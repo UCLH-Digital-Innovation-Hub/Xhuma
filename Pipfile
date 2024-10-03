@@ -14,6 +14,7 @@ fhirclient = "~=3.0.0"
 redis = "*"
 cryptography = "*"
 jwcrypto = "*"
+xmlschema = "*"
 
 [dev-packages]
 black = "*"

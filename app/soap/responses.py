@@ -9,7 +9,6 @@ from ..redis_connect import redis_client
 
 async def iti_47_response(message_id, patient, query):
     soap_response = {}
-    soap_response["Envelope"] = {}
     header = {
         "Action": {
             "@mustUnderstand": 1,
@@ -17,8 +16,7 @@ async def iti_47_response(message_id, patient, query):
         },
         "RelatesTo": {"#text": message_id},
     }
-    body = {}
-    body["PRPA_IN201306UV02"] = {
+    soap_response["PRPA_IN201306UV02"] = {
         "id": {"@root": str(uuid.uuid4())},
         "creationTime": {"@value": "20210802120000"},
         "interactionId": {"@root": "2.16.840.1.113883.1.6", "@extension": "PRPA_IN201306UV02"},
@@ -62,8 +60,8 @@ async def iti_47_response(message_id, patient, query):
     }
 
 
-    soap_response["Envelope"]["Header"] = header
-    soap_response["Envelope"]["Body"] = body
+    # soap_response["Envelope"]["Header"] = header
+    # soap_response["Envelope"]["Body"] = body
     print(soap_response)
     return xmltodict.unparse(soap_response, pretty=True)
 

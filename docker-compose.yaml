@@ -1,11 +1,25 @@
-version: '0.1'
 services:
+  nginx:
+    image: nginx:latest
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./keys/mtls:/ssl
+    working_dir: /ssl
+    command: /bin/sh -c "python combine_ssl.py && nginx -g 'daemon off;'"
+    deploy:
+      restart_policy:
+        condition: on-failure
+    environment:
+      - PYTHONUNBUFFERED=1  # Ensures logs from Python are visible in real-time
   redis:
     image: redis
+    volumes:
+      - ./redis/6379.conf:/usr/local/etc/redis/redis.conf  
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     ports:
       - "6379:6379"
-    volumes:
-      - ./app:/code/app
   gpcon:
     build: .
     ports:
