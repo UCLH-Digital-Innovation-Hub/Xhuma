@@ -69,12 +69,24 @@ the server can then be started using
 uvicorn app.main:app --reload
 ```
 
+### Keys
+
+Project keys for interacting with the NHS API's should be put in /keys
+
+Certificates for Mutual TLS should be placed in /keys/mtls/clients
+
 ### Docker
 
-The project can also be run using docker. Ensure you have a valid installation and simple run
+The project can also be run using docker. Ensure you have a valid installation and simply run
 ```
 docker-compose up
 ```
+
+To combine all mutual TLS keys and launch the containers in an appropraite order there is a bash script available
+```
+./launch_xhuma.sh
+```
+
 ---
 ## Branches
 
