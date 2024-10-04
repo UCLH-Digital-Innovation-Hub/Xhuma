@@ -113,10 +113,12 @@ async def gpconnect(nhsno: int):
     if endpoint_trace["total"] == 0:
         raise HTTPException(status_code=404, detail="No fhir structured endpoint found")
 
+    endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
+
     token = create_jwt()
 
     headers = {
-        "Ssp-TraceID": "09a01679-2564-0fb4-5129-aecc81ea2706",
+        "Ssp-TraceID": str(uuid4()),
         "Ssp-From": "200000000359",
         "Ssp-To": f"{asid}",
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
@@ -148,8 +150,9 @@ async def gpconnect(nhsno: int):
             {"name": "includeInvestigations"},
         ],
     }
+    proxy_url = "testspineproxy.nhs.domain.uk"
     r = httpx.post(
-        "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
+        f"https://{proxy_url}/{endpoint_url}$gpc.getstructuredrecord",
         json=body,
         headers=headers,
     )
