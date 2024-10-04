@@ -62,6 +62,7 @@ NAMESPACES = (
         "urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0": None,
         "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0": None,
         "urn:ihe:iti:xds-b:2007": None,
+        "soap": None,
     },
 )
 
