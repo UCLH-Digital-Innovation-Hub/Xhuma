@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime
 from typing import Any, Callable, Dict
 from urllib.request import Request
 
@@ -27,44 +28,30 @@ class LoggingRoute(APIRoute):
         original_route_handler = super().get_route_handler()
 
         async def custom_route_handler(request: Request) -> Response:
+            logging.info(f"Handling request for {request.url}")
             # Log request body
             req_body = await request.body()
 
             # Get client IP from headers
             client_ip = request.headers.get("x-forwarded-for") or request.client.host
 
-            # Handle the request and get the response
-            response = await original_route_handler(request)
+            # log time
+            logging.info(f"Time: {datetime.now()}")
 
-            # Log the response body (safely rendered)
-            res_body = await response.render()
-
-            # Log request method, URL, and response status
             method = request.method
-            url = str(request.url)
-            status_code = response.status_code
+            logging.info(f"Method: {method}")
 
-            # Create a background task for logging
-            tasks = response.background
-            task = BackgroundTask(
-                log_info, req_body, res_body, client_ip, method, url, status_code
-            )
+            logging.info(f"Client IP: {client_ip}")
+            logging.info(f"Request Body: {req_body}")
 
-            # Check if the original response had background tasks assigned
-            if tasks:
-                tasks.add_task(task)
-                response.background = tasks
-            else:
-                response.background = task
-
-            return response
+            return await original_route_handler(request)
 
         return custom_route_handler
 
 
 router = APIRouter(prefix="/SOAP", route_class=LoggingRoute)
 
-logging.basicConfig(filename="info.log", level=logging.DEBUG)
+logging.basicConfig(filename="info.log", level=logging.INFO)
 
 client = redis_connect()
 
