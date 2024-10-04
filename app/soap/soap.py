@@ -6,18 +6,20 @@ from urllib.request import Request
 import xmltodict
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.routing import APIRoute
-
 from starlette.background import BackgroundTask
 
 from ..ccda.helpers import clean_soap
+from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .responses import iti_38_response, iti_39_response, iti_47_response
-from ..pds.pds import lookup_patient
 
 
-def log_info(req_body, res_body):
-    logging.info(req_body)
-    logging.info(res_body)
+# Function to log request and response bodies, including IP and metadata
+def log_info(req_body, res_body, client_ip, method, url, status_code):
+    logging.info(f"Client IP: {client_ip}, Method: {method}, URL: {url}")
+    logging.info(f"Request Body: {req_body}")
+    logging.info(f"Response Body: {res_body}")
+    logging.info(f"Status Code: {status_code}")
 
 
 class LoggingRoute(APIRoute):
@@ -25,15 +27,32 @@ class LoggingRoute(APIRoute):
         original_route_handler = super().get_route_handler()
 
         async def custom_route_handler(request: Request) -> Response:
+            # Log request body
             req_body = await request.body()
+
+            # Get client IP from headers
+            client_ip = request.headers.get("x-forwarded-for") or request.client.host
+
+            # Handle the request and get the response
             response = await original_route_handler(request)
+
+            # Log the response body (safely rendered)
+            res_body = await response.render()
+
+            # Log request method, URL, and response status
+            method = request.method
+            url = str(request.url)
+            status_code = response.status_code
+
+            # Create a background task for logging
             tasks = response.background
+            task = BackgroundTask(
+                log_info, req_body, res_body, client_ip, method, url, status_code
+            )
 
-            task = BackgroundTask(log_info, req_body, response.body)
-
-            # check if the original response had background tasks already assigned to it
+            # Check if the original response had background tasks assigned
             if tasks:
-                tasks.add_task(task)  # add the new task to the tasks list
+                tasks.add_task(task)
                 response.background = tasks
             else:
                 response.background = task
@@ -66,25 +85,34 @@ async def iti47(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
-        query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"]["queryByParameter"]["parameterList"]
-        #for each query parameter fir the patient id with the root for nhsno
+        query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+            "queryByParameter"
+        ]["parameterList"]
+        # for each query parameter fir the patient id with the root for nhsno
         for param in query_params["livingSubjectId"]:
             print(param)
             if param["value"]["@root"] == "2.16.840.1.113883.2.1.4.1":
                 nhsno = param["value"]["@extension"]
-        #if theres no nhsno then raise an error
+        # if theres no nhsno then raise an error
         if not nhsno:
-            raise HTTPException(status_code=400, detail=f"Invalid request, no nhs number found")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid request, no nhs number found"
+            )
 
         patient = await lookup_patient(nhsno)
-        #if the patient is not found then raise an error
+        # if the patient is not found then raise an error
         if not patient:
             print("Patient not found")
         else:
             print(patient)
-            
 
-        data = await iti_47_response(envelope["Header"]["MessageID"], patient, envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"]["queryByParameter"])
+        data = await iti_47_response(
+            envelope["Header"]["MessageID"],
+            patient,
+            envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                "queryByParameter"
+            ],
+        )
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(
