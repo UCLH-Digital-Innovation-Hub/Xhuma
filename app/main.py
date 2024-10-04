@@ -31,20 +31,16 @@ REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
 async def startup_event():
     redis_client.set("registry", REGISTRY_ID)
     # check if there is a jwk and if not generate
-    if os.path.isfile('keys/jwk.json'):
+    if os.path.isfile("keys/jwk.json"):
         pass
     else:
         # generate one with with private key
-        with open ("keys/test-1.pem", "rb") as pemfile:
+        with open("keys/test-1.pem", "rb") as pemfile:
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
             jwk_json = public_jwk.export_public(as_dict=True)
-            with open("keys/jwk.json", 'w') as f:
+            with open("keys/jwk.json", "w") as f:
                 json.dump(jwk_json, f)
-                
-
-
-
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -66,13 +62,14 @@ async def root():
     </html
     """
 
+
 @app.get("/demo/{nhsno}")
 async def demo(nhsno: int):
-    """
-    """
+    """ """
     bundle_id = await gpconnect(nhsno)
 
     return redis_client.get(bundle_id["document_id"])
+
 
 @app.get("/jwk")
 async def get_jwk():
@@ -80,7 +77,6 @@ async def get_jwk():
     with open("keys/jwk.json", "r") as jwk_file:
         key = json.load(jwk_file)
     return key
-
 
 
 @app.get("/gpconnect/{nhsno}")
@@ -92,18 +88,37 @@ async def gpconnect(nhsno: int):
         logging.error(f"{nhsno} is not a valid NHS number")
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
-    # TODO pds search
     pds_search = await pds.lookup_patient(nhsno)
-    print(pds_search)
+    if pds_search["meta"]["security"][0]["code"] == "R":
+        raise HTTPException(status_code=403, detail="Restricted record")
 
-    # TODO sds search
+    ods_code = pds_search["generalPractitioner"][0]["identifier"]["value"]
+
+    # check for cached sds response
+    # sds_search = redis_client.get(pds_search["generalPractitioner"][0]["identifier"]["value"])
+    # if sds_search is None:
+    #     sds_search = await pds.sds_trace(pds_search["generalPractitioner"][0]["identifier"]["value"])
+    # redis_client.setex(pds_search["generalPractitioner"][0]["identifier"]["value"], timedelta(minutes=120), sds_search)
+
+    asid_search = await pds.sds_trace(ods_code)
+    endpoint_trace = await pds.sds_trace(ods_code, endpoint=True)
+
+    # TODO ASID isn't in most of the responses so we will spoof some for now
+    try:
+        asid = asid_search["entry"][0]["resource"]["identifier"][0]["value"]
+    except:
+        asid = "918999198738"
+        logging.error(f"ASID not found for {ods_code}")
+
+    if endpoint_trace["total"] == 0:
+        raise HTTPException(status_code=404, detail="No fhir structured endpoint found")
 
     token = create_jwt()
 
     headers = {
         "Ssp-TraceID": "09a01679-2564-0fb4-5129-aecc81ea2706",
         "Ssp-From": "200000000359",
-        "Ssp-To": "918999198738",
+        "Ssp-To": f"{asid}",
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
         "accept": "application/fhir+json",
@@ -172,4 +187,6 @@ async def gpconnect(nhsno: int):
     with open(f"{nhsno}.xml", "w") as output:
         output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
-    return {"document_id": doc_uuid}
+    return {
+        "document_id": doc_uuid,
+    }

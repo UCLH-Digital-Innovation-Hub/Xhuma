@@ -159,7 +159,7 @@ async def create_ccda(scr):
                 for entry in section["entry"]:
                     codeable_entry = find_reference(entry["reference"])
                     ent = ET.SubElement(sec, "entry")
-                    ent.append(await (convert_resource(codeable_entry)))
+                    ent.append(await convert_resource(codeable_entry))
 
     await asyncio.gather(
         *[generate_component(section) for section in entry["resource"]["section"]]

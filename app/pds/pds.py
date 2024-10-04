@@ -63,18 +63,38 @@ async def lookup_patient(nhsno: int):
 
 
 @router.get("/sds/{ods}")
-async def sds_trace(ods: str):
-    url = f"{INT_BASE_PATH}spine-directory/FHIR/R4/Device"
+async def sds_trace(ods: str, endpoint: bool = False):
+    """
+    Function to get the SDS trace for an ODS code
+
+    args:
+    ods: str - the ODS code to trace
+    endpoiny: bool - whether to make an endpoint SDS trace
+
+    returns:
+    fhir bundle of the SDS trace
+    """
+    if endpoint:
+        suffix = "Endpoint"
+        identifier = [
+            "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
+        ]
+
+    else:
+        suffix = "Device"
+        identifier = [
+            "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:psis:REPC_IN150016UK05"
+        ]
+
+    url = f"{INT_BASE_PATH}spine-directory/FHIR/R4/{suffix}"
     organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|{ods}"
-    identifier = [
-        "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:psis:REPC_IN150016UK05"
-    ]
+
     api_key = os.environ.get("API_KEY")
     parameters = {
         "organization": organisation,
         "identifier": identifier,
     }
-    print(parameters)
+    # print(parameters)
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
         "accept": "application/fhir+json",
@@ -87,11 +107,11 @@ async def sds_trace(ods: str):
 
 if __name__ == "__main__":
 
-    patient = asyncio.run(lookup_patient(9449306621))
+    # patient = asyncio.run(lookup_patient(9449306621))
 
-    print(patient.gender)
-    print(patient.name[0].family)
-    print(patient.generalPractitioner[0].identifier.value)
+    # print(patient.gender)
+    # print(patient.name[0].family)
+    # print(patient.generalPractitioner[0].identifier.value)
 
-    ods = sds_trace("T99999")
+    ods = asyncio.run(sds_trace("T99999"))
     print(ods.text)

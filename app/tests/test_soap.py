@@ -2,9 +2,11 @@ from urllib import response
 from xml.etree import ElementTree
 
 from fastapi.testclient import TestClient
+
 from app.main import app
 
 client = TestClient(app)
+
 
 def test_iti47():
     with open("xml/pdqRequest.xml") as iti47:
@@ -19,8 +21,8 @@ def test_iti47():
 
 def test_iti47():
     headers = {
-    "Content-Type": "application/soap+xml",
-    "SOAPAction": "urn:ihe:iti:2007:CrossGatewayQuery"  # Adjust this according to the specific SOAP action required for ITI-47
+        "Content-Type": "application/soap+xml",
+        "SOAPAction": "urn:ihe:iti:2007:CrossGatewayQuery",  # Adjust this according to the specific SOAP action required for ITI-47
     }
 
     # ITI-47 request XML
