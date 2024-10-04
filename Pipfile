@@ -21,6 +21,7 @@ websockets = "*"
 pre-commit = "*"
 isort = "*"
 pytest = "*"
+xmlschema = "*"
 
 [requires]
 python_version = "3.9"
