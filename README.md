@@ -37,7 +37,7 @@ Current the service is designed to interact with a requesting EHR via ITI reques
 ---
 ## Tasks
 Currently on open test environment or int as able:
-- [ ] ITI 47
+- [x] ITI 47
 - [x] Fhir PDS lookup
 - [x] ITI 38 call and response
 - [x] GP Connect call
@@ -46,7 +46,7 @@ Currently on open test environment or int as able:
 
 ## Todo
 - [ ] Flesh out html section of CCDA
-- [ ] Progress to NHS test environment
+- [x] Progress to NHS test environment
 - [x] Sign up to PDS lookup
 
 ---
@@ -90,4 +90,3 @@ Integration --PR-->Main
 Dev -.-> Demo
 click Dev href "https://github.com/UCLH-Foundry/Xhuma/tree/dev"
 ```
-
