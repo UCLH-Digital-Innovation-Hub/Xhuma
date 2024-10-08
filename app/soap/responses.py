@@ -18,11 +18,12 @@ def create_security():
     expiration_timestamp = expiration_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     security = {
-        "@mustUnderstand": 1,
-        # "@xmlns": "http://www.w3.org/2005/08/addressing",
-        "Timestamp": {
-            "Created": {"#text": current_timestamp},
-            "Expires": {"#text": expiration_timestamp},
+        "@s:mustUnderstand": 1,
+        "@xmlns:o": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd",
+        "u:Timestamp": {
+            "@u:Id": "_0",
+            "u:Created": {"#text": current_timestamp},
+            "u:Expires": {"#text": expiration_timestamp},
         },
     }
 
@@ -41,17 +42,24 @@ async def iti_47_response(message_id, patient, query):
     expiration_timestamp = expiration_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     soap_response = {}
-    soap_response["Envelope"] = {}
+    soap_response["s:Envelope"] = {
+        "@xmlns:s": "http://www.w3.org/2003/05/soap-envelope",
+        "@xmlns:a": "http://www.w3.org/2005/08/addressing",
+        "@xmlns:u": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd",
+    }
     header = {
-        "Action": {
-            "@mustUnderstand": 1,
+        "a:Action": {
+            "@s:mustUnderstand": 1,
             "#text": "urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery",
             # "#text": "urn:ihe:iti:2007:CrossGatewayQueryResponse",
         },
-        "RelatesTo": {"#text": message_id},
-        "Security": create_security(),
+        "a:RelatesTo": {"#text": message_id},
+        "o:Security": create_security(),
     }
-    body = {}
+    body = {
+        "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+    }
     body["PRPA_IN201306UV02"] = {
         "@xmlns": "urn:hl7-org:v3",
         "@ITSVersion": "XML_1.0",
@@ -139,8 +147,8 @@ async def iti_47_response(message_id, patient, query):
         },
     }
 
-    soap_response["Envelope"]["Header"] = header
-    soap_response["Envelope"]["Body"] = body
+    soap_response["s:Envelope"]["s:Header"] = header
+    soap_response["s:Envelope"]["s:Body"] = body
 
     # pprint.pprint(patient)
     return xmltodict.unparse(soap_response, pretty=True)
@@ -175,8 +183,8 @@ async def iti_39_response(message_id, document_id, document):
             },
         }
     }
-    soap_response["Envelope"]["Header"] = header
-    soap_response["Envelope"]["Body"] = body
+    soap_response["s:Envelope"]["s:Header"] = header
+    soap_response["s:Envelope"]["s:Body"] = body
     with open(f"{document_id}.xml", "w") as output:
         output.write(xmltodict.unparse(soap_response, pretty=True))
 
