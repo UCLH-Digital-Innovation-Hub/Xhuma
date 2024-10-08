@@ -2,7 +2,7 @@ import base64
 import logging
 import pprint
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import xmltodict
 from httpx import AsyncClient
@@ -10,17 +10,46 @@ from httpx import AsyncClient
 from ..redis_connect import redis_client
 
 
+def create_security():
+    current_time = datetime.now()
+    expiration_time = current_time + timedelta(minutes=5)
+
+    current_timestamp = current_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    expiration_timestamp = expiration_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+    security = {
+        "@mustUnderstand": 1,
+        # "@xmlns": "http://www.w3.org/2005/08/addressing",
+        "Timestamp": {
+            "Created": {"#text": current_timestamp},
+            "Expires": {"#text": expiration_timestamp},
+        },
+    }
+
+    return security
+
+
 async def iti_47_response(message_id, patient, query):
     gp = patient["generalPractitioner"][0]
     # print(query)
+
+    # create time and expiration time
+    current_time = datetime.now()
+    expiration_time = current_time + timedelta(minutes=5)
+
+    current_timestamp = current_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    expiration_timestamp = expiration_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
     soap_response = {}
-    # soap_response["Envelope"] = {}
+    soap_response["Envelope"] = {}
     header = {
         "Action": {
             "@mustUnderstand": 1,
             "#text": "urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery",
+            # "#text": "urn:ihe:iti:2007:CrossGatewayQueryResponse",
         },
         "RelatesTo": {"#text": message_id},
+        "Security": create_security(),
     }
     body = {}
     body["PRPA_IN201306UV02"] = {
@@ -127,6 +156,7 @@ async def iti_39_response(message_id, document_id, document):
             "#text": "urn:ihe:iti:2007:CrossGatewayRetrieveResponse",
         },
         "RelatesTo": {"#text": message_id},
+        "Security": create_security(),
     }
     base64_bytes = base64.b64encode(document)
     body = {
@@ -161,6 +191,7 @@ async def iti_38_response(nhsno: int, queryid: str):
             "#text": "urn:ihe:iti:2007:CrossGatewayQueryResponse",
         },
         "RelatesTo": {"#text": queryid},
+        "Security": create_security(),
     }
     body = {}
     body["AdhocQueryResponse"] = {
