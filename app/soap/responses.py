@@ -37,7 +37,7 @@ def create_header(message_urn: str, message_id: str):
             "#text": message_urn,
         },
         "a:RelatesTo": {"#text": message_id},
-        "Security": create_security(),
+        # "Security": create_security(),
     }
     return header
 
