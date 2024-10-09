@@ -1,5 +1,5 @@
-import uuid
 import os
+import uuid
 from time import time
 
 import jwt

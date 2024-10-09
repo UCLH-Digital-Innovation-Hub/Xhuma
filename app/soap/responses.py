@@ -32,12 +32,12 @@ def create_security():
 
 def create_header(message_urn: str, message_id: str):
     header = {
-        "Action": {
+        "a:Action": {
             "@s:mustUnderstand": 1,
             "#text": message_urn,
         },
         "a:RelatesTo": {"#text": message_id},
-        # "Security": create_security(),
+        "o:Security": create_security(),
     }
     return header
 
