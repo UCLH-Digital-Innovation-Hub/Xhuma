@@ -50,11 +50,11 @@ async def iti_47_response(message_id, patient, query):
     header = {
         "a:Action": {
             "@s:mustUnderstand": 1,
-            "#text": "urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery",
+            "#text": "urn:hl7-org:v3:PRPA_IN201306UV02",
             # "#text": "urn:ihe:iti:2007:CrossGatewayQueryResponse",
         },
         "a:RelatesTo": {"#text": message_id},
-        "o:Security": create_security(),
+        # "o:Security": create_security(),
     }
     body = {
         "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",

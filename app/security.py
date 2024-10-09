@@ -10,6 +10,7 @@ creation of JWT as per https://developer.nhs.uk/apis/gpconnect-1-5-0/integration
 
 JWTKEY = os.getenv("JWTKEY")
 
+
 def pds_jwt(issuer, subject, audience, key_id):
     headers = {"typ": "JWT", "kid": key_id}
     payload = {
