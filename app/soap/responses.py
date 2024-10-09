@@ -30,36 +30,40 @@ def create_security():
     return security
 
 
-async def iti_47_response(message_id, patient, query):
-    gp = patient["generalPractitioner"][0]
-    # print(query)
-
-    # create time and expiration time
-    current_time = datetime.now()
-    expiration_time = current_time + timedelta(minutes=5)
-
-    current_timestamp = current_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-    expiration_timestamp = expiration_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
-
-    soap_response = {}
-    soap_response["s:Envelope"] = {
-        "@xmlns:s": "http://www.w3.org/2003/05/soap-envelope",
-        "@xmlns:a": "http://www.w3.org/2005/08/addressing",
-        "@xmlns:u": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd",
-    }
+def create_header(message_urn: str, message_id: str):
     header = {
-        "a:Action": {
+        "Action": {
             "@s:mustUnderstand": 1,
-            "#text": "urn:hl7-org:v3:PRPA_IN201306UV02",
-            # "#text": "urn:ihe:iti:2007:CrossGatewayQueryResponse",
+            "#text": message_urn,
         },
         "a:RelatesTo": {"#text": message_id},
-        # "o:Security": create_security(),
+        "Security": create_security(),
     }
+    return header
+
+
+def create_envelope(header, body):
+    envelope = {
+        "s:Envelope": {
+            "@xmlns:s": "http://www.w3.org/2003/05/soap-envelope",
+            "@xmlns:a": "http://www.w3.org/2005/08/addressing",
+            "@xmlns:u": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd",
+            "s:Header": header,
+            "s:Body": body,
+        }
+    }
+    return envelope
+
+
+async def iti_47_response(message_id, patient, query):
+
+    gp = patient["generalPractitioner"][0]
+
     body = {
         "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
         "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
     }
+
     body["PRPA_IN201306UV02"] = {
         "@xmlns": "urn:hl7-org:v3",
         "@ITSVersion": "XML_1.0",
@@ -146,26 +150,15 @@ async def iti_47_response(message_id, patient, query):
             "queryByParameter": query,
         },
     }
-
-    soap_response["s:Envelope"]["s:Header"] = header
-    soap_response["s:Envelope"]["s:Body"] = body
+    header = create_header("urn:hl7-org:v3:PRPA_IN201306UV02", message_id)
 
     # pprint.pprint(patient)
-    return xmltodict.unparse(soap_response, pretty=True)
+    return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
 async def iti_39_response(message_id, document_id, document):
     registry_id = redis_client.get("registry")
-    soap_response = {}
-    soap_response["Envelope"] = {}
-    header = {
-        "Action": {
-            "@mustUnderstand": 1,
-            "#text": "urn:ihe:iti:2007:CrossGatewayRetrieveResponse",
-        },
-        "RelatesTo": {"#text": message_id},
-        "Security": create_security(),
-    }
+
     base64_bytes = base64.b64encode(document)
     body = {
         "RetrieveDocumentSetResponse": {
@@ -183,8 +176,11 @@ async def iti_39_response(message_id, document_id, document):
             },
         }
     }
-    soap_response["s:Envelope"]["s:Header"] = header
-    soap_response["s:Envelope"]["s:Body"] = body
+
+    soap_response = create_envelope(
+        create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", message_id), body
+    )
+
     with open(f"{document_id}.xml", "w") as output:
         output.write(xmltodict.unparse(soap_response, pretty=True))
 
@@ -192,15 +188,7 @@ async def iti_39_response(message_id, document_id, document):
 
 
 async def iti_38_response(nhsno: int, queryid: str):
-    soap_response = {}
-    header = {
-        "Action": {
-            "@mustUnderstand": 1,
-            "#text": "urn:ihe:iti:2007:CrossGatewayQueryResponse",
-        },
-        "RelatesTo": {"#text": queryid},
-        "Security": create_security(),
-    }
+
     body = {}
     body["AdhocQueryResponse"] = {
         "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Success",
@@ -281,8 +269,8 @@ async def iti_38_response(nhsno: int, queryid: str):
     else:
         body["AdhocQueryResponse"]["RegistryObjectList"] = {}
 
-    soap_response["Envelope"] = {}
-    soap_response["Envelope"]["Header"] = header
-    soap_response["Envelope"]["Body"] = body
-    # soap_response = soap_response["Envelope"]["Body"]
+    soap_response = create_envelope(
+        create_header("urn:ihe:iti:2007:CrossGatewayQueryResponse", queryid), body
+    )
+
     return xmltodict.unparse(soap_response, pretty=True)
