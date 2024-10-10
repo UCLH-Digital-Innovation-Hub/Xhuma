@@ -8,6 +8,7 @@ import xmltodict
 from httpx import AsyncClient
 
 from ..redis_connect import redis_client
+from ..main import gpconnect
 
 
 def create_security():
@@ -226,7 +227,9 @@ async def iti_38_response(nhsno: int, queryid: str):
     if docid is None:
         # no cached ccda
         async with AsyncClient() as client:
-            r = await client.get(f"http://localhost:8000/gpconnect/{nhsno}")
+            # r = await client.get(f"http://localhost:8000/gpconnect/{nhsno}")
+            #make internal call to gpconnect function
+            r = await gpconnect(nhsno)
             if r.status_code == 200:
                 logging.info(f"used internal call for {nhsno}")
                 docid = r.json()
