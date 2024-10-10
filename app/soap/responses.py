@@ -134,14 +134,6 @@ async def iti_47_response(message_id, patient, ceid, query):
                         "patient": {
                             "@classCode": "PAT",
                             "id": ids,
-                            # "id": {
-                            #     "@root": "2.16.840.1.113883.2.1.4.1",
-                            #     "@extension": patient["id"],
-                            # },
-                            # "id": {
-                            #     "@root": "1.2.840.114350.1.13.525.3.7.3.688884.100",
-                            #     "@extension": ceid,
-                            # },
                             "statusCode": {"@code": "active"},
                             "patientPerson": {
                                 "@classCode": "PSN",
@@ -177,40 +169,7 @@ async def iti_47_response(message_id, patient, ceid, query):
     }
     header = create_header("urn:hl7-org:v3:PRPA_IN201306UV02", message_id)
 
-    # pprint.pprint(patient)
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
-
-
-async def iti_39_response(message_id, document_id, document):
-    registry_id = redis_client.get("registry")
-
-    base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
-    body = {
-        "RetrieveDocumentSetResponse": {
-            "@xmlns": "urn:ihe:iti:xds-b:2007",
-            "RegistryResponse": {
-                "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Success",
-                "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-                "DocumentResponse": {
-                    "HomeCommunityId": {"#text": f"urn:oid:{registry_id}"},
-                    "RepositoryUniqueId": {"#text": registry_id},
-                    "DocumentUniqueId": {"#text": document_id},
-                    "mimeType": {"#text": "text/xml"},
-                    # "Document": base64_bytes.decode("ascii"),
-                    "Docuument": base64_bytes,
-                },
-            },
-        }
-    }
-
-    soap_response = create_envelope(
-        create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", message_id), body
-    )
-
-    with open(f"{document_id}.xml", "w") as output:
-        output.write(xmltodict.unparse(soap_response, pretty=True))
-
-    return xmltodict.unparse(soap_response, pretty=True)
 
 
 async def iti_38_response(nhsno: int, queryid: str):
@@ -226,27 +185,46 @@ async def iti_38_response(nhsno: int, queryid: str):
 
     if docid is None:
         # no cached ccda
-        async with AsyncClient() as client:
-            # r = await client.get(f"http://localhost:8000/gpconnect/{nhsno}")
-            # make internal call to gpconnect function
+        # async with AsyncClient() as client:
+        #     # r = await client.get(f"http://localhost:8000/gpconnect/{nhsno}")
+        #     # make internal call to gpconnect function
+        #     r = await gpconnect(nhsno)
+        #     if r.status_code == 200:
+        #         logging.info(f"used internal call for {nhsno}")
+        #         docid = r.json()
+        #         docid = docid["document_id"]
+        #     else:
+        #         body["AdhocQueryResponse"][
+        #             "@status"
+        #         ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+        #         body["AdhocQueryResponse"]["RegistryErrorList"] = {
+        #             "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+        #             "RegistryError": {
+        #                 "@errorCode": "XDSRegistryError",
+        #                 "@codeContext": f"Unable to locate SCR with NHS number {nhsno}",
+        #                 "@location": "",
+        #                 "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+        #             },
+        #         }
+        try:
             r = await gpconnect(nhsno)
-            if r.status_code == 200:
-                logging.info(f"used internal call for {nhsno}")
-                docid = r.json()
-                docid = docid["document_id"]
-            else:
-                body["AdhocQueryResponse"][
-                    "@status"
-                ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-                body["AdhocQueryResponse"]["RegistryErrorList"] = {
-                    "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                    "RegistryError": {
-                        "@errorCode": "XDSRegistryError",
-                        "@codeContext": f"Unable to locate SCR with NHS number {nhsno}",
-                        "@location": "",
-                        "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                    },
-                }
+            logging.info(f"used internal call for {nhsno}")
+            docid = r.json()
+            docid = docid["document_id"]
+        except Exception as e:
+            logging.error(f"Error: {e}")
+            body["AdhocQueryResponse"][
+                "@status"
+            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            body["AdhocQueryResponse"]["RegistryErrorList"] = {
+                "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                "RegistryError": {
+                    "@errorCode": "XDSRegistryError",
+                    "@codeContext": f"Unable to locate SCR with NHS number {nhsno}",
+                    "@location": "",
+                    "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                },
+            }
 
     if docid is not None:
         # add the ccda as registry object list
@@ -265,8 +243,6 @@ async def iti_38_response(nhsno: int, queryid: str):
             create_slot("sourcePatientId", f"{nhsno}^^^&2.16.840.1.113883.2.1.4.1&ISO")
         )
         slots.append(create_slot("languageCode", "en-GB"))
-        # slots.append("entryUUID", f"urn:uuid:{uuid.uuid4()}")
-
         # No hash for on demand document
         # slots.append(create_slot("hash", "4cf4f82d78b5e2aac35c31bca8cb79fe6bd6a41e"))
         slots.append(create_slot("size", "1"))
@@ -300,5 +276,37 @@ async def iti_38_response(nhsno: int, queryid: str):
     soap_response = create_envelope(
         create_header("urn:ihe:iti:2007:CrossGatewayQueryResponse", queryid), body
     )
+
+    return xmltodict.unparse(soap_response, pretty=True)
+
+
+async def iti_39_response(message_id, document_id, document):
+    registry_id = redis_client.get("registry")
+
+    base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
+    body = {
+        "RetrieveDocumentSetResponse": {
+            "@xmlns": "urn:ihe:iti:xds-b:2007",
+            "RegistryResponse": {
+                "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Success",
+                "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
+                "DocumentResponse": {
+                    "HomeCommunityId": {"#text": f"urn:oid:{registry_id}"},
+                    "RepositoryUniqueId": {"#text": registry_id},
+                    "DocumentUniqueId": {"#text": document_id},
+                    "mimeType": {"#text": "text/xml"},
+                    # "Document": base64_bytes.decode("ascii"),
+                    "Docuument": base64_bytes,
+                },
+            },
+        }
+    }
+
+    soap_response = create_envelope(
+        create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", message_id), body
+    )
+
+    with open(f"{document_id}.xml", "w") as output:
+        output.write(xmltodict.unparse(soap_response, pretty=True))
 
     return xmltodict.unparse(soap_response, pretty=True)

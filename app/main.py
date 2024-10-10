@@ -1,24 +1,15 @@
 import json
-import logging
 import os
-from datetime import timedelta
 from uuid import uuid4
 
-import httpx
-import xmltodict
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fhirclient.models import bundle
-from jwcrypto import jwk, jws
-from jwcrypto.common import json_encode
+from jwcrypto import jwk
 
-from .ccda.convert_mime import convert_mime
-from .ccda.fhir2ccda import convert_bundle
-from .ccda.helpers import validateNHSnumber
-from .gpconnect import *
+from .gpconnect import gpconnect
 from .pds import pds
 from .redis_connect import redis_client
-from .security import create_jwt
 from .soap import soap
 
 app = FastAPI()

@@ -78,7 +78,7 @@ async def iti47(request: Request):
         ]["parameterList"]
         # for each query parameter fir the patient id with the root for nhsno
         for param in query_params["livingSubjectId"]:
-            print(param)
+            # print(param)
             if param["value"]["@root"] == "2.16.840.1.113883.2.1.4.1":
                 nhsno = param["value"]["@extension"]
             if param["value"]["@root"] == "1.2.840.114350.1.13.525.3.7.3.688884.100":
@@ -95,14 +95,15 @@ async def iti47(request: Request):
             )
 
         # map nhsno to ceid in redis
-        client.set(nhsno, ceid)
+        client.set(ceid, nhsno)
 
         patient = await lookup_patient(nhsno)
         # if the patient is not found then raise an error
         if not patient:
             print("Patient not found")
         else:
-            print(patient)
+            pass
+            # print(patient)
 
         data = await iti_47_response(
             envelope["Header"]["MessageID"],
@@ -141,11 +142,14 @@ async def iti38(request: Request):
             # assume patient id is ceid
             # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
             patient_id = patient_id.split("^^^")[0]
-            patient_id = patient_id.replace("\'", "")
+            patient_id = patient_id.replace(patient_id[:2], "")
+
+            print(f"CEID: {patient_id}")
             logging.info(f"Patient ID is CEID: {patient_id}")
 
-            #retrieve ceid/nhsno mapping from redis
+            # retrieve ceid/nhsno mapping from redis
             patient_id = client.get(patient_id)
+            print(f"NHS no for CEID is: {patient_id}")
             logging.info(f"Mapped NHSNO is: {patient_id}")
 
         data = await iti_38_response(patient_id, query_id)
@@ -170,7 +174,7 @@ async def iti39(request: Request):
             raise HTTPException(status_code=404, detail=f"DocumentUniqueId not found")
 
         document = client.get(document_id)
-        print(document)
+
         if document is not None:
             # return ITI39 response
             message_id = envelope["Header"]["MessageID"]
