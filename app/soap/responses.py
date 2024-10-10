@@ -76,7 +76,7 @@ async def iti_47_response(message_id, patient, ceid, query):
 
     ids = []
     ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
-    # ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
+    ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
 
     body = {
         "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -183,7 +183,7 @@ async def iti_47_response(message_id, patient, ceid, query):
 async def iti_39_response(message_id, document_id, document):
     registry_id = redis_client.get("registry")
 
-    base64_bytes = base64.b64encode(document)
+    base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
     body = {
         "RetrieveDocumentSetResponse": {
             "@xmlns": "urn:ihe:iti:xds-b:2007",
@@ -195,7 +195,8 @@ async def iti_39_response(message_id, document_id, document):
                     "RepositoryUniqueId": {"#text": registry_id},
                     "DocumentUniqueId": {"#text": document_id},
                     "mimeType": {"#text": "text/xml"},
-                    "Document": base64_bytes.decode("ascii"),
+                    # "Document": base64_bytes.decode("ascii"),
+                    "Docuument": base64_bytes,
                 },
             },
         }

@@ -161,8 +161,8 @@ async def gpconnect(nhsno: int):
     doc_uuid = str(uuid4())
 
     # TODO set this as background task
-    redis_client.setex(nhsno, timedelta(minutes=5), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=5), xop)
+    redis_client.setex(nhsno, timedelta(minutes=30), doc_uuid)
+    redis_client.setex(doc_uuid, timedelta(minutes=30), xop)
 
     # pprint(xml_ccda)
     with open(f"{nhsno}.xml", "w") as output:

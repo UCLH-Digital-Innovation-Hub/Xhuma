@@ -130,6 +130,7 @@ async def iti39(request: Request):
             raise HTTPException(status_code=404, detail=f"DocumentUniqueId not found")
 
         document = client.get(document_id)
+        print(document)
         if document is not None:
             # return ITI39 response
             message_id = envelope["Header"]["MessageID"]
