@@ -156,7 +156,7 @@ async def iti38(request: Request):
             logging.info(f"Mapped NHSNO is: {patient_id}")
 
         data = await iti_38_response(patient_id, ceid, query_id)
-        return Response(content=data, media_type="application/xml")
+        return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(
             status_code=400, detail=f"Content type {content_type} not supported"
