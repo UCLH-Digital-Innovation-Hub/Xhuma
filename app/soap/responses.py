@@ -37,7 +37,7 @@ def create_header(message_urn: str, message_id: str):
             "#text": message_urn,
         },
         "a:RelatesTo": {"#text": message_id},
-        "o:Security": create_security(),
+        # "o:Security": create_security(),
     }
     return header
 
@@ -76,7 +76,7 @@ async def iti_47_response(message_id, patient, ceid, query):
 
     ids = []
     ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
-    ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
+    # ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
 
     body = {
         "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -225,7 +225,7 @@ async def iti_38_response(nhsno: int, queryid: str):
     if docid is None:
         # no cached ccda
         async with AsyncClient() as client:
-            r = await client.get(f"http://127.0.0.1:8000/gpconnect/{nhsno}")
+            r = await client.get(f"http://localhost:8000/gpconnect/{nhsno}")
             if r.status_code == 200:
                 logging.info(f"used internal call for {nhsno}")
                 docid = r.json()
