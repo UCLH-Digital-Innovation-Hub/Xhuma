@@ -81,10 +81,17 @@ async def iti47(request: Request):
             print(param)
             if param["value"]["@root"] == "2.16.840.1.113883.2.1.4.1":
                 nhsno = param["value"]["@extension"]
+            if param["value"]["@root"] == "1.2.840.114350.1.13.525.3.7.3.688884.100":
+                ceid = param["value"]["@extension"]
         # if theres no nhsno then raise an error
         if not nhsno:
             raise HTTPException(
                 status_code=400, detail=f"Invalid request, no nhs number found"
+            )
+
+        if not ceid:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid request, no care everywhere id found"
             )
 
         patient = await lookup_patient(nhsno)
@@ -97,6 +104,7 @@ async def iti47(request: Request):
         data = await iti_47_response(
             envelope["Header"]["MessageID"],
             patient,
+            ceid,
             envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
                 "queryByParameter"
             ],

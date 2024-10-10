@@ -55,9 +55,28 @@ def create_envelope(header, body):
     return envelope
 
 
-async def iti_47_response(message_id, patient, query):
+def create_id(root, extension):
+    return {"@root": root, "@extension": extension}
+
+
+async def iti_47_response(message_id, patient, ceid, query):
+    """ITI47 response message generator
+
+    Args:
+        message_id (_type_): _description_
+        patient (_type_): _description_
+        ceid (_type_): _description_
+        query (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
 
     gp = patient["generalPractitioner"][0]
+
+    ids = []
+    ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
+    ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
 
     body = {
         "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -113,10 +132,15 @@ async def iti_47_response(message_id, patient, query):
                         "@typeCode": "SBJ",
                         "patient": {
                             "@classCode": "PAT",
-                            "id": {
-                                "@root": "2.16.840.1.113883.2.1.4.1",
-                                "@extension": patient["id"],
-                            },
+                            "id": ids,
+                            # "id": {
+                            #     "@root": "2.16.840.1.113883.2.1.4.1",
+                            #     "@extension": patient["id"],
+                            # },
+                            # "id": {
+                            #     "@root": "1.2.840.114350.1.13.525.3.7.3.688884.100",
+                            #     "@extension": ceid,
+                            # },
                             "statusCode": {"@code": "active"},
                             "patientPerson": {
                                 "@classCode": "PSN",
