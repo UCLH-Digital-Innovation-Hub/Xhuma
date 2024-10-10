@@ -172,7 +172,7 @@ async def iti_47_response(message_id, patient, ceid, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
-async def iti_38_response(nhsno: int, queryid: str):
+async def iti_38_response(nhsno: int, ceid, queryid: str):
 
     body = {}
     body["AdhocQueryResponse"] = {
@@ -185,27 +185,6 @@ async def iti_38_response(nhsno: int, queryid: str):
 
     if docid is None:
         # no cached ccda
-        # async with AsyncClient() as client:
-        #     # r = await client.get(f"http://localhost:8000/gpconnect/{nhsno}")
-        #     # make internal call to gpconnect function
-        #     r = await gpconnect(nhsno)
-        #     if r.status_code == 200:
-        #         logging.info(f"used internal call for {nhsno}")
-        #         docid = r.json()
-        #         docid = docid["document_id"]
-        #     else:
-        #         body["AdhocQueryResponse"][
-        #             "@status"
-        #         ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-        #         body["AdhocQueryResponse"]["RegistryErrorList"] = {
-        #             "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-        #             "RegistryError": {
-        #                 "@errorCode": "XDSRegistryError",
-        #                 "@codeContext": f"Unable to locate SCR with NHS number {nhsno}",
-        #                 "@location": "",
-        #                 "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-        #             },
-        #         }
         try:
             r = await gpconnect(nhsno)
             logging.info(f"used internal call for {nhsno}")
@@ -231,7 +210,6 @@ async def iti_38_response(nhsno: int, queryid: str):
 
         # create list of slots
         slots = []
-        classifications = []
 
         def create_slot(name: str, value) -> dict:
             slot_dict = {"@name": name, "ValueList": {"Value": {"#text": value}}}
@@ -241,6 +219,12 @@ async def iti_38_response(nhsno: int, queryid: str):
         # slots.append(create_slot("sourcePatientId", nhsno))
         slots.append(
             create_slot("sourcePatientId", f"{nhsno}^^^&2.16.840.1.113883.2.1.4.1&ISO")
+        )
+        slots.append(
+            create_slot(
+                "sourcePatientInfo",
+                f"PID-3|{nhsno}^^^&2.16.840.1.113883.2.1.4.1&ISO;{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO",
+            )
         )
         slots.append(create_slot("languageCode", "en-GB"))
         # No hash for on demand document
