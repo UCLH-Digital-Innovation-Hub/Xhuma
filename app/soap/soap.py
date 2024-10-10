@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
-from ..ccda.helpers import clean_soap
+from ..ccda.helpers import clean_soap, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .responses import iti_38_response, iti_39_response, iti_47_response
@@ -94,6 +94,9 @@ async def iti47(request: Request):
                 status_code=400, detail=f"Invalid request, no care everywhere id found"
             )
 
+        # map nhsno to ceid in redis
+        client.set(nhsno, ceid)
+
         patient = await lookup_patient(nhsno)
         # if the patient is not found then raise an error
         if not patient:
@@ -110,6 +113,43 @@ async def iti47(request: Request):
             ],
         )
         return Response(content=data, media_type="application/soap+xml")
+    else:
+        raise HTTPException(
+            status_code=400, detail=f"Content type {content_type} not supported"
+        )
+
+
+@router.post("/iti38")
+async def iti38(request: Request):
+    content_type = request.headers["Content-Type"]
+    if "application/soap+xml" in content_type:
+        body = await request.body()
+        envelope = clean_soap(body)
+        soap_body = envelope["Body"]
+        slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
+        query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
+
+        # TODO test this for cases when multiple id's come through
+        patient_id = next(
+            x["ValueList"]["Value"]
+            for x in slots
+            if x["@name"] == "$XDSDocumentEntryPatientId"
+        )
+
+        # check if patient id is valid nhs number
+        if not validateNHSnumber(patient_id):
+            # assume patient id is ceid
+            # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
+            patient_id = patient_id.split("^^^")[0]
+            patient_id = patient_id.replace("\'", "")
+            logging.info(f"Patient ID is CEID: {patient_id}")
+
+            #retrieve ceid/nhsno mapping from redis
+            patient_id = client.get(patient_id)
+            logging.info(f"Mapped NHSNO is: {patient_id}")
+
+        data = await iti_38_response(patient_id, query_id)
+        return Response(content=data, media_type="application/xml")
     else:
         raise HTTPException(
             status_code=400, detail=f"Content type {content_type} not supported"
@@ -141,28 +181,6 @@ async def iti39(request: Request):
                 status_code=404,
                 detail=f"Document with Id {document_id} not found or is empty",
             )
-    else:
-        raise HTTPException(
-            status_code=400, detail=f"Content type {content_type} not supported"
-        )
-
-
-@router.post("/iti38")
-async def iti38(request: Request):
-    content_type = request.headers["Content-Type"]
-    if "application/soap+xml" in content_type:
-        body = await request.body()
-        envelope = clean_soap(body)
-        soap_body = envelope["Body"]
-        slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
-        query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
-        patient_id = next(
-            x["ValueList"]["Value"]
-            for x in slots
-            if x["@name"] == "$XDSDocumentEntryPatientId"
-        )
-        data = await iti_38_response(patient_id, query_id)
-        return Response(content=data, media_type="application/xml")
     else:
         raise HTTPException(
             status_code=400, detail=f"Content type {content_type} not supported"
