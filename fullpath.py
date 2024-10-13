@@ -7,7 +7,7 @@ from xmlschema import XMLSchema
 
 if __name__ == "__main__":
 
-    with open("xml/pdq10oct.xml") as iti47:
+    with open("xml/pdqRequest.xml") as iti47:
         response_schema = XMLSchema("xml/multicacheschemas/PRPA_IN201306UV02.xsd")
 
         print("ITI47 query")

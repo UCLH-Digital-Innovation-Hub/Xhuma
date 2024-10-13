@@ -140,22 +140,29 @@ async def iti38(request: Request):
 
         # check if patient id is valid nhs number
         if not validateNHSnumber(patient_id):
-            # assume patient id is ceid
-            # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
-            pattern = r"[A-Z0-9]{15}"
-            # patient_id = patient_id.split("^^^")[0]
-            # patient_id = patient_id.replace(patient_id[15:], "")
-            ceid = re.search(pattern, patient_id).group(0)
+            # check if the nhs number is a ck format
+            pattern = r"[0-9]{10}"
+            poss_nhs = re.search(pattern, patient_id).group(0)
 
-            print(f"CEID: {ceid}")
-            logging.info(f"Patient ID is CEID: {ceid}")
+            if validateNHSnumber(poss_nhs):
+                patient_id = poss_nhs
 
-            # retrieve ceid/nhsno mapping from redis
-            patient_id = client.get(ceid)
-            print(f"NHS no for CEID is: {patient_id}")
-            logging.info(f"Mapped NHSNO is: {patient_id}")
+            else:
 
-        data = await iti_38_response(patient_id, ceid, query_id)
+                # assume patient id is ceid
+                # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
+                pattern = r"[A-Z0-9]{15}"
+                ceid = re.search(pattern, patient_id).group(0)
+
+                print(f"CEID: {ceid}")
+                logging.info(f"Patient ID is CEID: {ceid}")
+
+                # retrieve ceid/nhsno mapping from redis
+                patient_id = client.get(ceid)
+                print(f"NHS no for CEID is: {patient_id}")
+                logging.info(f"Mapped NHSNO is: {patient_id}")
+
+        data = await iti_38_response(patient_id, query_id)
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(
