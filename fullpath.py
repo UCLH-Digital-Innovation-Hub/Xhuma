@@ -42,9 +42,9 @@ if __name__ == "__main__":
 
         dict_38 = xmltodict.parse(r.text)
         pprint.pprint(dict_38)
-        docid = dict_38["s:Envelope"]["s:Body"]["AdhocQueryResponse"][
-            "RegistryObjectList"
-        ]["ExtrinsicObject"]["ExternalIdentifier"]["@value"]
+        # docid = dict_38["s:Envelope"]["s:Body"]["AdhocQueryResponse"][
+        #     "RegistryObjectList"
+        # ]["ExtrinsicObject"]["ExternalIdentifier"]["@value"]
         with open("iti38.xml", "w") as output:
             output.write(r.text)
         print(r.status_code)

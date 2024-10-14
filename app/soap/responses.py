@@ -242,7 +242,8 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
         slots.append(
             create_slot(
-                "sourcePatientId", f"{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO"
+                "sourcePatientId",
+                f"{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO",
             )
         )
 
@@ -267,16 +268,28 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
                 "@mimeType": "text/xml",
                 "Slot": slots,
                 # UNIQUE ID SECTION
-                "ExternalIdentifier": {
-                    "@identificationScheme": "urn:uuid:2e82c1f6-a085-4c72-9da3-8640a32e42ab",
-                    "@value": docid,
-                    "@id": f"CCDA-{docid}",
-                    "@registryObject": object_id,
-                    "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier",
-                    "Name": {
-                        "LocalizedString": {"@value": "XDSDocumentEntry.uniqueId"}
+                "ExternalIdentifier": [
+                    {
+                        "@identificationScheme": "urn:uuid:2e82c1f6-a085-4c72-9da3-8640a32e42ab",
+                        "@value": docid,
+                        "@id": f"CCDA-{docid}",
+                        "@registryObject": object_id,
+                        "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier",
+                        "Name": {
+                            "LocalizedString": {"@value": "XDSDocumentEntry.uniqueId"}
+                        },
                     },
-                },
+                    {
+                        "@identificationScheme": "urn:uuid:58a6f841-87b3-4a3e-92fd-a8ffeff98427",
+                        "@value": f"{nhsno}^^^&2.16.840.1.113883.2.1.4.99.1&ISO",
+                        "@id": f"PID-{nhsno}",
+                        "@registryObject": object_id,
+                        "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier",
+                        "Name": {
+                            "LocalizedString": {"@value": "XDSDocumentEntry.patientId"}
+                        },
+                    },
+                ],
             },
         }
 
