@@ -188,7 +188,7 @@ async def iti_47_response(message_id, patient, ceid, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
-async def iti_38_response(nhsno: int, queryid: str):
+async def iti_38_response(nhsno: int, ceid, queryid: str):
 
     body = {}
     body["AdhocQueryResponse"] = {
@@ -233,17 +233,25 @@ async def iti_38_response(nhsno: int, queryid: str):
 
         # slots.append(create_slot("creationTime", str(int(datetime.now().timestamp()))))
         # slots.append(create_slot("sourcePatientId", nhsno))
-        slots.append(
-            create_slot(
-                "sourcePatientId", f"{nhsno}^^^&2.16.840.1.113883.2.1.4.99.1&ISO"
-            )
-        )
         # slots.append(
         #     create_slot(
-        #         "sourcePatientInfo",
-        #         f"PID-3|{nhsno}^^^&2.16.840.1.113883.2.1.4.1&ISO;{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO",
+        #         "sourcePatientId", f"{nhsno}^^^&2.16.840.1.113883.2.1.4.99.1&ISO"
         #     )
         # )
+
+        # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
+        slots.append(
+            create_slot(
+                "sourcePatientId", f"{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO"
+            )
+        )
+
+        slots.append(
+            create_slot(
+                "sourcePatientInfo",
+                f"PID-3|{nhsno}^^^&2.16.840.1.113883.2.1.4.1&ISO;{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO",
+            )
+        )
         slots.append(create_slot("languageCode", "en-GB"))
         # No hash for on demand document
         # slots.append(create_slot("hash", "4cf4f82d78b5e2aac35c31bca8cb79fe6bd6a41e"))
