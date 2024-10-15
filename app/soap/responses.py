@@ -10,6 +10,8 @@ from httpx import AsyncClient
 from ..gpconnect import gpconnect
 from ..redis_connect import redis_client
 
+REGISTRY_ID = redis_client.get("registry")
+
 
 def create_security():
     current_time = datetime.now()
@@ -258,6 +260,18 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         # slots.append(create_slot("hash", "4cf4f82d78b5e2aac35c31bca8cb79fe6bd6a41e"))
         slots.append(create_slot("size", "1"))
         slots.append(create_slot("repositoryUniqueId", redis_client.get("registry")))
+        slots.append(
+            create_slot(
+                "$XDSDocumentEntryClassCode", "('34133-9^^2.16.840.1.113883.6.1')"
+            )
+        )
+        slots.append(
+            create_slot(
+                "$XDSDocumentEntryFormatCode",
+                "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
+            )
+        )
+
         object_id = "CCDA_01"
         body["AdhocQueryResponse"]["RegistryObjectList"] = {
             "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0",

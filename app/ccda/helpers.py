@@ -75,7 +75,6 @@ def clean_soap(
         "soap": None,
     },
 ) -> dict:
-
     """
     Takes raw soap requests and cleans
 

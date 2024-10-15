@@ -41,10 +41,10 @@ if __name__ == "__main__":
         r = requests.post(url, data=body, headers=headers)
 
         dict_38 = xmltodict.parse(r.text)
-        pprint.pprint(dict_38)
-        # docid = dict_38["s:Envelope"]["s:Body"]["AdhocQueryResponse"][
-        #     "RegistryObjectList"
-        # ]["ExtrinsicObject"]["ExternalIdentifier"]["@value"]
+        # pprint.pprint(dict_38)
+        docid = dict_38["s:Envelope"]["s:Body"]["AdhocQueryResponse"][
+            "RegistryObjectList"
+        ]["ExtrinsicObject"]["ExternalIdentifier"][0]["@value"]
         with open("iti38.xml", "w") as output:
             output.write(r.text)
         print(r.status_code)
@@ -72,6 +72,7 @@ if __name__ == "__main__":
         query["Body"]["RetrieveDocumentSetRequest"]["DocumentRequest"][
             "DocumentUniqueId"
         ] = docid
+
         pprint.pprint(query)
 
         # body = ElementTree.tostring(root)

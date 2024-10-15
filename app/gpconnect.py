@@ -73,6 +73,8 @@ async def gpconnect(nhsno: int):
         json=body,
         headers=headers,
     )
+    print(r.text)
+    logging.info(r.text)
 
     scr_bundle = json.loads(r.text)
 
