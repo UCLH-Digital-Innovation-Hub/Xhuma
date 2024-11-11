@@ -84,87 +84,120 @@
 - **pydantic**: Data validation
 - **fhirclient**: FHIR data models
 
-## Testing Resources
+## Monitoring & Observability
+
+### Prometheus
+- **Purpose**: Metrics collection and storage
+- **Documentation**: [Prometheus Docs](https://prometheus.io/docs/introduction/overview/)
+- **Key Metrics**:
+  - Request counts
+  - Response times
+  - Error rates
+  - Cache hit/miss rates
+  - Resource utilization
+
+### Grafana
+- **Purpose**: Metrics visualization and alerting
+- **Documentation**: [Grafana Docs](https://grafana.com/docs/)
+- **Features**:
+  - Custom dashboards
+  - Alert management
+  - Data exploration
+  - Annotation support
+
+### ELK Stack
+- **Purpose**: Log aggregation and analysis
+- **Components**:
+  - Elasticsearch: Log storage
+  - Logstash: Log processing
+  - Kibana: Log visualization
+- **Documentation**: [Elastic Docs](https://www.elastic.co/guide/index.html)
+
+### OpenTelemetry
+- **Purpose**: Distributed tracing
+- **Documentation**: [OpenTelemetry Docs](https://opentelemetry.io/docs/)
+- **Features**:
+  - Request tracing
+  - Performance monitoring
+  - Error tracking
+  - Service dependencies
+
+## Testing Tools
 
 ### Unit Testing
-- **Framework**: pytest
-- **Test Files Location**: app/tests/
-- **Key Test Areas**:
-  - SOAP message handling
-  - Helper functions
-  - Main application routes
+- **pytest**: Primary testing framework
+  - [Documentation](https://docs.pytest.org/)
+  - Test discovery
+  - Fixture support
+  - Parameterized testing
 
 ### Integration Testing
-- **NHS Digital Testing**:
-  - GP Connect Provider Simulator
-  - PDS Sandbox Environment
-  - FHIR Validation
+- **pytest-asyncio**: Async test support
+- **aiohttp**: HTTP client testing
+- **testcontainers**: Container-based testing
+  - Redis integration tests
+  - Service mocking
 
-## Deployment
+### Performance Testing
+- **locust**: Load testing
+  - [Documentation](https://docs.locust.io/)
+  - Concurrent user simulation
+  - Performance metrics
+  - Real-time monitoring
+
+### Code Quality
+- **black**: Code formatting
+- **flake8**: Style guide enforcement
+- **mypy**: Type checking
+- **bandit**: Security linting
+
+## Deployment & Infrastructure
 
 ### Docker
-- **Containerization**: Application and Redis
-- **Configuration**:
-  - Environment variables
-  - Volume mounts for keys
+- **Documentation**: [Docker Docs](https://docs.docker.com/)
+- **Components**:
+  - Multi-stage builds
+  - Health checks
+  - Volume management
   - Network configuration
 
-### Environment Variables
-- `REGISTRY_ID`: Unique identifier for the service instance
-- `JWTKEY`: Private key for JWT signing
-- Additional configuration as needed
+### Docker Compose
+- **Documentation**: [Compose Docs](https://docs.docker.com/compose/)
+- **Features**:
+  - Service orchestration
+  - Environment variables
+  - Volume mapping
+  - Network setup
 
-## Security Implementation
+### Health Checks
+- **Endpoints**:
+  - /health/live: Liveness probe
+  - /health/ready: Readiness probe
+  - /metrics: Prometheus metrics
+- **Implementation**: FastAPI endpoints
 
-### JWT Security
-- **Key Management**:
-  - Private key storage: PEM format
-  - Public JWK endpoint
-  - Key rotation support
-- **Token Claims**:
-  - Issuer (iss)
-  - Subject (sub)
-  - Audience (aud)
-  - Expiration (exp)
-  - Issued At (iat)
+## Security Tools
 
-### Request Security
-- **Content Validation**:
-  - NHS Number validation
-  - SOAP message structure validation
-  - Content-Type verification
-- **Logging**:
-  - Request/Response logging
-  - Client IP tracking
-  - Timestamp recording
+### JWT Management
+- **python-jose**: JWT implementation
+- **cryptography**: Cryptographic operations
+- **Key rotation**: Automated key management
 
-## Monitoring
-
-### Application Logging
-- **Implementation**: Python logging
-- **Log Details**:
-  - Client IP
-  - Request/Response bodies
-  - Timestamps
-  - Method calls
-  - Status codes
-
-### Error Handling
-- **HTTP Exceptions**:
-  - 400: Invalid requests
-  - 404: Resource not found
-- **Custom error responses for SOAP faults**
+### API Security
+- **Rate limiting**: FastAPI middleware
+- **Input validation**: Pydantic models
+- **CORS**: FastAPI CORS middleware
+- **Security headers**: Custom middleware
 
 ## Additional Resources
 
-### Code Quality
-- **Pre-commit hooks**: .pre-commit-config.yaml
-- **Style Guide**: PEP 8
-- **Type Hints**: Python typing module
+### Documentation Tools
+- **mkdocs**: Documentation generation
+- **OpenAPI**: API documentation
+- **sphinx**: Python documentation
 
-### Version Control
-- **Repository**: GitHub
-- **Branch Strategy**:
-  - main: Production
-  - dev: Development
-  - feature branches: New features
+### Development Tools
+- **pre-commit**: Git hooks
+- **dependabot**: Dependency updates
+- **renovate**: Package management
+- **git-flow**: Version control workflow

@@ -1,9 +1,6 @@
 # Data Flow Documentation
 
-## Overview
-This document details the flow of data through the Xhuma middleware service, from initial request to final response, including all transformations and validations.
-
-## Primary Data Flows
+## Core Data Flows
 
 ### 1. Patient Demographics Service (PDS) Flow
 ```mermaid
@@ -28,6 +25,47 @@ flowchart TD
     F -->|CCDA Document| G[Cache Storage]
     G -->|Formatted Response| H[ITI-38 Response]
     C -->|Cache Hit| H
+```
+
+## Observability Data Flows
+
+### 1. Metrics Collection Flow
+```mermaid
+flowchart TD
+    A[Application Events] -->|Metrics| B[Prometheus Client]
+    B -->|Scrape| C[Prometheus Server]
+    C -->|Query| D[Grafana]
+    D -->|Alert| E[Alert Manager]
+    E -->|Notification| F[Alert Channels]
+    
+    G[System Metrics] -->|Resource Usage| B
+    H[Redis Metrics] -->|Cache Stats| B
+    I[Request Metrics] -->|Latency/Errors| B
+```
+
+### 2. Logging Flow
+```mermaid
+flowchart TD
+    A[Application Logs] -->|JSON Format| B[Logstash]
+    B -->|Process| C[Elasticsearch]
+    C -->|Query| D[Kibana]
+    
+    E[System Logs] -->|Structured| B
+    F[Access Logs] -->|Parse| B
+    G[Error Logs] -->|Enrich| B
+```
+
+### 3. Tracing Flow
+```mermaid
+flowchart TD
+    A[Request Start] -->|Generate Trace ID| B[OpenTelemetry]
+    B -->|Collect Spans| C[Trace Processing]
+    C -->|Store| D[Trace Storage]
+    D -->|Query| E[Trace Analysis]
+    
+    F[Service Calls] -->|Add Spans| B
+    G[Database Ops] -->|Add Spans| B
+    H[Cache Ops] -->|Add Spans| B
 ```
 
 ## Data Transformations
@@ -60,145 +98,97 @@ Generate XML Structure
 Output: CCDA Document
 ```
 
-## Data Validation Points
+## Monitoring Data Flows
 
-### Request Validation
-- NHS Number format validation
-- Token validation
-- Request parameter validation
-- Content-type verification
+### 1. Performance Metrics Flow
+```
+Request Start
+↓
+Timing Collection
+↓
+Metric Aggregation
+↓
+Prometheus Storage
+↓
+Grafana Visualization
+```
 
-### Response Validation
-- FHIR response structure validation
-- Required field presence
-- Data type conformance
-- Business rule validation
+### 2. Error Tracking Flow
+```
+Error Detection
+↓
+Error Classification
+↓
+Log Generation
+↓
+Alert Evaluation
+↓
+Notification Dispatch
+```
 
-## Caching Strategy
+## Cache Data Flow
 
-### Cache Keys
-- `pds:{nhs_number}`: Patient demographics
-- `sds:{org_code}`: SDS endpoint information
-- `ccda:{nhs_number}`: Generated CCDA documents
-
-### Cache TTL
-- PDS Data: 24 hours
-- SDS Endpoints: 12 hours
-- CCDA Documents: 4 hours
-
-## Error Handling Flow
-
-### Error Categories and Responses
-1. **Validation Errors**
-   ```
-   Invalid Input → Error Handler → Formatted Error Response
-   ```
-
-2. **API Errors**
-   ```
-   API Failure → Retry Logic → Error Handler → Error Response
-   ```
-
-3. **Transformation Errors**
-   ```
-   Failed Conversion → Error Handler → Error Response
-   ```
-
-## Security Flow
-
-### Request Security Flow
+### 1. Cache Operations
 ```mermaid
 flowchart TD
-    A[Incoming Request] -->|JWT Token| B[Token Validation]
-    B -->|Valid Token| C[Permission Check]
+    A[Cache Request] -->|Key Lookup| B{Cache Hit?}
+    B -->|Yes| C[Return Cached Data]
+    B -->|No| D[Fetch Fresh Data]
+    D -->|Store| E[Cache Storage]
+    E -->|Return| F[Response]
+    
+    G[TTL Monitor] -->|Expire| H[Cache Cleanup]
+    I[Memory Monitor] -->|Evict| H
+```
+
+### 2. Cache Monitoring
+```mermaid
+flowchart TD
+    A[Cache Operations] -->|Stats| B[Metrics Collection]
+    B -->|Store| C[Time Series DB]
+    C -->|Query| D[Performance Analysis]
+    D -->|Alert| E[Cache Optimization]
+```
+
+## Security Data Flow
+
+### 1. Authentication Flow
+```mermaid
+flowchart TD
+    A[Request] -->|JWT Token| B[Token Validation]
+    B -->|Valid| C[Permission Check]
     C -->|Authorized| D[Process Request]
-    B -->|Invalid Token| E[Auth Error]
+    B -->|Invalid| E[Auth Error]
     C -->|Unauthorized| E
-    E -->|Error Response| F[Client]
+    E -->|Log| F[Error Tracking]
 ```
 
-### Data Protection Flow
+### 2. Audit Trail Flow
 ```mermaid
 flowchart TD
-    A[Sensitive Data] -->|Encryption| B[Processing]
-    B -->|Access Control| C[Storage/Transit]
-    C -->|Decryption| D[Authorized Access]
+    A[System Event] -->|Generate| B[Audit Record]
+    B -->|Store| C[Audit Log]
+    C -->|Index| D[Search Engine]
+    D -->|Query| E[Audit Reports]
 ```
 
-## Integration Points
+## Health Check Data Flow
 
-### NHS Digital Services
-- PDS FHIR API
-- SDS API
-- GP Connect API
-
-### External Systems
-- Client EHR Systems
-- Monitoring Systems
-- Audit Systems
-
-## Performance Considerations
-
-### Request Flow Optimization
-```
-Client Request
-↓
-Load Balancer
-↓
-Cache Check
-↓
-API Request (if needed)
-↓
-Response Generation
-↓
-Client Response
+### 1. System Health
+```mermaid
+flowchart TD
+    A[Health Check] -->|Probe| B{Service Status}
+    B -->|Healthy| C[Update Status]
+    B -->|Unhealthy| D[Alert]
+    D -->|Log| E[Incident Management]
+    C -->|Metrics| F[Health Dashboard]
 ```
 
-### Concurrent Processing
-- Async API calls
-- Parallel transformations
-- Batch processing capabilities
-
-## Monitoring Points
-
-### Data Collection Points
-1. Request Entry
-   - Timestamp
-   - Request type
-   - Client identifier
-
-2. API Interactions
-   - Response times
-   - Success rates
-   - Error rates
-
-3. Cache Operations
-   - Hit rates
-   - Miss rates
-   - Invalidation events
-
-4. Transformations
-   - Processing time
-   - Success/failure rates
-   - Resource usage
-
-## Audit Trail
-
-### Logged Events
-1. Authentication attempts
-2. Data access events
-3. Transformation operations
-4. Error occurrences
-5. Cache operations
-
-### Audit Record Structure
-```json
-{
-    "timestamp": "ISO8601 DateTime",
-    "event_type": "String",
-    "actor": "String",
-    "action": "String",
-    "resource": "String",
-    "status": "String",
-    "details": "Object"
-}
+### 2. Dependency Health
+```mermaid
+flowchart TD
+    A[Service Check] -->|Test| B{Dependencies}
+    B -->|Available| C[Update Status]
+    B -->|Unavailable| D[Circuit Breaker]
+    D -->|Activate| E[Fallback Mode]
+    E -->|Log| F[Recovery Monitor]

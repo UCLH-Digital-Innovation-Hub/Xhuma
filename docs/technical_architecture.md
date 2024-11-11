@@ -47,36 +47,131 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 - Optimizes repeated requests
 - Handles cache invalidation
 
-## Technical Stack
+## Monitoring & Observability Architecture
 
-### Core Technologies
-- Python 3.9+
-- FastAPI (ASGI Framework)
-- Redis (Caching)
-- Docker (Containerization)
-- Uvicorn (ASGI Server)
+### 1. Metrics Collection (Prometheus)
+- **Endpoint Metrics**
+  - Request counts and rates
+  - Response times
+  - Error rates by type
+  - Status code distribution
 
-### Key Dependencies
-- pydantic: Data validation
-- python-jose: JWT handling
-- requests: HTTP client
-- lxml: XML processing
-- pytest: Testing framework
+- **Cache Metrics**
+  - Hit/miss rates
+  - Cache size
+  - Eviction rates
+  - TTL statistics
 
-## System Requirements
+- **Resource Metrics**
+  - CPU usage
+  - Memory utilization
+  - Network I/O
+  - Disk operations
 
-### Minimum Requirements
-- Python 3.9 or higher
-- Redis 6.0 or higher
-- 2GB RAM
-- 1 CPU core
+### 2. Visualization (Grafana)
+- **System Dashboards**
+  - Real-time performance monitoring
+  - Historical trends analysis
+  - Resource utilization tracking
+  - Error rate visualization
 
-### Recommended Requirements
-- Python 3.11
-- Redis 7.0
-- 4GB RAM
-- 2 CPU cores
-- SSD storage
+- **Business Metrics**
+  - Transaction success rates
+  - API usage patterns
+  - Cache efficiency
+  - Service availability
+
+### 3. Logging Architecture (ELK Stack)
+- **Log Collection**
+  - Application logs
+  - System logs
+  - Access logs
+  - Error logs
+
+- **Log Processing**
+  - Structured log formatting
+  - Log enrichment
+  - Pattern detection
+  - Alert generation
+
+- **Log Storage**
+  - Indexed storage
+  - Retention policies
+  - Archival strategy
+  - Search optimization
+
+### 4. Distributed Tracing (OpenTelemetry)
+- **Trace Collection**
+  - Request tracing
+  - Service dependencies
+  - Performance bottlenecks
+  - Error propagation
+
+- **Trace Analysis**
+  - Latency analysis
+  - Error tracking
+  - Service mapping
+  - Performance optimization
+
+## Testing Architecture
+
+### 1. Unit Testing
+- **Test Organization**
+  - Feature-based test suites
+  - Integration test suites
+  - Mock implementations
+  - Test fixtures
+
+- **Test Coverage**
+  - Code coverage tracking
+  - Branch coverage
+  - Integration points
+  - Error scenarios
+
+### 2. Integration Testing
+- **Service Testing**
+  - API endpoint testing
+  - Database interactions
+  - Cache operations
+  - External service mocks
+
+- **End-to-End Testing**
+  - User flow testing
+  - Error handling
+  - Performance validation
+  - Security testing
+
+### 3. Performance Testing
+- **Load Testing**
+  - Concurrent user simulation
+  - Resource utilization
+  - Response time analysis
+  - Bottleneck identification
+
+- **Stress Testing**
+  - System limits testing
+  - Recovery testing
+  - Failover scenarios
+  - Resource exhaustion
+
+## Security Architecture
+
+### 1. Authentication
+- JWT-based authentication
+- NHS API authentication
+- Token validation and verification
+
+### 2. Data Protection
+- TLS 1.2+ for all communications
+- Data encryption at rest
+- Secure header handling
+- Input validation and sanitization
+
+### 3. Compliance
+- NHS Digital Standards
+- NHS Supplier Conformance Assessment List: Structured Extended Testing, Spine Integration Testing, PDS onboarding
+- GDPR requirements
+- Health data protection regulations
 
 ## Deployment Architecture
 
@@ -95,78 +190,53 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 - Exposed ports:
   - 8000: Application API
   - 6379: Redis (internal only)
+  - 9090: Prometheus metrics
+  - 3000: Grafana dashboards
 
-## Security Considerations
+## Error Handling Architecture
 
-### Authentication
-- JWT-based authentication
-- NHS API authentication
-- Token validation and verification
-
-### Data Protection
-- TLS 1.2+ for all communications
-- Data encryption at rest
-- Secure header handling
-- Input validation and sanitization
-
-### Compliance
-- NHS Digital Standards
-- NHS Supplier Conformance Assessment List: Structured Extended Testing, Spine Integration Testing, PDS onboarding
-- GDPR requirements
-- Health data protection regulations
-
-## Performance Considerations
-
-### Caching Strategy
-- SDS endpoint caching
-- CCDA document caching
-- Cache invalidation policies
-- Redis persistence configuration
-
-### Optimization
-- Async operations
-- Connection pooling
-- Resource optimization
-- Response compression
-
-## Monitoring and Logging
-
-### Metrics Collection
-- Request/Response timing
-- Cache hit rates
-- Error rates
-- System resource usage
-
-### Logging
-- Application logs
-- Error tracking
-- Audit trails
-- Performance metrics
-
-## Error Handling
-
-### Error Categories
+### 1. Error Categories
 - NHS API errors
 - Conversion failures
 - Authentication errors
 - Network issues
 
-### Recovery Procedures
+### 2. Recovery Procedures
 - Automatic retries
 - Fallback mechanisms
 - Error reporting
 - System recovery
 
-## Maintenance and Support
+## Maintenance Architecture
 
-### Regular Maintenance
+### 1. Regular Maintenance
 - Cache cleanup
 - Log rotation
 - Performance monitoring
 - Security updates
 
-### Support Procedures
+### 2. Support Procedures
 - Issue tracking
 - Version control
 - Documentation updates
 - Dependency management
+
+## Health Check Architecture
+
+### 1. Liveness Probes
+- Basic application health
+- Critical service checks
+- Resource availability
+- Error rate monitoring
+
+### 2. Readiness Probes
+- Service dependencies
+- Cache availability
+- External service status
+- Resource thresholds
+
+### 3. Startup Probes
+- Initialization checks
+- Configuration validation
+- Resource allocation
+- Service registration
