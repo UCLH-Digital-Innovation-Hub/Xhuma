@@ -57,6 +57,12 @@ class PostgresLogHandler(logging.Handler):
         nhs_number = nhs_number_ctx_var.get(None)
         request_type = request_type_ctx_var.get(None)
         
+        # Don't store "N/A" values in the database
+        if nhs_number == "N/A":
+            nhs_number = None
+        if request_type == "N/A":
+            request_type = None
+        
         request_details = getattr(record, 'request_details', None)
         response_details = getattr(record, 'response_details', None)
         
@@ -66,14 +72,28 @@ class PostgresLogHandler(logging.Handler):
             'lineno': record.lineno,
         }
         
+        # Add any extra attributes from the record
         for key, value in record.__dict__.items():
             if key not in ('correlation_id', 'nhs_number', 'msg', 'args', 
-                         'exc_info', 'exc_text', 'request_details', 'response_details'):
+                         'exc_info', 'exc_text', 'request_details', 'response_details',
+                         'request_type', 'level', 'module', 'message'):
                 try:
                     json.dumps(value)
                     extra[key] = value
                 except (TypeError, ValueError):
                     extra[key] = str(value)
+        
+        # Format message
+        message = {
+            'message': record.getMessage(),
+            'module': record.name,
+            'level': record.levelname,
+            'correlation_id': correlation_id,
+            'nhs_number': nhs_number,
+            'request_type': request_type,
+            'timestamp': datetime.fromtimestamp(record.created).strftime('%Y-%m-%d %H:%M:%S'),
+            **extra
+        }
         
         return {
             'timestamp': datetime.fromtimestamp(record.created),
@@ -82,7 +102,7 @@ class PostgresLogHandler(logging.Handler):
             'request_type': request_type,
             'level': record.levelname,
             'module': record.name,
-            'message': self.format(record),
+            'message': Json(message),
             'request_details': Json(request_details) if request_details else None,
             'response_details': Json(response_details) if response_details else None,
             'extra_data': Json(extra)

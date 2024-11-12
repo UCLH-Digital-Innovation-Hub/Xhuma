@@ -26,6 +26,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import MutableHeaders
 from fhirclient.models import bundle
 from jwcrypto import jwk
 
@@ -37,6 +38,7 @@ from .config import (
     LOGGING_CONFIG, 
     FASTAPI_OBSERVABILITY_CONFIG,
     CORRELATION_ID_CONFIG,
+    REQUEST_TYPES,
     get_logger
 )
 from .handlers import (
@@ -126,6 +128,46 @@ class MetricsMiddleware(BaseHTTPMiddleware):
 class CorrelationMiddleware(BaseHTTPMiddleware):
     """Middleware to handle correlation IDs for request tracing."""
     
+    def get_request_type(self, path: str) -> Optional[str]:
+        """Determine request type from path."""
+        if "/iti/47" in path:
+            return "ITI-47"
+        elif "/iti/38" in path:
+            return "ITI-38"
+        elif "/iti/39" in path:
+            return "ITI-39"
+        elif "/ccda/convert" in path:
+            return "CCDA"
+        elif "/pds/" in path:
+            return "PDS"
+        elif "/sds/" in path:
+            return "SDS"
+        return None
+    
+    async def get_nhs_number(self, request: Request) -> Optional[str]:
+        """Extract NHS number from request."""
+        # From path parameter
+        path_parts = request.url.path.split("/")
+        for part in path_parts:
+            if part.isdigit() and len(part) == 10:
+                return part
+        
+        # From JSON body for POST requests
+        if request.method == "POST":
+            try:
+                body_bytes = await request.body()
+                body = json.loads(body_bytes)
+                if isinstance(body, dict):
+                    nhs_number = body.get("nhs_number")
+                    if nhs_number:
+                        # Store body for reuse
+                        request.state.body = body_bytes
+                        return str(nhs_number)
+            except:
+                pass
+        
+        return None
+    
     async def dispatch(self, request: Request, call_next):
         """Process the request and add correlation ID."""
         correlation_id = request.headers.get(
@@ -134,8 +176,27 @@ class CorrelationMiddleware(BaseHTTPMiddleware):
         )
         
         request.state.correlation_id = correlation_id
+        request_type = self.get_request_type(request.url.path)
+        nhs_number = await self.get_nhs_number(request)
         
-        with setup_request_context(correlation_id):
+        # Set up custom receive function to reuse body if needed
+        if hasattr(request.state, 'body'):
+            body = request.state.body
+            async def receive():
+                return {"type": "http.request", "body": body}
+            request._receive = receive
+        
+        with setup_request_context(correlation_id, nhs_number, request_type):
+            logger.info(
+                f"Processing request",
+                extra={
+                    "correlation_id": correlation_id,
+                    "nhs_number": nhs_number,
+                    "request_type": request_type,
+                    "method": request.method,
+                    "path": request.url.path
+                }
+            )
             response = await call_next(request)
             response.headers[CORRELATION_ID_CONFIG["header_name"]] = correlation_id
             return response
@@ -244,7 +305,8 @@ async def demo(nhsno: int, request: Request):
         f"Processing demo request for NHS number: {nhsno}",
         extra={
             "correlation_id": request.state.correlation_id,
-            "nhs_number": str(nhsno)
+            "nhs_number": str(nhsno),
+            "request_type": "CCDA"
         }
     )
     
@@ -257,7 +319,8 @@ async def demo(nhsno: int, request: Request):
             f"Error processing demo request: {str(e)}",
             extra={
                 "correlation_id": request.state.correlation_id,
-                "nhs_number": str(nhsno)
+                "nhs_number": str(nhsno),
+                "request_type": "CCDA"
             }
         )
         raise
