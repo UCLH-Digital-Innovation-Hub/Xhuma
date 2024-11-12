@@ -65,6 +65,129 @@ OpenTelemetry provides distributed tracing across:
 - CCDA conversions
 - Cache operations
 
+## Demo Commands
+
+### 1. Load Testing & Metrics
+
+#### Generate Load
+```bash
+# Generate CCDA conversion load
+for i in {1..10}; do curl -s http://localhost:80/demo/9690937278 > /dev/null; sleep 1; done
+
+# Generate ITI-47 requests with logging
+for i in {1..5}; do 
+    curl -s -X POST http://localhost:80/iti/47 \
+    -H "Content-Type: application/json" \
+    -d '{"nhs_number": "9690937278"}' > /dev/null; 
+    sleep 1; 
+done
+```
+
+#### View Metrics
+```bash
+# Access Prometheus UI
+open http://localhost:9090
+
+# Useful PromQL Queries:
+# Total requests by endpoint
+rate(http_requests_total[5m])
+
+# Average request duration
+rate(http_request_duration_seconds_sum[5m]) / rate(http_request_duration_seconds_count[5m])
+
+# Error rate
+sum(rate(http_requests_total{status_code=~"5.*"}[5m])) by (endpoint)
+```
+
+### 2. Tracing & Logs
+
+#### View Recent Logs
+```bash
+# View latest logs with correlation IDs
+docker-compose exec postgres psql -U postgres -d xhuma -c "
+SELECT timestamp, correlation_id, nhs_number, request_type, 
+       message::jsonb->>'message' as message, level 
+FROM application_logs 
+ORDER BY timestamp DESC LIMIT 5;"
+
+# View logs for specific NHS number
+docker-compose exec postgres psql -U postgres -d xhuma -c "
+SELECT timestamp, correlation_id, request_type, 
+       message::jsonb->>'message' as message 
+FROM application_logs 
+WHERE nhs_number = '9690937278' 
+ORDER BY timestamp DESC LIMIT 5;"
+
+# View error logs
+docker-compose exec postgres psql -U postgres -d xhuma -c "
+SELECT timestamp, correlation_id, message::jsonb->>'message' as message 
+FROM application_logs 
+WHERE level = 'ERROR' 
+ORDER BY timestamp DESC LIMIT 5;"
+```
+
+#### Trace Request Flow
+```bash
+# Make request and follow trace
+curl -s -X POST http://localhost:80/iti/47 \
+-H "Content-Type: application/json" \
+-H "X-Correlation-ID: demo-trace-001" \
+-d '{"nhs_number": "9690937278"}' > /dev/null && \
+sleep 1 && \
+docker-compose exec postgres psql -U postgres -d xhuma -c "
+SELECT timestamp, request_type, message::jsonb->>'message' as message 
+FROM application_logs 
+WHERE correlation_id = 'demo-trace-001' 
+ORDER BY timestamp ASC;"
+```
+
+### 3. Monitoring Dashboards
+
+#### Access UIs
+```bash
+# Grafana Dashboard
+open http://localhost:3000
+# Default credentials: admin/admin
+
+# Prometheus UI
+open http://localhost:9090
+
+# Tempo UI (for traces)
+open http://localhost:3000/explore
+```
+
+### 4. Error Scenarios
+
+#### Trigger and View Errors
+```bash
+# Restart service and check startup logs
+docker-compose restart gpcon && \
+sleep 5 && \
+docker-compose exec postgres psql -U postgres -d xhuma -c "
+SELECT timestamp, message::jsonb->>'message' as message, level 
+FROM application_logs 
+ORDER BY timestamp DESC LIMIT 1;"
+
+# Make invalid request
+curl -s -X POST http://localhost:80/iti/47 \
+-H "Content-Type: application/json" \
+-d '{"invalid": "data"}' > /dev/null && \
+sleep 1 && \
+docker-compose exec postgres psql -U postgres -d xhuma -c "
+SELECT timestamp, level, message::jsonb->>'message' as message 
+FROM application_logs 
+WHERE level = 'ERROR' 
+ORDER BY timestamp DESC LIMIT 1;"
+```
+
+### Key Metrics to Watch
+- Request rates by endpoint
+- Response times (p95, p99)
+- Error rates
+- CCDA conversion times
+- Token creation/validation rates
+- Cache hit/miss rates
+
 ## Grafana Dashboards
 
 ### Xhuma Overview Dashboard
@@ -90,8 +213,6 @@ Located at `/var/lib/grafana/dashboards/xhuma.json`, this dashboard provides:
    - Uses `rate(ccda_conversion_duration_seconds_sum{job="xhuma"}[5m]) / rate(ccda_conversion_duration_seconds_count{job="xhuma"}[5m])`
    - Helps track document conversion performance
 
-[Previous sections remain unchanged...]
-
 ## Monitoring Setup
 
 1. Start monitoring stack:
@@ -113,8 +234,6 @@ docker-compose up -d
 - Dashboards are automatically provisioned from /var/lib/grafana/dashboards
 - Data sources are configured in grafana/provisioning/datasources/datasource.yml
 - Dashboard configuration in grafana/provisioning/dashboards/dashboards.yml
-
-[Previous sections remain unchanged...]
 
 ## Best Practices
 
@@ -143,5 +262,3 @@ logger.info("Processing request", extra={
 - Use consistent units and scales
 - Add helpful descriptions
 - Configure appropriate refresh intervals
-
-[Previous sections remain unchanged...]
