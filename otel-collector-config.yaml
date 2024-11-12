@@ -36,6 +36,10 @@ exporters:
       insecure: true
 
 service:
+  telemetry:
+    metrics:
+      address: ":8890"  # Changed from 8888 to avoid conflict
+
   pipelines:
     metrics:
       receivers: [otlp]

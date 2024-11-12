@@ -16,9 +16,9 @@ import logging.config
 from typing import Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -188,6 +188,16 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup handler for application shutdown."""
     logger.info("Shutting down Xhuma application")
+
+@app.get("/metrics")
+async def metrics():
+    """
+    Endpoint that exposes Prometheus metrics.
+    
+    :return: Prometheus metrics in text format
+    :rtype: Response
+    """
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root():

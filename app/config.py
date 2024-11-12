@@ -33,6 +33,17 @@ OTEL_CONFIG = {
     }
 }
 
+# FastAPI Observability Configuration
+FASTAPI_OBSERVABILITY_CONFIG = {
+    "app_name": "xhuma",
+    "metrics_path": "/metrics",
+    "should_gzip": True,
+    "should_include_status_code_metrics": True,
+    "should_include_response_time_metrics": True,
+    "excluded_urls": ["/metrics", "/health", "/docs", "/openapi.json"],
+    "buckets": [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0],
+}
+
 # Prometheus Metric Configurations
 METRIC_CONFIGS = {
     "request_duration_buckets": [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0],

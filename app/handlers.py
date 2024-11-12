@@ -2,17 +2,23 @@
 Custom logging handlers for the Xhuma application.
 
 This module provides custom logging handlers for enhanced logging capabilities,
-particularly focused on request tracing and correlation ID management.
+particularly focused on request tracing and correlation ID management with
+Postgres storage support.
 """
 
 import logging
-import threading
-from typing import Optional
+import json
+from typing import Optional, Dict, Any, Tuple
 from contextvars import ContextVar
+from datetime import datetime
+import psycopg2
+from psycopg2.extras import Json, DictCursor
+from uuid import UUID, uuid4
 
-# Context variable to store correlation ID
+# Context variables for request tracking
 correlation_id_ctx_var: ContextVar[Optional[str]] = ContextVar("correlation_id", default=None)
 nhs_number_ctx_var: ContextVar[Optional[str]] = ContextVar("nhs_number", default=None)
+request_type_ctx_var: ContextVar[Optional[str]] = ContextVar("request_type", default=None)
 
 class ContextualFilter(logging.Filter):
     """
@@ -30,9 +36,11 @@ class ContextualFilter(logging.Filter):
         """
         correlation_id = correlation_id_ctx_var.get(None)
         nhs_number = nhs_number_ctx_var.get(None)
+        request_type = request_type_ctx_var.get(None)
         
         record.correlation_id = correlation_id or "N/A"
         record.nhs_number = nhs_number or "N/A"
+        record.request_type = request_type or "N/A"
         
         return True
 
@@ -41,7 +49,8 @@ class RequestContextManager:
     Context manager for handling request-specific context variables.
     """
     
-    def __init__(self, correlation_id: str, nhs_number: Optional[str] = None):
+    def __init__(self, correlation_id: str, nhs_number: Optional[str] = None, 
+                 request_type: Optional[str] = None):
         """
         Initialize the context manager with correlation ID and optional NHS number.
         
@@ -49,29 +58,33 @@ class RequestContextManager:
         :type correlation_id: str
         :param nhs_number: The NHS number associated with the request
         :type nhs_number: Optional[str]
+        :param request_type: The type of request being processed
+        :type request_type: Optional[str]
         """
         self.correlation_id = correlation_id
         self.nhs_number = nhs_number
-        self.correlation_token = None
-        self.nhs_number_token = None
+        self.request_type = request_type
+        self.tokens = []
     
     def __enter__(self):
         """
         Set the correlation ID and NHS number in the context.
         """
-        self.correlation_token = correlation_id_ctx_var.set(self.correlation_id)
+        self.tokens.append(correlation_id_ctx_var.set(self.correlation_id))
         if self.nhs_number:
-            self.nhs_number_token = nhs_number_ctx_var.set(self.nhs_number)
+            self.tokens.append(nhs_number_ctx_var.set(self.nhs_number))
+        if self.request_type:
+            self.tokens.append(request_type_ctx_var.set(self.request_type))
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
         Clear the correlation ID and NHS number from the context.
         """
-        correlation_id_ctx_var.reset(self.correlation_token)
-        if self.nhs_number_token:
-            nhs_number_ctx_var.reset(self.nhs_number_token)
+        for token in reversed(self.tokens):
+            correlation_id_ctx_var.reset(token)
 
-def setup_request_context(correlation_id: str, nhs_number: Optional[str] = None) -> RequestContextManager:
+def setup_request_context(correlation_id: str, nhs_number: Optional[str] = None,
+                        request_type: Optional[str] = None) -> RequestContextManager:
     """
     Create a context manager for request-specific logging context.
     
@@ -79,7 +92,81 @@ def setup_request_context(correlation_id: str, nhs_number: Optional[str] = None)
     :type correlation_id: str
     :param nhs_number: The NHS number associated with the request
     :type nhs_number: Optional[str]
+    :param request_type: The type of request being processed
+    :type request_type: Optional[str]
     :return: A context manager for the request context
     :rtype: RequestContextManager
     """
-    return RequestContextManager(correlation_id, nhs_number)
+    return RequestContextManager(correlation_id, nhs_number, request_type)
+
+class CorrelationManager:
+    """
+    Manages correlation IDs and their reuse for repeated requests.
+    """
+    
+    def __init__(self, dsn: str):
+        """
+        Initialize the correlation manager.
+        
+        :param dsn: Database connection string
+        :type dsn: str
+        """
+        self.dsn = dsn
+        self.conn = None
+        self.connect()
+    
+    def connect(self) -> None:
+        """Establish database connection."""
+        try:
+            self.conn = psycopg2.connect(self.dsn)
+            self.conn.autocommit = True
+        except psycopg2.Error as e:
+            print(f"Failed to connect to PostgreSQL: {e}")
+            raise
+    
+    def get_or_create_correlation_id(self, nhs_number: str, request_type: str) -> Tuple[UUID, bool]:
+        """
+        Get existing correlation ID or create new one for NHS number and request type.
+        
+        :param nhs_number: NHS number for the request
+        :type nhs_number: str
+        :param request_type: Type of request (e.g., ITI-47, ITI-38)
+        :type request_type: str
+        :return: Tuple of (correlation_id, is_new)
+        :rtype: Tuple[UUID, bool]
+        """
+        if self.conn is None or self.conn.closed:
+            self.connect()
+        
+        try:
+            with self.conn.cursor(cursor_factory=DictCursor) as cur:
+                # Try to get existing correlation ID
+                cur.execute("""
+                    SELECT correlation_id 
+                    FROM correlation_mappings 
+                    WHERE nhs_number = %s AND request_type = %s
+                """, (nhs_number, request_type))
+                
+                result = cur.fetchone()
+                
+                if result:
+                    return UUID(result['correlation_id']), False
+                
+                # Create new correlation ID
+                new_correlation_id = uuid4()
+                cur.execute("""
+                    INSERT INTO correlation_mappings 
+                    (nhs_number, correlation_id, request_type)
+                    VALUES (%s, %s, %s)
+                """, (nhs_number, str(new_correlation_id), request_type))
+                
+                return new_correlation_id, True
+                
+        except Exception as e:
+            print(f"Error managing correlation ID: {e}")
+            raise
+    
+    def close(self) -> None:
+        """Close the database connection."""
+        if self.conn is not None:
+            self.conn.close()

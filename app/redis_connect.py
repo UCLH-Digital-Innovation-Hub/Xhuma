@@ -18,7 +18,7 @@ from typing import Optional, Union
 import redis
 
 # Redis connection configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")  # Changed default from localhost to redis
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", None)
@@ -33,7 +33,7 @@ def redis_connect() -> redis.Redis:
 
     Note:
         Connection parameters can be customized through environment variables:
-        - REDIS_HOST: Redis server hostname (default: localhost)
+        - REDIS_HOST: Redis server hostname (default: redis)
         - REDIS_PORT: Redis server port (default: 6379)
         - REDIS_DB: Redis database number (default: 0)
         - REDIS_PASSWORD: Redis password (default: None)
