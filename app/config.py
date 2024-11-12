@@ -1,19 +1,17 @@
 """
-Xhuma Logging Configuration Module
+Xhuma Configuration Module
 
-This module provides centralized logging configuration for the Xhuma middleware service.
-It configures structured logging with correlation IDs, security event tracking, and 
-integration with fastapi-observability for comprehensive system observability.
+This module provides centralized configuration for the Xhuma middleware service,
+including logging, metrics, and tracing settings.
 """
 
 import logging
 import os
 from enum import Enum
 from typing import Dict, Any
-from uuid import uuid4
 
 # Environment-based configuration
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 class LogLevel(str, Enum):
@@ -23,6 +21,26 @@ class LogLevel(str, Enum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     CRITICAL = "CRITICAL"
+
+# OpenTelemetry Configuration
+OTEL_CONFIG = {
+    "service_name": "xhuma",
+    "service_version": "1.0.0",
+    "deployment_environment": ENVIRONMENT,
+    "traces_exporter": {
+        "endpoint": os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"),
+        "insecure": True
+    }
+}
+
+# Prometheus Metric Configurations
+METRIC_CONFIGS = {
+    "request_duration_buckets": [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0],
+    "default_labels": {
+        "service": "xhuma",
+        "environment": ENVIRONMENT
+    }
+}
 
 # Logging configuration dictionary
 LOGGING_CONFIG: Dict[str, Any] = {
@@ -37,11 +55,14 @@ LOGGING_CONFIG: Dict[str, Any] = {
                 level: %(levelname)s
                 correlation_id: %(correlation_id)s
                 nhs_number: %(nhs_number)s
+                request_type: %(request_type)s
                 message: %(message)s
                 module: %(module)s
                 function: %(funcName)s
                 line: %(lineno)d
                 path: %(pathname)s
+                trace_id: %(otelTraceID)s
+                span_id: %(otelSpanID)s
             """.replace("\n", " ").strip(),
             "datefmt": "%Y-%m-%d %H:%M:%S",
         },
@@ -98,60 +119,42 @@ LOGGING_CONFIG: Dict[str, Any] = {
     },
 }
 
-# FastAPI Observability Configuration
-# Based on https://github.com/blueswen/fastapi-observability
-FASTAPI_OBSERVABILITY_CONFIG = {
-    "metrics_route": "/metrics",
-    "metrics_route_name": "metrics",
-    "should_group_status_codes": True,
-    "should_ignore_untemplated": True,
-    "should_group_untemplated": True,
-    "should_round_latency_decimals": True,
-    "excluded_handlers": ["/metrics", "/health"],
-    "buckets": [0.1, 0.5, 1.0, 2.0, 5.0, 10.0],
-    "should_include_handler_name": True,
-    "should_include_method": True,
-    "should_include_status": True,
-    "should_include_hostname": True,
-    "hostname_label": "instance",
-    "label_names": ("method", "handler", "status", "hostname"),
-    "namespace": "fastapi",
-    "subsystem": "xhuma",
-    "env_var_name": "ENABLE_METRICS",
-    "metrics_route_format": "plaintext",
-}
-
-# Security Logging Configuration
-SECURITY_LOG_CONFIG = {
-    "log_failed_attempts": True,
-    "log_successful_attempts": True,
-    "sensitive_fields": [
-        "password",
-        "token",
-        "authorization",
-        "api_key",
-    ],
-}
-
 # Correlation ID Configuration
 CORRELATION_ID_CONFIG = {
     "header_name": "X-Correlation-ID",
     "validate_uuid": True,
-    "generator": lambda: str(uuid4()),
+    "generator": "uuid4"
+}
+
+# Request Type Mapping
+REQUEST_TYPES = {
+    "ITI-47": "Patient Demographics Query",
+    "ITI-38": "Cross Gateway Query",
+    "ITI-39": "Cross Gateway Retrieve",
+    "CCDA": "CCDA Conversion",
+    "SDS": "Spine Directory Service",
+    "PDS": "Patient Demographics Service"
+}
+
+# Security Event Types
+SECURITY_EVENTS = {
+    "AUTH_SUCCESS": "Authentication Success",
+    "AUTH_FAILURE": "Authentication Failure",
+    "ACCESS_DENIED": "Access Denied",
+    "TOKEN_EXPIRED": "Token Expired",
+    "INVALID_TOKEN": "Invalid Token"
 }
 
 def get_logger(name: str) -> logging.Logger:
     """
     Get a configured logger instance for the specified module.
     
-    Args:
-        name (str): The name of the module requesting the logger.
-        
-    Returns:
-        logging.Logger: Configured logger instance.
+    :param name: The name of the module requesting the logger
+    :type name: str
+    :return: Configured logger instance
+    :rtype: logging.Logger
     """
-    logger = logging.getLogger(f"xhuma.{name}")
-    return logger
+    return logging.getLogger(f"xhuma.{name}")
 
 # Ensure logs directory exists
 os.makedirs("logs", exist_ok=True)

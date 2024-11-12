@@ -13,11 +13,18 @@ import json
 import os
 from uuid import uuid4
 import logging.config
+from typing import Optional
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi_observability import Instrumentator
+from prometheus_client import Counter, Histogram
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from starlette.middleware.base import BaseHTTPMiddleware
 from fhirclient.models import bundle
 from jwcrypto import jwk
@@ -34,15 +41,52 @@ from .config import (
 )
 from .handlers import (
     ContextualFilter,
-    setup_request_context
+    setup_request_context,
+    CorrelationManager
 )
 
 # Configure logging
 logging.config.dictConfig(LOGGING_CONFIG)
 logger = get_logger(__name__)
 
-# Add contextual filter to root logger
-logging.getLogger("xhuma").addFilter(ContextualFilter())
+# Initialize metrics
+REQUEST_COUNT = Counter(
+    "http_requests_total",
+    "Total count of HTTP requests",
+    ["method", "endpoint", "status_code"]
+)
+
+REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency in seconds",
+    ["method", "endpoint"]
+)
+
+ITI_TRANSACTION_COUNT = Counter(
+    "iti_transaction_total",
+    "Total count of ITI transactions",
+    ["type", "status"]
+)
+
+CCDA_CONVERSION_DURATION = Histogram(
+    "ccda_conversion_duration_seconds",
+    "CCDA conversion duration in seconds"
+)
+
+# Initialize OpenTelemetry
+resource = Resource.create(attributes={
+    "service.name": "xhuma",
+    "service.version": "1.0.0",
+    "deployment.environment": os.getenv("ENVIRONMENT", "production")
+})
+
+trace.set_tracer_provider(TracerProvider(resource=resource))
+otlp_exporter = OTLPSpanExporter(
+    endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"),
+    insecure=True
+)
+span_processor = BatchSpanProcessor(otlp_exporter)
+trace.get_tracer_provider().add_span_processor(span_processor)
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -60,21 +104,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+class MetricsMiddleware(BaseHTTPMiddleware):
+    """Middleware for collecting request metrics."""
+    
+    async def dispatch(self, request: Request, call_next):
+        """Process the request and collect metrics."""
+        method = request.method
+        path = request.url.path
+        
+        with REQUEST_LATENCY.labels(method=method, endpoint=path).time():
+            response = await call_next(request)
+            
+            REQUEST_COUNT.labels(
+                method=method,
+                endpoint=path,
+                status_code=response.status_code
+            ).inc()
+            
+            return response
+
 class CorrelationMiddleware(BaseHTTPMiddleware):
     """Middleware to handle correlation IDs for request tracing."""
     
     async def dispatch(self, request: Request, call_next):
-        """
-        Process the request and add correlation ID.
-        
-        :param request: The incoming request
-        :type request: Request
-        :param call_next: The next middleware in the chain
-        :return: The response with correlation ID header
-        """
+        """Process the request and add correlation ID."""
         correlation_id = request.headers.get(
             CORRELATION_ID_CONFIG["header_name"],
-            CORRELATION_ID_CONFIG["generator"]()
+            str(uuid4())
         )
         
         request.state.correlation_id = correlation_id
@@ -84,32 +140,12 @@ class CorrelationMiddleware(BaseHTTPMiddleware):
             response.headers[CORRELATION_ID_CONFIG["header_name"]] = correlation_id
             return response
 
-# Add correlation ID middleware
+# Add middleware
+app.add_middleware(MetricsMiddleware)
 app.add_middleware(CorrelationMiddleware)
 
-# Initialize FastAPI Observability
-instrumentator = Instrumentator(
-    should_group_status_codes=FASTAPI_OBSERVABILITY_CONFIG["should_group_status_codes"],
-    should_ignore_untemplated=FASTAPI_OBSERVABILITY_CONFIG["should_ignore_untemplated"],
-    should_group_untemplated=FASTAPI_OBSERVABILITY_CONFIG["should_group_untemplated"],
-    should_round_latency_decimals=FASTAPI_OBSERVABILITY_CONFIG["should_round_latency_decimals"],
-    excluded_handlers=FASTAPI_OBSERVABILITY_CONFIG["excluded_handlers"],
-    buckets=FASTAPI_OBSERVABILITY_CONFIG["buckets"],
-    should_include_handler_name=FASTAPI_OBSERVABILITY_CONFIG["should_include_handler_name"],
-    should_include_method=FASTAPI_OBSERVABILITY_CONFIG["should_include_method"],
-    should_include_status=FASTAPI_OBSERVABILITY_CONFIG["should_include_status"],
-    should_include_hostname=FASTAPI_OBSERVABILITY_CONFIG["should_include_hostname"],
-    hostname_label=FASTAPI_OBSERVABILITY_CONFIG["hostname_label"],
-    label_names=FASTAPI_OBSERVABILITY_CONFIG["label_names"],
-    namespace=FASTAPI_OBSERVABILITY_CONFIG["namespace"],
-    subsystem=FASTAPI_OBSERVABILITY_CONFIG["subsystem"],
-)
-instrumentator.instrument(app).expose(
-    app,
-    endpoint=FASTAPI_OBSERVABILITY_CONFIG["metrics_route"],
-    name=FASTAPI_OBSERVABILITY_CONFIG["metrics_route_name"],
-    format=FASTAPI_OBSERVABILITY_CONFIG["metrics_route_format"],
-)
+# Initialize OpenTelemetry instrumentation
+FastAPIInstrumentor.instrument_app(app)
 
 # Include routers for different service components
 app.include_router(soap.router)
@@ -125,10 +161,9 @@ async def startup_event():
     Startup event handler that initializes necessary configurations.
     
     This function:
-    
-    * Sets the registry ID in Redis
-    * Checks for existing JWK (JSON Web Key)
-    * Generates a new JWK from private key if none exists
+    1. Sets the registry ID in Redis
+    2. Checks for existing JWK (JSON Web Key)
+    3. Generates a new JWK from private key if none exists
     """
     logger.info("Starting Xhuma application", extra={"registry_id": REGISTRY_ID})
     
@@ -204,8 +239,9 @@ async def demo(nhsno: int, request: Request):
     )
     
     try:
-        bundle_id = await gpconnect(nhsno)
-        return redis_client.get(bundle_id["document_id"])
+        with CCDA_CONVERSION_DURATION.time():
+            bundle_id = await gpconnect(nhsno)
+            return redis_client.get(bundle_id["document_id"])
     except Exception as e:
         logger.error(
             f"Error processing demo request: {str(e)}",
