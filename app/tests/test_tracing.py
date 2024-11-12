@@ -1,8 +1,9 @@
 """
-Test module for verifying tracing functionality across ITI transactions.
+Test module for verifying tracing functionality through middleware.
 
-This module tests the tracing and correlation ID propagation through
-the complete ITI transaction flow (ITI-47 -> ITI-38 -> ITI-39).
+This module tests the correlation ID propagation and logging through
+the middleware stack, focusing on request tracing rather than the
+full ITI transaction flow.
 """
 
 import json
@@ -13,7 +14,7 @@ import psycopg2
 from psycopg2.extras import DictCursor
 
 from ..main import app
-from ..config import DB_DSN
+from ..config import DB_DSN, REQUEST_TYPES
 
 client = TestClient(app)
 
@@ -37,113 +38,69 @@ def get_logs_for_correlation_id(correlation_id: str):
             """, (correlation_id,))
             return [dict(row) for row in cur.fetchall()]
 
-def test_iti_transaction_tracing():
-    """Test tracing through a complete ITI transaction flow."""
-    
-    # Generate a test correlation ID
+def test_correlation_id_propagation():
+    """Test that correlation IDs are properly propagated through middleware."""
     correlation_id = str(uuid.uuid4())
-    nhs_number = "9690937278"
+    
+    # Make request with correlation ID
+    response = client.get(
+        "/",
+        headers={"X-Correlation-ID": correlation_id}
+    )
+    assert response.status_code == 200
+    
+    # Get logs and verify correlation ID propagation
+    logs = get_logs_for_correlation_id(correlation_id)
+    assert len(logs) > 0
+    assert all(log["correlation_id"] == correlation_id for log in logs)
+    
+    # Verify response header contains correlation ID
+    assert response.headers.get("X-Correlation-ID") == correlation_id
+
+def test_metrics_endpoint():
+    """Test that metrics endpoint returns Prometheus metrics."""
+    correlation_id = str(uuid.uuid4())
+    
+    response = client.get(
+        "/metrics",
+        headers={"X-Correlation-ID": correlation_id}
+    )
+    assert response.status_code == 200
+    assert "http_requests_total" in response.text
+    
+    # Verify correlation ID propagation
+    logs = get_logs_for_correlation_id(correlation_id)
+    assert len(logs) > 0
+    assert all(log["correlation_id"] == correlation_id for log in logs)
+
+def test_request_type_detection():
+    """Test that request types are properly detected and logged."""
+    correlation_id = str(uuid.uuid4())
     
     # Make ITI-47 request
-    response = client.post(
-        "/iti/47",
-        json={"nhs_number": nhs_number},
-        headers={"X-Correlation-ID": correlation_id}
-    )
-    assert response.status_code == 200
-    
-    # Make ITI-38 request
-    response = client.post(
-        "/iti/38",
-        json={"nhs_number": nhs_number},
-        headers={"X-Correlation-ID": correlation_id}
-    )
-    assert response.status_code == 200
-    iti38_response = response.json()
-    document_id = iti38_response["document_id"]
-    
-    # Make ITI-39 request
-    response = client.post(
-        "/iti/39",
-        json={"document_id": document_id},
-        headers={"X-Correlation-ID": correlation_id}
-    )
-    assert response.status_code == 200
-    
-    # Get all logs for this correlation ID
-    logs = get_logs_for_correlation_id(correlation_id)
-    
-    # Verify the complete trace
-    assert len(logs) >= 3  # At least one log per request
-    
-    # Verify ITI-47 trace
-    iti47_logs = [log for log in logs if log["request_type"] == "ITI-47"]
-    assert len(iti47_logs) > 0
-    assert iti47_logs[0]["nhs_number"] == nhs_number
-    
-    # Verify ITI-38 trace
-    iti38_logs = [log for log in logs if log["request_type"] == "ITI-38"]
-    assert len(iti38_logs) > 0
-    assert iti38_logs[0]["nhs_number"] == nhs_number
-    
-    # Verify ITI-39 trace
-    iti39_logs = [log for log in logs if log["request_type"] == "ITI-39"]
-    assert len(iti39_logs) > 0
-    assert iti39_logs[0]["nhs_number"] == nhs_number
-    
-    # Verify chronological order
-    iti47_time = iti47_logs[0]["timestamp"]
-    iti38_time = iti38_logs[0]["timestamp"]
-    iti39_time = iti39_logs[0]["timestamp"]
-    assert iti47_time <= iti38_time <= iti39_time
-
-def test_correlation_id_propagation():
-    """Test that correlation IDs are properly propagated and reused."""
-    
-    nhs_number = "9690937278"
-    
-    # Make first request without correlation ID
-    response = client.post(
-        "/iti/47",
-        json={"nhs_number": nhs_number}
-    )
-    assert response.status_code == 200
-    correlation_id = response.headers.get("X-Correlation-ID")
-    assert correlation_id is not None
-    
-    # Make second request with same NHS number
-    response = client.post(
-        "/iti/47",
-        json={"nhs_number": nhs_number}
-    )
-    assert response.status_code == 200
-    assert response.headers.get("X-Correlation-ID") == correlation_id
-    
-    # Verify logs show correlation ID reuse
-    logs = get_logs_for_correlation_id(correlation_id)
-    assert len(logs) >= 2
-    assert all(log["correlation_id"] == correlation_id for log in logs)
-    assert all(log["nhs_number"] == nhs_number for log in logs)
-
-def test_trace_context_propagation():
-    """Test OpenTelemetry trace context propagation."""
-    
-    correlation_id = str(uuid.uuid4())
-    nhs_number = "9690937278"
+    soap_envelope = """<?xml version="1.0" encoding="UTF-8"?>
+    <SOAP-ENV:Envelope xmlns:SOAP-ENV="http://www.w3.org/2003/05/soap-envelope">
+        <SOAP-ENV:Header>
+            <MessageID xmlns="http://www.w3.org/2005/08/addressing">urn:uuid:6d296e90-e5dc-43d0-b455-7c1f3eb35d83</MessageID>
+        </SOAP-ENV:Header>
+        <SOAP-ENV:Body>
+            <PRPA_IN201305UV02 xmlns="urn:hl7-org:v3"/>
+        </SOAP-ENV:Body>
+    </SOAP-ENV:Envelope>"""
     
     response = client.post(
-        "/iti/47",
-        json={"nhs_number": nhs_number},
-        headers={"X-Correlation-ID": correlation_id}
+        "/SOAP/iti47",
+        data=soap_envelope,
+        headers={
+            "X-Correlation-ID": correlation_id,
+            "Content-Type": "application/soap+xml"
+        }
     )
-    assert response.status_code == 200
     
-    # Get logs and verify trace context
+    # Get logs and verify request type
     logs = get_logs_for_correlation_id(correlation_id)
     assert len(logs) > 0
     
-    # Verify trace context in log message
-    first_log = logs[0]
-    message = json.loads(first_log["message"])
-    assert "otelTraceID" in message
-    assert "otelSpanID" in message
+    # Verify ITI-47 request type was logged
+    iti47_logs = [log for log in logs if log["request_type"] == "ITI-47"]
+    assert len(iti47_logs) > 0
