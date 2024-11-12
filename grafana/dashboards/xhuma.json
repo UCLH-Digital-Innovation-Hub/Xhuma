@@ -34,7 +34,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Requests per second",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -70,7 +70,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -93,6 +94,19 @@
           "sort": "none"
         }
       },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(http_requests_total{job=\"xhuma\"}[5m])) by (endpoint, method)",
+          "legendFormat": "{{endpoint}} ({{method}})",
+          "range": true,
+          "refId": "A"
+        }
+      ],
       "title": "Request Rate",
       "type": "timeseries"
     },
@@ -109,7 +123,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Duration",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -145,7 +159,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "s"
         },
         "overrides": []
       },
@@ -175,13 +190,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(http_request_duration_seconds_count{job=\"xhuma\"}[5m])",
-          "legendFormat": "{{handler}}",
+          "expr": "rate(http_request_duration_seconds_sum{job=\"xhuma\"}[5m]) / rate(http_request_duration_seconds_count{job=\"xhuma\"}[5m])",
+          "legendFormat": "{{endpoint}} ({{method}})",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Request Duration",
+      "title": "Average Request Duration",
       "type": "timeseries"
     },
     {
@@ -197,7 +212,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Transactions per second",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -233,7 +248,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "ops"
         },
         "overrides": []
       },
@@ -263,7 +279,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(iti_transaction_total{job=\"xhuma\"}[5m])",
+          "expr": "sum(rate(iti_transaction_total{job=\"xhuma\"}[5m])) by (type)",
           "legendFormat": "{{type}}",
           "range": true,
           "refId": "A"
@@ -285,7 +301,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "Duration",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -321,7 +337,8 @@
                 "value": null
               }
             ]
-          }
+          },
+          "unit": "s"
         },
         "overrides": []
       },
@@ -352,7 +369,7 @@
           },
           "editorMode": "code",
           "expr": "rate(ccda_conversion_duration_seconds_sum{job=\"xhuma\"}[5m]) / rate(ccda_conversion_duration_seconds_count{job=\"xhuma\"}[5m])",
-          "legendFormat": "avg duration",
+          "legendFormat": "Average Duration",
           "range": true,
           "refId": "A"
         }

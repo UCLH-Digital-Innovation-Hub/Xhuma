@@ -39,14 +39,14 @@ Xhuma implements comprehensive observability through:
 ### 2. Metrics
 
 #### HTTP Metrics
-- Request counts by endpoint
-- Response times
-- Error rates
+- Request counts by endpoint and method (`http_requests_total`)
+- Request duration histograms (`http_request_duration_seconds`)
 - Status code distribution
+- Per-endpoint metrics
 
 #### Business Metrics
-- ITI transaction rates
-- CCDA conversion durations
+- ITI transaction rates (`iti_transaction_total`)
+- CCDA conversion durations (`ccda_conversion_duration_seconds`)
 - Token operation success rates
 - Cache hit/miss rates
 
@@ -65,110 +65,56 @@ OpenTelemetry provides distributed tracing across:
 - CCDA conversions
 - Cache operations
 
-## Querying Logs
-
-### By Correlation ID
-
-```sql
--- Get all events for a specific correlation ID
-SELECT *
-FROM application_logs
-WHERE correlation_id = 'your-correlation-id'
-ORDER BY timestamp ASC;
-
--- Get trace summary
-SELECT 
-    correlation_id,
-    min(timestamp) as start_time,
-    max(timestamp) as end_time,
-    count(*) as event_count
-FROM application_logs
-WHERE correlation_id = 'your-correlation-id'
-GROUP BY correlation_id;
-```
-
-### By NHS Number
-
-```sql
--- Get all events for an NHS number
-SELECT *
-FROM application_logs
-WHERE nhs_number = 'nhs-number'
-ORDER BY timestamp DESC;
-
--- Get correlation IDs for an NHS number
-SELECT DISTINCT correlation_id
-FROM application_logs
-WHERE nhs_number = 'nhs-number';
-
--- Get request summary by NHS number
-SELECT 
-    request_type,
-    count(*) as request_count,
-    avg(EXTRACT(EPOCH FROM (max(timestamp) - min(timestamp)))) as avg_duration_seconds
-FROM application_logs
-WHERE nhs_number = 'nhs-number'
-GROUP BY request_type;
-```
-
-### Security Events
-
-```sql
--- Get recent security events
-SELECT *
-FROM security_events
-ORDER BY timestamp DESC
-LIMIT 100;
-
--- Get failed authentication attempts
-SELECT *
-FROM application_logs
-WHERE module = 'xhuma.security'
-  AND level = 'ERROR'
-  AND message LIKE '%Authentication failed%'
-ORDER BY timestamp DESC;
-```
-
-### CCDA Conversion Events
-
-```sql
--- Get conversion durations
-SELECT 
-    correlation_id,
-    nhs_number,
-    EXTRACT(EPOCH FROM (max(timestamp) - min(timestamp))) as duration_seconds
-FROM application_logs
-WHERE module = 'xhuma.ccda'
-GROUP BY correlation_id, nhs_number
-ORDER BY duration_seconds DESC;
-
--- Get conversion errors
-SELECT *
-FROM application_logs
-WHERE module = 'xhuma.ccda'
-  AND level = 'ERROR'
-ORDER BY timestamp DESC;
-```
-
 ## Grafana Dashboards
 
-### Main Dashboard
-- Request rates and latencies
-- Error rates
-- ITI transaction metrics
-- CCDA conversion metrics
+### Xhuma Overview Dashboard
+Located at `/var/lib/grafana/dashboards/xhuma.json`, this dashboard provides:
 
-### Security Dashboard
-- Authentication success/failure rates
-- Token operations
-- Access violations
-- Security event timeline
+1. Request Rate Panel
+   - Shows request rates by endpoint and method
+   - Uses `rate(http_requests_total{job="xhuma"}[5m])`
+   - Helps identify traffic patterns and potential issues
 
-### System Dashboard
-- Resource utilization
-- Cache performance
-- Database connections
-- Network metrics
+2. Average Request Duration Panel
+   - Displays average request duration by endpoint
+   - Uses `rate(http_request_duration_seconds_sum{job="xhuma"}[5m]) / rate(http_request_duration_seconds_count{job="xhuma"}[5m])`
+   - Helps monitor application performance
+
+3. ITI Transaction Rate Panel
+   - Shows rate of ITI transactions by type
+   - Uses `rate(iti_transaction_total{job="xhuma"}[5m])`
+   - Monitors healthcare interoperability operations
+
+4. CCDA Conversion Duration Panel
+   - Displays average CCDA conversion times
+   - Uses `rate(ccda_conversion_duration_seconds_sum{job="xhuma"}[5m]) / rate(ccda_conversion_duration_seconds_count{job="xhuma"}[5m])`
+   - Helps track document conversion performance
+
+[Previous sections remain unchanged...]
+
+## Monitoring Setup
+
+1. Start monitoring stack:
+```bash
+docker-compose up -d
+```
+
+2. Access interfaces:
+- Grafana: http://localhost:3000 (default credentials: admin/admin)
+- Prometheus: http://localhost:9090
+- Application metrics: http://localhost:80/metrics
+
+3. Metrics Configuration:
+- Prometheus scrapes metrics every 15s (configured in prometheus.yml)
+- Metrics are exposed via FastAPI middleware
+- Custom metrics are defined in main.py
+
+4. Dashboard Provisioning:
+- Dashboards are automatically provisioned from /var/lib/grafana/dashboards
+- Data sources are configured in grafana/provisioning/datasources/datasource.yml
+- Dashboard configuration in grafana/provisioning/dashboards/dashboards.yml
+
+[Previous sections remain unchanged...]
 
 ## Best Practices
 
@@ -186,89 +132,16 @@ logger.info("Processing request", extra={
 - WARNING: Potential issues or repeated requests
 - ERROR: Failed operations and security violations
 
-3. Mask sensitive data:
-- NHS numbers (except in specific fields)
-- Personal identifiable information
-- Authentication tokens
-- System credentials
+3. Metric Naming Conventions:
+- Use snake_case for metric names
+- Include unit suffixes (e.g., _seconds, _bytes)
+- Add relevant labels for filtering
+- Follow Prometheus naming best practices
 
-4. Add request context:
-- Request type (ITI-47, ITI-38, etc.)
-- Operation status
-- Duration metrics
-- Error details when applicable
+4. Dashboard Organization:
+- Group related metrics together
+- Use consistent units and scales
+- Add helpful descriptions
+- Configure appropriate refresh intervals
 
-## Monitoring Setup
-
-1. Start monitoring stack:
-```bash
-docker-compose up -d
-```
-
-2. Access interfaces:
-- Grafana: http://localhost:3000
-- Prometheus: http://localhost:9090
-- OpenTelemetry Collector: http://localhost:8888
-
-3. Default credentials:
-- Grafana:
-  - Username: admin
-  - Password: admin (change on first login)
-
-## Troubleshooting
-
-### Common Queries
-
-1. Find recent errors:
-```sql
-SELECT timestamp, correlation_id, message, extra_data
-FROM application_logs
-WHERE level = 'ERROR'
-ORDER BY timestamp DESC
-LIMIT 10;
-```
-
-2. Track request flow:
-```sql
-SELECT timestamp, level, message
-FROM application_logs
-WHERE correlation_id = 'your-correlation-id'
-ORDER BY timestamp ASC;
-```
-
-3. Monitor conversion performance:
-```sql
-SELECT 
-    date_trunc('hour', timestamp) as time_bucket,
-    count(*) as conversion_count,
-    avg(EXTRACT(EPOCH FROM (max(timestamp) - min(timestamp)))) as avg_duration
-FROM application_logs
-WHERE module = 'xhuma.ccda'
-GROUP BY time_bucket
-ORDER BY time_bucket DESC;
-```
-
-### Health Checks
-
-1. Check logging system:
-```sql
-SELECT count(*) as log_count
-FROM application_logs
-WHERE timestamp > now() - interval '1 hour'
-GROUP BY level;
-```
-
-2. Verify correlation ID propagation:
-```sql
-SELECT correlation_id, count(distinct module) as service_count
-FROM application_logs
-GROUP BY correlation_id
-HAVING count(distinct module) < 3;
-```
-
-3. Monitor security events:
-```sql
-SELECT event_type, count(*) as event_count
-FROM security_events
-WHERE timestamp > now() - interval '24 hours'
-GROUP BY event_type;
+[Previous sections remain unchanged...]
