@@ -16,6 +16,7 @@ services:
       - redis
       - otel-collector
       - postgres
+      - tempo
     environment:
       API_KEY: ${API_KEY}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
@@ -58,6 +59,7 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     depends_on:
       - prometheus
+      - tempo
     networks:
       - xhuma-net
 
@@ -68,10 +70,11 @@ services:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
       - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP http receiver
-      - "8890:8890"   # Metrics endpoint (changed from 8888)
+      - "4316:4318"   # OTLP http receiver (changed port to avoid conflict)
+      - "8890:8890"   # Metrics endpoint
     depends_on:
       - prometheus
+      - tempo
     networks:
       - xhuma-net
 
@@ -86,6 +89,17 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./app/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - xhuma-net
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+    ports:
+      - "3200:3200"   # tempo-query frontend
+      - "4318:4318"   # OTLP gRPC
     networks:
       - xhuma-net
 

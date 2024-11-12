@@ -1,19 +1,16 @@
 [[source]]
-url = "https://pypi.python.org/simple"
+url = "https://pypi.org/simple"
 verify_ssl = true
 name = "pypi"
 
 [packages]
 fastapi = "*"
-pydantic = "*"
-pyjwt = "*"
-httpx = "*"
+uvicorn = "*"
+requests = "*"
 xmltodict = "*"
-uvicorn = {extras = ["standard"], version = "*"}
-fhirclient = "~=3.0.0"
-redis = "*"
-cryptography = "*"
+xmlschema = "*"
 jwcrypto = "*"
+redis = "*"
 prometheus-client = "*"
 opentelemetry-api = "*"
 opentelemetry-sdk = "*"
@@ -23,12 +20,8 @@ python-json-logger = "*"
 psycopg2-binary = "*"
 
 [dev-packages]
-black = "*"
-websockets = "*"
-pre-commit = "*"
-isort = "*"
 pytest = "*"
-xmlschema = "*"
+httpx = "*"
 
 [requires]
 python_version = "3.9"

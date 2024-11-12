@@ -14,6 +14,9 @@ from typing import Dict, Any
 ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
+# Database configuration
+DB_DSN = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/xhuma")
+
 class LogLevel(str, Enum):
     """Enum for log levels to ensure consistent usage across the application"""
     DEBUG = "DEBUG"
@@ -94,36 +97,41 @@ LOGGING_CONFIG: Dict[str, Any] = {
             "filename": "logs/xhuma.log",
             "maxBytes": 10485760,  # 10MB
             "backupCount": 5,
+        },
+        "database": {
+            "class": "app.log_handlers.PostgresLogHandler",
+            "formatter": "json",
+            "dsn": DB_DSN,
         }
     },
     "loggers": {
         "xhuma": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "xhuma.security": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "file", "database"],
             "level": "INFO",
             "propagate": False,
         },
         "xhuma.soap": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "xhuma.pds": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "xhuma.gpconnect": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
             "propagate": False,
         },
         "xhuma.ccda": {
-            "handlers": ["console", "file"],
+            "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
             "propagate": False,
         },

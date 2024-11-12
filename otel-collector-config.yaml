@@ -31,7 +31,7 @@ exporters:
     loglevel: debug
 
   otlp:
-    endpoint: "tempo:4317"
+    endpoint: "tempo:4318"  # Updated to match Tempo's new port
     tls:
       insecure: true
 

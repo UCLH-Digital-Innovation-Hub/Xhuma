@@ -19,5 +19,11 @@ datasources:
     editable: false
     jsonData:
       httpMethod: GET
+      tracesToLogs:
+        datasourceUid: prometheus
       serviceMap:
         datasourceUid: prometheus
+      search:
+        hide: false
+      nodeGraph:
+        enabled: true

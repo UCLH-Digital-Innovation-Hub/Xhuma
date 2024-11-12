@@ -17,7 +17,8 @@ COPY keys/test-1.pem /code/keys/test-1.pem
 # Install Python dependencies directly with pip
 RUN pip install fastapi pydantic pyjwt httpx xmltodict uvicorn[standard] fhirclient==3.0.0 \
     redis cryptography jwcrypto prometheus-client opentelemetry-api opentelemetry-sdk \
-    opentelemetry-instrumentation-fastapi opentelemetry-exporter-otlp python-json-logger psycopg2-binary
+    opentelemetry-instrumentation-fastapi opentelemetry-exporter-otlp python-json-logger psycopg2-binary \
+    pytest httpx
 
 # Set environment variables for OpenTelemetry
 ENV OTEL_PYTHON_METER_PROVIDER="sdk_meter_provider"

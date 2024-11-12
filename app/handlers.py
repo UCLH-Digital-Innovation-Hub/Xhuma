@@ -9,7 +9,7 @@ Postgres storage support.
 import logging
 import json
 from typing import Optional, Dict, Any, Tuple
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import Json, DictCursor
@@ -64,24 +64,36 @@ class RequestContextManager:
         self.correlation_id = correlation_id
         self.nhs_number = nhs_number
         self.request_type = request_type
-        self.tokens = []
+        self.tokens: Dict[str, Token] = {}
     
     def __enter__(self):
         """
         Set the correlation ID and NHS number in the context.
+        
+        :return: self for context manager protocol
+        :rtype: RequestContextManager
         """
-        self.tokens.append(correlation_id_ctx_var.set(self.correlation_id))
-        if self.nhs_number:
-            self.tokens.append(nhs_number_ctx_var.set(self.nhs_number))
-        if self.request_type:
-            self.tokens.append(request_type_ctx_var.set(self.request_type))
+        self.tokens['correlation_id'] = correlation_id_ctx_var.set(self.correlation_id)
+        
+        if self.nhs_number is not None:
+            self.tokens['nhs_number'] = nhs_number_ctx_var.set(self.nhs_number)
+            
+        if self.request_type is not None:
+            self.tokens['request_type'] = request_type_ctx_var.set(self.request_type)
+            
+        return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
-        Clear the correlation ID and NHS number from the context.
+        Clear the context variables using their respective tokens.
         """
-        for token in reversed(self.tokens):
-            correlation_id_ctx_var.reset(token)
+        for var_name, token in self.tokens.items():
+            if var_name == 'correlation_id':
+                correlation_id_ctx_var.reset(token)
+            elif var_name == 'nhs_number':
+                nhs_number_ctx_var.reset(token)
+            elif var_name == 'request_type':
+                request_type_ctx_var.reset(token)
 
 def setup_request_context(correlation_id: str, nhs_number: Optional[str] = None,
                         request_type: Optional[str] = None) -> RequestContextManager:
