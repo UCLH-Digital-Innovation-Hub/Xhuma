@@ -1,3 +1,32 @@
+"""
+GP Connect Integration Module
+===========================
+
+This module provides integration with GP Connect APIs for retrieving structured records
+and converting them to CCDA format.
+
+The module handles:
+- GP Connect authentication
+- FHIR bundle retrieval
+- CCDA conversion
+- Redis caching
+- PDS patient verification
+
+Dependencies
+-----------
+- httpx: For HTTP requests
+- fhirclient: For FHIR resource handling
+- redis: For document caching
+- xmltodict: For XML processing
+
+Configuration
+------------
+The module requires:
+- GP Connect API endpoints
+- NHS authentication tokens
+- Redis connection details
+"""
+
 import json
 import logging
 from datetime import timedelta
@@ -23,7 +52,27 @@ tracer = trace.get_tracer(__name__)
 
 @router.get("/gpconnect/{nhsno}")
 async def gpconnect(nhsno: int):
-    """accesses gp connect endpoint for nhs number"""
+    """
+    Access GP Connect endpoint for NHS number and convert to CCDA.
+
+    This endpoint:
+    1. Validates the NHS number
+    2. Performs PDS lookup
+    3. Retrieves structured record from GP Connect
+    4. Converts FHIR bundle to CCDA
+    5. Caches the result in Redis
+
+    :param nhsno: NHS number to retrieve records for
+    :type nhsno: int
+    :return: Dictionary containing document ID for retrieval
+    :rtype: dict
+    :raises HTTPException: If NHS number is invalid or GP Connect request fails
+    
+    Example Response:
+        {
+            "document_id": "550e8400-e29b-41d4-a716-446655440000"
+        }
+    """
     with tracer.start_as_current_span("gpconnect_request") as span:
         try:
             # validate nhsnumber

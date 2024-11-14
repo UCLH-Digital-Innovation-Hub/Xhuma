@@ -1,3 +1,33 @@
+"""
+Patient Demographics Service (PDS) Module
+=======================================
+
+This module provides integration with NHS Digital's Patient Demographics Service (PDS)
+and Spine Directory Service (SDS) through FHIR APIs.
+
+The module handles:
+
+* Patient demographic lookups via NHS number
+* OAuth2 token management with Redis caching
+* SDS organization lookups
+* FHIR resource handling
+
+Dependencies
+-----------
+* httpx: For HTTP requests
+* fhirclient: For FHIR resource handling
+* redis: For token caching
+* fastapi: For HTTP routing
+
+Configuration
+------------
+The module requires:
+
+* API_KEY environment variable for NHS Digital API access
+* Redis connection for token caching
+* Base URLs for different environments (DEV, INT, PROD)
+"""
+
 import asyncio
 import json
 import os
@@ -20,8 +50,43 @@ router = fastapi.APIRouter(prefix="/pds")
 
 
 @router.get("/lookup_patient/{nhsno}")
-async def lookup_patient(nhsno: int):
+async def lookup_patient(nhsno: int) -> dict:
+    """
+    Look up patient demographics using NHS number.
 
+    This endpoint:
+    1. Manages OAuth2 token lifecycle
+    2. Makes PDS FHIR API request
+    3. Returns patient demographics
+
+    :param nhsno: NHS number to look up
+    :type nhsno: int
+    :return: Patient demographics as FHIR Patient resource
+    :rtype: dict
+    
+    Example Response::
+
+        {
+            "resourceType": "Patient",
+            "id": "9000000009",
+            "identifier": [{
+                "system": "https://fhir.nhs.uk/Id/nhs-number",
+                "value": "9000000009"
+            }],
+            "name": [{
+                "family": "Smith",
+                "given": ["John"]
+            }],
+            "gender": "male",
+            "birthDate": "1980-01-01"
+        }
+
+    Note:
+        The function handles OAuth2 token management, including:
+        * Token retrieval from cache
+        * Token refresh when expired
+        * Token caching in Redis
+    """
     nhs_token = redis_client.get("access_token")
 
     # if nhs token expired or not request, get one and cache
@@ -63,7 +128,40 @@ async def lookup_patient(nhsno: int):
 
 
 @router.get("/sds/{ods}")
-async def sds_trace(ods: str):
+async def sds_trace(ods: str) -> dict:
+    """
+    Look up organization details in Spine Directory Service.
+
+    This endpoint:
+    1. Constructs SDS FHIR query parameters
+    2. Makes SDS FHIR API request
+    3. Returns matching Device resources
+
+    :param ods: Organization's ODS code
+    :type ods: str
+    :return: Organization details as FHIR Bundle resource
+    :rtype: dict
+    
+    Example Response::
+
+        {
+            "resourceType": "Bundle",
+            "type": "searchset",
+            "entry": [{
+                "resource": {
+                    "resourceType": "Device",
+                    "identifier": [{
+                        "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+                        "value": "T99999"
+                    }]
+                }
+            }]
+        }
+
+    Note:
+        The function queries for devices supporting specific NHS service interactions,
+        filtering by organization ODS code.
+    """
     url = f"{INT_BASE_PATH}spine-directory/FHIR/R4/Device"
     organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|{ods}"
     identifier = [
@@ -86,7 +184,7 @@ async def sds_trace(ods: str):
 
 
 if __name__ == "__main__":
-
+    # Example usage
     patient = asyncio.run(lookup_patient(9449306621))
 
     print(patient.gender)
