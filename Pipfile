@@ -5,6 +5,10 @@ name = "pypi"
 
 [packages]
 fastapi = "*"
+pydantic ="*"
+pyjwt = "*"
+fhirclient = "*"
+cryptography = "*"
 uvicorn = "*"
 requests = "*"
 xmltodict = "*"
@@ -22,6 +26,10 @@ psycopg2-binary = "*"
 [dev-packages]
 pytest = "*"
 httpx = "*"
+black = "*"
+websockets = "*"
+pre-commit = "*"
+isort = "*"
 
 [requires]
 python_version = "3.9"
