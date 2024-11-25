@@ -1,93 +1,112 @@
-# GPConnect to CCDA service
-![Python versio](https://img.shields.io/github/pipenv/locked/python-version/JMathiszig-Lee/GPconnect)
+# Xhuma - GP Connect to CCDA Middleware Service
 
----
+![Python version](https://img.shields.io/github/pipenv/locked/python-version/JMathiszig-Lee/GPconnect)
 
-
-This is a service to connect to GP Connect and return the structured SCR record as a CCDA document
-
----
 ## Overview
 
-Current the service is designed to interact with a requesting EHR via ITI requests in order to lookup, request and convert a patients summary care record
-```mermaid
-  sequenceDiagram
-  participant EHR
-  participant Service
-  participant NHS API's
-  participant Redis Cache
-  EHR->>Service: ITI 47 Request
-  Service->>NHS API's: FHIR PDS lookup
-  NHS API's->> Service: PDS response
-  Service->>EHR: ITI 47 Response
-  Service ->> Redis Cache: Check for cached SDS lookup
-  Service -->> NHS API's: SDS lookup
-  NHS API's -->> Service: SDS Response
-  Redis Cache ->> Service: Return ADIS and Fhir root
-  EHR->>Service: ITI 38 Request
-  Service->>Redis Cache: Check for cached response
-  Service-->>NHS API's:GPconnnect Structured SCR request
-  NHS API's-->> Service: Return Structured SCR
-  Service->>Service: convert SCR to CCDA
-  Service->>Redis Cache: Cache CCDA
-  Service->>EHR: ITI 38 Response
-  EHR->>Service: ITI 39 Request
-  Service->>EHR: ITI 39 Response
-```
----
-## Tasks
-Currently on open test environment or int as able:
-- [ ] ITI 47
-- [x] Fhir PDS lookup
-- [x] ITI 38 call and response
-- [x] GP Connect call
-- [x] Fhir Bundle -> CCDA conversion
-- [x] ITI 39 call and response
+Xhuma is a stateless middleware service that facilitates the conversion of GP Connect structured records into CCDA (Consolidated Clinical Document Architecture) format. The service implements IHE ITI profiles for interoperability and uses Redis for efficient caching of responses.
 
-## Todo
-- [ ] Flesh out html section of CCDA
-- [ ] Progress to NHS test environment
-- [x] Sign up to PDS lookup
+### Key Features
 
----
-## Running
+- Stateless architecture for scalability and reliability
+- Redis-based caching for optimized performance
+- IHE ITI profile implementation (ITI-47, ITI-38, ITI-39)
+- FHIR to CCDA conversion
+- JWT-based authentication for NHS Digital services
+- SOAP message handling for healthcare interoperability
 
-The project is built on fastAPI and pipenv for package management
+## Technical Architecture
 
-to run locally
-```
-pipenv shell
-pipenv install --dev
-```
-the project requires an active redis server running on port 6379
-this should be activated first by running (for example)
-```
-redis-server /etc/redis/6379.conf
-```
-the server can then be started using
-```
-uvicorn app.main:app --reload
-```
+The service is built on FastAPI and follows a modular design pattern. For detailed technical documentation, see:
 
-### Docker
+- [Technical Architecture](docs/technical_architecture.md)
+- [Data Flow Documentation](docs/data_flow.md)
+- [Technical Resources](docs/technical_resources.md)
 
-The project can also be run using docker. Ensure you have a valid installation and simple run
-```
-docker-compose up
-```
----
-## Branches
-
-Development will take place on <a href=https://github.com/SAFEHR-data/Xhuma/tree/dev>Dev</a>, check there for latest progress. Feature development should be checked out onto their own branch.
-`Demo` is the branch for the internet facing demo, currently on heroku.
-`Integration` will be for final intergration testing and `Main` will host final production builds
+## System Flow
 
 ```mermaid
-flowchart TD
-Feature --> Dev --> Feature
-Dev --PR --> Integration
-Integration --PR-->Main
-Dev -.-> Demo
-click Dev href "https://github.com/SAFEHR-data/Xhuma/tree/dev"
+sequenceDiagram
+    participant EHR
+    participant Service
+    participant NHS API's
+    participant Redis Cache
+    
+    EHR->>Service: ITI 47 Request
+    Service->>NHS API's: FHIR PDS lookup
+    NHS API's->>Service: PDS response
+    Service->>EHR: ITI 47 Response
+    Service->>Redis Cache: Check for cached SDS lookup
+    Service-->>NHS API's: SDS lookup
+    NHS API's-->>Service: SDS Response
+    Redis Cache->>Service: Return ADIS and FHIR root
+    EHR->>Service: ITI 38 Request
+    Service->>Redis Cache: Check for cached response
+    Service-->>NHS API's: GPconnect Structured SCR request
+    NHS API's-->>Service: Return Structured SCR
+    Service->>Service: convert SCR to CCDA
+    Service->>Redis Cache: Cache CCDA
+    Service->>EHR: ITI 38 Response
+    EHR->>Service: ITI 39 Request
+    Service->>EHR: ITI 39 Response
 ```
 
+## Prerequisites
+
+- Docker
+- Docker Compose
+- NHS Digital API access credentials
+
+## Deployment
+
+1. Clone the repository:
+```bash
+git clone https://github.com/UCLH-Digital-Innovation-Hub/Xhuma.git
+cd Xhuma
+```
+
+2. Configure environment variables in docker-compose.yml:
+```yaml
+environment:
+  - JWTKEY=your_jwt_key
+  - REGISTRY_ID=your_registry_id
+```
+
+3. Deploy with Docker Compose:
+```bash
+docker-compose up -d
+```
+
+The service will be available at `http://localhost:8000`
+
+## API Documentation
+
+Access the interactive API documentation at:
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+## Branch Strategy
+
+- `main`: Production releases
+- `dev`: Development branch
+- `feature/*`: Feature branches
+- `integration`: Integration testing
+
+## Contributing
+
+1. Create a feature branch from `dev`
+2. Implement changes
+3. Add tests
+4. Create a pull request to `dev`
+
+## Testing
+
+Tests are automatically run in the CI pipeline. To run tests locally using Docker:
+
+```bash
+docker-compose -f docker-compose.test.yml up --build
+```
+
+## License
+
+This project is licensed under the terms of the license included in the [LICENSE](LICENSE) file.

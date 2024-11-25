@@ -153,7 +153,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             }
             # if there are no entries
             if not list.entry:
-                comp["section"]["@nullFlavour"] = "NI"
+                # comp["section"]["@nullFlavour"] = "NI"
                 comp["section"]["text"] = "No Information"
 
             else:

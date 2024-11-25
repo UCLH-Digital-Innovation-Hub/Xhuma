@@ -1,14 +1,44 @@
+"""
+Security Module
+
+This module handles JWT (JSON Web Token) creation and management for NHS API authentication.
+It implements the NHS Digital specifications for JWT creation as documented in:
+https://digital.nhs.uk/developer/guides-and-documentation/security-and-authorisation
+
+The module provides two main JWT creation functions:
+1. pds_jwt: Creates JWTs for PDS FHIR API authentication
+2. create_jwt: Creates JWTs for GP Connect access
+
+All tokens are signed using RS512 algorithm and have a 5-minute expiration time.
+"""
+
+import os
 import uuid
 from time import time
 
 import jwt
 
-"""
-creation of JWT as per https://developer.nhs.uk/apis/gpconnect-1-5-0/integration_cross_organisation_audit_and_provenance.html
-"""
+JWTKEY = os.getenv("JWTKEY")
 
 
-def pds_jwt(issuer, subject, audience, key_id):
+def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
+    """
+    Creates a JWT for PDS FHIR API authentication.
+
+    Args:
+        issuer (str): The JWT issuer (iss claim)
+        subject (str): The JWT subject (sub claim)
+        audience (str): The intended audience (aud claim)
+        key_id (str): The key identifier (kid header)
+
+    Returns:
+        str: Encoded JWT string
+
+    Note:
+        The token is signed using RS512 algorithm and includes:
+        - A unique JWT ID (jti claim)
+        - 5-minute expiration time (exp claim)
+    """
     headers = {"typ": "JWT", "kid": key_id}
     payload = {
         "sub": subject,
@@ -17,22 +47,42 @@ def pds_jwt(issuer, subject, audience, key_id):
         "aud": audience,
         "exp": int(time()) + 300,
     }
-    with open("keys/test-1.pem", "r") as f:
-        private_key = f.read()
+
+    # Get private key from environment or file
+    if JWTKEY is not None:
+        private_key = JWTKEY
+    else:
+        with open("keys/test-1.pem", "r") as f:
+            private_key = f.read()
+
     return jwt.encode(payload, key=private_key, algorithm="RS512", headers=headers)
 
 
 def create_jwt(
     audience: str = "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/documents/fhir",
-):
+) -> str:
     """
-    creates JWT for access to GP connect
+    Creates a JWT for GP Connect access with specific claims required by NHS Digital.
+
+    Args:
+        audience (str): The intended audience (aud claim). Defaults to test environment.
+
+    Returns:
+        str: Encoded JWT string
+
+    Note:
+        This function creates a JWT with specific claims required for GP Connect:
+        - reason_for_request
+        - requested_scope
+        - requesting_device
+        - requesting_organization
+        - requesting_practitioner
 
     TODO:
-    - make requesting device dynamic
-    - make requesting organisation dynamic
-    - make requesting practioner dynamic
-    - make audience dynamic
+        - Make requesting device dynamic
+        - Make requesting organisation dynamic
+        - Make requesting practitioner dynamic
+        - Make audience dynamic
     """
     created_time = int(time())
     payload = {
@@ -90,5 +140,6 @@ def create_jwt(
 
 
 if __name__ == "__main__":
+    # Example usage
     token = create_jwt()
     print(token)
