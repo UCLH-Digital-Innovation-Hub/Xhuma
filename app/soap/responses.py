@@ -261,14 +261,13 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         slots.append(create_slot("size", "1"))
         slots.append(create_slot("repositoryUniqueId", redis_client.get("registry")))
         slots.append(
-            create_slot(
-                "$XDSDocumentEntryClassCode", "('34133-9^^2.16.840.1.113883.6.1')"
-            )
+            create_slot("$XDSDocumentEntryClassCode", "34133-9^^2.16.840.1.113883.6.1")
         )
         slots.append(
             create_slot(
                 "$XDSDocumentEntryFormatCode",
-                "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
+                # "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
+                "2.16.840.1.113883.10.20.1",
             )
         )
 
