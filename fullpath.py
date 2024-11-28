@@ -39,6 +39,7 @@ if __name__ == "__main__":
         headers = {"Content-Type": "application/soap+xml"}
         url = "http://localhost:8000/SOAP/iti38"
         r = requests.post(url, data=body, headers=headers)
+        print(r.text)
 
         dict_38 = xmltodict.parse(r.text)
         # pprint.pprint(dict_38)

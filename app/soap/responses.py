@@ -277,7 +277,8 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
             "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0",
             "ExtrinsicObject": {
                 "@id": object_id,
-                "@status": "urn:oasis:names:tc:ebxml-regrep:StatusType:Approved",
+                # "@status": "urn:oasis:names:tc:ebxml-regrep:StatusType:Approved",
+                "@status": "urn:ihe:iti:2010:StatusType:DeferredCreation",
                 "@objectType": "urn:uuid:34268e47-fdf5-41a6-ba33-82133c465248",  # On Demand
                 "@mimeType": "text/xml",
                 "Slot": slots,
