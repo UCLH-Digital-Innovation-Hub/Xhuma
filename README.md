@@ -28,27 +28,40 @@ The service is built on FastAPI and follows a modular design pattern. For detail
 ```mermaid
 sequenceDiagram
     participant EHR
-    participant Service
-    participant NHS API's
-    participant Redis Cache
-    
-    EHR->>Service: ITI 47 Request
-    Service->>NHS API's: FHIR PDS lookup
-    NHS API's->>Service: PDS response
-    Service->>EHR: ITI 47 Response
-    Service->>Redis Cache: Check for cached SDS lookup
-    Service-->>NHS API's: SDS lookup
-    NHS API's-->>Service: SDS Response
-    Redis Cache->>Service: Return ADIS and FHIR root
-    EHR->>Service: ITI 38 Request
-    Service->>Redis Cache: Check for cached response
-    Service-->>NHS API's: GPconnect Structured SCR request
-    NHS API's-->>Service: Return Structured SCR
-    Service->>Service: convert SCR to CCDA
-    Service->>Redis Cache: Cache CCDA
-    Service->>EHR: ITI 38 Response
-    EHR->>Service: ITI 39 Request
-    Service->>EHR: ITI 39 Response
+    box Xhuma
+    participant Fast API
+    participant Redis
+    end
+    box NHS API's
+    participant PDS
+    participant SDS
+    participant GP Connect
+    end
+
+
+    EHR->>Fast API: ITI 47 Request
+    Fast API->>PDS: FHIR PDS lookup
+    PDS->>Fast API: PDS response
+    Fast API->>EHR: ITI 47 Response
+    Fast API->>Redis: Check for cached SDS lookup
+    opt if no cached SDS lookup
+    Fast API--)SDS: ASID Lookup
+    Fast API--)SDS: FHIR Endpoint Trace
+    SDS--)Fast API: SDS Responses
+    Fast API->>Redis: Cache SDS Responses
+    end
+    Redis->>Fast API: Return ADIS and FHIR root
+    EHR->>Fast API: ITI 38 Request
+    Fast API->>Redis: Check for cached response
+    opt if no cached GP connect lookup
+    Fast API--)GP Connect: GPconnect Structured SCR request
+    GP Connect--)Fast API: Return Structured SCR
+    Fast API->>Fast API: convert SCR to CCDA
+    Fast API->>Redis: Cache CCDA
+    end
+    Fast API->>EHR: ITI 38 Response
+    EHR->>Fast API: ITI 39 Request
+    Fast API->>EHR: ITI 39 Response
 ```
 
 ## Prerequisites
