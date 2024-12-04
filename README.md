@@ -14,6 +14,8 @@ Xhuma is a stateless middleware service that facilitates the conversion of GP Co
 - FHIR to CCDA conversion
 - JWT-based authentication for NHS Digital services
 - SOAP message handling for healthcare interoperability
+- Comprehensive observability with logging, metrics, and tracing
+- Grafana dashboards for monitoring and analysis
 
 ## Technical Architecture
 
@@ -22,6 +24,7 @@ The service is built on FastAPI and follows a modular design pattern. For detail
 - [Technical Architecture](docs/technical_architecture.md)
 - [Data Flow Documentation](docs/data_flow.md)
 - [Technical Resources](docs/technical_resources.md)
+- [Observability Documentation](docs/observability.md)
 
 ## System Flow
 
@@ -65,11 +68,10 @@ git clone https://github.com/UCLH-Digital-Innovation-Hub/Xhuma.git
 cd Xhuma
 ```
 
-2. Configure environment variables in docker-compose.yml:
-```yaml
-environment:
-  - JWTKEY=your_jwt_key
-  - REGISTRY_ID=your_registry_id
+2. Copy the example environment file and configure your variables:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
 ```
 
 3. Deploy with Docker Compose:
@@ -77,13 +79,46 @@ environment:
 docker-compose up -d
 ```
 
-The service will be available at `http://localhost:8000`
+The service will be available at:
+- API: http://localhost:80
+- Grafana: http://localhost:3000
+- Prometheus: http://localhost:9090
+
+## Observability Stack
+
+Xhuma includes a comprehensive observability stack:
+
+### 1. Logging
+- Structured JSON logging with correlation IDs
+- Log storage in PostgreSQL for traceability
+- Log rotation and size limits
+
+### 2. Metrics
+- Prometheus metrics for request rates, durations, and errors
+- Custom business metrics for CCDA conversions and cache operations
+- System resource utilization tracking
+
+### 3. Tracing
+- Distributed tracing with OpenTelemetry
+- Trace visualization in Grafana Tempo
+- Request flow analysis and bottleneck detection
+
+### 4. Dashboards
+- Pre-configured Grafana dashboards
+- Real-time monitoring of key metrics
+- Historical trend analysis
+- Error rate visualization
+
+Access the monitoring interfaces:
+- Grafana: http://localhost:3000 (default credentials: admin/admin)
+- Prometheus: http://localhost:9090
+- Application metrics: http://localhost:80/metrics
 
 ## API Documentation
 
 Access the interactive API documentation at:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- Swagger UI: http://localhost:80/docs
+- ReDoc: http://localhost:80/redoc
 
 ## Branch Strategy
 
@@ -97,14 +132,23 @@ Access the interactive API documentation at:
 1. Create a feature branch from `dev`
 2. Implement changes
 3. Add tests
-4. Create a pull request to `dev`
+4. Run pre-commit hooks:
+```bash
+pre-commit install
+pre-commit run --all-files
+```
+5. Create a pull request to `dev`
 
 ## Testing
 
-Tests are automatically run in the CI pipeline. To run tests locally using Docker:
+Tests are automatically run in the CI pipeline. To run tests locally:
 
 ```bash
+# Run the full test suite
 docker-compose -f docker-compose.test.yml up --build
+
+# Run specific test modules
+docker-compose exec gpcon pytest app/tests/test_tracing.py -v
 ```
 
 ## License

@@ -1,0 +1,41 @@
+services:
+  redis:
+    image: redis
+    networks:
+      - xhuma-test-net
+
+  gpcon:
+    build: .
+    depends_on:
+      - redis
+      - postgres
+    environment:
+      API_KEY: ${API_KEY}
+      PDS_API_KEY: ${PDS_API_KEY}
+      SDS_API_KEY: ${SDS_API_KEY}
+      TESTING: "true"
+      POSTGRES_DB: ${POSTGRES_DB:-xhuma_test}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+    volumes:
+      - ./app:/code/app
+    command: pytest app/tests/ -v
+    networks:
+      - xhuma-test-net
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-xhuma_test}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - ./app/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - xhuma-test-net
+
+networks:
+  xhuma-test-net:
+    driver: bridge
