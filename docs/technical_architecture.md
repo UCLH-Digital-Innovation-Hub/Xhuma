@@ -42,10 +42,30 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 - Handles SOAP fault scenarios
 
 ### 7. Caching Layer (Redis)
-- Implements distributed caching
-- Manages temporary data storage
-- Optimizes repeated requests
-- Handles cache invalidation
+- **Infrastructure Configuration**
+  - Memory limit: 256MB with volatile-lru eviction
+  - Persistence: RDB snapshots and AOF journaling
+  - Network: Isolated container network
+  - Security: Password authentication, protected mode
+
+- **Client Implementation** (`app/redis_connect.py`)
+  - Connection pooling with configurable limits
+  - Automatic retry mechanism for resilience
+  - Comprehensive error handling
+  - Memory usage monitoring
+  - Structured logging
+
+- **Cache Management**
+  - Intelligent key expiry
+  - Memory usage monitoring
+  - Cache statistics collection
+  - Health checks and diagnostics
+
+- **Data Types**
+  - CCDA documents (4-hour TTL)
+  - PDS lookup results (24-hour TTL)
+  - SDS endpoint information (12-hour TTL)
+  - NHS number mappings
 
 ## Monitoring & Observability Architecture
 
@@ -58,9 +78,11 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 
 - **Cache Metrics**
   - Hit/miss rates
-  - Cache size
+  - Cache size and memory usage
   - Eviction rates
-  - TTL statistics
+  - Connection pool statistics
+  - Operation latencies
+  - Error counts by type
 
 - **Resource Metrics**
   - CPU usage
@@ -160,12 +182,14 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 - JWT-based authentication
 - NHS API authentication
 - Token validation and verification
+- Redis password protection
 
 ### 2. Data Protection
 - TLS 1.2+ for all communications
 - Data encryption at rest
 - Secure header handling
 - Input validation and sanitization
+- Redis protected mode
 
 ### 3. Compliance
 - NHS Digital Standards
@@ -181,8 +205,14 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 │   ├── FastAPI Application
 │   ├── Uvicorn Server
 │   └── Application Dependencies
-└── Redis Container
-    └── Redis Server
+├── Redis Container
+│   ├── Redis Server (v7.2)
+│   ├── Custom Configuration
+│   └── Persistence Volumes
+└── Monitoring Stack
+    ├── Prometheus
+    ├── Grafana
+    └── OpenTelemetry Collector
 ```
 
 ### Network Configuration
@@ -200,20 +230,23 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 - Conversion failures
 - Authentication errors
 - Network issues
+- Cache operation failures
 
 ### 2. Recovery Procedures
-- Automatic retries
-- Fallback mechanisms
+- Automatic retries with backoff
+- Connection pool management
 - Error reporting
 - System recovery
+- Cache rebuilding
 
 ## Maintenance Architecture
 
 ### 1. Regular Maintenance
-- Cache cleanup
+- Cache cleanup and monitoring
 - Log rotation
 - Performance monitoring
 - Security updates
+- Redis persistence management
 
 ### 2. Support Procedures
 - Issue tracking
@@ -228,15 +261,18 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 - Critical service checks
 - Resource availability
 - Error rate monitoring
+- Redis connection status
 
 ### 2. Readiness Probes
 - Service dependencies
 - Cache availability
 - External service status
 - Resource thresholds
+- Memory usage checks
 
 ### 3. Startup Probes
 - Initialization checks
 - Configuration validation
 - Resource allocation
 - Service registration
+- Redis persistence verification

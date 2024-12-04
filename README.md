@@ -9,7 +9,10 @@ Xhuma is a stateless middleware service that facilitates the conversion of GP Co
 ### Key Features
 
 - Stateless architecture for scalability and reliability
-- Redis-based caching for optimized performance
+- Production-ready Redis caching with:
+  - Memory management and persistence
+  - Connection pooling and automatic retry
+  - Comprehensive monitoring
 - IHE ITI profile implementation (ITI-47, ITI-38, ITI-39)
 - FHIR to CCDA conversion
 - JWT-based authentication for NHS Digital services
@@ -65,19 +68,43 @@ git clone https://github.com/UCLH-Digital-Innovation-Hub/Xhuma.git
 cd Xhuma
 ```
 
-2. Configure environment variables in docker-compose.yml:
-```yaml
-environment:
-  - JWTKEY=your_jwt_key
-  - REGISTRY_ID=your_registry_id
+2. Set up environment variables:
+```bash
+cp .env.example .env
 ```
 
-3. Deploy with Docker Compose:
+3. Configure the following in your .env file:
+```
+# Required configurations
+REDIS_PASSWORD=your_secure_redis_password
+API_KEY=your_api_key
+JWTKEY=your_jwt_key
+REGISTRY_ID=your_registry_id
+
+# Optional configurations (defaults provided)
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_DB=0
+```
+
+4. Deploy with Docker Compose:
 ```bash
 docker-compose up -d
 ```
 
 The service will be available at `http://localhost:8000`
+
+## Redis Configuration
+
+The service uses a production-ready Redis setup with:
+- Memory management (256MB limit with volatile-lru policy)
+- Data persistence (RDB snapshots and AOF)
+- Connection pooling
+- Automatic retry mechanism
+- Comprehensive monitoring
+- Security hardening
+
+Redis metrics are available through Prometheus and can be visualized in Grafana.
 
 ## API Documentation
 
