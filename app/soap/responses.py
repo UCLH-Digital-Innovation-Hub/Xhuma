@@ -210,6 +210,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
             docid = docid["document_id"]
         except Exception as e:
             logging.error(f"Error: {e}")
+            print(f"iti_38_error: {e}")
             body["AdhocQueryResponse"][
                 "@status"
             ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
@@ -232,6 +233,19 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         def create_slot(name: str, value) -> dict:
             slot_dict = {"@name": name, "ValueList": {"Value": {"#text": value}}}
             return slot_dict
+
+        def create_classification(
+            classification_scheme: str, name: str, value, localized_string: str
+        ) -> dict:
+            classification = {
+                "@classificationScheme": classification_scheme,
+                "@classifiedObject": docid,
+                "@id": f"urn:uuid:{uuid.uuid4()}",
+                "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:Classification",
+                "Slot": create_slot(name, value),
+                "Name": {"LocalizedString": {"@value": localized_string}},
+            }
+            return classification
 
         # slots.append(create_slot("creationTime", str(int(datetime.now().timestamp()))))
         # slots.append(create_slot("sourcePatientId", nhsno))
@@ -260,16 +274,34 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         # slots.append(create_slot("hash", "4cf4f82d78b5e2aac35c31bca8cb79fe6bd6a41e"))
         slots.append(create_slot("size", "1"))
         slots.append(create_slot("repositoryUniqueId", redis_client.get("registry")))
-        slots.append(
-            create_slot("$XDSDocumentEntryClassCode", "34133-9^^2.16.840.1.113883.6.1")
-        )
-        slots.append(
-            create_slot(
-                "$XDSDocumentEntryFormatCode",
-                # "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
-                "2.16.840.1.113883.10.20.1",
+
+        classifications = []
+        classifications.append(
+            create_classification(
+                "urn:uuid:41a5887f-8865-4c09-adf7-e362475b143a",
+                "codingScheme",
+                "34133-9^^2.16.840.1.113883.6.1",
+                "XDSDocumentEntry.classCode",
             )
         )
+        classifications.append(
+            create_classification(
+                "urn:uuid:a09d5840-386c-46f2-b5ad-9c3699a4309d",
+                "codingScheme",
+                "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
+                "XDSDocumentEntry.formatCode",
+            )
+        )
+        # slots.append(
+        #     create_slot("$XDSDocumentEntryClassCode", "34133-9^^2.16.840.1.113883.6.1")
+        # )
+        # slots.append(
+        #     create_slot(
+        #         "$XDSDocumentEntryFormatCode",
+        #         # "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
+        #         "2.16.840.1.113883.10.20.1",
+        #     )
+        # )
 
         object_id = "CCDA_01"
         body["AdhocQueryResponse"]["RegistryObjectList"] = {
@@ -281,6 +313,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
                 "@objectType": "urn:uuid:34268e47-fdf5-41a6-ba33-82133c465248",  # On Demand
                 "@mimeType": "text/xml",
                 "Slot": slots,
+                "Classification": classifications,
                 # UNIQUE ID SECTION
                 "ExternalIdentifier": [
                     {
