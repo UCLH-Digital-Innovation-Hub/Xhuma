@@ -206,7 +206,6 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         try:
             r = await gpconnect(nhsno)
             logging.info(f"used internal call for {nhsno}")
-            print(r.text)
             docid = r.json()
             docid = docid["document_id"]
         except Exception as e:
@@ -236,25 +235,23 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
             return slot_dict
 
         def create_classification(
-            classification_scheme: str, name: str, value, localized_string: str
+            classification_scheme: str,
+            noderep: str,
+            value,
+            localized_string: str,
         ) -> dict:
             classification = {
                 "@classificationScheme": classification_scheme,
                 "@classifiedObject": object_id,
                 "@id": f"urn:uuid:{uuid.uuid4()}",
+                "@nodeRepresentation": noderep,
                 "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:Classification",
-                "Slot": create_slot(name, value),
+                "Slot": create_slot("codingScheme", value),
                 "Name": {"LocalizedString": {"@value": localized_string}},
             }
             return classification
 
         # slots.append(create_slot("creationTime", str(int(datetime.now().timestamp()))))
-        # slots.append(create_slot("sourcePatientId", nhsno))
-        # slots.append(
-        #     create_slot(
-        #         "sourcePatientId", f"{nhsno}^^^&2.16.840.1.113883.2.1.4.99.1&ISO"
-        #     )
-        # )
 
         # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
         slots.append(
@@ -280,29 +277,19 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         classifications.append(
             create_classification(
                 "urn:uuid:41a5887f-8865-4c09-adf7-e362475b143a",
-                "codingScheme",
-                "34133-9^^2.16.840.1.113883.6.1",
+                "34133-9",
+                "2.16.840.1.113883.6.1",
                 "XDSDocumentEntry.classCode",
             )
         )
         classifications.append(
             create_classification(
                 "urn:uuid:a09d5840-386c-46f2-b5ad-9c3699a4309d",
-                "codingScheme",
+                "",
                 "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
                 "XDSDocumentEntry.formatCode",
             )
         )
-        # slots.append(
-        #     create_slot("$XDSDocumentEntryClassCode", "34133-9^^2.16.840.1.113883.6.1")
-        # )
-        # slots.append(
-        #     create_slot(
-        #         "$XDSDocumentEntryFormatCode",
-        #         # "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
-        #         "2.16.840.1.113883.10.20.1",
-        #     )
-        # )
 
         body["AdhocQueryResponse"]["RegistryObjectList"] = {
             "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0",

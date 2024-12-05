@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from xml.etree import ElementTree
 
@@ -94,3 +95,33 @@ def clean_soap(
         namespaces=namespaces,
     )
     return xmldict["Envelope"]
+
+
+def extract_soap_request(message):
+    """
+    Extracts the SOAP request from a MIME message.
+    """
+
+    print("Extracting SOAP request from MIME message...")
+    print(message)
+    # Define the boundary pattern
+    boundary_pattern = r"--uuid:[a-f0-9\-]+\+id=[0-9]"
+    boundary_start = re.search(boundary_pattern, message)
+
+    if not boundary_start:
+        raise ValueError("Boundary not found in the message.")
+
+    # Split the message by the boundary
+    parts = message.split(boundary_start.group(0))
+
+    # Extract the content within the SOAP Content-Type section
+    for part in parts:
+        if "application/soap+xml" in part:
+            # The SOAP request starts after the Content-Type header
+            soap_start = part.find("<?xml")
+            if soap_start == -1:
+                soap_start = part.find("<s:Envelope")
+            if soap_start != -1:
+                # Extract and return the SOAP request
+                return part[soap_start:].strip()
+    return None

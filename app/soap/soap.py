@@ -22,7 +22,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
-from ..ccda.helpers import clean_soap, validateNHSnumber
+from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .responses import iti_38_response, iti_39_response, iti_47_response
@@ -234,7 +234,8 @@ async def iti39(request: Request):
     content_type = request.headers["Content-Type"]
     if "application/soap+xml" in content_type:
         body = await request.body()
-        envelope = clean_soap(body)
+        soap = extract_soap_request(body.decode("utf-8"))
+        envelope = clean_soap(soap)
         try:
             document_id = envelope["Body"]["RetrieveDocumentSetRequest"][
                 "DocumentRequest"
