@@ -44,7 +44,7 @@ def redis_connect() -> redis.Redis:
             port=REDIS_PORT,
             db=REDIS_DB,
             password=REDIS_PASSWORD,
-            decode_responses=False,  # Keep as bytes for MIME data
+            decode_responses=True,  # Keep as bytes for MIME data
             socket_timeout=5,  # 5 second timeout
             socket_connect_timeout=5,
             retry_on_timeout=True,

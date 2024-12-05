@@ -198,7 +198,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0",
     }
 
-    # check the redis cash if there's an existing ccda
+    # check the redis cache if there's an existing ccda
     docid = redis_client.get(nhsno)
 
     if docid is None:
@@ -206,6 +206,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         try:
             r = await gpconnect(nhsno)
             logging.info(f"used internal call for {nhsno}")
+            print(r.text)
             docid = r.json()
             docid = docid["document_id"]
         except Exception as e:
@@ -226,7 +227,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
 
     if docid is not None:
         # add the ccda as registry object list
-
+        object_id = f"CCDA_{docid}"
         # create list of slots
         slots = []
 
@@ -239,7 +240,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         ) -> dict:
             classification = {
                 "@classificationScheme": classification_scheme,
-                "@classifiedObject": docid,
+                "@classifiedObject": object_id,
                 "@id": f"urn:uuid:{uuid.uuid4()}",
                 "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:Classification",
                 "Slot": create_slot(name, value),
@@ -303,7 +304,6 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         #     )
         # )
 
-        object_id = "CCDA_01"
         body["AdhocQueryResponse"]["RegistryObjectList"] = {
             "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0",
             "ExtrinsicObject": {
@@ -352,8 +352,10 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
 
 async def iti_39_response(message_id, document_id, document):
     registry_id = redis_client.get("registry")
+    # convert document to bytes
+    # base64 encode the document
+    base64_bytes = base64.b64encode(document.encode("utf-8"))
 
-    base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
     body = {
         "RetrieveDocumentSetResponse": {
             "@xmlns": "urn:ihe:iti:xds-b:2007",

@@ -43,7 +43,7 @@ REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
 async def startup_event():
     """
     Startup event handler that initializes necessary configurations.
-    
+
     This function:
     1. Sets the registry ID in Redis
     2. Checks for existing JWK (JSON Web Key)
@@ -51,7 +51,7 @@ async def startup_event():
     """
     # Store registry ID in Redis
     redis_client.set("registry", REGISTRY_ID)
-    
+
     # Handle JWK generation/verification
     if not os.path.isfile("keys/jwk.json"):
         # Generate new JWK from private key
@@ -59,7 +59,7 @@ async def startup_event():
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
             jwk_json = public_jwk.export_public(as_dict=True)
-            
+
             # Save generated JWK
             with open("keys/jwk.json", "w") as f:
                 json.dump(jwk_json, f)
@@ -69,7 +69,7 @@ async def startup_event():
 async def root():
     """
     Root endpoint that serves the welcome page with service information.
-    
+
     Returns:
         HTMLResponse: A welcome page containing service description and endpoint examples.
     """
@@ -83,12 +83,12 @@ async def root():
             <p>This is the internet facing demo for Xhuma</p>
             <p>Interactive API documentation is available <a href="/docs#/">here</a>
             <h4>Endpoints</h4>
-            <p>/pds/lookuppatient/nhsno will perform a pds lookup and return the fhir response. 
+            <p>/pds/lookuppatient/nhsno will perform a pds lookup and return the fhir response.
                <a href="pds/lookup_patient/9449306680">Example</a></p>
-            <p>/gpconnect/nhsno will perform a gpconnect access record structured query, 
-               convert it to a CCDA and return the cached record uuid. 
+            <p>/gpconnect/nhsno will perform a gpconnect access record structured query,
+               convert it to a CCDA and return the cached record uuid.
                <a href="gpconnect/9690937278">Example</a></p>
-            <p>For the purposes of the internet facing demo /demo/nhsno will return the 
+            <p>For the purposes of the internet facing demo /demo/nhsno will return the
                mime encoded ccda. <a href="/demo/9690937278">Example</a></p>
         </body>
     </html>
@@ -99,10 +99,10 @@ async def root():
 async def demo(nhsno: int):
     """
     Demo endpoint that retrieves and returns a CCDA document for a given NHS number.
-    
+
     Args:
         nhsno (int): NHS number to retrieve the CCDA document for.
-    
+
     Returns:
         bytes: MIME encoded CCDA document retrieved from Redis cache.
     """
@@ -114,10 +114,10 @@ async def demo(nhsno: int):
 async def get_jwk():
     """
     Public endpoint that provides access to the service's JSON Web Key.
-    
+
     This endpoint is used by clients to verify JWT signatures and establish
     trust with the service.
-    
+
     Returns:
         dict: JSON Web Key in dictionary format.
     """

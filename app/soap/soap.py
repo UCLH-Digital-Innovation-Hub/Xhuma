@@ -137,6 +137,7 @@ async def iti47(request: Request):
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
         client.set(ceid, nhsno)
         patient = await lookup_patient(nhsno)
+        print(f"Patient: {patient}")
         if not patient:
             print("Patient not found")
         data = await iti_47_response(
