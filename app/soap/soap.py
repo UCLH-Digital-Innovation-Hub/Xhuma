@@ -246,7 +246,7 @@ async def iti39(request: Request):
         document = client.get(document_id)
 
         if document is not None:
-            message_id = envelope["Header"]["MessageID"]
+            message_id = envelope["Header"]["MessageID"]["#text"]
             data = await iti_39_response(message_id, document_id, document)
             return Response(content=data, media_type="application/soap+xml")
         else:

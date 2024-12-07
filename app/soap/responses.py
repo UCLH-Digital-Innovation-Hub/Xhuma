@@ -206,8 +206,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         try:
             r = await gpconnect(nhsno)
             logging.info(f"used internal call for {nhsno}")
-            docid = r.json()
-            docid = docid["document_id"]
+            docid = r["document_id"]
         except Exception as e:
             logging.error(f"Error: {e}")
             print(f"iti_38_error: {e}")
@@ -337,12 +336,12 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
     return xmltodict.unparse(soap_response, pretty=True)
 
 
-async def iti_39_response(message_id, document_id, document):
+async def iti_39_response(message_id: str, document_id: str, document):
     registry_id = redis_client.get("registry")
     # convert document to bytes
     # base64 encode the document
-    base64_bytes = base64.b64encode(document.encode("utf-8"))
-
+    base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
+    # print(type(base64_bytes))
     body = {
         "RetrieveDocumentSetResponse": {
             "@xmlns": "urn:ihe:iti:xds-b:2007",
@@ -354,18 +353,37 @@ async def iti_39_response(message_id, document_id, document):
                     "RepositoryUniqueId": {"#text": registry_id},
                     "DocumentUniqueId": {"#text": document_id},
                     "mimeType": {"#text": "text/xml"},
-                    # "Document": base64_bytes.decode("ascii"),
-                    "Docuument": base64_bytes,
+                    "Document": base64_bytes,
                 },
             },
-        }
+        },
     }
 
     soap_response = create_envelope(
         create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", message_id), body
     )
 
-    with open(f"{document_id}.xml", "w") as output:
-        output.write(xmltodict.unparse(soap_response, pretty=True))
+    # soap_response = create_envelope(
+    #     create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", "test"), body
+    # )
+
+    # Verify that all values are serializable
+    def ensure_serializable(data):
+        if isinstance(data, bytes):
+            return data.decode("utf-8")  # Decode bytes to string
+        elif isinstance(data, dict):
+            return {k: ensure_serializable(v) for k, v in data.items()}  # Recurse
+        elif isinstance(data, list):
+            return [ensure_serializable(item) for item in data]  # Recurse for lists
+        else:
+            return data  # Return as-is for strings, numbers, etc.
+
+    soap_response = ensure_serializable(soap_response)
+
+    pprint.pprint(soap_response)
+    # print(type(soap_response))
+
+    # with open(f"{document_id}.xml", "w") as output:
+    #     output.write(xmltodict.unparse(soap_response, pretty=True))
 
     return xmltodict.unparse(soap_response, pretty=True)
