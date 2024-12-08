@@ -305,7 +305,8 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
                     {
                         "@identificationScheme": "urn:uuid:2e82c1f6-a085-4c72-9da3-8640a32e42ab",
                         "@value": docid,
-                        "@id": f"CCDA-{docid}",
+                        # "@id": f"CCDA-{docid}",
+                        "@id": docid,
                         "@registryObject": object_id,
                         "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier",
                         "Name": {
