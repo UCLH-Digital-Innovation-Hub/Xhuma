@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict
 from urllib.request import Request
 
+import httpx
 import xmltodict
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.routing import APIRoute
@@ -248,6 +249,27 @@ async def iti39(request: Request):
         if document is not None:
             message_id = envelope["Header"]["MessageID"]["#text"]
             data = await iti_39_response(message_id, document_id, document)
+            # if there's not an anonymous address in the reply to header, send the response to that address
+            if (
+                envelope["Header"]["ReplyTo"]["Address"]
+                and envelope["Header"]["ReplyTo"]["Address"]
+                != "http://www.w3.org/2005/08/addressing/anonymous"
+            ):
+                print(
+                    f"Sending response to: {envelope['Header']['ReplyTo']['Address']}"
+                )
+                return Response(
+                    content=data,
+                    media_type="application/soap+xml",
+                    background=BackgroundTask(
+                        lambda: httpx.post(
+                            envelope["Header"]["ReplyTo"]["Address"],
+                            data=data,
+                            headers={"Content-Type": "application/soap+xml"},
+                        )
+                    ),
+                )
+
             return Response(content=data, media_type="application/soap+xml")
         else:
             raise HTTPException(

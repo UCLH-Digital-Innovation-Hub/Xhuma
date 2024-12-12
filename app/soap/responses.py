@@ -225,7 +225,8 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
 
     if docid is not None:
         # add the ccda as registry object list
-        object_id = f"CCDA_{docid}"
+        # object_id = f"CCDA_{docid}"
+        object_id = docid
         # create list of slots
         slots = []
 
