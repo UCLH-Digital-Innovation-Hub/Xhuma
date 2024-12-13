@@ -11,6 +11,7 @@ from typing import Dict, Any
 from datetime import datetime
 import psycopg2
 from psycopg2.extras import Json
+from uuid import uuid4
 
 from .handlers import (
     correlation_id_ctx_var,
@@ -56,6 +57,10 @@ class PostgresLogHandler(logging.Handler):
         correlation_id = correlation_id_ctx_var.get(None)
         nhs_number = nhs_number_ctx_var.get(None)
         request_type = request_type_ctx_var.get(None)
+        
+        # Generate a correlation ID if none exists
+        if correlation_id is None:
+            correlation_id = str(uuid4())
         
         # Don't store "N/A" values in the database
         if nhs_number == "N/A":

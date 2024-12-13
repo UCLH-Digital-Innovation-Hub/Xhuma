@@ -106,7 +106,7 @@ LOGGING_CONFIG: Dict[str, Any] = {
     },
     "loggers": {
         "xhuma": {
-            "handlers": ["console", "file", "database"],
+            "handlers": ["console", "file"],  # Remove database handler from root logger
             "level": LOG_LEVEL,
             "propagate": False,
         },
