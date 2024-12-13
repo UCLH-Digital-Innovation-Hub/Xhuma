@@ -138,10 +138,8 @@ class CorrelationMiddleware(BaseHTTPMiddleware):
             return "ITI-39"
         elif "/ccda/convert" in path:
             return "CCDA"
-        elif "/pds/" in path:
-            return "PDS"
-        elif "/sds/" in path:
-            return "SDS"
+        elif "/pds/" in path or "/sds/" in path:
+            return "SECURITY"  # Changed from "PDS" to "SECURITY" for PDS/SDS requests
         return None
     
     async def get_nhs_number(self, request: Request) -> Optional[str]:
