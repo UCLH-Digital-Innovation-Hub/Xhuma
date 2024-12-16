@@ -1,5 +1,6 @@
 import base64
 import logging
+import os
 import pprint
 import uuid
 from datetime import datetime, timedelta
@@ -10,7 +11,8 @@ from httpx import AsyncClient
 from ..gpconnect import gpconnect
 from ..redis_connect import redis_client
 
-REGISTRY_ID = redis_client.get("registry")
+# REGISTRY_ID = redis_client.get("registry")
+REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid.uid4()))
 
 
 def create_security():
