@@ -10,15 +10,17 @@ The module provides FastAPI routes for handling SOAP requests and responses,
 integrating with Redis for caching and implementing NHS number validation.
 """
 
-import json
 import logging
 import re
+import uuid
 from datetime import datetime
+from email import charset
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Any, Callable, Dict
 from urllib.request import Request
 
 import httpx
-import xmltodict
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
@@ -249,6 +251,31 @@ async def iti39(request: Request):
         if document is not None:
             message_id = envelope["Header"]["MessageID"]["#text"]
             data = await iti_39_response(message_id, document_id, document)
+            # mime encode the data
+            boundary = f"uuid:{uuid.uuid4()}"
+            mime_message = MIMEMultipart(
+                "related", boundary=boundary, type="application/xop+xml"
+            )
+
+            # specify 8bit encoding so it doesn't 64bit encode everything
+            ch = charset.Charset("utf-8")
+            ch.body_encoding = "8bit"
+
+            soap_mime = MIMEText("")
+            soap_mime.set_charset(ch)
+            # add the data after specifing the charset
+            soap_mime.set_payload(data)
+            soap_mime.replace_header("Content-Transfer-Encoding", "8bit")
+            soap_mime.add_header("Content-Id", "<http://tempuri.org/0>")
+            soap_mime.add_header(
+                "Content-Type",
+                'application/xop+xml; charset="utf-8"; type="application/soap+xml"',
+            )
+            mime_message.attach(soap_mime)
+
+            mime_string = mime_message.as_string()
+            headers = {"Content-Type": f'multipart/related; boundary="{boundary}"'}
+
             # if there's not an anonymous address in the reply to header, send the response to that address
             if (
                 envelope["Header"]["ReplyTo"]["Address"]
@@ -259,13 +286,13 @@ async def iti39(request: Request):
                     f"Sending response to: {envelope['Header']['ReplyTo']['Address']}"
                 )
                 return Response(
-                    content=data,
-                    media_type="application/soap+xml",
+                    content=mime_string.encode("utf-8"),
+                    headers=headers,
                     background=BackgroundTask(
                         lambda: httpx.post(
                             envelope["Header"]["ReplyTo"]["Address"],
-                            data=data,
-                            headers={"Content-Type": "application/soap+xml"},
+                            data=mime_string.encode("utf-8"),
+                            headers=headers,
                         )
                     ),
                 )
