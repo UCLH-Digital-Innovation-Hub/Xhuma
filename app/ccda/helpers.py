@@ -102,26 +102,13 @@ def extract_soap_request(message):
     Extracts the SOAP request from a MIME message.
     """
 
-    print("Extracting SOAP request from MIME message...")
-    print(message)
-    # Define the boundary pattern
-    boundary_pattern = r"--uuid:[a-f0-9\-]+\+id=[0-9]"
-    boundary_start = re.search(boundary_pattern, message)
+    # print("Extracting SOAP request from MIME message...")
+    # print(message)
 
-    if not boundary_start:
-        raise ValueError("Boundary not found in the message.")
+    # iterate throught the message lines and find soap envelope
 
-    # Split the message by the boundary
-    parts = message.split(boundary_start.group(0))
-
-    # Extract the content within the SOAP Content-Type section
-    for part in parts:
-        if "application/soap+xml" in part:
-            # The SOAP request starts after the Content-Type header
-            soap_start = part.find("<?xml")
-            if soap_start == -1:
-                soap_start = part.find("<s:Envelope")
-            if soap_start != -1:
-                # Extract and return the SOAP request
-                return part[soap_start:].strip()
-    return None
+    for line in message.splitlines():
+        if line.startswith("<s:Envelope "):
+            return line
+    # if can't find a soap envelope raise an error
+    raise ValueError("SOAP envelope not found in the message.")
