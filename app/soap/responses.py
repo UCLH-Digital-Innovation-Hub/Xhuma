@@ -12,7 +12,7 @@ from ..gpconnect import gpconnect
 from ..redis_connect import redis_client
 
 # REGISTRY_ID = redis_client.get("registry")
-REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid.uid4()))
+REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid.uuid4()))
 
 
 def create_security():
@@ -273,7 +273,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         # No hash for on demand document
         # slots.append(create_slot("hash", "4cf4f82d78b5e2aac35c31bca8cb79fe6bd6a41e"))
         slots.append(create_slot("size", "1"))
-        slots.append(create_slot("repositoryUniqueId", redis_client.get("registry")))
+        slots.append(create_slot("repositoryUniqueId", REGISTRY_ID))
 
         classifications = []
         classifications.append(
