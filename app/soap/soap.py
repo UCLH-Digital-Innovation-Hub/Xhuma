@@ -249,7 +249,7 @@ async def iti39(request: Request):
         document = client.get(document_id)
 
         if document is not None:
-            message_id = envelope["Header"]["MessageID"]["#text"]
+            message_id = envelope["Header"]["MessageID"]
             data = await iti_39_response(message_id, document_id, document)
             # mime encode the data
             boundary = f"uuid:{uuid.uuid4()}"
