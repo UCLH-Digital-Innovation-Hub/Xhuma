@@ -347,20 +347,20 @@ async def iti_39_response(message_id: str, document_id: str, document):
     base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
     # print(type(base64_bytes))
     body = {
-        "ns4:RetrieveDocumentSetResponse": {
-            "@xmlns:ns4":"urn:ihe:iti:xds-b:2007",
-            "@xmlns:ns8":"urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
+        "ns4:RetrieveDcoumentSetResponse": {
+            "@xmlns:ns4": "urn:ihe:iti:xds-b:2007",
+            "@xmlns:ns8": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
             "ns8:RegistryResponse": {
-                "@id":uuid.uuid4(),
+                "@id": uuid.uuid4(),
                 "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Success",
-                "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-                "ns4:DocumentResponse": {
-                    "ns4:HomeCommunityId": {"#text": f"urn:oid:{registry_id}"},
-                    "ns4:RepositoryUniqueId": {"#text": REGISTRY_ID},
-                    "ns4:DocumentUniqueId": {"#text": document_id},
-                    "ns4:mimeType": {"#text": "text/xml"},
-                    "ns4:Document": base64_bytes,
-                },
+                # "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
+            },
+            "ns4:DocumentResponse": {
+                "ns4:HomeCommunityId": {"#text": f"urn:oid:{REGISTRY_ID}"},
+                "ns4:RepositoryUniqueId": {"#text": REGISTRY_ID},
+                "ns4:DocumentUniqueId": {"#text": document_id},
+                "ns4:mimeType": {"#text": "text/xml"},
+                "ns4:Document": base64_bytes,
             },
         },
     }
