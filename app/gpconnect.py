@@ -8,7 +8,7 @@ import xmltodict
 from fastapi import APIRouter, HTTPException, Request, Response
 from fhirclient.models import bundle
 
-from .ccda.convert_mime import convert_mime
+from .ccda.convert_mime import base64_xml, convert_mime
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
 from .pds import pds
@@ -98,13 +98,14 @@ async def gpconnect(nhsno: int):
             pass
 
     xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
-    xop = convert_mime(xml_ccda)
+    # xop = convert_mime(xml_ccda)
+    xop = base64_xml(xml_ccda)
+    print(xop)
     doc_uuid = str(uuid4())
 
     # TODO set this as background task
-    redis_client.setex(nhsno, timedelta(minutes=30), doc_uuid)
-    # redis_client.setex(doc_uuid, timedelta(minutes=30), xop)
-    redis_client.setex(doc_uuid, timedelta(minutes=30), xml_ccda)
+    redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
+    redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
 
     # pprint(xml_ccda)
     with open(f"{nhsno}.xml", "w") as output:

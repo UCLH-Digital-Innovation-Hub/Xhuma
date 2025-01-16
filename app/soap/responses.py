@@ -341,10 +341,9 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
 
 
 async def iti_39_response(message_id: str, document_id: str, document):
-    registry_id = redis_client.get("registry")
-    # convert document to bytes
+
     # base64 encode the document
-    base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
+    # base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
     # print(type(base64_bytes))
     body = {
         "ns4:RetrieveDocumentSetResponse": {
@@ -360,7 +359,7 @@ async def iti_39_response(message_id: str, document_id: str, document):
                 "ns4:RepositoryUniqueId": {"#text": REGISTRY_ID},
                 "ns4:DocumentUniqueId": {"#text": document_id},
                 "ns4:mimeType": {"#text": "text/xml"},
-                "ns4:Document": base64_bytes,
+                "ns4:Document": document,
             },
         },
     }
