@@ -103,7 +103,8 @@ async def gpconnect(nhsno: int):
 
     # TODO set this as background task
     redis_client.setex(nhsno, timedelta(minutes=30), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=30), xop)
+    # redis_client.setex(doc_uuid, timedelta(minutes=30), xop)
+    redis_client.setex(doc_uuid, timedelta(minutes=30), xml_ccda)
 
     # pprint(xml_ccda)
     with open(f"{nhsno}.xml", "w") as output:
