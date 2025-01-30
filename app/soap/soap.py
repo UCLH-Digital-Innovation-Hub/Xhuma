@@ -255,12 +255,14 @@ async def iti38(request: Request):
             if x["@name"] == "$XDSDocumentEntryPatientId"
         )
 
+        # TODO rewrite this pattern if we don't need to map CEID to NHSNO
         if not validateNHSnumber(patient_id):
             try:
                 pattern = r"[0-9]{10}"
                 poss_nhs = re.search(pattern, patient_id).group(0)
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
+                    data = await iti_38_response(patient_id, "NOCEID", query_id)
             except:
                 pattern = r"[A-Z0-9]{15}"
                 ceid = re.search(pattern, patient_id).group(0)
@@ -270,7 +272,9 @@ async def iti38(request: Request):
                 print(f"NHS no for CEID is: {patient_id}")
                 logging.info(f"Mapped NHSNO is: {patient_id} from {ceid}")
 
-        data = await iti_38_response(patient_id, ceid, query_id)
+                data = await iti_38_response(patient_id, ceid, query_id)
+        else:
+            data = await iti_38_response(patient_id, "NOCEID", query_id)
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(

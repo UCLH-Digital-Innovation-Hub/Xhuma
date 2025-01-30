@@ -351,6 +351,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         try:
             r = await gpconnect(nhsno)
             logging.info(f"used internal call for {nhsno}")
+            print(r)
             docid = r["document_id"]
         except Exception as e:
             logging.error(f"Error: {e}")
@@ -399,10 +400,17 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
         # slots.append(create_slot("creationTime", str(int(datetime.now().timestamp()))))
 
         # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
+        # slots.append(
+        #     create_slot(
+        #         "sourcePatientId",
+        #         f"{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO",
+        #     )
+        # )
+
         slots.append(
             create_slot(
                 "sourcePatientId",
-                f"{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO",
+                f"{nhsno}^^^&2.16.840.1.113883.2.1.4.1&ISO",
             )
         )
 
