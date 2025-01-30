@@ -128,13 +128,15 @@ async def iti55(request: Request):
         query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
             "queryByParameter"
         ]["parameterList"]
-        for param in query_params["livingSubjectId"]:
-            if param["value"]["@root"] == "2.16.840.1.113883.2.1.4.1":
-                nhsno = param["value"]["@extension"]
+        print(query_params["livingSubjectId"]["value"])
+        for param in query_params["livingSubjectId"]["value"]:
+            print(param)
+            if param["@root"] == "2.16.840.1.113883.2.1.4.1":
+                nhsno = param["@extension"]
                 print(f"NHSNO: {nhsno}")
-            if param["value"]["@root"] == "1.2.840.114350.1.13.525.3.7.3.688884.100":
-                ceid = param["value"]["@extension"]
-                print(f"CEID: {ceid}")
+            # if param["value"]["@root"] == "1.2.840.114350.1.13.525.3.7.3.688884.100":
+            #     ceid = param["value"]["@extension"]
+            #     print(f"CEID: {ceid}")
         if not nhsno:
             raise HTTPException(
                 status_code=400, detail=f"Invalid request, no nhs number found"
