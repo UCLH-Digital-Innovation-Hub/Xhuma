@@ -28,7 +28,12 @@ from starlette.background import BackgroundTask
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
-from .responses import iti_38_response, iti_39_response, iti_47_response
+from .responses import (
+    iti_38_response,
+    iti_39_response,
+    iti_47_response,
+    iti_55_response,
+)
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -95,6 +100,62 @@ NAMESPACES = (
         "soap": None,
     },
 )
+
+
+@router.post("/iti55")
+async def iti55(request: Request):
+    """
+    Handles ITI-55 (Cross Gateway Patient Discovery) requests.
+
+    This endpoint processes PDQ requests by:
+    1. Extracting NHS number from the request
+    2. Performing PDS lookup
+    3.. Returning demographics in ITI-55 response format
+
+    Args:
+        request (Request): The incoming SOAP request
+
+    Returns:
+        Response: SOAP response containing patient demographics
+
+    Raises:
+        HTTPException: For invalid content type, missing NHS number, or missing CEID
+    """
+    content_type = request.headers["Content-Type"]
+    if "application/soap+xml" in content_type:
+        body = await request.body()
+        envelope = clean_soap(body)
+        query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+            "queryByParameter"
+        ]["parameterList"]
+        for param in query_params["livingSubjectId"]["value"]:
+            if param["@root"] == "2.16.840.1.113883.2.1.4.1":
+                nhsno = param["@extension"]
+                print(f"NHSNO: {nhsno}")
+
+        if not nhsno:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid request, no nhs number found"
+            )
+
+        patient = await lookup_patient(nhsno)
+        print(f"Patient: {patient}")
+        # TODO refine this to return a proper error message as this will 500
+        if not patient:
+            print("Patient not found")
+
+        data = await iti_55_response(
+            envelope["Header"]["MessageID"],
+            patient,
+            envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                "queryByParameter"
+            ],
+        )
+        return Response(content=data, media_type="application/soap+xml")
+    else:
+        raise HTTPException(
+            status_code=400, detail=f"Content type {content_type} not supported"
+        )
 
 
 @router.post("/iti47")
@@ -192,12 +253,14 @@ async def iti38(request: Request):
             if x["@name"] == "$XDSDocumentEntryPatientId"
         )
 
+        # TODO rewrite this pattern if we don't need to map CEID to NHSNO
         if not validateNHSnumber(patient_id):
             try:
                 pattern = r"[0-9]{10}"
                 poss_nhs = re.search(pattern, patient_id).group(0)
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
+                    data = await iti_38_response(patient_id, "NOCEID", query_id)
             except:
                 pattern = r"[A-Z0-9]{15}"
                 ceid = re.search(pattern, patient_id).group(0)
@@ -207,7 +270,9 @@ async def iti38(request: Request):
                 print(f"NHS no for CEID is: {patient_id}")
                 logging.info(f"Mapped NHSNO is: {patient_id} from {ceid}")
 
-        data = await iti_38_response(patient_id, ceid, query_id)
+                data = await iti_38_response(patient_id, ceid, query_id)
+        else:
+            data = await iti_38_response(patient_id, "NOCEID", query_id)
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(
