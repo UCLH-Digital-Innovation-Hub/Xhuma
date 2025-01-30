@@ -65,7 +65,7 @@ def create_id(root, extension):
     return {"@root": root, "@extension": extension}
 
 
-async def iti_55_response(message_id, patient, ceid, query):
+async def iti_55_response(message_id, patient, query):
     """ITI47 response message generator
 
     Args:
@@ -80,8 +80,6 @@ async def iti_55_response(message_id, patient, ceid, query):
 
     gp = patient["generalPractitioner"][0]
 
-    # pprint.pprint(patient["address"][0])
-    address = patient["address"][0]
     patient_gender = patient["gender"]
     if patient_gender == "male":
         gender = "M"
@@ -92,8 +90,8 @@ async def iti_55_response(message_id, patient, ceid, query):
 
     ids = []
     ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
+    # we need to add an additional ID as an "internal" CEID
     ids.append(create_id("2.16.840.1.113883.2.1.4.1.99", patient["id"]))
-    # ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
 
     body = {
         "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -177,11 +175,6 @@ async def iti_55_response(message_id, patient, ceid, query):
                                 "birthTime": {
                                     "@value": patient["birthDate"].replace("-", "")
                                 },
-                                # "birthTime": {"@value": patient["birthDate"]},
-                                # "addr": {
-                                #     "streetAddressLine": address["line"],
-                                #     "postalCode": {"#text": address["postalCode"]},
-                                # },
                             },
                             "providerOrganization": {
                                 "@classCode": "ORG",
