@@ -149,26 +149,64 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "@codeSystem": "2.16.840.1.113883.6.1",
                 },
                 "title": list.title,
-                "text": "lorem ipsum",
+                "text": "",  # Will be populated with table
             }
             # if there are no entries
             if not list.entry:
                 # comp["section"]["@nullFlavour"] = "NI"
-                comp["section"]["text"] = "No Information"
+                # Initialize empty table with appropriate headers based on section
+                if list.title == "Allergies and adverse reactions":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Start Date</th><th>Status</th><th>Description</th><th>Reaction</th></tr><tr><td colspan='4'>No Information Available</td></tr></table>"
+                elif list.title == "Medications and medical devices":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Start Date</th><th>End Date</th><th>Status</th><th>Medication</th><th>Instructions</th></tr><tr><td colspan='5'>No Information Available</td></tr></table>"
+                elif list.title == "Problems":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Date</th><th>Status</th><th>Condition</th></tr><tr><td colspan='3'>No Information Available</td></tr></table>"
+                elif list.title == "Immunisations":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Date</th><th>Type</th><th>Details</th></tr><tr><td colspan='3'>No Information Available</td></tr></table>"
+                elif list.title == "Vital Signs":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Date</th><th>Type</th><th>Value</th><th>Units</th></tr><tr><td colspan='4'>No Information Available</td></tr></table>"
 
             else:
+                # Initialize table with headers based on section
+                if list.title == "Allergies and adverse reactions":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Start Date</th><th>Status</th><th>Description</th><th>Reaction</th></tr>"
+                elif list.title == "Medications and medical devices":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Start Date</th><th>End Date</th><th>Status</th><th>Medication</th><th>Instructions</th></tr>"
+                elif list.title == "Problems":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Date</th><th>Status</th><th>Condition</th></tr>"
+                elif list.title == "Immunisations":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Date</th><th>Type</th><th>Details</th></tr>"
+                elif list.title == "Vital Signs":
+                    comp["section"]["text"] = "<table border='1'><tr><th>Date</th><th>Type</th><th>Value</th><th>Units</th></tr>"
+
                 comp["section"]["entry"] = []
                 for entry in list.entry:
                     referenced_item = index[entry.item.reference]
 
                     if list.title == "Allergies and adverse reactions":
-                        comp["section"]["entry"].append(allergy(referenced_item))
+                        entry_data = allergy(referenced_item)
+                        comp["section"]["entry"].append(entry_data)
+                        comp["section"]["text"] += f"<tr><td>{entry_data['act']['effectiveTime']['low']['@value']}</td>" \
+                            f"<td>{entry_data['act']['statusCode']['@code']}</td>" \
+                            f"<td>{entry_data['act']['entryRelationship']['observation']['participant']['participantRole']['playingEntity']['code']['@displayName']}</td>" \
+                            f"<td>{entry_data['act']['entryRelationship']['observation']['entryRelationship']['observation']['value']['@displayName']}</td></tr>"
                     elif list.title == "Problems":
-                        comp["section"]["entry"].append(problem(referenced_item))
+                        entry_data = problem(referenced_item)
+                        comp["section"]["entry"].append(entry_data)
+                        comp["section"]["text"] += f"<tr><td>{entry_data['act']['effectiveTime']['low']['@value']}</td>" \
+                            f"<td>{entry_data['act']['statusCode']['@code']}</td>" \
+                            f"<td>{entry_data['act']['entryRelationship']['observation']['value']['@displayName']}</td></tr>"
                     elif list.title == "Medications and medical devices":
-                        comp["section"]["entry"].append(
-                            medication(referenced_item, index)
-                        )
+                        entry_data = medication(referenced_item, index)
+                        comp["section"]["entry"].append(entry_data)
+                        comp["section"]["text"] += f"<tr><td>{entry_data['substanceAdministration']['effectiveTime']['low']['@value']}</td>" \
+                            f"<td>{entry_data['substanceAdministration']['effectiveTime']['high']['@value']}</td>" \
+                            f"<td>{entry_data['substanceAdministration']['statusCode']['@code']}</td>" \
+                            f"<td>{entry_data['substanceAdministration']['consumable']['manufacturedProduct']['manufacturedMaterial']['code'][0]['@displayName']}</td>" \
+                            f"<td>{entry_data['substanceAdministration']['entryRelationship']['act']['text']['#text']}</td></tr>"
+
+                # Close the table after all entries are processed
+                comp["section"]["text"] += "</table>"
 
             return comp
 
