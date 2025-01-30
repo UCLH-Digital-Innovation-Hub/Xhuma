@@ -202,7 +202,9 @@ async def iti_55_response(message_id, patient, query):
             "queryByParameter": query,
         },
     }
-    header = create_header("urn:hl7-org:v3:PRPA_IN201306UV02", message_id)
+    header = create_header(
+        "urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery", message_id
+    )
 
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
