@@ -12,7 +12,8 @@ from ..gpconnect import gpconnect
 from ..redis_connect import redis_client
 
 # REGISTRY_ID = redis_client.get("registry")
-REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid.uuid4()))
+COMMUNITY_ID = os.getenv("COMMUNITY_ID", "2.16.840.1.113883.2.1.3.34.9001")
+REGISTRY_ID = os.getenv("REGISTRY_ID", "2.16.840.1.113883.2.1.3.34.69.420")
 
 
 def create_security():
@@ -62,6 +63,148 @@ def create_envelope(header, body):
 
 def create_id(root, extension):
     return {"@root": root, "@extension": extension}
+
+
+async def iti_55_response(message_id, patient, query):
+    """ITI47 response message generator
+
+    Args:
+        message_id (_type_): _description_
+        patient (_type_): _description_
+        ceid (_type_): _description_
+        query (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
+    gp = patient["generalPractitioner"][0]
+
+    # pprint.pprint(patient["address"][0])
+    address = patient["address"][0]
+    patient_gender = patient["gender"]
+    if patient_gender == "male":
+        gender = "M"
+    elif patient_gender == "female":
+        gender = "F"
+    else:
+        gender = "UNK"
+
+    ids = []
+    ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
+    # ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
+
+    body = {
+        "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+    }
+
+    body["PRPA_IN201306UV02"] = {
+        "@xmlns": "urn:hl7-org:v3",
+        "@ITSVersion": "XML_1.0",
+        "id": {"@root": str(uuid.uuid4())},
+        "creationTime": {"@value": int(datetime.now().timestamp())},
+        "interactionId": {
+            "@root": "2.16.840.1.113883.1.18",
+            "@extension": "PRPA_IN201306UV02",
+        },
+        "processingCode": {"@code": "T"},
+        "processingModeCode": {"@code": "T"},
+        "acceptAckCode": {"@code": "NE"},
+        "receiver": {
+            "@typeCode": "RCV",
+            "device": {"@classCode": "DEV", "@determinerCode": "INSTANCE"},
+        },
+        "sender": {
+            "@typeCode": "SND",
+            "device": {"@classCode": "DEV", "@determinerCode": "INSTANCE"},
+        },
+        "acknowledgement": {
+            "typeCode": {"@code": "AA"},
+            "targetMessage": {"id": {"@root": message_id}},
+        },
+        "controlActProcess": {
+            "@classCode": "CACT",
+            "@moodCode": "EVN",
+            "code": {
+                "@code": "PRPA_TE201306UV02",
+                "@codeSystem": "2.16.840.1.113883.1.18",
+            },
+            "authorOrPerformer": {
+                "@typeCode": "AUT",
+                "assignedDevice": {
+                    "@classCode": "ASSIGNED",
+                    # NHS number needs to be the assigned authority
+                    "id": {"@root": "2.16.840.1.113883.2.1.4.1"},
+                },
+            },
+            "subject": {
+                "@typeCode": "SUBJ",
+                "@contextConductionInd": "false",
+                "registrationEvent": {
+                    "@classCode": "REG",
+                    "moodCode": "EVN",
+                    "statusCode": {"@code": "active"},
+                    "custodian": {
+                        "@typeCode": "CST",
+                        "assignedEntity": {
+                            "@classCode": "ASSIGNED",
+                            "id": {
+                                "@root": COMMUNITY_ID,
+                            },
+                            "code": {
+                                "@code": "SupportsHealthDataLocator",
+                                "@codeSystem": "1.3.6.1.4.1.19376.1.2.27.2",
+                            },
+                        },
+                    },
+                    "subject1": {
+                        "@typeCode": "SBJ",
+                        "patient": {
+                            "@classCode": "PAT",
+                            "id": ids,
+                            "statusCode": {"@code": "active"},
+                            "patientPerson": {
+                                "@classCode": "PSN",
+                                "@determinerCode": "INSTANCE",
+                                "name": {
+                                    "given": {"#text": patient["name"][0]["given"][0]},
+                                    "family": {"#text": patient["name"][0]["family"]},
+                                },
+                                "administrativeGenderCode": {"@code": gender},
+                                # birthTime is ISO 8601 format
+                                "birthTime": {
+                                    "@value": patient["birthDate"].replace("-", "")
+                                },
+                                # "birthTime": {"@value": patient["birthDate"]},
+                                # "addr": {
+                                #     "streetAddressLine": address["line"],
+                                #     "postalCode": {"#text": address["postalCode"]},
+                                # },
+                            },
+                            "providerOrganization": {
+                                "@classCode": "ORG",
+                                "@determinerCode": "INSTANCE",
+                                "id": {
+                                    "@root": "2.16.840.1.113883.2.1.4.3",
+                                    "id": gp["identifier"]["value"],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+            "queryAck": {
+                "queryId": query["queryId"],
+                "queryResponseCode": {"@code": "OK"},
+                "statusCode": {"@code": "deliveredResponse"},
+            },
+            "queryByParameter": query,
+        },
+    }
+    header = create_header("urn:hl7-org:v3:PRPA_IN201306UV02", message_id)
+
+    return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
 async def iti_47_response(message_id, patient, ceid, query):
@@ -355,7 +498,7 @@ async def iti_39_response(message_id: str, document_id: str, document):
                 # "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
             },
             "ns4:DocumentResponse": {
-                "ns4:HomeCommunityId": {"#text": f"urn:oid:{REGISTRY_ID}"},
+                "ns4:HomeCommunityId": {"#text": f"urn:oid:{COMMUNITY_ID}"},
                 "ns4:RepositoryUniqueId": {"#text": REGISTRY_ID},
                 "ns4:DocumentUniqueId": {"#text": document_id},
                 "ns4:mimeType": {"#text": "text/xml"},
