@@ -65,7 +65,7 @@ def create_id(root, extension):
     return {"@root": root, "@extension": extension}
 
 
-async def iti_55_response(message_id, patient, query):
+async def iti_55_response(message_id, patient, ceid, query):
     """ITI47 response message generator
 
     Args:
@@ -92,6 +92,7 @@ async def iti_55_response(message_id, patient, query):
 
     ids = []
     ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
+    ids.append(create_id("2.16.840.1.113883.2.1.4.1.99", patient["id"]))
     # ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
 
     body = {
