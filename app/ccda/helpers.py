@@ -42,7 +42,7 @@ def generate_code(coding: coding.Coding) -> dict:
     }
 
     if coding.system == "http://snomed.info/sct":
-        code["@codeSystem"] = ("2.16.840.1.113883.6.96",)
+        code["@codeSystem"] = "2.16.840.1.113883.6.96"
 
     return code
 
