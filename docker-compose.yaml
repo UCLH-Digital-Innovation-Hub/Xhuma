@@ -1,16 +1,123 @@
-version: '0.1'
 services:
   redis:
-    image: redis
+    image: redis:7.2
+    command: redis-server /usr/local/etc/redis/redis.conf
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - ./app:/code/app
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+      - redis_data:/data
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    sysctls:
+      net.core.somaxconn: 1024
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    networks:
+      - xhuma-net
+
   gpcon:
     build: .
     ports:
       - "${GPCON_PORT:-80}:80"
     depends_on:
       - redis
+      - otel-collector
+      - postgres
+      - tempo
     environment:
       API_KEY: ${API_KEY}
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_PYTHON_METER_PROVIDER: "sdk_meter_provider"
+      OTEL_PYTHON_TRACER_PROVIDER: "sdk_tracer_provider"
+      OTEL_SERVICE_NAME: "xhuma"
+      POSTGRES_DB: ${POSTGRES_DB:-xhuma}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_HOST: postgres
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - ./app:/code/app
+    networks:
+      - xhuma-net
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - xhuma-net
+
+  grafana:
+    image: grafana/grafana:10.0.3
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+      - tempo
+    networks:
+      - xhuma-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector:0.85.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4316:4318"   # OTLP http receiver (changed port to avoid conflict)
+      - "8890:8890"   # Metrics endpoint
+    depends_on:
+      - prometheus
+      - tempo
+    networks:
+      - xhuma-net
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-xhuma}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./app/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - xhuma-net
+
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+    ports:
+      - "3200:3200"   # tempo-query frontend
+      - "4318:4318"   # OTLP gRPC
+    networks:
+      - xhuma-net
+
+networks:
+  xhuma-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
