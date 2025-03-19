@@ -44,6 +44,8 @@ services:
     environment:
       API_KEY: ${API_KEY}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+      OTEL_PYTHON_LOG_CORRELATION: "true"
       OTEL_PYTHON_METER_PROVIDER: "sdk_meter_provider"
       OTEL_PYTHON_TRACER_PROVIDER: "sdk_tracer_provider"
       OTEL_SERVICE_NAME: "xhuma"

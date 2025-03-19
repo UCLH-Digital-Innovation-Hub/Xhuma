@@ -17,7 +17,7 @@ processors:
   resource:
     attributes:
       - key: environment
-        value: ${ENV:-production}
+        value: "production"
         action: upsert
 
 exporters:

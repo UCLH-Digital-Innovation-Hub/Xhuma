@@ -6,7 +6,7 @@ distributor:
     otlp:
       protocols:
         grpc:
-          endpoint: "0.0.0.0:4318"  # Changed from 4317 to avoid conflict
+          endpoint: "0.0.0.0:4318"  # Using OTLP gRPC port to match docker-compose config
 
 ingester:
   trace_idle_period: 10s
