@@ -86,11 +86,14 @@ class RedisClient:
             socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
             retry_on_timeout=True,
             decode_responses=False,  # Keep as bytes for MIME data
+            protocol=2,  # Use RESP2 protocol for better compatibility
         )
         self._client = redis.Redis(
             connection_pool=self._pool,
             socket_timeout=SOCKET_TIMEOUT,
             retry_on_timeout=True,
+            decode_responses=False,  # Keep as bytes for MIME data
+            protocol=2,  # Use RESP2 protocol for better compatibility
         )
 
     @retry_on_connection_error()
@@ -122,6 +125,11 @@ class RedisClient:
     def info(self) -> Dict[str, Any]:
         """Get Redis server information."""
         return self._client.info()
+
+    @retry_on_connection_error()
+    def exists(self, key: str) -> bool:
+        """Check if a key exists."""
+        return bool(self._client.exists(key))
 
     def get_cache_info(self) -> dict:
         """Get cache statistics and memory usage."""
@@ -162,6 +170,8 @@ class RedisClient:
 # Create global Redis client instance
 redis_client = RedisClient()
 
+# Export the redis_connect instance for use in other modules
+redis_connect = redis_client
 
 def get_cached_data(key: str) -> Optional[bytes]:
     """Retrieve cached data for a given key."""

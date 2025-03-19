@@ -87,7 +87,7 @@ router = APIRouter(prefix="/SOAP", route_class=LoggingRoute)
 
 logging.basicConfig(filename="info.log", level=logging.INFO)
 
-client = redis_connect()
+client = redis_connect  # Use the redis_connect instance directly
 
 # SOAP namespace definitions
 NAMESPACES = (

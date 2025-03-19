@@ -49,8 +49,8 @@ async def startup_event():
     2. Checks for existing JWK (JSON Web Key)
     3. Generates a new JWK from private key if none exists
     """
-    # Store registry ID in Redis
-    redis_client.set("registry", REGISTRY_ID)
+    # Store registry ID in Redis with 24 hour expiry
+    redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
 
     # Handle JWK generation/verification
     if not os.path.isfile("keys/jwk.json"):
