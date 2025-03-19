@@ -32,7 +32,7 @@ services:
     networks:
       - xhuma-net
 
-  gpcon:
+  xhuma:
     build: .
     ports:
       - "${GPCON_PORT:-80}:80"
