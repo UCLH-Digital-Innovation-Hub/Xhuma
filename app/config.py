@@ -1,8 +1,8 @@
 """
 Xhuma Configuration Module
 
-This module provides centralized configuration for the Xhuma middleware service,
-including logging, metrics, and tracing settings.
+This module provides centralized configuration for the Xhuma middleware service
+including logging metrics and tracing settings.
 """
 
 import logging
@@ -44,7 +44,7 @@ FASTAPI_OBSERVABILITY_CONFIG = {
     "should_include_status_code_metrics": True,
     "should_include_response_time_metrics": True,
     "excluded_urls": ["/metrics", "/health", "/docs", "/openapi.json"],
-    "buckets": [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0],
+    "buckets": [0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0]
 }
 
 # Prometheus Metric Configurations
@@ -78,64 +78,64 @@ LOGGING_CONFIG: Dict[str, Any] = {
                 trace_id: %(otelTraceID)s
                 span_id: %(otelSpanID)s
             """.replace("\n", " ").strip(),
-            "datefmt": "%Y-%m-%d %H:%M:%S",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
         },
         "standard": {
             "format": "[%(asctime)s] [%(correlation_id)s] [%(levelname)s] %(message)s",
-            "datefmt": "%Y-%m-%d %H:%M:%S",
-        },
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        }
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "standard" if ENVIRONMENT == "development" else "json",
-            "stream": "ext://sys.stdout",
+            "stream": "ext://sys.stdout"
         },
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
             "formatter": "json",
             "filename": "logs/xhuma.log",
             "maxBytes": 10485760,  # 10MB
-            "backupCount": 5,
+            "backupCount": 5
         },
         "database": {
             "class": "app.log_handlers.PostgresLogHandler",
             "formatter": "json",
-            "dsn": DB_DSN,
+            "dsn": DB_DSN
         }
     },
     "loggers": {
         "xhuma": {
             "handlers": ["console", "file"],  # Remove database handler from root logger
             "level": LOG_LEVEL,
-            "propagate": False,
+            "propagate": False
         },
         "xhuma.security": {
             "handlers": ["console", "file", "database"],
             "level": "INFO",
-            "propagate": False,
+            "propagate": False
         },
         "xhuma.soap": {
             "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
-            "propagate": False,
+            "propagate": False
         },
         "xhuma.pds": {
             "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
-            "propagate": False,
+            "propagate": False
         },
         "xhuma.gpconnect": {
             "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
-            "propagate": False,
+            "propagate": False
         },
         "xhuma.ccda": {
             "handlers": ["console", "file", "database"],
             "level": LOG_LEVEL,
-            "propagate": False,
-        },
-    },
+            "propagate": False
+        }
+    }
 }
 
 # Correlation ID Configuration
@@ -167,7 +167,7 @@ SECURITY_EVENTS = {
 def get_logger(name: str) -> logging.Logger:
     """
     Get a configured logger instance for the specified module.
-    
+
     :param name: The name of the module requesting the logger
     :type name: str
     :return: Configured logger instance
