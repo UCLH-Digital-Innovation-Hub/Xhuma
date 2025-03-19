@@ -5,6 +5,8 @@ import requests
 import xmltodict
 from xmlschema import XMLSchema
 
+from app.ccda.helpers import extract_soap_request
+
 if __name__ == "__main__":
 
     with open("xml/pdqRequest.xml") as iti47:
@@ -52,13 +54,16 @@ if __name__ == "__main__":
 
         print("-" * 20)
 
-    with open("xml/4. Perform XCA ITI-39 document retrieve.xml") as iti39:
+    with open("xml/iti39example.xml") as iti39:
         print("ITI39")
-
-        dom = ElementTree.parse(iti39)
-        root = dom.getroot()
+        # print(iti39.read())
+        raw39 = iti39
+        iti39 = extract_soap_request(iti39.read())
+        dom = ElementTree.fromstring(iti39)
+        # root = dom.getroot()
         xmldict = xmltodict.parse(
-            ElementTree.tostring(root),
+            # ElementTree.tostring(root),
+            iti39,
             process_namespaces=True,
             namespaces={
                 "http://www.w3.org/2003/05/soap-envelope": None,
@@ -82,7 +87,7 @@ if __name__ == "__main__":
         headers = {"Content-Type": "application/soap+xml"}
 
         url = "http://127.0.0.1:8000/SOAP/iti39"
-        r = requests.post(url, data=body, headers=headers)
+        r = requests.post(url, data=raw39.read(), headers=headers)
 
         # save iti39 response
         with open("iti39.xml", "w") as output:

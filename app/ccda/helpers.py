@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from xml.etree import ElementTree
 
@@ -39,6 +40,9 @@ def generate_code(coding: coding.Coding) -> dict:
         "@displayName": coding.display,
         "@codeSystemName": coding.system,
     }
+
+    if coding.system == "http://snomed.info/sct":
+        code["@codeSystem"] = "2.16.840.1.113883.6.96"
 
     return code
 
@@ -94,3 +98,20 @@ def clean_soap(
         namespaces=namespaces,
     )
     return xmldict["Envelope"]
+
+
+def extract_soap_request(message):
+    """
+    Extracts the SOAP request from a MIME message.
+    """
+
+    # print("Extracting SOAP request from MIME message...")
+    # print(message)
+
+    # iterate throught the message lines and find soap envelope
+
+    for line in message.splitlines():
+        if line.startswith("<s:Envelope "):
+            return line
+    # if can't find a soap envelope raise an error
+    raise ValueError("SOAP envelope not found in the message.")

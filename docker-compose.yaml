@@ -1,11 +1,25 @@
 services:
   redis:
     image: redis:7.2
-    command: redis-server /usr/local/etc/redis/redis.conf
+    command:
+      - /bin/sh
+      - -c
+      - |
+        redis-server \
+        --requirepass "$${REDIS_PASSWORD}" \
+        --maxmemory 256mb \
+        --maxmemory-policy volatile-lru \
+        --appendonly yes \
+        --appendfsync everysec \
+        --save 900 1 \
+        --save 300 10 \
+        --save 60 10000 \
+        --maxclients 100 \
+        --timeout 300 \
+        --tcp-keepalive 60
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
       - redis_data:/data
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
@@ -18,7 +32,7 @@ services:
     networks:
       - xhuma-net
 
-  gpcon:
+  xhuma:
     build: .
     ports:
       - "${GPCON_PORT:-80}:80"

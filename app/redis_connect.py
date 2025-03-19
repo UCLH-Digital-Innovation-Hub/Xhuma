@@ -21,10 +21,9 @@ import time
 from functools import wraps
 from typing import Any, Dict, Optional, Union
 
+import redis
 from redis.connection import ConnectionPool
 from redis.exceptions import ConnectionError, RedisError
-
-import redis
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -86,11 +85,14 @@ class RedisClient:
             socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
             retry_on_timeout=True,
             decode_responses=False,  # Keep as bytes for MIME data
+            protocol=2,  # Use RESP2 protocol for better compatibility
         )
         self._client = redis.Redis(
             connection_pool=self._pool,
             socket_timeout=SOCKET_TIMEOUT,
             retry_on_timeout=True,
+            decode_responses=False,  # Keep as bytes for MIME data
+            protocol=2,  # Use RESP2 protocol for better compatibility
         )
 
     @retry_on_connection_error()
@@ -123,6 +125,11 @@ class RedisClient:
         """Get Redis server information."""
         return self._client.info()
 
+    @retry_on_connection_error()
+    def exists(self, key: str) -> bool:
+        """Check if a key exists."""
+        return bool(self._client.exists(key))
+
     def get_cache_info(self) -> dict:
         """Get cache statistics and memory usage."""
         try:
@@ -135,9 +142,9 @@ class RedisClient:
                 "total_keys": total_keys,
                 "memory_used": memory_used,
                 "memory_limit": total_memory,
-                "memory_usage_percent": (
-                    (memory_used / total_memory * 100) if total_memory else 0
-                ),
+                "memory_usage_percent": (memory_used / total_memory * 100)
+                if total_memory
+                else 0,
                 "connected_clients": info.get("connected_clients", 0),
                 "hit_rate": info.get("keyspace_hits", 0)
                 / (info.get("keyspace_hits", 0) + info.get("keyspace_misses", 1)),
@@ -161,6 +168,9 @@ class RedisClient:
 
 # Create global Redis client instance
 redis_client = RedisClient()
+
+# Export the redis_connect instance for use in other modules
+redis_connect = redis_client
 
 
 def get_cached_data(key: str) -> Optional[bytes]:

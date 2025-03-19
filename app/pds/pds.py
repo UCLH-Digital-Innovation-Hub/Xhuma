@@ -21,11 +21,7 @@ router = fastapi.APIRouter(prefix="/pds")
 
 @router.get("/lookup_patient/{nhsno}")
 async def lookup_patient(nhsno: int):
-
-    nhs_token = redis_client.get("access_token")
-
-    # if nhs token expired or not request, get one and cache
-    if nhs_token is None:
+    def get_pds_token():
         full_path = f"{INT_BASE_PATH}oauth2/token"
         jwt_token = pds_jwt(API_KEY, API_KEY, full_path, "test-1")
 
@@ -42,6 +38,12 @@ async def lookup_patient(nhsno: int):
 
         redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
 
+    # if nhs token expired or not request, get one and cache
+    if not redis_client.exists("access_token"):
+        nhs_token = get_pds_token()
+    else:
+        nhs_token = redis_client.get("access_token")
+
     # set headers for pds request
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
@@ -55,9 +57,131 @@ async def lookup_patient(nhsno: int):
     # print(url)
 
     r = httpx.get(url, headers=headers)
-    patient_dict = json.loads(r.text)
-    # print(patient_dict)
-    # TODO add error handling
+
+    # if 401, get new one and try again
+    if r.status_code == 401:
+        print("401: trying to refresh token")
+        nhs_token = get_pds_token()
+        r = httpx.get(url, headers=headers)
+
+    if r.status_code != 200:
+        # raise Exception(f"{r.status_code}: {r.text}")
+        # mocking response whilst PDS INT is down
+        print("mocking response")
+        patient_dict = {
+            "address": [
+                {
+                    "extension": [
+                        {
+                            "extension": [
+                                {
+                                    "url": "type",
+                                    "valueCoding": {
+                                        "code": "PAF",
+                                        "system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-AddressKeyType",
+                                    },
+                                },
+                                {"url": "value", "valueString": "19343715"},
+                            ],
+                            "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-AddressKey",
+                        }
+                    ],
+                    "id": "XUSFS",
+                    "line": ["268 PIPER KNOWLE ROAD", "STOCKTON-ON-TEES", "CLEVELAND"],
+                    "period": {"start": "1998-07-04"},
+                    "postalCode": "TS19 8JP",
+                    "use": "home",
+                }
+            ],
+            "birthDate": "1938-12-11",
+            "extension": [
+                {
+                    "extension": [
+                        {
+                            "url": "language",
+                            "valueCodeableConcept": {
+                                "coding": [
+                                    {
+                                        "code": "de",
+                                        "display": "German",
+                                        "system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-HumanLanguage",
+                                        "version": "1.0.0",
+                                    }
+                                ]
+                            },
+                        },
+                        {"url": "interpreterRequired", "valueBoolean": True},
+                    ],
+                    "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-NHSCommunication",
+                }
+            ],
+            "gender": "male",
+            "generalPractitioner": [
+                {
+                    "id": "BZYbh",
+                    "identifier": {
+                        "period": {"start": "2023-09-29"},
+                        "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+                        "value": "B83621",
+                    },
+                    "type": "Organization",
+                }
+            ],
+            "id": "9690937278",
+            "identifier": [
+                {
+                    "extension": [
+                        {
+                            "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-NHSNumberVerificationStatus",
+                            "valueCodeableConcept": {
+                                "coding": [
+                                    {
+                                        "code": "01",
+                                        "display": "Number present and verified",
+                                        "system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-NHSNumberVerificationStatus",
+                                        "version": "1.0.0",
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                    "system": "https://fhir.nhs.uk/Id/nhs-number",
+                    "value": "9690937278",
+                }
+            ],
+            "meta": {
+                "security": [
+                    {
+                        "code": "U",
+                        "display": "unrestricted",
+                        "system": "http://terminology.hl7.org/CodeSystem/v3-Confidentiality",
+                    }
+                ],
+                "versionId": "4",
+            },
+            "name": [
+                {
+                    "family": "SAMUAL",
+                    "given": ["Lucien", "Keith"],
+                    "id": "LVxyI",
+                    "period": {"start": "1970-08-11"},
+                    "prefix": ["MR"],
+                    "use": "usual",
+                }
+            ],
+            "resourceType": "Patient",
+            "telecom": [
+                {
+                    "id": "EAFDAA6A",
+                    "period": {"start": "2024-11-27"},
+                    "system": "email",
+                    "use": "home",
+                    "value": "luclen@gmail.com",
+                }
+            ],
+        }
+    else:
+        patient_dict = json.loads(r.text)
 
     return patient_dict
 
