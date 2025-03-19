@@ -1,0 +1,57 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+      http:
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1500
+    spike_limit_mib: 512
+
+  resource:
+    attributes:
+      - key: environment
+        value: ${ENV:-production}
+        action: upsert
+
+exporters:
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "xhuma"
+    const_labels:
+      label1: value1
+    
+  logging:
+    loglevel: debug
+
+  otlp:
+    endpoint: "tempo:4318"  # Updated to match Tempo's new port
+    tls:
+      insecure: true
+
+service:
+  telemetry:
+    metrics:
+      address: ":8890"  # Changed from 8888 to avoid conflict
+
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [prometheus, logging]
+    
+    traces:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [otlp, logging]
+
+    logs:
+      receivers: [otlp]
+      processors: [batch, resource]
+      exporters: [logging]
