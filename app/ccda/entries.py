@@ -61,8 +61,10 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 "@codeSystemName": "SNOMED CT",
                 "@codeSystem": "2.16.840.1.113883.6.96",
             },
-            "text": {"#text": entry.dosage[0].text},
-            "patientInstruction": {"#text": entry.dosage[0].patientInstruction},
+            "text": {
+                "#text": f"{entry.dosage[0].text}\n Patient Instuctions: {entry.dosage[0].patientInstruction}"
+            },
+            # "patientInstruction": {"#text": entry.dosage[0].patientInstruction},
             "statusCode": {"@code": "completed"},
         },
     }
