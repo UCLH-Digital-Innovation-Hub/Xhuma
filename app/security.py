@@ -59,12 +59,14 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
 
 
 def create_jwt(
+    audit: dict,
     audience: str = "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/documents/fhir",
 ) -> str:
     """
     Creates a JWT for GP Connect access with specific claims required by NHS Digital.
 
     Args:
+        audit (dict): Audit information for the JWT from teh SOAP SAML headers
         audience (str): The intended audience (aud claim). Defaults to test environment.
 
     Returns:

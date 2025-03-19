@@ -187,12 +187,13 @@ async def lookup_patient(nhsno: int):
 
 
 @router.get("/sds/{ods}")
-async def sds_trace(ods: str, endpoint: bool = False):
+async def sds_trace(ods: str, audit: dict, endpoint: bool = False):
     """
     Function to get the SDS trace for an ODS code
 
     args:
     ods: str - the ODS code to trace
+    audit: dictionary of saml attributes for the request
     endpoiny: bool - whether to make an endpoint SDS trace
 
     returns:

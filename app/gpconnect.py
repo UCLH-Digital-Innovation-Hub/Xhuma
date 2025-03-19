@@ -19,7 +19,7 @@ router = APIRouter()
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(nhsno: int):
+async def gpconnect(nhsno: int, saml_attrs: dict):
     """accesses gp connect endpoint for nhs number"""
 
     # validate nhsnumber
@@ -27,13 +27,12 @@ async def gpconnect(nhsno: int):
         logging.error(f"{nhsno} is not a valid NHS number")
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
-    # TODO pds search
     pds_search = await pds.lookup_patient(nhsno)
-    print(pds_search)
+    # print(pds_search)
 
     # TODO sds search
 
-    token = create_jwt()
+    token = create_jwt(saml_attrs)
 
     headers = {
         "Ssp-TraceID": "09a01679-2564-0fb4-5129-aecc81ea2706",

@@ -28,6 +28,7 @@ from starlette.background import BackgroundTask
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
+from .audit import process_saml_attributes
 from .responses import (
     iti_38_response,
     iti_39_response,
@@ -182,6 +183,7 @@ async def iti47(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
+
         query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
             "queryByParameter"
         ]["parameterList"]
@@ -244,6 +246,10 @@ async def iti38(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
+        saml_attrs = process_saml_attributes(
+            envelope["Header"]["Security"]["Assertion"]["AttributeStatement"]
+        )
+
         soap_body = envelope["Body"]
         slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
         query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
@@ -273,7 +279,7 @@ async def iti38(request: Request):
 
                 data = await iti_38_response(patient_id, ceid, query_id)
         else:
-            data = await iti_38_response(patient_id, "NOCEID", query_id)
+            data = await iti_38_response(patient_id, "NOCEID", query_id, saml_attrs)
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(
