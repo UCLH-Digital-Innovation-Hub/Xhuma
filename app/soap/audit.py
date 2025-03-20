@@ -25,4 +25,5 @@ def process_saml_attributes(saml_header: dict) -> dict:
         # setattr(saml_attributes, attr_map[attribute['@Name']], attribute['AttributeValue'])
         saml_attributes[attr_map[attribute["@Name"]]] = attribute["AttributeValue"]
 
+    # print(saml_attributes)
     return saml_attributes

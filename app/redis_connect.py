@@ -142,9 +142,9 @@ class RedisClient:
                 "total_keys": total_keys,
                 "memory_used": memory_used,
                 "memory_limit": total_memory,
-                "memory_usage_percent": (memory_used / total_memory * 100)
-                if total_memory
-                else 0,
+                "memory_usage_percent": (
+                    (memory_used / total_memory * 100) if total_memory else 0
+                ),
                 "connected_clients": info.get("connected_clients", 0),
                 "hit_rate": info.get("keyspace_hits", 0)
                 / (info.get("keyspace_hits", 0) + info.get("keyspace_misses", 1)),

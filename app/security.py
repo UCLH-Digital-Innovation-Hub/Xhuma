@@ -17,6 +17,7 @@ import uuid
 from time import time
 
 import jwt
+from fhirclient.models import humanname, practitioner
 
 JWTKEY = os.getenv("JWTKEY")
 
@@ -87,9 +88,12 @@ def create_jwt(
         - Make audience dynamic
     """
     created_time = int(time())
+    # print(audit["subject_id"].split(", "))
+    # split_name = audit["subject_id"].split(" ")
+    family, given = audit["subject_id"].split(", ")
     payload = {
         "iss": "https://orange.testlab.nhs.uk/",
-        "sub": "1",
+        "sub": audit["subject_id"],
         "aud": audience,
         "iat": created_time,
         "exp": created_time + 300,
@@ -99,49 +103,83 @@ def create_jwt(
             "resourceType": "Device",
             "identifier": [
                 {
-                    "system": "https://orange.testlab.nhs.uk/gpconnect-demonstrator/Id/local-system-instance-id",
-                    "value": "gpcdemonstrator-1-orange",
+                    "system": "https://xhumademo.com",
+                    "value": os.getenv("DEVICE_ID", "1"),
                 }
             ],
-            "model": "GP Connect Demonstrator",
-            "version": "1.5.0",
+            "model": "Xhuma",
+            "version": os.getenv("VERSION", "1.0"),
         },
         "requesting_organization": {
             "resourceType": "Organization",
             "identifier": [
                 {
                     "system": "https://fhir.nhs.uk/Id/ods-organization-code",
-                    "value": "A11111",
+                    "value": os.getenv("ORG_CODE", "RRV"),
                 }
             ],
-            "name": "Consumer organisation name",
+            "name": audit["organization"],
         },
+        # "requesting_practitioner": f"{audit["organisation_id"]}|{audit["subject_id"]}",
         "requesting_practitioner": {
             "resourceType": "Practitioner",
-            "id": "1",
+            "id": audit["subject_id"],
             "identifier": [
                 {
-                    "system": "https://fhir.nhs.uk/Id/sds-user-id",
-                    "value": "111111111111",
-                },
-                {
-                    "system": "https://fhir.nhs.uk/Id/sds-role-profile-id",
-                    "value": "22222222222222",
-                },
-                {
-                    "system": "https://orange.testlab.nhs.uk/gpconnect-demonstrator/Id/local-user-id",
-                    "value": "1",
+                    "system": audit["organization_id"],
+                    "value": audit["subject_id"],
                 },
             ],
-            "name": [
-                {"family": "Demonstrator", "given": ["GPConnect"], "prefix": ["Dr"]}
-            ],
+            "name": humanname.HumanName(
+                dict(
+                    family=family,
+                    given=[given],
+                    prefix=["Dr"],
+                )
+            ).as_json(),
+            # "name": [
+            #     {"family": "Demonstrator", "given": ["GPConnect"], "prefix": ["Dr"]}
+            # ],
         },
     }
+    print("JWT PAYLOAD")
+    print(payload)
     return jwt.encode(payload, headers={"alg": "none", "typ": "JWT"}, key=None)
 
 
 if __name__ == "__main__":
     # Example usage
-    token = create_jwt()
+    audit = {
+        "subject_id": "CONE, Stephen",
+        "organization": "UCLH - University College London Hospitals - TST",
+        "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+        "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+        "role": {
+            "Role": {
+                "@xsi:type": "CE",
+                "@code": "224608005",
+                "@codeSystem": "2.16.840.1.113883.6.96",
+                "@codeSystemName": "SNOMED_CT",
+                "@displayName": "Administrative healthcare staff",
+                "@xmlns": "urn:hl7-org:v3",
+                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+            }
+        },
+        "purpose_of_use": {
+            "PurposeForUse": {
+                "@xsi:type": "CE",
+                "@code": "TREATMENT",
+                "@codeSystem": "2.16.840.1.113883.3.18.7.1",
+                "@codeSystemName": "nhin-purpose",
+                "@displayName": "Treatment",
+                "@xmlns": "urn:hl7-org:v3",
+                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+            }
+        },
+        "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
+    }
+    print("RAW TOKEN")
+    token = create_jwt(audit)
     print(token)
