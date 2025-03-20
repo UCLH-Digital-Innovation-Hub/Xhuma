@@ -129,6 +129,11 @@ def create_jwt(
                     "system": audit["organization_id"],
                     "value": audit["subject_id"],
                 },
+                {
+                    # role ID
+                    "system": audit["role"]["Role"]["@codeSystem"],
+                    "value": audit["role"]["Role"]["@code"],
+                },
             ],
             "name": humanname.HumanName(
                 dict(
