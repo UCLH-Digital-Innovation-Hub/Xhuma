@@ -81,15 +81,8 @@ def create_jwt(
         - requesting_organization
         - requesting_practitioner
 
-    TODO:
-        - Make requesting device dynamic
-        - Make requesting organisation dynamic
-        - Make requesting practitioner dynamic
-        - Make audience dynamic
     """
     created_time = int(time())
-    # print(audit["subject_id"].split(", "))
-    # split_name = audit["subject_id"].split(" ")
     family, given = audit["subject_id"].split(", ")
     payload = {
         "iss": "https://orange.testlab.nhs.uk/",

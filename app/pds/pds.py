@@ -33,7 +33,7 @@ async def lookup_patient(nhsno: int):
         r = httpx.post(full_path, data=oauth_params)
 
         response_dict = json.loads(r.text)
-        print(response_dict)
+        # print(response_dict)
         nhs_token = response_dict["access_token"]
 
         redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
@@ -238,5 +238,5 @@ if __name__ == "__main__":
     # print(patient.name[0].family)
     # print(patient.generalPractitioner[0].identifier.value)
 
-    ods = asyncio.run(sds_trace("T99999"))
+    ods = asyncio.run(sds_trace("RRV"))
     print(ods.text)

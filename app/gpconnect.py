@@ -35,7 +35,9 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
     token = create_jwt(saml_attrs)
 
     headers = {
-        "Ssp-TraceID": "09a01679-2564-0fb4-5129-aecc81ea2706",
+        # unique uuid per request (TODO maybe use the correlation id?)
+        "Ssp-TraceID": str(uuid4()),
+        # ASID for originating organisation e.g. Hospital not Xhuma
         "Ssp-From": "200000000359",
         "Ssp-To": "918999198738",
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
