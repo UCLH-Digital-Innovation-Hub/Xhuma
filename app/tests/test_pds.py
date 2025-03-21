@@ -5,6 +5,8 @@ from fhirclient.models import patient as p
 
 from app.pds.pds import lookup_patient
 
+pytest_plugins = ("pytest_asyncio",)
+
 
 @pytest.fixture
 def mock_response():
@@ -12,6 +14,7 @@ def mock_response():
         yield mock_get
 
 
+@pytest.mark.asyncio
 async def test_get_data_success(mock_response):
     # Successful response
     mock_response.return_value.json.return_value = {

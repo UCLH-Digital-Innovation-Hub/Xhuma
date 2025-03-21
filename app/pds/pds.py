@@ -187,22 +187,23 @@ async def lookup_patient(nhsno: int):
 
 
 @router.get("/sds/{ods}")
-async def sds_trace(ods: str, audit: dict, endpoint: bool = False):
+async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     """
     Function to get the SDS trace for an ODS code
 
     args:
     ods: str - the ODS code to trace
-    audit: dictionary of saml attributes for the request
-    endpoiny: bool - whether to make an endpoint SDS trace
+    endpoint: bool - whether to make an endpoint SDS trace
 
     returns:
     fhir bundle of the SDS trace
     """
     if endpoint:
         suffix = "Endpoint"
+        partykey = kwargs.get("mhsparty")
         identifier = [
-            "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
+            "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
+            f"https://fhir.nhs.uk/Id/nhsMhsPartyKey|{partykey}",
         ]
 
     else:

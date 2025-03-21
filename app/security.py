@@ -116,7 +116,8 @@ def create_jwt(
         # "requesting_practitioner": f"{audit["organisation_id"]}|{audit["subject_id"]}",
         "requesting_practitioner": {
             "resourceType": "Practitioner",
-            "id": audit["subject_id"],
+            # "id": audit["subject_id"],
+            "id": 1,
             "identifier": [
                 {
                     "system": audit["organization_id"],

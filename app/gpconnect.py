@@ -1,5 +1,6 @@
 import json
 import logging
+import pprint
 from datetime import timedelta
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from fhirclient.models import bundle
 from .ccda.convert_mime import base64_xml, convert_mime
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
-from .pds import pds
+from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 
@@ -27,10 +28,29 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
         logging.error(f"{nhsno} is not a valid NHS number")
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
-    pds_search = await pds.lookup_patient(nhsno)
-    # print(pds_search)
+    pds_search = await lookup_patient(nhsno)
+    pprint.pprint(pds_search)
+    gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
 
     # TODO sds search
+    asid_trace = await sds_trace(gp_ods)
+    print("Device")
+    # pprint.pprint(asid_trace["entry"]["resource"]["identifier"])
+    for item in asid_trace["entry"][0]["resource"]["identifier"]:
+        if item["system"] == "https://fhir.nhs.uk/Id/nhsSpineASID":
+            asid = item["value"]
+        elif item["system"] == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+            nhsmhsparty = item["value"]
+
+    print("ASID:", asid)
+    print("NHS MHS Party Key:", nhsmhsparty)
+    print("-" * 20)
+
+    print("Endpoint")
+    endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+    fhir_endpoint_url = endpoint_trace["entry"][0]["fullUrl"]
+    print(fhir_endpoint_url)
+    print("-" * 20)
 
     token = create_jwt(saml_attrs)
 
@@ -38,8 +58,8 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
         # unique uuid per request (TODO maybe use the correlation id?)
         "Ssp-TraceID": str(uuid4()),
         # ASID for originating organisation e.g. Hospital not Xhuma
-        "Ssp-From": "200000000359",
-        "Ssp-To": "918999198738",
+        "Ssp-From": asid,
+        "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
         "accept": "application/fhir+json",
@@ -70,10 +90,12 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
         ],
     }
     r = httpx.post(
-        "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
+        # "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
+        f"https://testspineproxy.nhs.domain.uk/{fhir_endpoint_url}",
         json=body,
         headers=headers,
     )
+    logging.info(r)
     print(r.text)
     logging.info(r.text)
 
