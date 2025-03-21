@@ -199,7 +199,8 @@ async def iti47(request: Request):
                 status_code=400, detail=f"Invalid request, no care everywhere id found"
             )
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
-        client.set(ceid, nhsno)
+        # Cache NHSNO to CEID mapping for 24 hours (86400 seconds)
+        client.setex(ceid, 86400, nhsno)
         patient = await lookup_patient(nhsno)
         print(f"Patient: {patient}")
         if not patient:
