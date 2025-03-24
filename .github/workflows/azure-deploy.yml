@@ -1,0 +1,61 @@
+name: Deploy to Azure
+
+on:
+  push:
+    branches: [ dev, main ]
+  pull_request:
+    branches: [ dev, main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+    
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+    
+    - name: Login to Azure Container Registry
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+    
+    - name: Build and push Xhuma image
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        push: true
+        tags: ${{ secrets.ACR_LOGIN_SERVER }}/xhuma:${{ github.sha }}
+    
+    - name: Generate docker-compose with correct tags
+      run: |
+        VERSION=${{ github.sha }}
+        sed "s/\${TAG:-latest}/\${TAG:-$VERSION}/g" docker-compose.azure.yml > docker-compose.azure.generated.yml
+        
+    - name: Deploy to Azure Container Apps
+      uses: azure/container-apps-deploy-action@v1
+      with:
+        appSourcePath: ${{ github.workspace }}
+        acrName: ${{ secrets.ACR_NAME }}
+        containerAppName: xhuma
+        resourceGroup: ${{ secrets.RESOURCE_GROUP }}
+        containerAppEnvironment: ${{ secrets.CONTAINER_APP_ENVIRONMENT }}
+        targetPort: 80
+        ingress: external
+        environmentVariables: |
+          REDIS_HOST=redis
+          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+          API_KEY=${{ secrets.API_KEY }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+          GRAFANA_ADMIN_PASSWORD=${{ secrets.GRAFANA_ADMIN_PASSWORD }}
