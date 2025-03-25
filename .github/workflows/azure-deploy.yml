@@ -1,12 +1,13 @@
 name: Deploy to Azure with Terraform
 
 # This workflow will only run when:
-# 1. Code is pushed to main branch
+# 1. A PR to the play branch is merged
 # 2. It's manually triggered via the Actions tab
 
 on:
-  push:
-    branches: [ main ]
+  pull_request:
+    types: [closed]
+    branches: [ play ]
   workflow_dispatch:
     inputs:
       environment:
@@ -22,7 +23,10 @@ on:
 
 jobs:
   terraform:
+    # Only run when PR is merged, not when it's closed without merging
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    environment: rg-xhuma-play  # Use the GitHub Environment for secrets
     
     steps:
     - name: Checkout repository
@@ -83,6 +87,7 @@ jobs:
   build-and-push:
     needs: terraform
     runs-on: ubuntu-latest
+    environment: rg-xhuma-play  # Use the GitHub Environment for secrets
     
     steps:
     - name: Checkout repository
