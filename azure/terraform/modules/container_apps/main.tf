@@ -84,10 +84,10 @@ resource "azurerm_container_app" "xhuma" {
     }
   }
   
+  # Updated registry configuration to match the current Azure provider schema
   registry {
-    server   = var.acr_login_server
-    username = var.acr_admin_username
-    password = var.acr_admin_password
+    server = var.acr_login_server
+    identity = "System"
   }
 }
 

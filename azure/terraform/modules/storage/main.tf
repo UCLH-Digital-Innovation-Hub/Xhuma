@@ -11,7 +11,9 @@ resource "azurerm_storage_account" "storage" {
   # Security settings
   min_tls_version           = "TLS1_2"
   enable_https_traffic_only = true
-  allow_blob_public_access  = false
+  # Removed deprecated allow_blob_public_access attribute
+  # Using newer attribute to maintain the same security level
+  shared_access_key_enabled = false
 }
 
 # Create file shares for Redis and PostgreSQL data
