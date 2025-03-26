@@ -57,31 +57,8 @@ jobs:
         cd azure/terraform
         terraform init
     
-    - name: Import existing resources
-      run: |
-        cd azure/terraform
-        # Extract environment name without prefixes
-        ENV_NAME=$(echo "${{ env.ENVIRONMENT }}" | sed -E 's/^rg-xhuma-//g' | sed -E 's/^rg-//g')
-        
-        # Get subscription ID
-        SUBSCRIPTION_ID="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-        RESOURCE_GROUP="${{ env.ENVIRONMENT }}"
-        
-        # Import ACR
-        terraform import module.acr.azurerm_container_registry.acr \
-          /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.ContainerRegistry/registries/crxhuma${ENV_NAME} || true
-        
-        # Import Storage Account
-        terraform import module.storage.azurerm_storage_account.storage \
-          /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/st${ENV_NAME}xhuma || true
-        
-        # Import Key Vault
-        terraform import module.key_vault.azurerm_key_vault.key_vault \
-          /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.KeyVault/vaults/kvxhuma${ENV_NAME} || true
-        
-        # Import Log Analytics Workspace
-        terraform import module.log_analytics.azurerm_log_analytics_workspace.workspace \
-          /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.OperationalInsights/workspaces/logxhuma${ENV_NAME} || true
+    # For first deployment, we'll skip the import step
+    # The import-resources.sh script can be used manually if needed
     
     - name: Terraform Validate
       run: |

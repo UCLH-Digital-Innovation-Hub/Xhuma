@@ -84,11 +84,27 @@ resource "azurerm_container_app" "xhuma" {
     }
   }
   
-  # Use username/password authentication for ACR instead of managed identity
+  # Registry configuration for ACR
   registry {
     server   = var.acr_login_server
-    username = var.acr_admin_username
-    password = var.acr_admin_password
+  }
+  
+  # Add registry credentials as secrets
+  secret {
+    name  = "registry-password"
+    value = var.acr_admin_password
+  }
+  
+  secret {
+    name  = "registry-username" 
+    value = var.acr_admin_username
+  }
+  
+  # Reference the secrets in registry_credential
+  registry_credential {
+    server   = var.acr_login_server
+    username_secret_name = "registry-username"
+    password_secret_name = "registry-password"
   }
 }
 
