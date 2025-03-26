@@ -39,7 +39,10 @@ locals {
   }
   
   # Derive resource group name if not explicitly provided
-  resource_group_name = var.resource_group_name != "" ? var.resource_group_name : "rg-xhuma-${var.environment}"
+  # Avoid doubling prefixes by checking if environment already contains the prefix
+  resource_group_name = var.resource_group_name != "" ? var.resource_group_name : (
+    startswith(var.environment, "rg-") ? var.environment : "rg-xhuma-${var.environment}"
+  )
 }
 
 # Use existing resource group
