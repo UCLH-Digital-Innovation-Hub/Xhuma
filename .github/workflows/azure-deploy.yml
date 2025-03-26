@@ -1,0 +1,117 @@
+name: Deploy to Azure with Terraform
+
+# This workflow will only run when:
+# 1. A PR to the play branch is merged
+# 2. It's manually triggered via the Actions tab
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [ play ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'rg-xhuma-play'
+        type: choice
+        options:
+          - rg-xhuma-play
+          - dev
+          - test
+          - prod
+
+jobs:
+  terraform:
+    # Only run when PR is merged, not when it's closed without merging
+    if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'rg-xhuma-play' }}  # Use the selected environment for secrets
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set environment variables
+      id: env-vars
+      run: |
+        echo "ENVIRONMENT=${{ github.event.inputs.environment || 'rg-xhuma-play' }}" >> $GITHUB_ENV
+    
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.4.6
+    
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        enable-AzPSSession: true
+    
+    - name: Select Azure subscription
+      run: |
+        az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+    
+    - name: Terraform Init
+      run: |
+        cd azure/terraform
+        terraform init
+    
+    - name: Terraform Validate
+      run: |
+        cd azure/terraform
+        terraform validate
+    
+    - name: Terraform Plan
+      run: |
+        cd azure/terraform
+        terraform plan \
+          -var="environment=${{ env.ENVIRONMENT }}" \
+          -var="redis_password=${{ secrets.REDIS_PASSWORD }}" \
+          -var="postgres_password=${{ secrets.POSTGRES_PASSWORD }}" \
+          -var="api_key=${{ secrets.API_KEY }}" \
+          -var="grafana_admin_password=${{ secrets.GRAFANA_ADMIN_PASSWORD }}" \
+          -out=tfplan
+    
+    - name: Terraform Apply
+      run: |
+        cd azure/terraform
+        terraform apply -auto-approve tfplan
+      
+    - name: Get Terraform Outputs
+      id: terraform-outputs
+      run: |
+        cd azure/terraform
+        echo "ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)" >> $GITHUB_ENV
+  
+  build-and-push:
+    needs: terraform
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'rg-xhuma-play' }}  # Use the selected environment for secrets
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+    
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+        enable-AzPSSession: true
+    
+    - name: Login to Azure Container Registry
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ env.ACR_LOGIN_SERVER }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+    
+    - name: Build and push Xhuma image
+      uses: docker/build-push-action@v3
+      with:
+        context: .
+        push: true
+        tags: ${{ env.ACR_LOGIN_SERVER }}/xhuma:${{ github.sha }},${{ env.ACR_LOGIN_SERVER }}/xhuma:latest
