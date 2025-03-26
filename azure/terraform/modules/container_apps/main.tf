@@ -84,10 +84,11 @@ resource "azurerm_container_app" "xhuma" {
     }
   }
   
-  # Updated registry configuration to match the current Azure provider schema
+  # Use username/password authentication for ACR instead of managed identity
   registry {
-    server = var.acr_login_server
-    identity = "System"
+    server   = var.acr_login_server
+    username = var.acr_admin_username
+    password = var.acr_admin_password
   }
 }
 
