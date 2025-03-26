@@ -141,3 +141,4 @@ ccda.xml
 #key files
 *.pem
 keys/
+azure/GITHUB_SECRETS.md
