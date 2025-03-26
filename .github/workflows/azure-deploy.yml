@@ -57,6 +57,32 @@ jobs:
         cd azure/terraform
         terraform init
     
+    - name: Import existing resources
+      run: |
+        cd azure/terraform
+        # Extract environment name without prefixes
+        ENV_NAME=$(echo "${{ env.ENVIRONMENT }}" | sed -E 's/^rg-xhuma-//g' | sed -E 's/^rg-//g')
+        
+        # Get subscription ID
+        SUBSCRIPTION_ID="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+        RESOURCE_GROUP="${{ env.ENVIRONMENT }}"
+        
+        # Import ACR
+        terraform import module.acr.azurerm_container_registry.acr \
+          /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.ContainerRegistry/registries/crxhuma${ENV_NAME} || true
+        
+        # Import Storage Account
+        terraform import module.storage.azurerm_storage_account.storage \
+          /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/st${ENV_NAME}xhuma || true
+        
+        # Import Key Vault
+        terraform import module.key_vault.azurerm_key_vault.key_vault \
+          /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.KeyVault/vaults/kvxhuma${ENV_NAME} || true
+        
+        # Import Log Analytics Workspace
+        terraform import module.log_analytics.azurerm_log_analytics_workspace.workspace \
+          /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.OperationalInsights/workspaces/logxhuma${ENV_NAME} || true
+    
     - name: Terraform Validate
       run: |
         cd azure/terraform
@@ -78,11 +104,33 @@ jobs:
         cd azure/terraform
         terraform apply -auto-approve tfplan
       
-    - name: Get Terraform Outputs
-      id: terraform-outputs
+    - name: Get ACR Credentials
+      id: acr-creds
       run: |
         cd azure/terraform
-        echo "ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)" >> $GITHUB_ENV
+        # Extract environment name without prefixes
+        ENV_NAME=$(echo "${{ env.ENVIRONMENT }}" | sed -E 's/^rg-xhuma-//g' | sed -E 's/^rg-//g')
+        
+        # Get ACR details
+        ACR_NAME="crxhuma${ENV_NAME}"
+        ACR_LOGIN_SERVER=$(az acr show --name $ACR_NAME --resource-group ${{ env.ENVIRONMENT }} --query loginServer -o tsv)
+        
+        # Set outputs
+        echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
+        
+        # If ACR_USERNAME and ACR_PASSWORD are not set in GitHub secrets, get them from Azure
+        if [[ -z "${{ secrets.ACR_USERNAME }}" || -z "${{ secrets.ACR_PASSWORD }}" ]]; then
+          echo "ACR credentials not found in GitHub secrets, retrieving from Azure..."
+          ACR_CREDS=$(az acr credential show --name $ACR_NAME --resource-group ${{ env.ENVIRONMENT }})
+          ACR_USERNAME=$(echo $ACR_CREDS | jq -r '.username')
+          ACR_PASSWORD=$(echo $ACR_CREDS | jq -r '.passwords[0].value')
+          
+          echo "ACR_USERNAME=$ACR_USERNAME" >> $GITHUB_ENV
+          echo "ACR_PASSWORD=$ACR_PASSWORD" >> $GITHUB_ENV
+          echo "Retrieved ACR credentials from Azure"
+        else
+          echo "Using ACR credentials from GitHub secrets"
+        fi
   
   build-and-push:
     needs: terraform
@@ -106,8 +154,8 @@ jobs:
       uses: azure/docker-login@v1
       with:
         login-server: ${{ env.ACR_LOGIN_SERVER }}
-        username: ${{ secrets.ACR_USERNAME }}
-        password: ${{ secrets.ACR_PASSWORD }}
+        username: ${{ secrets.ACR_USERNAME || env.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD || env.ACR_PASSWORD }}
     
     - name: Build and push Xhuma image
       uses: docker/build-push-action@v3
