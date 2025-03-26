@@ -10,9 +10,8 @@ resource "azurerm_storage_account" "storage" {
   
   # Security settings
   min_tls_version           = "TLS1_2"
-  enable_https_traffic_only = true
-  # Removed deprecated allow_blob_public_access attribute
-  # Using newer attribute to maintain the same security level
+  https_traffic_only_enabled = true  # Replacing deprecated enable_https_traffic_only
+  # Security configurations with newer attributes
   shared_access_key_enabled = false
 }
 
