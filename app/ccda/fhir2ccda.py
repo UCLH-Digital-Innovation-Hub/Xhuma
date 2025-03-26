@@ -139,7 +139,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
         # check if list is one of the desired ones
         if list.title in sections:
-            print(list.title)
+            # print(list.title)
             comp = {}
             comp["section"] = {
                 "templateId": templateId(templates[list.title]["root"], "2015-8-1"),
@@ -149,28 +149,140 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "@codeSystem": "2.16.840.1.113883.6.1",
                 },
                 "title": list.title,
-                "text": "lorem ipsum",
+                "text": "",  # Will be populated with table
             }
-            # if there are no entries
-            if not list.entry:
-                # comp["section"]["@nullFlavour"] = "NI"
-                comp["section"]["text"] = "No Information"
 
+            table_headers = {
+                "Allergies and adverse reactions": [
+                    "Start Date",
+                    "Status",
+                    "Description",
+                    "Reaction",
+                ],
+                "Medications and medical devices": [
+                    "Start Date",
+                    "End Date",
+                    "Status",
+                    "Medication",
+                    "Instructions",
+                ],
+                "Problems": ["Date", "Status", "Condition"],
+                "Immunisations": ["Date", "Type", "Details"],
+                "Vital Signs": ["Date", "Type", "Value", "Units"],
+            }
+
+            def create_headers(title: str) -> dict:
+                """Create headers for the table based on the section
+
+                Args:
+                    title (str): Title of the fhir section
+
+                Returns:
+                    dict: dictionary with appropriate headers for the section to generate xml correctly
+                """
+
+                headers = []
+                for header in table_headers[title]:
+                    headers.append({header})
+                return {"tr": {"th":  table_headers[title]}}
+
+            def create_row(entry_data) -> dict:
+                """generates a table row from a list of inputs
+
+                Args:
+                    entry_data (List): _description_
+
+                Returns:
+                    dict: _description_
+                """
+                row = []
+                for data in entry_data:
+                    row.append({data})
+                return {"td": entry_data}
+
+            if not list.entry:
+                # if there are no entries
+                # Initialize empty table with appropriate headers based on section
+                comp["section"]["text"] = {
+                    "table": {
+                        "thead": create_headers(list.title),
+                        "tbody": {
+                            "tr": {
+                                "td": {
+                                    "@colspan": len(table_headers[list.title]),
+                                    "#text": "No Information Available",
+                                }
+                            }
+                        },
+                    }
+                }
             else:
                 comp["section"]["entry"] = []
+                rows = []
                 for entry in list.entry:
                     referenced_item = index[entry.item.reference]
+                    
 
                     if list.title == "Allergies and adverse reactions":
-                        comp["section"]["entry"].append(allergy(referenced_item))
-                    elif list.title == "Problems":
-                        comp["section"]["entry"].append(problem(referenced_item))
-                    elif list.title == "Medications and medical devices":
-                        comp["section"]["entry"].append(
-                            medication(referenced_item, index)
+                        entry_data = allergy(referenced_item)
+                        comp["section"]["entry"].append(entry_data)
+                        rows.append(
+                            create_row(
+                                [entry_data["act"]["effectiveTime"]["low"]["@value"],
+                                entry_data["act"]["statusCode"]["@code"],
+                                entry_data["act"]["entryRelationship"]["observation"][
+                                    "participant"
+                                ]["participantRole"]["playingEntity"]["code"][
+                                    "@displayName"
+                                ],
+                                entry_data["act"]["entryRelationship"]["observation"][
+                                    "entryRelationship"
+                                ]["observation"]["value"]["@displayName"],]
+                            )
                         )
-
-            return comp
+                    elif list.title == "Problems":
+                        entry_data = problem(referenced_item)
+                        comp["section"]["entry"].append(entry_data)
+                        rows.append(
+                            create_row([
+                                entry_data["act"]["effectiveTime"]["low"]["@value"],
+                                entry_data["act"]["statusCode"]["@code"],
+                                entry_data["act"]["entryRelationship"]["observation"][
+                                    "value"
+                                ]["@displayName"],]
+                            )
+                        )
+                    elif list.title == "Medications and medical devices":
+                        entry_data = medication(referenced_item, index)
+                        comp["section"]["entry"].append(entry_data)
+                        rows.append(
+                            create_row([
+                                entry_data["substanceAdministration"]["effectiveTime"][
+                                    "low"
+                                ]["@value"],
+                                entry_data["substanceAdministration"]["effectiveTime"][
+                                    "high"
+                                ]["@value"],
+                                entry_data["substanceAdministration"]["statusCode"][
+                                    "@code"
+                                ],
+                                entry_data["substanceAdministration"]["consumable"][
+                                    "manufacturedProduct"
+                                ]["manufacturedMaterial"]["code"][0]["@displayName"],
+                                entry_data["substanceAdministration"][
+                                    "entryRelationship"
+                                ]["act"]["text"]["#text"],]
+                            )
+                        )
+                        print(rows)
+                # Close the table after all entries are processed
+                comp["section"]["text"] = {
+                    "table": {
+                        "thead": create_headers(list.title),
+                        "tbody": {"tr": rows},
+                    }
+                }
+                return comp
 
     bundle_components = [create_section(list) for list in lists]
     bundle_components = [x for x in bundle_components if x is not None]

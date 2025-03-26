@@ -1,4 +1,14 @@
 services:
+  nginx:
+    image: ${ACR_LOGIN_SERVER}/nginx:${TAG:-latest}
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - xhuma
+    networks:
+      - xhuma-net
+
   redis:
     image: redis:7.2
     command:
@@ -17,10 +27,10 @@ services:
         --maxclients 100 \
         --timeout 300 \
         --tcp-keepalive 60
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     volumes:
-      - redis_data:/data
+      - type: volume
+        source: redis-data
+        target: /data
     environment:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     sysctls:
@@ -33,9 +43,7 @@ services:
       - xhuma-net
 
   xhuma:
-    build: .
-    ports:
-      - "${GPCON_PORT:-80}:80"
+    image: ${ACR_LOGIN_SERVER}/xhuma:${TAG:-latest}
     depends_on:
       - redis
       - otel-collector
@@ -44,24 +52,23 @@ services:
     environment:
       API_KEY: ${API_KEY}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+      OTEL_PYTHON_LOG_CORRELATION: "true"
       OTEL_PYTHON_METER_PROVIDER: "sdk_meter_provider"
       OTEL_PYTHON_TRACER_PROVIDER: "sdk_tracer_provider"
       OTEL_SERVICE_NAME: "xhuma"
       POSTGRES_DB: ${POSTGRES_DB:-xhuma}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-xhuma}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-    volumes:
-      - ./app:/code/app
     networks:
       - xhuma-net
 
   prometheus:
-    image: prom/prometheus:v2.45.0
-    ports:
-      - "9090:9090"
+    image: ${ACR_LOGIN_SERVER}/prometheus:${TAG:-latest}
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     command:
@@ -73,9 +80,7 @@ services:
       - xhuma-net
 
   grafana:
-    image: grafana/grafana:10.0.3
-    ports:
-      - "3000:3000"
+    image: ${ACR_LOGIN_SERVER}/grafana:${TAG:-latest}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning
       - ./grafana/dashboards:/var/lib/grafana/dashboards
@@ -89,14 +94,10 @@ services:
       - xhuma-net
 
   otel-collector:
-    image: otel/opentelemetry-collector:0.85.0
+    image: ${ACR_LOGIN_SERVER}/otel-collector:${TAG:-latest}
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
-    ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4316:4318"   # OTLP http receiver (changed port to avoid conflict)
-      - "8890:8890"   # Metrics endpoint
     depends_on:
       - prometheus
       - tempo
@@ -108,23 +109,20 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-xhuma}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - type: volume
+        source: postgres-data
+        target: /var/lib/postgresql/data
       - ./app/migrations:/docker-entrypoint-initdb.d
     networks:
       - xhuma-net
 
   tempo:
-    image: grafana/tempo:latest
+    image: ${ACR_LOGIN_SERVER}/tempo:${TAG:-latest}
     command: ["-config.file=/etc/tempo.yaml"]
     volumes:
       - ./tempo.yaml:/etc/tempo.yaml
-    ports:
-      - "3200:3200"   # tempo-query frontend
-      - "4318:4318"   # OTLP gRPC
     networks:
       - xhuma-net
 
@@ -133,5 +131,13 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
-  redis_data:
+  postgres-data:
+    driver: azure_file
+    driver_opts:
+      share_name: postgres-data
+      storage_account_name: ${STORAGE_ACCOUNT_NAME}
+  redis-data:
+    driver: azure_file
+    driver_opts:
+      share_name: redis-data
+      storage_account_name: ${STORAGE_ACCOUNT_NAME}
