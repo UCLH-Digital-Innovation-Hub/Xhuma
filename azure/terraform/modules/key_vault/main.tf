@@ -30,10 +30,15 @@ resource "azurerm_key_vault" "key_vault" {
   }
 }
 
-# Add secrets if provided
+# Instead of using for_each with sensitive values, we'll use count with a list of secret names
+# This way we're not exposing secret values in Terraform state keys
+locals {
+  secret_names = keys(var.secrets)
+}
+
 resource "azurerm_key_vault_secret" "secrets" {
-  for_each     = var.secrets
-  name         = each.key
-  value        = each.value
+  count        = length(local.secret_names)
+  name         = local.secret_names[count.index]
+  value        = lookup(var.secrets, local.secret_names[count.index])
   key_vault_id = azurerm_key_vault.key_vault.id
 }
