@@ -109,7 +109,7 @@ module "container_apps_environment" {
   name                         = "caexhuma${local.env_base_name}"
   resource_group_name          = data.azurerm_resource_group.main.name
   location                     = var.location
-  log_analytics_workspace_id   = module.log_analytics.workspace_id
+  log_analytics_workspace_id   = module.log_analytics.id  # Use the full resource ID path
   log_analytics_workspace_key  = module.log_analytics.primary_shared_key
   tags                         = local.common_tags
 }

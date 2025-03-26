@@ -11,8 +11,8 @@ resource "azurerm_storage_account" "storage" {
   # Security settings
   min_tls_version           = "TLS1_2"
   https_traffic_only_enabled = true  # Replacing deprecated enable_https_traffic_only
-  # Security configurations with newer attributes
-  shared_access_key_enabled = false
+  # Enable shared access key authentication for Terraform to access the storage account
+  shared_access_key_enabled = true
 }
 
 # Create file shares for Redis and PostgreSQL data
