@@ -135,9 +135,6 @@ The deployment can be automated using the GitHub Actions workflow defined in `.g
 3. Plans and applies the Terraform configuration
 4. Builds and pushes the Docker images to the created ACR
 
-## GitLab CI/CD Deployment (Alternative)
-
-For UCLH environments, you might also consider GitLab CI/CD, which is commonly used in the organization. A sample `.gitlab-ci.yml` could be created based on the GitHub Actions workflow.
 
 ## Resource Naming Conventions
 
