@@ -38,18 +38,8 @@ locals {
     "Service Hours" = var.service_hours
   }
   
-  # Extract the environment name without prefixes for use in resource naming
-  # If environment is like "rg-xhuma-play", extract just "play"
-  env_base_name = replace(
-    replace(var.environment, "rg-xhuma-", ""),
-    "rg-", ""
-  )
-  
   # Derive resource group name if not explicitly provided
-  # Avoid doubling prefixes by checking if environment already contains the prefix
-  resource_group_name = var.resource_group_name != "" ? var.resource_group_name : (
-    startswith(var.environment, "rg-") ? var.environment : "rg-xhuma-${var.environment}"
-  )
+  resource_group_name = var.resource_group_name != "" ? var.resource_group_name : "rg-xhuma-${var.environment}"
 }
 
 # Use existing resource group
@@ -60,7 +50,7 @@ data "azurerm_resource_group" "main" {
 # Azure Container Registry
 module "acr" {
   source              = "./modules/acr"
-  name                = "crxhuma${local.env_base_name}"  # Alphanumeric only
+  name                = "cr-xhuma-${var.environment}"
   resource_group_name = data.azurerm_resource_group.main.name
   location            = var.location
   sku                 = "Standard"
@@ -71,7 +61,7 @@ module "acr" {
 # Storage Account for file shares
 module "storage" {
   source                    = "./modules/storage"
-  name                      = "st${local.env_base_name}xhuma"  # Storage accounts can't have hyphens
+  name                      = "st${var.environment}xhuma"  # Storage accounts can't have hyphens
   resource_group_name       = data.azurerm_resource_group.main.name
   location                  = var.location
   account_tier              = "Standard"
@@ -84,19 +74,18 @@ module "storage" {
 # Key Vault for secrets
 module "key_vault" {
   source              = "./modules/key_vault"
-  name                = "kvxhuma${local.env_base_name}"
+  name                = "kv-xhuma-${var.environment}"
   resource_group_name = data.azurerm_resource_group.main.name
   location            = var.location
   sku_name            = "standard"
   tenant_id           = data.azurerm_client_config.current.tenant_id
-  current_object_id   = data.azurerm_client_config.current.object_id
   tags                = local.common_tags
 }
 
 # Log Analytics workspace for monitoring
 module "log_analytics" {
   source              = "./modules/log_analytics"
-  name                = "logxhuma${local.env_base_name}"
+  name                = "log-xhuma-${var.environment}"
   resource_group_name = data.azurerm_resource_group.main.name
   location            = var.location
   retention_in_days   = 30
@@ -106,13 +95,11 @@ module "log_analytics" {
 # Container Apps Environment
 module "container_apps_environment" {
   source                       = "./modules/container_apps_environment"
-  name                         = "caexhuma${local.env_base_name}"
+  name                         = "cae-xhuma-${var.environment}"
   resource_group_name          = data.azurerm_resource_group.main.name
   location                     = var.location
-  log_analytics_workspace_id   = module.log_analytics.id  # Use the full resource ID path
+  log_analytics_workspace_id   = module.log_analytics.workspace_id
   log_analytics_workspace_key  = module.log_analytics.primary_shared_key
-  storage_account_name         = module.storage.name
-  storage_account_key          = module.storage.primary_access_key
   tags                         = local.common_tags
 }
 
@@ -121,7 +108,7 @@ module "container_apps" {
   source                      = "./modules/container_apps"
   resource_group_name         = data.azurerm_resource_group.main.name
   location                    = var.location
-  environment                 = local.env_base_name  # Use clean environment name without prefixes
+  environment                 = var.environment
   container_app_environment_id = module.container_apps_environment.id
   acr_login_server            = module.acr.login_server
   acr_admin_username          = module.acr.admin_username

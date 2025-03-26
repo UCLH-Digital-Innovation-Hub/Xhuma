@@ -84,27 +84,10 @@ resource "azurerm_container_app" "xhuma" {
     }
   }
   
-  # Registry configuration for ACR
+  # Updated registry configuration to match the current Azure provider schema
   registry {
-    server   = var.acr_login_server
-  }
-  
-  # Add registry credentials as secrets
-  secret {
-    name  = "registry-password"
-    value = var.acr_admin_password
-  }
-  
-  secret {
-    name  = "registry-username" 
-    value = var.acr_admin_username
-  }
-  
-  # Reference the secrets in registry_credential
-  registry_credential {
-    server   = var.acr_login_server
-    username_secret_name = "registry-username"
-    password_secret_name = "registry-password"
+    server = var.acr_login_server
+    identity = "System"
   }
 }
 
