@@ -86,9 +86,25 @@ resource "azurerm_container_app" "xhuma" {
   
   # Use username/password authentication for ACR instead of managed identity
   registry {
+    server               = var.acr_login_server
+  }
+  
+  # Add registry credentials separately - this is the correct syntax for container apps
+  secret {
+    name  = "registry-password"
+    value = var.acr_admin_password
+  }
+  
+  # Refer to the registry credentials from the secret
+  identity {
+    type = "None"
+  }
+  
+  # Add registry auth
+  registry_credential {
     server   = var.acr_login_server
     username = var.acr_admin_username
-    password = var.acr_admin_password
+    password_secret_name = "registry-password"
   }
 }
 
