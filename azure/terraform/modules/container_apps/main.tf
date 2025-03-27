@@ -2,7 +2,7 @@
 
 # Xhuma main application container app
 resource "azurerm_container_app" "xhuma" {
-  name                         = "ca-xhuma-${var.environment}"
+  name                         = "ca-xhuma-${local.env_base_name}"
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
@@ -22,7 +22,7 @@ resource "azurerm_container_app" "xhuma" {
       
       env {
         name  = "OTEL_EXPORTER_OTLP_ENDPOINT"
-        value = "http://ca-otel-collector-${var.environment}.internal:4317"
+        value = "http://ca-otel-collector-${local.env_base_name}.internal:4317"
       }
       
       env {
@@ -57,12 +57,12 @@ resource "azurerm_container_app" "xhuma" {
       
       env {
         name  = "POSTGRES_HOST"
-        value = "ca-postgres-${var.environment}.internal"
+        value = "ca-postgres-${local.env_base_name}.internal"
       }
       
       env {
         name  = "REDIS_HOST"
-        value = "ca-redis-${var.environment}.internal"
+        value = "ca-redis-${local.env_base_name}.internal"
       }
       
       env {
@@ -84,16 +84,17 @@ resource "azurerm_container_app" "xhuma" {
     }
   }
   
-  # Updated registry configuration to match the current Azure provider schema
+  # Use username/password authentication for ACR instead of managed identity
   registry {
-    server = var.acr_login_server
-    identity = "System"
+    server   = var.acr_login_server
+    username = var.acr_admin_username
+    password = var.acr_admin_password
   }
 }
 
 # Redis container app
 resource "azurerm_container_app" "redis" {
-  name                         = "ca-redis-${var.environment}"
+  name                         = "ca-redis-${local.env_base_name}"
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
@@ -145,7 +146,7 @@ resource "azurerm_container_app" "redis" {
 
 # PostgreSQL container app
 resource "azurerm_container_app" "postgres" {
-  name                         = "ca-postgres-${var.environment}"
+  name                         = "ca-postgres-${local.env_base_name}"
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
@@ -201,7 +202,7 @@ resource "azurerm_container_app" "postgres" {
 
 # Prometheus container app
 resource "azurerm_container_app" "prometheus" {
-  name                         = "ca-prometheus-${var.environment}"
+  name                         = "ca-prometheus-${local.env_base_name}"
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
@@ -238,7 +239,7 @@ resource "azurerm_container_app" "prometheus" {
 
 # Grafana container app
 resource "azurerm_container_app" "grafana" {
-  name                         = "ca-grafana-${var.environment}"
+  name                         = "ca-grafana-${local.env_base_name}"
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
@@ -278,7 +279,7 @@ resource "azurerm_container_app" "grafana" {
 
 # OpenTelemetry collector container app
 resource "azurerm_container_app" "otel_collector" {
-  name                         = "ca-otel-collector-${var.environment}"
+  name                         = "ca-otel-collector-${local.env_base_name}"
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
@@ -310,7 +311,7 @@ resource "azurerm_container_app" "otel_collector" {
 
 # Tempo container app
 resource "azurerm_container_app" "tempo" {
-  name                         = "ca-tempo-${var.environment}"
+  name                         = "ca-tempo-${local.env_base_name}"
   container_app_environment_id = var.container_app_environment_id
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"

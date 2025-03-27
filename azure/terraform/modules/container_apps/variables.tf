@@ -5,6 +5,16 @@ variable "environment" {
   type        = string
 }
 
+# Local variables for consistent naming
+locals {
+  # Extract the environment name without prefixes for use in resource naming
+  # If environment is like "rg-xhuma-play", extract just "play"
+  env_base_name = replace(
+    replace(var.environment, "rg-xhuma-", ""),
+    "rg-", ""
+  )
+}
+
 variable "resource_group_name" {
   description = "The name of the resource group"
   type        = string
