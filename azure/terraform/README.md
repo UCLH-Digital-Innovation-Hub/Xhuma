@@ -1,166 +1,107 @@
-# Xhuma Azure Terraform Infrastructure
+# Terraform Deployment for Xhuma
 
-This directory contains the Terraform configurations to deploy Xhuma to Azure Container Apps.
+This directory contains Terraform configuration for deploying Xhuma to Azure Container Apps.
 
-## Architecture
+## Recent Improvements
 
-The deployment creates the following Azure resources:
+- Fixed Registry credentials syntax in Container Apps
+- Added intelligent resource importing 
+- Improved CI/CD pipeline with change detection
+- Updated workflows to support multiple environments
 
-- **Azure Container Registry (ACR)**: Stores container images for Xhuma and other services
-- **Azure Storage Account**: Provides persistent storage for Redis and PostgreSQL data
-- **Azure Key Vault**: Manages secrets and credentials
-- **Log Analytics Workspace**: Collects monitoring data
-- **Container Apps Environment**: Hosts all container applications
-- **Container Apps**: Xhuma, Redis, PostgreSQL, Prometheus, Grafana, OpenTelemetry Collector, and Tempo
+## Structure
 
-```mermaid
-graph TD
-    subgraph "Azure"
-        subgraph "Container Apps Environment"
-            XHUMA[Xhuma Container]
-            REDIS[Redis Container]
-            POSTGRES[PostgreSQL Container]
-            PROM[Prometheus Container]
-            GRAFANA[Grafana Container]
-            OTEL[OpenTelemetry Collector]
-            TEMPO[Tempo Container]
-        end
-        
-        subgraph "Infrastructure Resources"
-            ACR[Azure Container Registry]
-            STORAGE[Azure Storage Account]
-            KEYVAULT[Azure Key Vault]
-            LOGS[Log Analytics]
-        end
-    end
-    
-    XHUMA -->|Connect| REDIS
-    XHUMA -->|Connect| POSTGRES
-    XHUMA -->|Send Metrics| OTEL
-    OTEL -->|Export Metrics| PROM
-    OTEL -->|Export Traces| TEMPO
-    
-    PROM -->|Visualize| GRAFANA
-    TEMPO -->|Visualize| GRAFANA
-    
-    POSTGRES -->|Persist| STORAGE
-    REDIS -->|Persist| STORAGE
-    
-    ACR -->|Provide Images| XHUMA
-    ACR -->|Provide Images| REDIS
-    ACR -->|Provide Images| POSTGRES
-    ACR -->|Provide Images| PROM
-    ACR -->|Provide Images| GRAFANA
-    ACR -->|Provide Images| OTEL
-    ACR -->|Provide Images| TEMPO
-    
-    KEYVAULT -->|Provide Secrets| XHUMA
-    
-    XHUMA -->|Send Logs| LOGS
-    REDIS -->|Send Logs| LOGS
-    POSTGRES -->|Send Logs| LOGS
-```
+- `main.tf` - Main configuration file
+- `variables.tf` - Variable definitions
+- `modules/` - Modularized resources:
+  - `acr/` - Azure Container Registry
+  - `storage/` - Azure Storage Account
+  - `key_vault/` - Azure Key Vault
+  - `log_analytics/` - Log Analytics Workspace
+  - `container_apps_environment/` - Container Apps Environment
+  - `container_apps/` - Container Apps (Xhuma, Redis, PostgreSQL, etc.)
 
 ## Prerequisites
 
-- Terraform CLI installed (version 1.0.0 or higher)
-- Azure CLI installed and logged in
-- Azure subscription with permissions to create resources
+- Azure CLI installed
+- Terraform ≥ 1.10.5
+- Azure subscription with appropriate permissions
+- GitHub repository with the required secrets configured
 
-## Configuration
+## Running Locally
 
-### Environment Variables
-
-Before running Terraform commands, you need to log in to the correct Azure tenant and subscription:
+To deploy manually:
 
 ```bash
-# Login to the UCLH Azure tenant
+# Login to Azure
 az login --tenant uclhaz.onmicrosoft.com
+az account set --subscription <subscription-id>
 
-# Set the correct subscription
-az account set --subscription rg-xhuma-play
+# Initialize Terraform
+terraform init
+
+# Check if resources exist and import them
+./import-resources.sh -g rg-xhuma-play
+
+# Plan deployment
+terraform plan -var-file=environments/play.tfvars -out=tfplan
+
+# Apply changes
+terraform apply tfplan
 ```
 
-### Variables
+## Managing Existing Resources
 
-Configuration is managed through the following files:
+If resources already exist in Azure, you can import them into the Terraform state:
 
-- `variables.tf`: Defines the input variables
-- Environment-specific values can be provided through:
-  - Command-line flags (`-var="name=value"`)
-  - Environment variables (`TF_VAR_name=value`)
-  - `.tfvars` files
+```bash
+./import-resources.sh -g <resource-group-name>
+```
 
-### Required Variables
+This will automatically detect and import existing resources, making it safe to apply Terraform to existing infrastructure.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| environment | Environment name (play, dev, test, prod) | play |
-| location | Azure region | uksouth |
-| redis_password | Password for Redis | (no default) |
-| postgres_password | Password for PostgreSQL | (no default) |
-| api_key | API key for Xhuma | (no default) |
-| grafana_admin_password | Admin password for Grafana | (no default) |
+## Change Detection
 
-## Deployment
+The CI/CD pipeline automatically detects:
+- Infrastructure changes (using Terraform plan)
+- Application code changes
+- Manual triggers
 
-### Manual Deployment
+It optimizes the deployment by only rebuilding and pushing container images when necessary.
 
-1. Initialize Terraform:
+## Environment Separation
+
+Resources are deployed with environment-specific naming to maintain clean separation:
+
+```
+Resource Group: rg-xhuma-{env}
+Container Registry: crxhuma{env}
+Storage Account: st{env}xhuma
+Key Vault: kvxhuma{env}
+Container Apps: ca-{component}-{env}
+```
+
+Where `{env}` is the environment name (play, dev, test, prod) and `{component}` is the component name (xhuma, redis, postgres, etc.).
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. Check if resources already exist and import them:
    ```bash
-   terraform init
+   ./import-resources.sh -g <resource-group>
    ```
 
-2. Validate the configuration:
+2. Validate the Terraform configuration:
    ```bash
    terraform validate
    ```
 
-3. Plan the deployment:
+3. Check for syntax errors:
    ```bash
-   terraform plan -var="environment=play" -out=tfplan
+   terraform fmt -check
    ```
 
-4. Apply the plan:
+4. Try with debugging enabled:
    ```bash
-   terraform apply tfplan
-   ```
-
-### GitHub Actions Deployment
-
-The deployment can be automated using the GitHub Actions workflow defined in `.github/workflows/azure-deploy.yml`. This workflow:
-
-1. Sets up Terraform
-2. Initializes and validates the configuration
-3. Plans and applies the Terraform configuration
-4. Builds and pushes the Docker images to the created ACR
-
-
-## Resource Naming Conventions
-
-Resources follow the UCLH naming conventions:
-
-- `<resource-type-abbreviation>-<project-shortname>-<environment>`
-- Example: `cr-xhuma-play` for the Container Registry in the play environment
-
-## Resource Tagging
-
-All resources are tagged according to UCLH requirements:
-
-- `CostCenter`: 240300
-- `CreatedBy`: Xhuma Team (or the person creating resources)
-- `Environment`: play, dev, test, or prod
-- `git_origin`: Source repository URL
-- `ManagedBy`: Terraform
-- `Owner`: Xhuma Team
-- `Service Hours`: none (or according to SLA)
-
-## Clean Up
-
-To destroy all created resources:
-
-```bash
-terraform destroy -var="environment=play"
-```
-
-**Note**: This will delete all resources including all data, so use with caution.
+   TF_LOG=DEBUG terraform plan

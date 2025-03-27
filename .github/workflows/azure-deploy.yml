@@ -17,9 +17,9 @@ on:
         type: choice
         options:
           - rg-xhuma-play
-          - dev
-          - test
-          - prod
+          - rg-xhuma-dev
+          - rg-xhuma-test
+          - rg-xhuma-prod
 
 jobs:
   terraform:
@@ -31,6 +31,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Fetch all history for file change detection
     
     - name: Set environment variables
       id: env-vars
@@ -40,7 +42,7 @@ jobs:
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v2
       with:
-        terraform_version: 1.4.6
+        terraform_version: 1.10.5
     
     - name: Login to Azure
       uses: azure/login@v1
@@ -52,6 +54,22 @@ jobs:
       run: |
         az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
     
+    - name: Check if resources exist
+      run: |
+        cd azure/terraform
+        # Check if resource group exists
+        RESOURCE_GROUP_EXISTS=$(az group exists --name ${{ env.ENVIRONMENT }} --query bool -o tsv)
+        echo "RESOURCE_GROUP_EXISTS=$RESOURCE_GROUP_EXISTS" >> $GITHUB_ENV
+    
+    - name: Import existing resources (if applicable)
+      if: env.RESOURCE_GROUP_EXISTS == 'true'
+      run: |
+        cd azure/terraform
+        # Make script executable
+        chmod +x ./import-resources.sh
+        # Run the import script with the resource group
+        ./import-resources.sh -g ${{ env.ENVIRONMENT }}
+    
     - name: Terraform Init
       run: |
         cd azure/terraform
@@ -62,9 +80,11 @@ jobs:
         cd azure/terraform
         terraform validate
     
-    - name: Terraform Plan
+    - name: Detect change type
+      id: change-detection
       run: |
         cd azure/terraform
+        # Run a terraform plan and save changes to a file
         terraform plan \
           -var="environment=${{ env.ENVIRONMENT }}" \
           -var="redis_password=${{ secrets.REDIS_PASSWORD }}" \
@@ -72,6 +92,18 @@ jobs:
           -var="api_key=${{ secrets.API_KEY }}" \
           -var="grafana_admin_password=${{ secrets.GRAFANA_ADMIN_PASSWORD }}" \
           -out=tfplan
+        
+        # Determine if infrastructure changes exist or only application changes
+        PLAN_JSON=$(terraform show -json tfplan)
+        INFRA_CHANGES=$(echo "$PLAN_JSON" | jq '.resource_changes | length')
+        
+        if [ "$INFRA_CHANGES" -gt "0" ]; then
+          echo "CHANGE_TYPE=infrastructure" >> $GITHUB_ENV
+          echo "::set-output name=change_type::infrastructure"
+        else
+          echo "CHANGE_TYPE=application" >> $GITHUB_ENV
+          echo "::set-output name=change_type::application"
+        fi
     
     - name: Terraform Apply
       run: |
@@ -82,27 +114,61 @@ jobs:
       id: terraform-outputs
       run: |
         cd azure/terraform
-        echo "ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server)" >> $GITHUB_ENV
+        # Get ACR details and export to environment variables for the next job
+        ACR_LOGIN_SERVER=$(terraform output -raw acr_login_server || echo "")
+        if [ -n "$ACR_LOGIN_SERVER" ]; then
+          echo "ACR_LOGIN_SERVER=$ACR_LOGIN_SERVER" >> $GITHUB_ENV
+          echo "::set-output name=acr_login_server::$ACR_LOGIN_SERVER"
+        else
+          # Fallback to secrets if terraform output is not available
+          echo "ACR_LOGIN_SERVER=${{ secrets.ACR_LOGIN_SERVER }}" >> $GITHUB_ENV
+          echo "::set-output name=acr_login_server::${{ secrets.ACR_LOGIN_SERVER }}"
+        fi
   
   build-and-push:
     needs: terraform
+    outputs:
+      change_type: ${{ needs.terraform.outputs.change_type }}
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'rg-xhuma-play' }}  # Use the selected environment for secrets
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Fetch all history for file change detection
+    
+    - name: Determine if app changes exist
+      id: app-changes
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          # Get list of changed files in PR
+          CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          # If manually triggered, assume app changes
+          CHANGED_FILES="app/"
+        fi
+        
+        # Check if app code was changed or if infrastructure changes occurred
+        if echo "$CHANGED_FILES" | grep -q "^app/" || [ "${{ needs.terraform.outputs.change_type }}" = "infrastructure" ]; then
+          echo "REBUILD_REQUIRED=true" >> $GITHUB_ENV
+        else
+          echo "REBUILD_REQUIRED=false" >> $GITHUB_ENV
+        fi
     
     - name: Set up Docker Buildx
+      if: env.REBUILD_REQUIRED == 'true'
       uses: docker/setup-buildx-action@v1
     
     - name: Login to Azure
+      if: env.REBUILD_REQUIRED == 'true'
       uses: azure/login@v1
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
         enable-AzPSSession: true
     
     - name: Login to Azure Container Registry
+      if: env.REBUILD_REQUIRED == 'true'
       uses: azure/docker-login@v1
       with:
         login-server: ${{ env.ACR_LOGIN_SERVER }}
@@ -110,6 +176,7 @@ jobs:
         password: ${{ secrets.ACR_PASSWORD }}
     
     - name: Build and push Xhuma image
+      if: env.REBUILD_REQUIRED == 'true'
       uses: docker/build-push-action@v3
       with:
         context: .
