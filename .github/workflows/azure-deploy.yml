@@ -38,6 +38,9 @@ jobs:
       id: env-vars
       run: |
         echo "ENVIRONMENT=${{ github.event.inputs.environment || 'rg-xhuma-play' }}" >> $GITHUB_ENV
+        # Extract the base environment name without prefixes for proper naming
+        GITHUB_ENV_NAME=$(echo "${{ github.event.inputs.environment || 'rg-xhuma-play' }}" | sed 's/rg-xhuma-//' | sed 's/rg-//')
+        echo "ENV_BASE_NAME=$GITHUB_ENV_NAME" >> $GITHUB_ENV
     
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v2
@@ -47,6 +50,7 @@ jobs:
     - name: Login to Azure
       uses: azure/login@v1
       with:
+        # Changed to use proper JSON credentials approach as fallback
         creds: ${{ secrets.AZURE_CREDENTIALS }}
         enable-AzPSSession: true
     
@@ -164,6 +168,7 @@ jobs:
       if: env.REBUILD_REQUIRED == 'true'
       uses: azure/login@v1
       with:
+        # Changed to use proper JSON credentials approach as fallback
         creds: ${{ secrets.AZURE_CREDENTIALS }}
         enable-AzPSSession: true
     
