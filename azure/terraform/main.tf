@@ -18,6 +18,7 @@ terraform {
 
 provider "azurerm" {
   features {}
+  skip_provider_registration = true
   # Note: Tenant and subscription should be set via az CLI before running Terraform
   # az login --tenant uclhaz.onmicrosoft.com
   # az account set --subscription rg-xhuma-play
