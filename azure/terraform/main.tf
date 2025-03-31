@@ -85,7 +85,7 @@ module "storage" {
 # Key Vault for secrets
 module "key_vault" {
   source              = "./modules/key_vault"
-  name                = "kvxhuma${local.env_base_name}"
+  name                = "kvxhuma${local.env_base_name}01"  # Added "01" suffix to avoid conflict with deleted vault
   resource_group_name = data.azurerm_resource_group.main.name
   location            = var.location
   sku_name            = "standard"

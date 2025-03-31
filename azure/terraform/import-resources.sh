@@ -66,7 +66,7 @@ ACR_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/provi
 # Storage Account resource id
 STORAGE_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.Storage/storageAccounts/st${ENV_NAME}xhuma"
 # Key Vault resource id
-KEYVAULT_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.KeyVault/vaults/kvxhuma${ENV_NAME}"
+KEYVAULT_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.KeyVault/vaults/kvxhuma${ENV_NAME}01"
 # Log Analytics Workspace resource id
 LOG_ANALYTICS_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.OperationalInsights/workspaces/logxhuma${ENV_NAME}"
 # Container Apps Environment resource id
