@@ -137,6 +137,21 @@ module "container_apps" {
   tags                        = local.common_tags
 }
 
+# Give the Container App's managed identity access to ACR
+resource "azurerm_role_assignment" "xhuma_acr_pull" {
+  # The Container App needs to be created first to have a managed identity
+  depends_on = [module.container_apps]
+  
+  # Get the principal ID of the Container App's managed identity
+  principal_id         = module.container_apps.xhuma_identity_principal_id
+  
+  # Use the built-in ACR Pull role
+  role_definition_name = "AcrPull"
+  
+  # Scope to the ACR resource
+  scope                = module.acr.id
+}
+
 # Current client config for Key Vault access policies
 data "azurerm_client_config" "current" {}
 
