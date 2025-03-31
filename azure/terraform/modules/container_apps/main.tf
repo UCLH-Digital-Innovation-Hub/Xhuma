@@ -84,7 +84,12 @@ resource "azurerm_container_app" "xhuma" {
     }
   }
   
-  # Reference the container registry by URL only, without authentication parameters
+  # Use managed identity authentication for ACR
+  identity {
+    type = "SystemAssigned"
+  }
+  
+  # Reference the container registry by URL only
   registry {
     server = var.acr_login_server
   }

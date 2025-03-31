@@ -6,8 +6,13 @@ output "xhuma_app_id" {
 }
 
 output "xhuma_app_url" {
-  description = "The URL of the Xhuma container app"
-  value       = "https://${azurerm_container_app.xhuma.ingress[0].fqdn}"
+  description = "The URL to access the Xhuma application"
+  value       = azurerm_container_app.xhuma.ingress[0].fqdn
+}
+
+output "xhuma_identity_principal_id" {
+  description = "The principal ID of the Xhuma container app's managed identity"
+  value       = azurerm_container_app.xhuma.identity[0].principal_id
 }
 
 output "redis_app_id" {
