@@ -105,17 +105,29 @@ jobs:
           -var="grafana_admin_password=${{ secrets.GRAFANA_ADMIN_PASSWORD }}" \
           -out=tfplan
         
-        # Determine if infrastructure changes exist or only application changes
-        PLAN_JSON=$(terraform show -json tfplan)
-        INFRA_CHANGES=$(echo "$PLAN_JSON" | jq '.resource_changes | length')
+        # Default to infrastructure changes - this ensures the workflow continues
+        # even if JSON parsing fails
+        CHANGE_TYPE="infrastructure"
+        echo "CHANGE_TYPE=$CHANGE_TYPE" >> $GITHUB_ENV
+        echo "::set-output name=change_type::$CHANGE_TYPE"
         
-        if [ "$INFRA_CHANGES" -gt "0" ]; then
-          echo "CHANGE_TYPE=infrastructure" >> $GITHUB_ENV
-          echo "::set-output name=change_type::infrastructure"
-        else
-          echo "CHANGE_TYPE=application" >> $GITHUB_ENV
-          echo "::set-output name=change_type::application"
+        # Only try jq if we want to be more specific (but don't fail the build)
+        set +e # Don't exit on error
+        PLAN_JSON=$(terraform show -json tfplan 2>/dev/null)
+        if [ $? -eq 0 ] && [ -n "$PLAN_JSON" ]; then
+          INFRA_CHANGES=$(echo "$PLAN_JSON" | jq '.resource_changes | length' 2>/dev/null)
+          if [ $? -eq 0 ] && [ -n "$INFRA_CHANGES" ]; then
+            if [ "$INFRA_CHANGES" -gt "0" ]; then
+              CHANGE_TYPE="infrastructure"
+            else
+              CHANGE_TYPE="application"
+            fi
+            echo "CHANGE_TYPE=$CHANGE_TYPE" >> $GITHUB_ENV
+            echo "::set-output name=change_type::$CHANGE_TYPE"
+          fi
         fi
+        # Regardless of parsing success, report what we're doing
+        echo "Proceeding with change type: $CHANGE_TYPE"
     
     - name: Terraform Apply
       run: |
