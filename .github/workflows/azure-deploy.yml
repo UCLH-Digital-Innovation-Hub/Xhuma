@@ -26,7 +26,6 @@ jobs:
     # Only run when PR is merged, not when it's closed without merging
     if: github.event.pull_request.merged == true || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'rg-xhuma-play' }}  # Use the selected environment for secrets
     
     steps:
     - name: Checkout repository
@@ -37,10 +36,20 @@ jobs:
     - name: Set environment variables
       id: env-vars
       run: |
-        echo "ENVIRONMENT=${{ github.event.inputs.environment || 'rg-xhuma-play' }}" >> $GITHUB_ENV
+        echo "ENVIRONMENT=rg-xhuma-play" >> $GITHUB_ENV
         # Extract the base environment name without prefixes for proper naming
-        GITHUB_ENV_NAME=$(echo "${{ github.event.inputs.environment || 'rg-xhuma-play' }}" | sed 's/rg-xhuma-//' | sed 's/rg-//')
-        echo "ENV_BASE_NAME=$GITHUB_ENV_NAME" >> $GITHUB_ENV
+        echo "ENV_BASE_NAME=play" >> $GITHUB_ENV
+    
+    - name: Debug credentials
+      run: |
+        # Log that we're about to authenticate (don't show any secrets)
+        echo "Preparing to authenticate with Azure..."
+        # Check if the AZURE_CREDENTIALS secret exists (without revealing its content)
+        if [ -n "${{ secrets.AZURE_CREDENTIALS }}" ]; then
+          echo "AZURE_CREDENTIALS secret is set"
+        else
+          echo "AZURE_CREDENTIALS secret is NOT set"
+        fi
     
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v2
@@ -50,12 +59,11 @@ jobs:
     - name: Login to Azure
       uses: azure/login@v1
       with:
-        # Changed to use proper JSON credentials approach as fallback
         creds: ${{ secrets.AZURE_CREDENTIALS }}
-        enable-AzPSSession: true
     
     - name: Select Azure subscription
       run: |
+        az account show
         az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
     
     - name: Check if resources exist
@@ -131,10 +139,7 @@ jobs:
   
   build-and-push:
     needs: terraform
-    outputs:
-      change_type: ${{ needs.terraform.outputs.change_type }}
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'rg-xhuma-play' }}  # Use the selected environment for secrets
     
     steps:
     - name: Checkout repository
@@ -153,8 +158,8 @@ jobs:
           CHANGED_FILES="app/"
         fi
         
-        # Check if app code was changed or if infrastructure changes occurred
-        if echo "$CHANGED_FILES" | grep -q "^app/" || [ "${{ needs.terraform.outputs.change_type }}" = "infrastructure" ]; then
+        # Check if app code was changed
+        if echo "$CHANGED_FILES" | grep -q "^app/"; then
           echo "REBUILD_REQUIRED=true" >> $GITHUB_ENV
         else
           echo "REBUILD_REQUIRED=false" >> $GITHUB_ENV
@@ -168,9 +173,7 @@ jobs:
       if: env.REBUILD_REQUIRED == 'true'
       uses: azure/login@v1
       with:
-        # Changed to use proper JSON credentials approach as fallback
         creds: ${{ secrets.AZURE_CREDENTIALS }}
-        enable-AzPSSession: true
     
     - name: Login to Azure Container Registry
       if: env.REBUILD_REQUIRED == 'true'
