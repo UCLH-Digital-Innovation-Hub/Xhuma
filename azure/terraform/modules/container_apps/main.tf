@@ -84,11 +84,9 @@ resource "azurerm_container_app" "xhuma" {
     }
   }
   
-  # Use username/password authentication for ACR instead of managed identity
+  # Reference the container registry by URL only, without authentication parameters
   registry {
-    server   = var.acr_login_server
-    username = var.acr_admin_username
-    password = var.acr_admin_password
+    server = var.acr_login_server
   }
 }
 
