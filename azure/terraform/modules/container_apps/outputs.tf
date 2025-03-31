@@ -10,10 +10,8 @@ output "xhuma_app_url" {
   value       = azurerm_container_app.xhuma.ingress[0].fqdn
 }
 
-output "xhuma_identity_principal_id" {
-  description = "The principal ID of the Xhuma container app's managed identity"
-  value       = azurerm_container_app.xhuma.identity[0].principal_id
-}
+# Removed xhuma_identity_principal_id output since we're now using secret-based authentication
+# instead of managed identity authentication
 
 output "redis_app_id" {
   description = "The ID of the Redis container app"
