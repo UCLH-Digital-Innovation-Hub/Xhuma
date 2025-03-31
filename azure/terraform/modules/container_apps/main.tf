@@ -84,14 +84,17 @@ resource "azurerm_container_app" "xhuma" {
     }
   }
   
-  # Use managed identity authentication for ACR
-  identity {
-    type = "SystemAssigned"
+  # Use secret-based authentication for ACR
+  secret {
+    name  = "registry-password"
+    value = var.acr_admin_password
   }
   
-  # Reference the container registry by URL only
+  # Reference the container registry with credentials
   registry {
-    server = var.acr_login_server
+    server               = var.acr_login_server
+    username             = var.acr_admin_username
+    password_secret_name = "registry-password"
   }
 }
 
