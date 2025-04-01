@@ -67,47 +67,70 @@ jobs:
         az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
     
     - name: Check if resources exist
+      id: resource-check
       run: |
         cd azure/terraform
         # Check if resource group exists
         RESOURCE_GROUP_EXISTS=$(az group exists --name ${{ env.ENVIRONMENT }} --query bool -o tsv)
         echo "RESOURCE_GROUP_EXISTS=$RESOURCE_GROUP_EXISTS" >> $GITHUB_ENV
+        echo "::set-output name=resource_group_exists::$RESOURCE_GROUP_EXISTS"
+        
+        # Log the resource group status
+        echo "Resource group ${{ env.ENVIRONMENT }} exists: $RESOURCE_GROUP_EXISTS"
     
-    - name: Import existing resources (if applicable)
-      if: env.RESOURCE_GROUP_EXISTS == 'true'
+    - name: Initialize Terraform
       run: |
         cd azure/terraform
-        # Make script executable
-        chmod +x ./import-resources.sh
-        # Run the import script with the resource group and debug flag
-        ./import-resources.sh -g ${{ env.ENVIRONMENT }} -d || true
+        terraform init
+    
+    # Separate step for direct imports - will run regardless of previous script success/failure
+    - name: Direct import of Azure resources
+      run: |
+        cd azure/terraform
+        echo "Starting direct import of resources..."
+        
+        # Get the subscription ID
+        SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+        echo "Using subscription ID: $SUBSCRIPTION_ID"
+        
+        # Get resource group info
+        echo "Checking resource group ${{ env.ENVIRONMENT }}..."
+        az group show --name ${{ env.ENVIRONMENT }} || true
+        
+        # Display existing resources in the resource group for debugging
+        echo "Listing resources in resource group ${{ env.ENVIRONMENT }}..."
+        az resource list --resource-group ${{ env.ENVIRONMENT }} --query "[].{name:name, type:type}" -o table || true
         
         # Verify no stale resources exist for Key Vault
         echo "Checking for soft-deleted Key Vault..."
+        az keyvault list-deleted --query "[?name=='kvxhuma${{ env.ENV_BASE_NAME }}']" || true
         if az keyvault list-deleted --query "[?name=='kvxhuma${{ env.ENV_BASE_NAME }}']" | grep -q "kvxhuma${{ env.ENV_BASE_NAME }}"; then
           echo "Found soft-deleted Key Vault, purging..."
           az keyvault purge --name "kvxhuma${{ env.ENV_BASE_NAME }}" --no-wait || true
         fi
-
-        # Fallback direct imports for critical resources that must be imported
-        echo "Attempting direct imports for known resources..."
-        SUBSCRIPTION_ID=$(az account show --query id -o tsv)
         
-        # Import ACR directly
-        echo "Importing ACR..."
-        terraform import module.acr.azurerm_container_registry.acr "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.ContainerRegistry/registries/crxhuma${{ env.ENV_BASE_NAME }}" || true
+        # Direct imports for each resource
+        echo "*** Importing Container Registry ***"
+        az acr show --name "crxhuma${{ env.ENV_BASE_NAME }}" --resource-group "${{ env.ENVIRONMENT }}" || true
+        terraform import module.acr.azurerm_container_registry.acr "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.ContainerRegistry/registries/crxhuma${{ env.ENV_BASE_NAME }}" || echo "Failed to import ACR"
         
-        # Import Storage Account directly
-        echo "Importing Storage Account..."
-        terraform import module.storage.azurerm_storage_account.storage "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.Storage/storageAccounts/st${{ env.ENV_BASE_NAME }}xhuma" || true
+        echo "*** Importing Storage Account ***"
+        az storage account show --name "st${{ env.ENV_BASE_NAME }}xhuma" --resource-group "${{ env.ENVIRONMENT }}" || true
+        terraform import module.storage.azurerm_storage_account.storage "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.Storage/storageAccounts/st${{ env.ENV_BASE_NAME }}xhuma" || echo "Failed to import Storage Account"
         
-        # Import Log Analytics Workspace directly
-        echo "Importing Log Analytics Workspace..."
-        terraform import module.log_analytics.azurerm_log_analytics_workspace.workspace "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.OperationalInsights/workspaces/logxhuma${{ env.ENV_BASE_NAME }}" || true
+        echo "*** Importing Key Vault ***"
+        az keyvault show --name "kvxhuma${{ env.ENV_BASE_NAME }}01" --resource-group "${{ env.ENVIRONMENT }}" || true
+        terraform import module.key_vault.azurerm_key_vault.key_vault "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.KeyVault/vaults/kvxhuma${{ env.ENV_BASE_NAME }}01" || echo "Failed to import Key Vault"
         
-        # Import Container Apps Environment directly (note the name - corrected from environment to env)
-        echo "Importing Container Apps Environment..."
-        terraform import module.container_apps_environment.azurerm_container_app_environment.env "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.App/managedEnvironments/caexhuma${{ env.ENV_BASE_NAME }}" || true
+        echo "*** Importing Log Analytics Workspace ***"
+        az monitor log-analytics workspace show --workspace-name "logxhuma${{ env.ENV_BASE_NAME }}" --resource-group "${{ env.ENVIRONMENT }}" || true
+        terraform import module.log_analytics.azurerm_log_analytics_workspace.workspace "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.OperationalInsights/workspaces/logxhuma${{ env.ENV_BASE_NAME }}" || echo "Failed to import Log Analytics"
+        
+        echo "*** Importing Container Apps Environment ***"
+        az containerapp env show --name "caexhuma${{ env.ENV_BASE_NAME }}" --resource-group "${{ env.ENVIRONMENT }}" || true
+        terraform import module.container_apps_environment.azurerm_container_app_environment.env "/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${{ env.ENVIRONMENT }}/providers/Microsoft.App/managedEnvironments/caexhuma${{ env.ENV_BASE_NAME }}" || echo "Failed to import Container Apps Environment"
+        
+        echo "Import operations completed"
     
     - name: Terraform Init
       run: |
