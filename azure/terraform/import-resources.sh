@@ -1,23 +1,36 @@
 #!/bin/bash
 # Script to import existing Azure resources into Terraform state
 
+set -e  # Exit on error
+set -o pipefail  # Exit if any command in pipeline fails
+
 # Default values
 RESOURCE_GROUP="rg-xhuma-play"
 ENV_NAME=""
+DEBUG=false
 
 # Parse command line arguments
-while getopts ":g:e:" opt; do
+while getopts ":g:e:d" opt; do
   case $opt in
     g) RESOURCE_GROUP="$OPTARG" ;;
     e) ENV_NAME="$OPTARG" ;;
+    d) DEBUG=true ;;
     \?) echo "Invalid option -$OPTARG" >&2; exit 1 ;;
   esac
 done
+
+# Debug function
+debug() {
+  if [ "$DEBUG" = true ]; then
+    echo "DEBUG: $1"
+  fi
+}
 
 # Extract environment name from resource group if not provided
 if [ -z "$ENV_NAME" ]; then
   # If environment is like "rg-xhuma-play", extract just "play"
   ENV_NAME=$(echo $RESOURCE_GROUP | sed -E 's/rg-xhuma-//g' | sed -E 's/rg-//g')
+  debug "Extracted environment name: $ENV_NAME"
 fi
 
 # Get subscription ID
@@ -36,9 +49,12 @@ if [ "$RESOURCE_GROUP_EXISTS" != "true" ]; then
   exit 1
 fi
 
+echo "===== Import Configuration ====="
 echo "Using subscription: $SUBSCRIPTION_ID"
 echo "Using resource group: $RESOURCE_GROUP"
 echo "Using environment name: $ENV_NAME"
+echo "Debug mode: $DEBUG"
+echo "==============================="
 
 # Initialize Terraform
 echo "Initializing Terraform..."
@@ -51,12 +67,31 @@ import_if_exists() {
   local azure_resource_id=$3
   
   echo "Checking if $resource_type exists..."
-  if az resource show --ids "$azure_resource_id" &>/dev/null; then
-    echo "Importing $resource_type..."
-    terraform import "$terraform_address" "$azure_resource_id"
-    return 0
+  debug "Resource ID: $azure_resource_id"
+  debug "Terraform address: $terraform_address"
+  
+  # Try to get the resource and capture the output for debugging
+  local resource_output
+  resource_output=$(az resource show --ids "$azure_resource_id" 2>&1)
+  local az_exit_code=$?
+  
+  if [ $az_exit_code -eq 0 ]; then
+    echo "Resource $resource_type exists, proceeding with import..."
+    debug "Resource details: $resource_output"
+    
+    # Import with error handling
+    echo "Running: terraform import \"$terraform_address\" \"$azure_resource_id\""
+    if terraform import "$terraform_address" "$azure_resource_id"; then
+      echo "Successfully imported $resource_type"
+      return 0
+    else
+      echo "WARNING: Failed to import $resource_type, but resource exists"
+      debug "Import command failed for: $terraform_address = $azure_resource_id"
+      return 2  # Resource exists but import failed
+    fi
   else
     echo "Resource $resource_type doesn't exist, skipping import."
+    debug "az resource show output: $resource_output"
     return 1
   fi
 }
@@ -77,10 +112,10 @@ import_if_exists "Container Registry" "module.acr.azurerm_container_registry.acr
 import_if_exists "Storage Account" "module.storage.azurerm_storage_account.storage" "$STORAGE_ID"
 import_if_exists "Key Vault" "module.key_vault.azurerm_key_vault.key_vault" "$KEYVAULT_ID"
 import_if_exists "Log Analytics Workspace" "module.log_analytics.azurerm_log_analytics_workspace.workspace" "$LOG_ANALYTICS_ID"
-import_if_exists "Container Apps Environment" "module.container_apps_environment.azurerm_container_app_environment.environment" "$CONTAINER_APPS_ENV_ID"
+import_if_exists "Container Apps Environment" "module.container_apps_environment.azurerm_container_app_environment.env" "$CONTAINER_APPS_ENV_ID"
 
 # Import container apps if the environment exists
-if import_if_exists "Container Apps Environment" "module.container_apps_environment.azurerm_container_app_environment.environment" "$CONTAINER_APPS_ENV_ID"; then
+if import_if_exists "Container Apps Environment" "module.container_apps_environment.azurerm_container_app_environment.env" "$CONTAINER_APPS_ENV_ID"; then
   # Try to import container apps
   echo "Checking for container apps..."
   CONTAINER_APPS=$(az containerapp list --resource-group $RESOURCE_GROUP --query "[].name" -o tsv)
