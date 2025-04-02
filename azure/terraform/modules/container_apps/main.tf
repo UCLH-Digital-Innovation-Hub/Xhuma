@@ -7,6 +7,11 @@ resource "azurerm_container_app" "xhuma" {
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
   tags                         = var.tags
+  
+  # Prevent accidental destruction of container app
+  lifecycle {
+    prevent_destroy = true
+  }
 
   template {
     container {
@@ -105,6 +110,11 @@ resource "azurerm_container_app" "redis" {
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
   tags                         = var.tags
+  
+  # Prevent accidental destruction of container app
+  lifecycle {
+    prevent_destroy = true
+  }
 
   template {
     container {
@@ -157,6 +167,11 @@ resource "azurerm_container_app" "postgres" {
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
   tags                         = var.tags
+  
+  # Prevent accidental destruction of container app
+  lifecycle {
+    prevent_destroy = true
+  }
 
   template {
     container {

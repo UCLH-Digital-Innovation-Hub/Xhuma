@@ -11,6 +11,11 @@ resource "azurerm_key_vault" "key_vault" {
   purge_protection_enabled    = var.purge_protection_enabled
   soft_delete_retention_days  = var.soft_delete_retention_days
   
+  # Prevent accidental destruction of Key Vault
+  lifecycle {
+    prevent_destroy = true
+  }
+  
   # Default access policy for the current client
   access_policy {
     tenant_id = var.tenant_id
