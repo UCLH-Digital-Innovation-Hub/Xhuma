@@ -39,7 +39,7 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         - A unique JWT ID (jti claim)
         - 5-minute expiration time (exp claim)
     """
-    headers = {"typ": "JWT", "kid": key_id}
+    headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
     payload = {
         "sub": subject,
         "iss": issuer,

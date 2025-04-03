@@ -184,7 +184,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 headers = []
                 for header in table_headers[title]:
                     headers.append({header})
-                return {"tr": {"th":  table_headers[title]}}
+                return {"tr": {"th": table_headers[title]}}
 
             def create_row(entry_data) -> dict:
                 """generates a table row from a list of inputs
@@ -221,57 +221,70 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 rows = []
                 for entry in list.entry:
                     referenced_item = index[entry.item.reference]
-                    
 
                     if list.title == "Allergies and adverse reactions":
                         entry_data = allergy(referenced_item)
                         comp["section"]["entry"].append(entry_data)
                         rows.append(
                             create_row(
-                                [entry_data["act"]["effectiveTime"]["low"]["@value"],
-                                entry_data["act"]["statusCode"]["@code"],
-                                entry_data["act"]["entryRelationship"]["observation"][
-                                    "participant"
-                                ]["participantRole"]["playingEntity"]["code"][
-                                    "@displayName"
-                                ],
-                                entry_data["act"]["entryRelationship"]["observation"][
-                                    "entryRelationship"
-                                ]["observation"]["value"]["@displayName"],]
+                                [
+                                    entry_data["act"]["effectiveTime"]["low"]["@value"],
+                                    entry_data["act"]["statusCode"]["@code"],
+                                    entry_data["act"]["entryRelationship"][
+                                        "observation"
+                                    ]["participant"]["participantRole"][
+                                        "playingEntity"
+                                    ][
+                                        "code"
+                                    ][
+                                        "@displayName"
+                                    ],
+                                    entry_data["act"]["entryRelationship"][
+                                        "observation"
+                                    ]["entryRelationship"]["observation"]["value"][
+                                        "@displayName"
+                                    ],
+                                ]
                             )
                         )
                     elif list.title == "Problems":
                         entry_data = problem(referenced_item)
                         comp["section"]["entry"].append(entry_data)
                         rows.append(
-                            create_row([
-                                entry_data["act"]["effectiveTime"]["low"]["@value"],
-                                entry_data["act"]["statusCode"]["@code"],
-                                entry_data["act"]["entryRelationship"]["observation"][
-                                    "value"
-                                ]["@displayName"],]
+                            create_row(
+                                [
+                                    entry_data["act"]["effectiveTime"]["low"]["@value"],
+                                    entry_data["act"]["statusCode"]["@code"],
+                                    entry_data["act"]["entryRelationship"][
+                                        "observation"
+                                    ]["value"]["@displayName"],
+                                ]
                             )
                         )
                     elif list.title == "Medications and medical devices":
                         entry_data = medication(referenced_item, index)
                         comp["section"]["entry"].append(entry_data)
                         rows.append(
-                            create_row([
-                                entry_data["substanceAdministration"]["effectiveTime"][
-                                    "low"
-                                ]["@value"],
-                                entry_data["substanceAdministration"]["effectiveTime"][
-                                    "high"
-                                ]["@value"],
-                                entry_data["substanceAdministration"]["statusCode"][
-                                    "@code"
-                                ],
-                                entry_data["substanceAdministration"]["consumable"][
-                                    "manufacturedProduct"
-                                ]["manufacturedMaterial"]["code"][0]["@displayName"],
-                                entry_data["substanceAdministration"][
-                                    "entryRelationship"
-                                ]["act"]["text"]["#text"],]
+                            create_row(
+                                [
+                                    entry_data["substanceAdministration"][
+                                        "effectiveTime"
+                                    ]["low"]["@value"],
+                                    entry_data["substanceAdministration"][
+                                        "effectiveTime"
+                                    ]["high"]["@value"],
+                                    entry_data["substanceAdministration"]["statusCode"][
+                                        "@code"
+                                    ],
+                                    entry_data["substanceAdministration"]["consumable"][
+                                        "manufacturedProduct"
+                                    ]["manufacturedMaterial"]["code"][0][
+                                        "@displayName"
+                                    ],
+                                    entry_data["substanceAdministration"][
+                                        "entryRelationship"
+                                    ]["act"]["text"]["#text"],
+                                ]
                             )
                         )
                         print(rows)
