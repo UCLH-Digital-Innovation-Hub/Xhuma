@@ -24,6 +24,7 @@ async def lookup_patient(nhsno: int):
     def get_pds_token():
         full_path = f"{INT_BASE_PATH}oauth2/token"
         jwt_token = pds_jwt(API_KEY, API_KEY, full_path, "test-1")
+        # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {
             "grant_type": "client_credentials",
@@ -33,7 +34,7 @@ async def lookup_patient(nhsno: int):
         r = httpx.post(full_path, data=oauth_params)
 
         response_dict = json.loads(r.text)
-        print(response_dict)
+        # print(response_dict)
         nhs_token = response_dict["access_token"]
 
         redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
@@ -42,12 +43,14 @@ async def lookup_patient(nhsno: int):
     if not redis_client.exists("access_token"):
         nhs_token = get_pds_token()
     else:
-        nhs_token = redis_client.get("access_token")
+        nhs_token = redis_client.get("access_token").decode("utf-8")
 
+    # print(f"nhs_token: {nhs_token}")
     # set headers for pds request
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
         "X-Correlation-ID": str(uuid.uuid4()),
+        # TODO make end user organisation dynamic
         "NHSD-End-User-Organisation-ODS": "Y12345",
         "Authorization": f"Bearer {nhs_token}",
         "accept": "application/fhir+json",
@@ -57,11 +60,21 @@ async def lookup_patient(nhsno: int):
     # print(url)
 
     r = httpx.get(url, headers=headers)
+    if r.status_code != 200:
+        raise Exception(f"{r.status_code}: {r.text}")
+        # print(r.text)
 
     # if 401, get new one and try again
     if r.status_code == 401:
         print("401: trying to refresh token")
         nhs_token = get_pds_token()
+        headers = {
+            "X-Request-ID": str(uuid.uuid4()),
+            "X-Correlation-ID": str(uuid.uuid4()),
+            "NHSD-End-User-Organisation-ODS": "Y12345",
+            "Authorization": f"Bearer {nhs_token}",
+            "accept": "application/fhir+json",
+        }
         r = httpx.get(url, headers=headers)
 
     if r.status_code != 200:
@@ -198,7 +211,6 @@ async def sds_trace(ods: str):
         "organization": organisation,
         "identifier": identifier,
     }
-    print(parameters)
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
         "accept": "application/fhir+json",
@@ -211,11 +223,11 @@ async def sds_trace(ods: str):
 
 if __name__ == "__main__":
 
-    patient = asyncio.run(lookup_patient(9449306621))
+    patient = asyncio.run(lookup_patient(9690937278))
 
-    print(patient.gender)
-    print(patient.name[0].family)
-    print(patient.generalPractitioner[0].identifier.value)
+    # print(patient.gender)
+    # print(patient.name[0].family)
+    # print(patient.generalPractitioner[0].identifier.value)
 
-    ods = sds_trace("T99999")
-    print(ods.text)
+    ods = asyncio.run(sds_trace("RVV00"))
+    print(ods)
