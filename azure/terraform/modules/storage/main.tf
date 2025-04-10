@@ -26,8 +26,8 @@ resource "azurerm_storage_share" "file_shares" {
   storage_account_name = azurerm_storage_account.storage.name
   quota                = var.file_share_quota
   
-  # Create new share before destroying old one to prevent data loss
-  lifecycle {
-    prevent_destroy = true
-  }
+  # Temporarily removed prevent_destroy to allow recreation
+  # lifecycle {
+  #   prevent_destroy = true
+  # }
 }
