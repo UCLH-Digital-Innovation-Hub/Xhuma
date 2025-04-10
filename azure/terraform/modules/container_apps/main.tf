@@ -8,10 +8,20 @@ resource "azurerm_container_app" "xhuma" {
   revision_mode                = "Single"
   tags                         = var.tags
   
-  # Temporarily removed prevent_destroy to allow recreation
-  # lifecycle {
-  #   prevent_destroy = true
-  # }
+  # Add comprehensive lifecycle configuration
+  lifecycle {
+    # Restore prevent_destroy for production
+    prevent_destroy = true
+    
+    # Ignore changes to fields that might cause recreation
+    # This allows updates without destroying existing app
+    ignore_changes = [
+      template[0].container[0].image,  # Allow image updates
+      tags,
+      template[0].min_replicas,
+      template[0].max_replicas
+    ]
+  }
 
   template {
     container {
@@ -111,10 +121,20 @@ resource "azurerm_container_app" "redis" {
   revision_mode                = "Single"
   tags                         = var.tags
   
-  # Temporarily removed prevent_destroy to allow recreation
-  # lifecycle {
-  #   prevent_destroy = true
-  # }
+  # Add comprehensive lifecycle configuration
+  lifecycle {
+    # Restore prevent_destroy for production data
+    prevent_destroy = true
+    
+    # Ignore changes to fields that might cause recreation
+    # This allows updates without destroying existing app
+    ignore_changes = [
+      tags,
+      template[0].min_replicas,
+      template[0].max_replicas,
+      template[0].container[0].command
+    ]
+  }
 
   template {
     container {
@@ -168,10 +188,19 @@ resource "azurerm_container_app" "postgres" {
   revision_mode                = "Single"
   tags                         = var.tags
   
-  # Temporarily removed prevent_destroy to allow recreation
-  # lifecycle {
-  #   prevent_destroy = true
-  # }
+  # Add comprehensive lifecycle configuration
+  lifecycle {
+    # Restore prevent_destroy for production database
+    prevent_destroy = true
+    
+    # Ignore changes to fields that might cause recreation
+    # This allows updates without destroying existing app
+    ignore_changes = [
+      tags,
+      template[0].min_replicas,
+      template[0].max_replicas
+    ]
+  }
 
   template {
     container {
@@ -228,6 +257,16 @@ resource "azurerm_container_app" "prometheus" {
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
   tags                         = var.tags
+  
+  # Add lifecycle configuration for monitoring container
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      tags,
+      template[0].min_replicas,
+      template[0].max_replicas
+    ]
+  }
 
   template {
     container {
@@ -265,6 +304,16 @@ resource "azurerm_container_app" "grafana" {
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
   tags                         = var.tags
+  
+  # Add lifecycle configuration for monitoring container
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      tags,
+      template[0].min_replicas,
+      template[0].max_replicas
+    ]
+  }
 
   template {
     container {
@@ -305,6 +354,16 @@ resource "azurerm_container_app" "otel_collector" {
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
   tags                         = var.tags
+  
+  # Add lifecycle configuration for monitoring container
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      tags,
+      template[0].min_replicas,
+      template[0].max_replicas
+    ]
+  }
 
   template {
     container {
@@ -337,6 +396,16 @@ resource "azurerm_container_app" "tempo" {
   resource_group_name          = var.resource_group_name
   revision_mode                = "Single"
   tags                         = var.tags
+  
+  # Add lifecycle configuration for tracing container
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes = [
+      tags,
+      template[0].min_replicas,
+      template[0].max_replicas
+    ]
+  }
 
   template {
     container {

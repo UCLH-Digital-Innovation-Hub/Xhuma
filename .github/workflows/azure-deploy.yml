@@ -123,17 +123,12 @@ jobs:
         # Get storage account key for file share operations
         STORAGE_KEY=$(az storage account keys list --account-name "st${{ env.ENV_BASE_NAME }}xhuma" --resource-group "${{ env.ENVIRONMENT }}" --query "[0].value" -o tsv)
         
-        # Check if redis-data share exists and import it
-        if az storage share exists --name "redis-data" --account-name "st${{ env.ENV_BASE_NAME }}xhuma" --account-key "$STORAGE_KEY" --query "exists" -o tsv | grep -q "true"; then
-          echo "Importing redis-data file share..."
-          terraform import 'module.storage.azurerm_storage_share.file_shares["redis-data"]' "st${{ env.ENV_BASE_NAME }}xhuma/redis-data" || echo "Failed to import redis-data share"
-        fi
+        # Always try to import the file shares (they likely exist but may fail on first run)
+        echo "Importing redis-data file share..."
+        terraform import 'module.storage.azurerm_storage_share.file_shares["redis-data"]' "st${{ env.ENV_BASE_NAME }}xhuma/redis-data" || echo "Failed to import redis-data share (will be created if it doesn't exist)"
         
-        # Check if postgres-data share exists and import it
-        if az storage share exists --name "postgres-data" --account-name "st${{ env.ENV_BASE_NAME }}xhuma" --account-key "$STORAGE_KEY" --query "exists" -o tsv | grep -q "true"; then
-          echo "Importing postgres-data file share..."
-          terraform import 'module.storage.azurerm_storage_share.file_shares["postgres-data"]' "st${{ env.ENV_BASE_NAME }}xhuma/postgres-data" || echo "Failed to import postgres-data share"
-        fi
+        echo "Importing postgres-data file share..."
+        terraform import 'module.storage.azurerm_storage_share.file_shares["postgres-data"]' "st${{ env.ENV_BASE_NAME }}xhuma/postgres-data" || echo "Failed to import postgres-data share (will be created if it doesn't exist)"
         
         echo "*** Importing Key Vault ***"
         az keyvault show --name "kvxhuma${{ env.ENV_BASE_NAME }}01" --resource-group "${{ env.ENVIRONMENT }}" || true

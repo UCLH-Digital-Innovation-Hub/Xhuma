@@ -26,8 +26,15 @@ resource "azurerm_storage_share" "file_shares" {
   storage_account_name = azurerm_storage_account.storage.name
   quota                = var.file_share_quota
   
-  # Temporarily removed prevent_destroy to allow recreation
-  # lifecycle {
-  #   prevent_destroy = true
-  # }
+  # Add proper lifecycle configuration
+  lifecycle {
+    # Restore prevent_destroy to protect data
+    prevent_destroy = true
+    
+    # Ignore changes to attributes that might trigger replacement
+    ignore_changes = [
+      quota,
+      metadata
+    ]
+  }
 }

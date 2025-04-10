@@ -8,10 +8,19 @@ resource "azurerm_container_app_environment" "env" {
   infrastructure_subnet_id   = var.infrastructure_subnet_id
   tags                       = var.tags
   
-  # Temporarily removed prevent_destroy to allow recreation
-  # lifecycle {
-  #   prevent_destroy = true
-  # }
+  # Add comprehensive lifecycle configuration to handle existing environments properly
+  lifecycle {
+    # Prevent destroy protects from accidental deletion
+    prevent_destroy = true
+    
+    # Ignore changes to fields that might cause replacement
+    # This ensures existing environments aren't recreated
+    ignore_changes = [
+      log_analytics_workspace_id,
+      infrastructure_subnet_id,
+      tags
+    ]
+  }
 }
 
 # Create storage for Redis and PostgreSQL
