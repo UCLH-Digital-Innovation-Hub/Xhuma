@@ -38,4 +38,7 @@ nhs_numbers = [
 if __name__ == "__main__":
     for nhsno in nhs_numbers:
         print(f"Testing {nhsno}")
-        asyncio.run(gpconnect(nhsno))
+        try:
+            asyncio.run(gpconnect(nhsno))
+        except Exception as e:
+            print(f"Failed to process {nhsno}: {e}")

@@ -43,6 +43,8 @@ def generate_code(coding: coding.Coding) -> dict:
 
     if coding.system == "http://snomed.info/sct":
         code["@codeSystem"] = "2.16.840.1.113883.6.96"
+    elif coding.system == "https://fhir.hl7.org.uk/Id/multilex-drug-codes":
+        code["@codeSystem"] = "2.16.840.1.113883.2.1.6.4"
 
     return code
 

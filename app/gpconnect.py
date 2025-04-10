@@ -122,6 +122,11 @@ async def gpconnect(nhsno: int):
             headers=headers,
         )
 
+    # check for errors
+    if r.status_code != 200:
+        logging.error(f"Error: {r.status_code} {r.text}")
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    
     scr_bundle = json.loads(r.text)
 
     # get rid of fhir_comments
