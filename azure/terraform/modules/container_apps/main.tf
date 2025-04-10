@@ -8,10 +8,10 @@ resource "azurerm_container_app" "xhuma" {
   revision_mode                = "Single"
   tags                         = var.tags
   
-  # Prevent accidental destruction of container app
-  lifecycle {
-    prevent_destroy = true
-  }
+  # Temporarily removed prevent_destroy to allow recreation
+  # lifecycle {
+  #   prevent_destroy = true
+  # }
 
   template {
     container {
@@ -111,10 +111,10 @@ resource "azurerm_container_app" "redis" {
   revision_mode                = "Single"
   tags                         = var.tags
   
-  # Prevent accidental destruction of container app
-  lifecycle {
-    prevent_destroy = true
-  }
+  # Temporarily removed prevent_destroy to allow recreation
+  # lifecycle {
+  #   prevent_destroy = true
+  # }
 
   template {
     container {
@@ -168,10 +168,10 @@ resource "azurerm_container_app" "postgres" {
   revision_mode                = "Single"
   tags                         = var.tags
   
-  # Prevent accidental destruction of container app
-  lifecycle {
-    prevent_destroy = true
-  }
+  # Temporarily removed prevent_destroy to allow recreation
+  # lifecycle {
+  #   prevent_destroy = true
+  # }
 
   template {
     container {
