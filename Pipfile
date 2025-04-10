@@ -18,10 +18,10 @@ jwcrypto = "*"
 [dev-packages]
 black = "*"
 websockets = "*"
-pre-commit = "*"
 isort = "*"
 pytest = "*"
 xmlschema = "*"
+pre-commit = "*"
 
 [requires]
 python_version = "3.13"
