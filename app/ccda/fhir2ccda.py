@@ -39,7 +39,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         "@codeSystem": "2.16.840.1.113883.6.1",
     }
 
-    ccda["ClinicalDocument"]["title"] = {"#text": "Summary Care Record"}
+    ccda["ClinicalDocument"]["title"] = {
+        "#text": "GP Connect: Access Record Structured"
+    }
 
     # patient
     # TODO refine address parsing as may have multiple
@@ -76,8 +78,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "addr": {"@nullFlavor": "NA"},
             "telecom": {"@nullFlavor": "NA"},
             "assignedAuthoringDevice": {
-                "manufacturerModelName": {"#text": "SCR Connector"},
-                "softwareName": {"#text": "SCR Connector v0.1"},
+                "manufacturerModelName": {"#text": "Xhuma"},
+                "softwareName": {"#text": "Xhuma v0.1"},
             },
         },
     }
@@ -200,7 +202,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     row.append({data})
                 return {"td": entry_data}
 
-            if not list.entry:
+            if not list.entry or list.entry is None:
                 # if there are no entries
                 # Initialize empty table with appropriate headers based on section
                 comp["section"]["text"] = {

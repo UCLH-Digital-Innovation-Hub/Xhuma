@@ -1,5 +1,6 @@
-from app.gpconnect import gpconnect
 import asyncio
+
+from app.gpconnect import gpconnect
 
 nhs_numbers = [
     "9690937278",
@@ -31,7 +32,7 @@ nhs_numbers = [
     "9690937340",
     "9690938088",
     "9690937693",
-    "9690938770"
+    "9690938770",
 ]
 
 
