@@ -42,11 +42,12 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
     med["substanceAdministration"]["effectiveTime"] = {
         "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)}
     }
-    if (
-        entry.effectivePeriod
-        and hasattr(entry.effectivePeriod, "end")
-        and entry.effectivePeriod.end
-    ):
+    # if (
+    #     entry.effectivePeriod
+    #     and hasattr(entry.effectivePeriod, "end")
+    #     and entry.effectivePeriod.end
+    # ):
+    if entry.effectivePeriod.end is not None:
         # print(vars(entry.effectivePeriod))
         med["substanceAdministration"]["effectiveTime"]["high"] = {
             "@value": date_helper(entry.effectivePeriod.end.isostring)

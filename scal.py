@@ -35,8 +35,11 @@ nhs_numbers = [
     "9690938770",
 ]
 
+nhsno = "9690938614"
+
 
 if __name__ == "__main__":
+    # asyncio.run(gpconnect(nhsno))
     for nhsno in nhs_numbers:
         print(f"Testing {nhsno}")
         try:
