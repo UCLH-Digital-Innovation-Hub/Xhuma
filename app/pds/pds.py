@@ -217,6 +217,8 @@ async def sds_trace(ods: str):
         "apikey": api_key,
     }
     r = httpx.get(url, headers=headers, params=parameters)
+    if r.status_code != 200:
+        raise Exception(f"{r.status_code}: {r.text}")
 
     return json.loads(r.text)
 
