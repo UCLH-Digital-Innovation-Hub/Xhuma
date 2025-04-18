@@ -95,8 +95,8 @@ class CD(ANY):
         "or more translations into different coding systems.",
     )
     code: str = Field(alias="code")
-    codeSystem: str = Field(alias="codeSystem")
-    codeSystemName: Optional[str] = Field(alias="codeSystemName")
+    codeSystem: str = Field(alias="@codeSystem")
+    codeSystemName: Optional[str] = Field(alias="@codeSystemName")
     displayName: Optional[str] = Field(alias="displayName")
     translation: Optional[List["CD"]] = None  # Forward reference
 

@@ -46,7 +46,9 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
         "id": {"@root": uuid.uuid4()},
         "manufacturedMaterial": {
             # "code": [generate_code(x) for x in referenced_med.code.coding],
-            "code": code_with_translations(referenced_med.code.coding),
+            "code": code_with_translations(referenced_med.code.coding).model_dump(
+                by_alias=True, exclude_none=True
+            ),
         },
     }
 

@@ -5,7 +5,7 @@ from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
 
 from .entries import allergy, medication, problem
-from .helpers import date_helper, templateId
+from .helpers import date_helper, readable_date, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -229,7 +229,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         rows.append(
                             create_row(
                                 [
-                                    entry_data["act"]["effectiveTime"]["low"]["@value"],
+                                    readable_date(
+                                        entry_data["act"]["effectiveTime"]["low"][
+                                            "@value"
+                                        ]
+                                    ),
                                     entry_data["act"]["statusCode"]["@code"],
                                     entry_data["act"]["entryRelationship"][
                                         "observation"
@@ -254,7 +258,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         rows.append(
                             create_row(
                                 [
-                                    entry_data["act"]["effectiveTime"]["low"]["@value"],
+                                    readable_date(
+                                        entry_data["act"]["effectiveTime"]["low"][
+                                            "@value"
+                                        ]
+                                    ),
                                     entry_data["act"]["statusCode"]["@code"],
                                     entry_data["act"]["entryRelationship"][
                                         "observation"
@@ -265,12 +273,19 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     elif list.title == "Medications and medical devices":
                         entry_data = medication(referenced_item, index)
                         comp["section"]["entry"].append(entry_data)
+                        print(
+                            entry_data["substanceAdministration"]["consumable"][
+                                "manufacturedProduct"
+                            ]["manufacturedMaterial"]["code"]
+                        )
                         rows.append(
                             create_row(
                                 [
-                                    entry_data["substanceAdministration"][
-                                        "effectiveTime"
-                                    ]["low"]["@value"],
+                                    readable_date(
+                                        entry_data["substanceAdministration"][
+                                            "effectiveTime"
+                                        ]["low"]["@value"]
+                                    ),
                                     entry_data["substanceAdministration"][
                                         "effectiveTime"
                                     ]["high"]["@value"],
@@ -279,9 +294,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                     ],
                                     entry_data["substanceAdministration"]["consumable"][
                                         "manufacturedProduct"
-                                    ]["manufacturedMaterial"]["code"][0][
-                                        "@displayName"
-                                    ],
+                                    ]["manufacturedMaterial"]["code"]["displayName"],
                                     entry_data["substanceAdministration"][
                                         "entryRelationship"
                                     ]["act"]["text"]["#text"],

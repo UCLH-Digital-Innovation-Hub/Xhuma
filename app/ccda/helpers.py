@@ -108,6 +108,15 @@ def date_helper(isodate):
     return new_date
 
 
+def readable_date(date):
+    """
+    takes date string in YYYYMMDD format and returns to more readable format
+    """
+    new_date = datetime.strptime(date, "%Y%m%d").strftime("%d/%m/%Y")
+
+    return new_date
+
+
 def clean_soap(
     soap_request,
     namespaces: dict = {

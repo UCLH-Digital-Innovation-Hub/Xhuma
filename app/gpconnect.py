@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import timedelta
@@ -28,8 +29,8 @@ async def gpconnect(nhsno: int):
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
     # TODO pds search
-    pds_search = await pds.lookup_patient(nhsno)
-    print(pds_search)
+    # pds_search = await pds.lookup_patient(nhsno)
+    # print(pds_search)
 
     # TODO sds search
 
@@ -104,11 +105,16 @@ async def gpconnect(nhsno: int):
     doc_uuid = str(uuid4())
 
     # TODO set this as background task
-    redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
+    # redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
+    # redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
 
     # pprint(xml_ccda)
     with open(f"{nhsno}.xml", "w") as output:
         output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     return {"document_id": doc_uuid}
+
+
+if __name__ == "__main__":
+
+    document = asyncio.run(gpconnect(9690937286))
