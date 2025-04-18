@@ -94,10 +94,10 @@ class CD(ANY):
         "original text or phrase that served as the basis of the coding and one "
         "or more translations into different coding systems.",
     )
-    code: str = Field(alias="code")
+    code: str = Field(alias="@code")
     codeSystem: str = Field(alias="@codeSystem")
     codeSystemName: Optional[str] = Field(alias="@codeSystemName")
-    displayName: Optional[str] = Field(alias="displayName")
+    displayName: Optional[str] = Field(alias="@displayName")
     translation: Optional[List["CD"]] = None  # Forward reference
 
     @model_validator(mode="before")
