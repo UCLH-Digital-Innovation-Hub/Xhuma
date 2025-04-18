@@ -1,0 +1,144 @@
+{
+    "address": [
+        {
+            "extension": [
+                {
+                    "extension": [
+                        {
+                            "url": "type",
+                            "valueCoding": {
+                                "code": "PAF",
+                                "system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-AddressKeyType"
+                            }
+                        },
+                        {
+                            "url": "value",
+                            "valueString": "19343715"
+                        }
+                    ],
+                    "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-AddressKey"
+                }
+            ],
+            "id": "XUSFS",
+            "line": [
+                "268 PIPER KNOWLE ROAD",
+                "STOCKTON-ON-TEES",
+                "CLEVELAND"
+            ],
+            "period": {
+                "start": "1998-07-04"
+            },
+            "postalCode": "TS19 8JP",
+            "use": "home"
+        }
+    ],
+    "birthDate": "1938-12-11",
+    "extension": [
+        {
+            "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-NominatedPharmacy",
+            "valueReference": {
+                "identifier": {
+                    "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+                    "value": "FAC08"
+                }
+            }
+        },
+        {
+            "extension": [
+                {
+                    "url": "language",
+                    "valueCodeableConcept": {
+                        "coding": [
+                            {
+                                "code": "de",
+                                "display": "German",
+                                "system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-HumanLanguage",
+                                "version": "1.0.0"
+                            }
+                        ]
+                    }
+                },
+                {
+                    "url": "interpreterRequired",
+                    "valueBoolean": true
+                }
+            ],
+            "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-NHSCommunication"
+        }
+    ],
+    "gender": "male",
+    "generalPractitioner": [
+        {
+            "id": "BZYbh",
+            "identifier": {
+                "period": {
+                    "start": "2025-02-03"
+                },
+                "system": "https://fhir.nhs.uk/Id/ods-organization-code",
+                "value": "E82665"
+            },
+            "type": "Organization"
+        }
+    ],
+    "id": "9690937278",
+    "identifier": [
+        {
+            "extension": [
+                {
+                    "url": "https://fhir.hl7.org.uk/StructureDefinition/Extension-UKCore-NHSNumberVerificationStatus",
+                    "valueCodeableConcept": {
+                        "coding": [
+                            {
+                                "code": "01",
+                                "display": "Number present and verified",
+                                "system": "https://fhir.hl7.org.uk/CodeSystem/UKCore-NHSNumberVerificationStatus",
+                                "version": "1.0.0"
+                            }
+                        ]
+                    }
+                }
+            ],
+            "system": "https://fhir.nhs.uk/Id/nhs-number",
+            "value": "9690937278"
+        }
+    ],
+    "meta": {
+        "security": [
+            {
+                "code": "U",
+                "display": "unrestricted",
+                "system": "http://terminology.hl7.org/CodeSystem/v3-Confidentiality"
+            }
+        ],
+        "versionId": "11"
+    },
+    "name": [
+        {
+            "family": "SAMUAL",
+            "given": [
+                "Lucien",
+                "Keith"
+            ],
+            "id": "LVxyI",
+            "period": {
+                "start": "1970-08-11"
+            },
+            "prefix": [
+                "MR"
+            ],
+            "use": "usual"
+        }
+    ],
+    "resourceType": "Patient",
+    "telecom": [
+        {
+            "id": "EAFDAA6A",
+            "period": {
+                "start": "2024-11-27"
+            },
+            "system": "email",
+            "use": "home",
+            "value": "luclen@gmail.com"
+        }
+    ]
+}
