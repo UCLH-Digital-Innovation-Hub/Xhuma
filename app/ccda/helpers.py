@@ -1,9 +1,12 @@
 import re
 from datetime import datetime
+from typing import List
 from xml.etree import ElementTree
 
 import xmltodict
 from fhirclient.models import coding
+
+from .models.datatypes import CD
 
 
 def validateNHSnumber(number: int) -> bool:
@@ -45,6 +48,44 @@ def generate_code(coding: coding.Coding) -> dict:
         code["@codeSystem"] = "2.16.840.1.113883.6.96"
 
     return code
+
+
+def code_with_translations(codings: List[coding.Coding]) -> CD:
+    """
+    Takes a list of coding objects and returns a CD object with translations
+    Args:
+        codings: List of fhir coding objects
+    Returns:
+        CD object with translations if more than one coding is provided
+    """
+    # Check if the list is empty
+    if not codings:
+        return None
+
+    # sort for SNOMED first
+    # codings.sort(key=lambda x: x.get("system") == "http://snomed.info/sct")
+
+    codings.sort(key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
+
+    # Create the CD object
+    cd = CD(
+        code=codings[0].code,
+        codeSystem=codings[0].system,
+        displayName=codings[0].display,
+    )
+    # Add translations for each coding
+    if len(codings) > 1:
+        # print("More than one coding found")
+        cd.translation = [
+            CD(
+                code=coding.code,
+                codeSystem=coding.system,
+                displayName=coding.display,
+            )
+            for coding in codings[1:]
+        ]
+
+    return cd
 
 
 def templateId(root: str, extension: str) -> list:

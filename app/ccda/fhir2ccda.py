@@ -15,6 +15,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         for entry in bundle.entry
         if isinstance(entry.resource, fhirlist.List)
     ]
+
     subject = [
         entry.resource
         for entry in bundle.entry

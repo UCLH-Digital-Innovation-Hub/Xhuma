@@ -1,11 +1,12 @@
 """
 Contains CDA datatype objects with pydantic validation
 """
+
 from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # TODO: add Enums
 
@@ -78,6 +79,13 @@ class II(ANY):
     root: Optional[str] = None
 
 
+CODE_SYSTEM_NAMES = {
+    "http://snomed.info/sct": "2.16.840.1.113883.6.96",
+    "LOINC": "2.16.840.1.113883.6.1",
+    "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
+}
+
+
 class CD(ANY):
     resource_type: str = Field(
         "CD",
@@ -86,16 +94,25 @@ class CD(ANY):
         "original text or phrase that served as the basis of the coding and one "
         "or more translations into different coding systems.",
     )
-    originalText: Optional[ED] = None
-    qualifier: Optional[List[str]] = None  # CR
-    translation: Optional[List[CD]] = Field(default_factory=list)
-    code: Optional[str] = None
-    codeSystem: Optional[str] = None
-    codeSystemName: Optional[str] = None
-    displayName: Optional[str] = None
+    code: str = Field(alias="code")
+    codeSystem: str = Field(alias="codeSystem")
+    codeSystemName: Optional[str] = Field(alias="codeSystemName")
+    displayName: Optional[str] = Field(alias="displayName")
+    translation: Optional[List["CD"]] = None  # Forward reference
+
+    @model_validator(mode="before")
+    def set_code_system_name(cls, values):
+        cs = values.get("codeSystem")
+        if cs and not values.get("codeSystemName"):
+            values["codeSystemName"] = CODE_SYSTEM_NAMES.get(cs)
+        return values
+
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
-CD.update_forward_refs()
+CD.model_rebuild()
 
 
 class CE(CD):

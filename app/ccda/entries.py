@@ -4,7 +4,7 @@ from fhirclient.models import allergyintolerance, coding, condition
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationstatement
 
-from .helpers import date_helper, generate_code, templateId
+from .helpers import code_with_translations, date_helper, generate_code, templateId
 
 
 def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
@@ -45,7 +45,8 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
         "templateId": templateId("2.16.840.1.113883.10.20.22.4.23", "2014-06-09"),
         "id": {"@root": uuid.uuid4()},
         "manufacturedMaterial": {
-            "code": [generate_code(x) for x in referenced_med.code.coding],
+            # "code": [generate_code(x) for x in referenced_med.code.coding],
+            "code": code_with_translations(referenced_med.code.coding),
         },
     }
 
