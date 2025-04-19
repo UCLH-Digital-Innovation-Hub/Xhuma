@@ -1,10 +1,10 @@
 from fhirclient.models import medication, medicationstatement
 
-from app.ccda.helpers import date_helper, templateId
+from app.ccda.helpers import code_with_translations, date_helper, templateId
 from app.ccda.models.base import SubstanceAdministration
 from app.ccda.models.datatypes import II
 
-med_statement = medication.Medication(
+med = medication.Medication(
     {
         "resourceType": "Medication",
         "id": "21",
@@ -93,13 +93,31 @@ def test_substance_administration():
 
     # create a sample substance administration
     substance_administration = SubstanceAdministration(
+        templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
         id=II(
             root=med_statement.identifier[0].value,
             assigningAuthorityName="https://fhir.nhs.uk/Id/cross-care-setting-identifier",
         ),
+        # code={
+        #     "@code": "CONC",
+        #     "@codeSystem": "2.16.840.1.113883.5.6"
+        # },
         statusCode={"@code": med_statement.status},
         effectiveTime={
             "@value": date_helper(med_statement.effectivePeriod.start.isostring),
+        },
+        consumable={
+            "manufacturedProduct": {
+                "templateId": templateId(
+                    root="2.16.840.1.113883.10.20.22.4.23", extension="2014-06-09"
+                ),
+                "id": {"@root": med.id},
+                "manufacturedMaterial": {
+                    "code": code_with_translations(med.code.coding).model_dump(
+                        by_alias=True, exclude_none=True
+                    ),
+                },
+            }
         },
         # entryRelationship=[
         #     {

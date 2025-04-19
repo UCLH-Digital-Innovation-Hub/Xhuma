@@ -12,7 +12,7 @@ class ManufacturedMaterial(BaseModel):
 
 class ManufacturedProduct(BaseModel):
     manufacturedMaterial: ManufacturedMaterial
-    templateId: II
+    templateId: List[II] = Field(default_factory=list)
     id: II = {"@root": str(uuid4())}
     classCode: str = Field(default="MANU", alias="@classCode")
 
@@ -62,13 +62,20 @@ class SubstanceAdministration(BaseModel):
     moodCode: str = Field(alias="@classCode", default="INT")
     templateId: List[II] = Field(default_factory=list)
     id: List[II] = Field(default_factory=list)
-    code: Optional[CD] = None
+    code: Optional[CD] = Field(
+        default=CD(
+            **{
+                "@code": "CONC",
+                "@codeSystem": "2.16.840.1.113883.5.6",
+            }
+        )
+    )
     text: Optional[ED] = None
     statusCode: Optional[CS] = None
     effectiveTime: List[SXCM_TS] = Field(default_factory=list)
+    consumable: Optional[Consumable] = None
     routeCode: Optional[CE] = None
     doseQuantity: Optional[IVL_PQ] = None
-    consumable: Optional[Consumable] = None
     entryRelationship: List[EntryRelationship] = Field(default_factory=list)
     # precondition: List[Precondition] = Field(default_factory=list)
 

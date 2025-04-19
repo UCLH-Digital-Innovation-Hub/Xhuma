@@ -75,8 +75,12 @@ class II(ANY):
     )
     assigningAuthorityName: Optional[str] = None
     displayable: Optional[bool] = None
-    extension: Optional[str] = None
-    root: Optional[str] = None
+    extension: Optional[str] = Field(alias="@extension", default=None)
+    root: Optional[str] = Field(alias="@root")
+
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 CODE_SYSTEM_NAMES = {
@@ -95,9 +99,9 @@ class CD(ANY):
         "or more translations into different coding systems.",
     )
     code: str = Field(alias="@code")
-    codeSystem: str = Field(alias="@codeSystem")
-    codeSystemName: Optional[str] = Field(alias="@codeSystemName")
-    displayName: Optional[str] = Field(alias="@displayName")
+    codeSystem: Optional[str] = Field(alias="@codeSystem", default=None)
+    codeSystemName: Optional[str] = Field(alias="@codeSystemName", default=None)
+    displayName: Optional[str] = Field(alias="@displayName", default=None)
     translation: Optional[List["CD"]] = None  # Forward reference
 
     @model_validator(mode="before")
