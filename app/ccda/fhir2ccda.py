@@ -280,11 +280,13 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                     readable_date(
                                         entry_data["substanceAdministration"][
                                             "effectiveTime"
-                                        ][0]["@value"]
+                                        ]["low"]["@value"]
                                     ),
-                                    entry_data["substanceAdministration"][
-                                        "effectiveTime"
-                                    ][1]["@value"],
+                                    readable_date(
+                                        entry_data["substanceAdministration"][
+                                            "effectiveTime"
+                                        ]["high"]["@value"]
+                                    ),
                                     entry_data["substanceAdministration"]["statusCode"][
                                         "@code"
                                     ],

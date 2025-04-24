@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from .datatypes import CD, CE, CS, ED, II, IVL_PQ, IVL_TS, SXCM_TS
 
@@ -79,6 +79,13 @@ class SubstanceAdministration(BaseModel):
     doseQuantity: Optional[IVL_PQ] = None
     entryRelationship: List[EntryRelationship] = Field(default_factory=list)
     # precondition: List[Precondition] = Field(default_factory=list)
+
+    @field_serializer("effectiveTime")
+    def serialize_effective_time(self, sxcm_ts_list: List[SXCM_TS]) -> Dict:
+        """
+        Takes a list of SXCM_TS objects and returns a dictionary with operator as key
+        """
+        return {sxcm_ts.operator: {"@value": sxcm_ts.value} for sxcm_ts in sxcm_ts_list}
 
 
 class Entry(BaseModel):

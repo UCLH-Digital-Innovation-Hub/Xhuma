@@ -129,14 +129,6 @@ def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
         high_value.value = date_helper(effective_period.end.isostring)
         sxcm_ts_list.append(high_value)
         # sxcm_ts_list.append(SXCM_TS(operator="high", value=date_helper(effective_period.end.isostring)))
-
-    # optional function to return dict with operator as key 
-    def as_dict(sxcm_ts_list):
-        """
-        Takes a list of SXCM_TS objects and returns a dictionary with operator as key
-        """
-        return {sxcm_ts.operator: {"value": sxcm_ts.value} for sxcm_ts in sxcm_ts_list}
-
     # Example usage of as_dict
     return sxcm_ts_list
 

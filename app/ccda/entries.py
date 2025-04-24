@@ -85,7 +85,7 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
             }
         ],
         statusCode={"@code": entry.status},
-        effectiveTime=effective_time_helper(entry.effectivePeriod).as_dict(),
+        effectiveTime=effective_time_helper(entry.effectivePeriod),
         consumable={
             "manufacturedProduct": {
                 "templateId": templateId(
