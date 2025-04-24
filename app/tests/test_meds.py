@@ -1,6 +1,6 @@
 from fhirclient.models import medication, medicationstatement
 
-from app.ccda.helpers import code_with_translations, date_helper, templateId
+from app.ccda.helpers import code_with_translations, date_helper, templateId, effective_time_helper
 from app.ccda.models.base import SubstanceAdministration
 from app.ccda.models.datatypes import II
 
@@ -94,18 +94,12 @@ def test_substance_administration():
     # create a sample substance administration
     substance_administration = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
-        id=II(
-            root=med_statement.identifier[0].value,
-            assigningAuthorityName="https://fhir.nhs.uk/Id/cross-care-setting-identifier",
-        ),
-        # code={
-        #     "@code": "CONC",
-        #     "@codeSystem": "2.16.840.1.113883.5.6"
-        # },
+        id = [{
+            "@root": med_statement.identifier[0].value,
+            "@assigningAuthorityName": med_statement.identifier[0].system,
+        }],
         statusCode={"@code": med_statement.status},
-        effectiveTime={
-            "@value": date_helper(med_statement.effectivePeriod.start.isostring),
-        },
+        effectiveTime= effective_time_helper(med_statement.effectivePeriod),
         consumable={
             "manufacturedProduct": {
                 "templateId": templateId(
@@ -119,29 +113,30 @@ def test_substance_administration():
                 },
             }
         },
-        # entryRelationship=[
-        #     {
-        #         "@typeCode": "SUBJ",
-        #         "@inversionInd": False,
-        #         "@moodCode": med_statement.resource.status,
-        #         "@classCode": med_statement.resource.status,
-        #         "@templateId": templateId(
-        #             "2.16.840.1.113883.10.20.22.4.16", "2014-06-09"
-        #         ),
-        #         "@code": {
-        #             "@codeSystemName": med_statement.resource.status,
-        #             "@codeSystemName": med_statement.resource.status,
-        #             "@displayName": med_statement.resource.status,
-        #             "@codeSystemName": med_statement.resource.status,
-        #             "@displayName": med_statement.resource.status,
-        #             "@codeSystemName": med_statement.resource.status,
-        #             "@displayName": med_statement.resource.status,
-        #         }
-        #     }
-        # ]
+        entryRelationship=[{
+            "inversionInd": True,
+            "act":{
+                "moodCode": "Int",
+                "templateId": templateId("2.16.840.1.113883.10.20.22.4.20", "2014-06-09"),
+                "code": {
+                    "code": "422037009",
+                    "codeSystem": "2.16.840.1.113883.6.96",
+                    "displayName": "Provider medication administration instructions",
+                    "codeSystemName": "SNOMED CT",
+                },
+                "text": med_statement.dosage[0].text,
+                "statusCode": {
+                    "code": "completed",
+                },
+            }
+        }]
     )
 
     assert substance_administration.classCode == "SBADM"
-    assert substance_administration.moodCode == "EVN"
+    assert substance_administration.moodCode == "INT"
+    assert substance_administration.code.codeSystem == "2.16.840.1.113883.5.6"
     assert len(substance_administration.id) == 1
-    assert substance_administration.id[0]["@root"] is not None
+    # assert effective time list contains low
+    assert substance_administration.effectiveTime[0].operator == "low"
+    assert substance_administration.effectiveTime[0].value =="20240522"
+    assert substance_administration.id[0].root is not None

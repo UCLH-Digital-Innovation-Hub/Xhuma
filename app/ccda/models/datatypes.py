@@ -170,7 +170,7 @@ class TS(QTY):
         description="A quantity specifying a point on the axis of natural time. A point "
         "in time is most often represented as a calendar expression.",
     )
-    value: Optional[str] = None
+    value: Optional[str] = Field(alias="@value", default=None)
 
 
 class SXCM_TS(TS):

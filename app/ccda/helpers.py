@@ -4,9 +4,9 @@ from typing import List
 from xml.etree import ElementTree
 
 import xmltodict
-from fhirclient.models import coding
+from fhirclient.models import coding, period
 
-from .models.datatypes import CD
+from .models.datatypes import CD, SXCM_TS
 
 
 def validateNHSnumber(number: int) -> bool:
@@ -106,6 +106,31 @@ def date_helper(isodate):
     new_date = datetime.strptime(isodate[:10], "%Y-%m-%d").strftime("%Y%m%d")
 
     return new_date
+
+def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
+    """
+    Takes a FHIR effective period and returns a list of SXCM_TS objects
+    """
+    # effective_period = effective_period.as_json()
+    start = effective_period.start
+    # end = effective_period.get("end")
+    # print(effective_period.as_json())
+    # print(date_helper(start.isostring))
+
+    # Create the SXCM_TS objects
+    sxcm_ts_list = []
+    if start:
+        low_value = SXCM_TS(operator="low" )
+        low_value.value = date_helper(start.isostring)
+        sxcm_ts_list.append(low_value)
+    if effective_period.end:
+        high_value = SXCM_TS(operator="high")
+        high_value.value = date_helper(effective_period.end.isostring)
+        sxcm_ts_list.append(high_value)
+        # sxcm_ts_list.append(SXCM_TS(operator="high", value=date_helper(effective_period.end.isostring)))
+    
+    return sxcm_ts_list
+
 
 
 def readable_date(date):

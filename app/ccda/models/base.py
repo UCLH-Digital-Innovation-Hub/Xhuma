@@ -30,12 +30,6 @@ class EntryRelationshipAct(BaseModel):
     moodCode: str = Field(alias="@moodCode", default="INT")
 
 
-class EntryRelationship(BaseModel):
-    act: EntryRelationshipAct
-    typeCode: str = Field(alias="@typeCode", default="SUBJ")
-    inversionInd: bool = False
-
-
 class Act(BaseModel):
     """
     Representation of CDA model object Act. Only contain relevant attributes.
@@ -44,12 +38,19 @@ class Act(BaseModel):
     classCode: str = Field(alias="@classCode", default="ACT")
     moodCode: str = Field(alias="@moodCode", default="EVN")
     templateId: List[II] = Field(default_factory=list)
-    id: List[II] = Field(default_factory=list)
+    id: Optional[List[II]] = Field(default_factory=list)
     code: Optional[CD] = None
-    text: Optional[ED] = None
+    text: Optional[str] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
-    entryRelationship: List[EntryRelationship] = Field(default_factory=list)
+
+
+class EntryRelationship(BaseModel):
+    # act: EntryRelationshipAct
+    typeCode: str = Field(alias="@typeCode", default="SUBJ")
+    inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
+    sequenceNumber: Optional[int] = None
+    act: Optional[Act] = None
 
 
 class SubstanceAdministration(BaseModel):
