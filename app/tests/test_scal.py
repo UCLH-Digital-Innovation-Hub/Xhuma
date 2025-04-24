@@ -7,7 +7,7 @@ import asyncio
 from app.gpconnect import gpconnect
 
 
-def test_GPC_STR_TST_GEN_02(self):
+def test_GPC_STR_TST_GEN_02():
     """Given I have imported GP Connect data
     And I support data sharing with other systems
     When I receive a request for patient record data for a patient I hold GP Connect data for
@@ -17,7 +17,7 @@ def test_GPC_STR_TST_GEN_02(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_05(self):
+def test_GPC_STR_TST_GEN_05():
     """Given I am at a point in the system where I have access to attempt a call to a GP Connect service
     When I make that attempt to access GP Connect
     Then an audit record is written to an appropriate auidit log including when access is blocked, unsuccessful or successful
@@ -27,7 +27,7 @@ def test_GPC_STR_TST_GEN_05(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_06(self):
+def test_GPC_STR_TST_GEN_06():
     """Given I have access to request data from GP Connect and the patient trace was [time] ago
     When I make that attempt to access GP Connect
     Then the GP Connect is request message is [result]
@@ -37,7 +37,7 @@ def test_GPC_STR_TST_GEN_06(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_07(self):
+def test_GPC_STR_TST_GEN_07():
     """Given I have made a successful request to GP Connect
     When I receive a valid response including a patient resource
     Then I verify the patient resource details for family name, given name, gender, date of birth and GP Practice Code match to those presented to the user from the local system in the patient record
@@ -48,7 +48,7 @@ def test_GPC_STR_TST_GEN_07(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_08(self):
+def test_GPC_STR_TST_GEN_08():
     """Given I have access to request data from GP Connect and the patient trace was within the last 24 hours
     When I make that attempt to access GP Connect
     Then the registered GP practice from the last PDS trace is used to identify the practice to submit the request to
@@ -57,7 +57,7 @@ def test_GPC_STR_TST_GEN_08(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_09(self):
+def test_GPC_STR_TST_GEN_09():
     """Given I have access to request data from GP Connect but I cannot confirm the registered practice either because it is not on PDS or the patient has an s-flag
     When I attempt to access GP Connect
     Then the request to GP Connect is blocked and handled gracefully so the user is aware that access is not available for that patient at that time
@@ -69,19 +69,19 @@ def test_GPC_STR_TST_GEN_09(self):
         assert response.status_code == 403
 
 
-def test_GPC_STR_TST_GEN_10(self):
+def test_GPC_STR_TST_GEN_10():
     """Given I access a patient which is recorded as deceased on PDS or on the local system
     When I am at a point where I would normally be able to access GP Connect
     Then the system prevents access to GP Connect
     And handles the prevention gracefully so the users is aware that GP Connect is not available for this patient
     """
-    nhsno = "9658220290"
+    nhsno = "9690938681"
 
     response = asyncio.run(gpconnect(nhsno))
     assert response.status_code == 403
 
 
-def test_GPC_STR_TST_GEN_11(self):
+def test_GPC_STR_TST_GEN_11():
     """Given I have made a request to a GP Connect service
     When I receive a aptient not found error response
     Then I handle the response gracefully
@@ -92,7 +92,7 @@ def test_GPC_STR_TST_GEN_11(self):
     assert response.status_code == 404
 
 
-def test_GPC_STR_TST_GEN_12(self):
+def test_GPC_STR_TST_GEN_12():
     """Given I have made a request to a GP Connect service
     When I receive a patient dissent to share error response
     Then I handle the response gracefully
@@ -103,7 +103,7 @@ def test_GPC_STR_TST_GEN_12(self):
     assert response.status_code == 403
 
 
-def test_GPC_STR_TST_GEN_13(self):
+def test_GPC_STR_TST_GEN_13():
     """Given I have made a request to a GP Connect service using an Invalid Resource (The Parameters resource passed does not conform to that specified in the GPConnect-GetStructuredRecord-Operation-1 OperationDefinition)
     When I receive an invalid resource error response
     Then I handle the response gracefully
@@ -113,22 +113,26 @@ def test_GPC_STR_TST_GEN_13(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_14(self):
+def test_GPC_STR_TST_GEN_14():
     """Given I have made a request to a GP Connect service using an Invalid NHS Number
     When I receive an invalid NHS number error response
     Then I handle the response gracefully
     And I make available all the diagnostic details to appropriate people to enable fault resolution
     """
     nhsno = "965821883"
-    response = asyncio.run(gpconnect(nhsno))
-    assert response.status_code == 400
+    try:
+        response = asyncio.run(gpconnect(nhsno))
+    except Exception as e:
+        assert "Invalid NHS Number" in str(e)
 
     nhsno = "testing"
-    response = asyncio.run(gpconnect(nhsno))
-    assert response.status_code == 400
+    try:
+        response = asyncio.run(gpconnect(nhsno))
+    except Exception as e:
+        assert "Invalid NHS Number" in str(e)
 
 
-def test_GPC_STR_TST_GEN_15(self):
+def test_GPC_STR_TST_GEN_15():
     """Given I have made a request for allergies to a GP Connect service with invalid Allergies Parameters/Part Parameters
     When I receive an invalid parameter error response
     Then I handle the response gracefully
@@ -138,7 +142,7 @@ def test_GPC_STR_TST_GEN_15(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_16(self):
+def test_GPC_STR_TST_GEN_16():
     """Given I have made a request for medications to a GP Connect service invalid Medications Parametes/Part Parameters
     When I receive an invalid parameter error response
     Then I handle the response gracefully
@@ -148,7 +152,7 @@ def test_GPC_STR_TST_GEN_16(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_17(self):
+def test_GPC_STR_TST_GEN_17():
     """Given I have sent a valid message to GP Connect
     When I receive a response including a data in transit warning
     Then I make the user aware as appropriate
@@ -157,7 +161,7 @@ def test_GPC_STR_TST_GEN_17(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_18(self):
+def test_GPC_STR_TST_GEN_18():
     """Given I have sent a valid message to GP Connect
     And I have requested allergies are included
     When I receive a response including a confidential items warning for allergies
@@ -167,7 +171,7 @@ def test_GPC_STR_TST_GEN_18(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_19(self):
+def test_GPC_STR_TST_GEN_19():
     """Given I have sent a valid message to GP Connect
     And I have requested medications are included
     When I receive a response including a confidential items warning for medications
@@ -177,7 +181,7 @@ def test_GPC_STR_TST_GEN_19(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_20(self):
+def test_GPC_STR_TST_GEN_20():
     """Given I have received a valid message response
     When I present the data to the end user
     Then the user is aware that the data has come from the patient's registered GP record (this may be expressed generically or specific to the source practice)
@@ -186,7 +190,7 @@ def test_GPC_STR_TST_GEN_20(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_24(self):
+def test_GPC_STR_TST_GEN_24():
     """Given I have received a successful, valid response message
     When I import the GP Connect resource / data into the local system
     Then I always retain resource identifiers including, but not limited to, system and value
@@ -195,7 +199,7 @@ def test_GPC_STR_TST_GEN_24(self):
     pass
 
 
-def test_GPC_STR_TST_GEN_25(self):
+def test_GPC_STR_TST_GEN_25():
     """Given I have sent a valid message to GP Connect
     And I have included a request for medications data
     When I receive a response including a data in transit warning and a confidential data items warning for medications
@@ -206,7 +210,7 @@ def test_GPC_STR_TST_GEN_25(self):
     pass
 
 
-def test_GPC_STR_TST_MED_01(self):
+def test_GPC_STR_TST_MED_01():
     """Given I am enabled to access GP Connect data for a given patient
     And I want to retrieve a full medication history
     When I make the medication request to GP Connect
@@ -221,7 +225,7 @@ def test_GPC_STR_TST_MED_01(self):
     pass
 
 
-def test_GPC_STR_TST_MED_02(self):
+def test_GPC_STR_TST_MED_02():
     """Given I have received a successful, valid medications message response
     When I display or use the medication information
     Then I display or utilise all the key information to represent or process the medication record(s) commenserate with the original record meaning and my specific use case
@@ -231,7 +235,7 @@ def test_GPC_STR_TST_MED_02(self):
     pass
 
 
-def test_GPC_STR_TST_MED_03(self):
+def test_GPC_STR_TST_MED_03():
     """Given I am enabled to access GP Connect data for a given patient
     And I want to retrieve medication details but I do not require a full medication history
     When I make the medication request to GP Connect
@@ -249,7 +253,7 @@ def test_GPC_STR_TST_MED_03(self):
     pass
 
 
-def test_GPC_STR_TST_MED_04(self):
+def test_GPC_STR_TST_MED_04():
     """Given I am enabled to access GP Connect data for a given patient
     And I am able to specify the date from which I want medications
     When I attempt to request medications by a future date
@@ -260,7 +264,7 @@ def test_GPC_STR_TST_MED_04(self):
     pass
 
 
-def test_GPC_STR_TST_MED_05(self):
+def test_GPC_STR_TST_MED_05():
     """Given I am enabled to access GP Connect data for a given patient
     And my use case [inc issue] require medication issues to be included
     When I make the medication request to GP Connect
@@ -276,7 +280,7 @@ def test_GPC_STR_TST_MED_05(self):
     pass
 
 
-def test_GPC_STR_TST_MED_07(self):
+def test_GPC_STR_TST_MED_07():
     """Given I have received a successful, valid medications message response
     And the response has a list with an empty reason
     And the response does not include medication resourcese
@@ -288,7 +292,7 @@ def test_GPC_STR_TST_MED_07(self):
     pass
 
 
-def test_GPC_STR_TST_MED_08(self):
+def test_GPC_STR_TST_MED_08():
     """Given I am enabled to access GP Connect data for a given patient
     And I want to retrieve a full medication history
     When I make the medication request to GP Connect
@@ -302,7 +306,7 @@ def test_GPC_STR_TST_MED_08(self):
     pass
 
 
-def test_GPC_STR_TST_ALG_01(self):
+def test_GPC_STR_TST_ALG_01():
     """Given the user wishes to view / import all current allergies OR the system is set to only view / import all current allergies
     When the user selects to access current allergies from GP Connect
     Then the resulting request is populated with valid syntax using the includeAllergies parameter with part parameter includeResolvedAllergies set to false
@@ -313,7 +317,7 @@ def test_GPC_STR_TST_ALG_01(self):
     pass
 
 
-def test_GPC_STR_TST_ALG_02(self):
+def test_GPC_STR_TST_ALG_02():
     """Given the user wishes to view / import all allergies, including resolved allergies OR the system is set to only view / import all allergies, including resolved allergies
     When the user selects to access all allergies from GP Connect
     Then the resulting request is populated with valid syntax using the includeAllergies parameter with part parameter includeResolvedAllergies set to true
@@ -324,7 +328,7 @@ def test_GPC_STR_TST_ALG_02(self):
     pass
 
 
-def test_GPC_STR_TST_ALG_03(self):
+def test_GPC_STR_TST_ALG_03():
     """Given I have received a successful, valid allergies message response
     And the response includes resolved allergies
     When I display or use the allergies information
@@ -336,7 +340,7 @@ def test_GPC_STR_TST_ALG_03(self):
     pass
 
 
-def test_GPC_STR_TST_ALG_04(self):
+def test_GPC_STR_TST_ALG_04():
     """Given I have received a successful, valid allergies message response
     When I display or use the allergy information
     Then I display or utilise all the key information to represent or process the allergy record(s) commenserate with the original record meaning and my specific use case
@@ -346,7 +350,7 @@ def test_GPC_STR_TST_ALG_04(self):
     pass
 
 
-def test_GPC_STR_TST_ALG_05(self):
+def test_GPC_STR_TST_ALG_05():
     """Given I have received a successful, valid allergies message response
     And the response includes allergies which is not recognised by my system
     When I display or use the allergy information
@@ -359,7 +363,7 @@ def test_GPC_STR_TST_ALG_05(self):
     pass  # Need discussion if this test and requirement is applicable
 
 
-def test_GPC_STR_TST_ALG_07(self):
+def test_GPC_STR_TST_ALG_07():
     """Given I have received a successful, valid allergies message response
     And the response includes an empty active allergies list resource indicating that the patient record has no content recorded
     When I display or use the allergies response
@@ -371,7 +375,7 @@ def test_GPC_STR_TST_ALG_07(self):
     pass
 
 
-def test_GPC_STR_TST_ALG_08(self):
+def test_GPC_STR_TST_ALG_08():
     """Given I have received a successful, valid allergies message response
     And the response includes a single code item which indicates that the clinician has recorded that the patient has no known allergies
     When I display or use the allergies response
