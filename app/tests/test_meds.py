@@ -4,8 +4,6 @@ import pytest
 from fhirclient.models import medication, medicationstatement
 
 from app.ccda.entries import medication as medication_entry
-from app.ccda.helpers import (code_with_translations, effective_time_helper,
-                              templateId)
 from app.ccda.models.base import SubstanceAdministration
 from app.ccda.models.datatypes import II
 
@@ -102,6 +100,7 @@ def test_substance_administration():
         "MedicationStatement/9": med,
     }
     substance_administration = medication_entry(med_statement, index_dict)
+    substance_administration = substance_administration["substanceAdministration"]
     print(substance_administration)
 
     assert substance_administration["@classCode"] == "SBADM"
@@ -109,6 +108,5 @@ def test_substance_administration():
     assert substance_administration["code"]["@codeSystem"] == "2.16.840.1.113883.5.6"
     assert len(substance_administration["id"]) == 1
     # assert effective time list contains low
-    assert substance_administration["effectiveTime"][0]["operator"] == "low"
-    assert substance_administration["effectiveTime"][0]["@value"] == "20240522"
+    assert substance_administration["effectiveTime"]["low"]["@value"] == "20240522"
     # assert substance_administration.id[0].root is not None

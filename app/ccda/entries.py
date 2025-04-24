@@ -97,8 +97,36 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 },
             }
         },
-        entryRelationship=[
+        entryRelationship=[],
+        # go through doses in dosage
+        # entryRelationship=[
+        #     {
+        #         "inversionInd": True,
+        #         "act": {
+        #             "moodCode": "Int",
+        #             "templateId": templateId(
+        #                 "2.16.840.1.113883.10.20.22.4.20", "2014-06-09"
+        #             ),
+        #             "code": {
+        #                 "code": "422037009",
+        #                 "codeSystem": "2.16.840.1.113883.6.96",
+        #                 "displayName": "Provider medication administration instructions",
+        #                 "codeSystemName": "SNOMED CT",
+        #             },
+        #             "text": entry.dosage[0].text,
+        #             "statusCode": {
+        #                 "code": "completed",
+        #             },
+        #         },
+        #     }
+        # ],
+    )
+    for dose in entry.dosage:
+        substance_administration.entryRelationship.append(
             {
+                "sequenceNumber": (
+                    entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
+                ),
                 "inversionInd": True,
                 "act": {
                     "moodCode": "Int",
@@ -111,15 +139,13 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                         "displayName": "Provider medication administration instructions",
                         "codeSystemName": "SNOMED CT",
                     },
-                    "text": entry.dosage[0].text,
+                    "text": dose.text,
                     "statusCode": {
                         "code": "completed",
                     },
                 },
             }
-        ],
-    )
-
+        )
     return {
         "substanceAdministration": substance_administration.model_dump(
             by_alias=True, exclude_none=True
