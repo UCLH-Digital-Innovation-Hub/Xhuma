@@ -71,7 +71,9 @@ class QTY(ANY):
 
 class II(ANY):
     resource_type: str = Field(
-        "II", description="An identifier that uniquely identifies a thing or object."
+        "II",
+        description="An identifier that uniquely identifies a thing or object.",
+        alias="@xsi:type",
     )
     assigningAuthorityName: Optional[str] = None
     displayable: Optional[bool] = None
@@ -97,6 +99,7 @@ class CD(ANY):
         "code defined in a code system. A concept descriptor can contain the "
         "original text or phrase that served as the basis of the coding and one "
         "or more translations into different coding systems.",
+        alias="@xsi:type",
     )
     code: str = Field(alias="@code")
     codeSystem: Optional[str] = Field(alias="@codeSystem", default=None)
@@ -151,6 +154,7 @@ class CS(CV):
         "CS",
         description="Coded data, consists of a code, display name, code system, and original "
         "text. Used when a single code value must be sent.",
+        alias="@xsi:type",
     )
 
 
@@ -174,31 +178,31 @@ class TS(QTY):
 
 
 class SXCM_TS(TS):
-    resource_type: str = Field("SXCM_TS", description="")
+    resource_type: str = Field("SXCM_TS", description="", alias="@xsi:type")
     operator: Optional[str] = None  # enumeration
 
 
 class SXCM_PQ(PQ):
-    resource_type: str = Field("SXCM_PQ", description="")
+    resource_type: str = Field("SXCM_PQ", description="", alias="@xsi:type")
     operator: Optional[str] = None  # enumeration
 
 
 class IVXB_TS(SXCM_TS):
-    resource_type: str = Field("IVXB_TS", description="")
+    resource_type: str = Field("IVXB_TS", description="", alias="@xsi:type")
     inclusive: Optional[bool] = Field(
         None, description="Specifies whether the limit is included in the interval."
     )
 
 
 class IVXB_PQ(PQ):
-    resource_type: str = Field("IVXB_PQ", description="")
+    resource_type: str = Field("IVXB_PQ", description="", alias="@xsi:type")
     inclusive: Optional[bool] = Field(
         None, description="Specifies whether the limit is included in the interval."
     )
 
 
 class IVL_PQ(SXCM_PQ):
-    resource_type: str = Field("IVL_PQ", description="")
+    resource_type: str = Field("IVL_PQ", description="", alias="@xsi:type")
     low: Optional[IVXB_PQ] = None
     center: Optional[PQ] = None
     width: Optional[PQ] = None
@@ -206,7 +210,9 @@ class IVL_PQ(SXCM_PQ):
 
 
 class IVL_TS(IVXB_TS):
-    resource_type: str = Field("IVL_TS", description="Time interval.")
+    resource_type: str = Field(
+        "IVL_TS", description="Time interval.", alias="@xsi:type"
+    )
     low: Optional[IVXB_TS] = None
     center: Optional[TS] = None
     width: Optional[PQ] = None
@@ -214,7 +220,7 @@ class IVL_TS(IVXB_TS):
 
 
 class PIVL_TS(SXCM_TS):
-    resource_type: str = Field("PIVL_TS", description="")
+    resource_type: str = Field("PIVL_TS", description="", alias="@xsi:type")
     phase: Optional[IVL_TS] = None
     period: Optional[PQ] = None
     alignment: Optional[CalendarCycle] = None
@@ -222,5 +228,5 @@ class PIVL_TS(SXCM_TS):
 
 
 class CalendarCycle(ANY):
-    resource_type: str = Field("CalendarCycle", description="")
+    resource_type: str = Field("CalendarCycle", description="", alias="@xsi:type")
     name: Optional[str] = None

@@ -4,75 +4,127 @@ from fhirclient.models import allergyintolerance, coding, condition
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationstatement
 
-from .helpers import code_with_translations, date_helper, generate_code, templateId
+from .helpers import (code_with_translations, date_helper,
+                      effective_time_helper, generate_code, templateId)
+from .models.base import SubstanceAdministration
 
 
 def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
-    med = {
-        "substanceAdministration": {
-            "@classCode": "SBADM",
-            "@moodCode": "INT",
-        }
-    }
+    # med = {
+    #     "substanceAdministration": {
+    #         "@classCode": "SBADM",
+    #         "@moodCode": "INT",
+    #     }
+    # }
 
-    med["substanceAdministration"]["templateId"] = templateId(
-        "2.16.840.1.113883.10.20.22.4.16", "2014-06-09"
+    # med["substanceAdministration"]["templateId"] = templateId(
+    #     "2.16.840.1.113883.10.20.22.4.16", "2014-06-09"
+    # )
+    # med["substanceAdministration"]["id"] = {"@root": entry.identifier[0].value}
+    # med["substanceAdministration"]["code"] = {
+    #     "@code": "CONC",
+    #     "@codeSystem": "2.16.840.1.113883.5.6",
+    # }
+
+    # med["substanceAdministration"]["statusCode"] = {"@code": entry.status}
+
+    # # TODO add robust checking on this in case there's no high value
+    # med["substanceAdministration"]["effectiveTime"] = {
+    #     "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)},
+    #     "high": {"@value": date_helper(entry.effectivePeriod.end.isostring)},
+    # }
+
+    # referenced_med: fhirmed.Medication() = index[entry.medicationReference.reference]
+    # request = index[entry.basedOn[0].reference]
+
+    # # medication information
+    # # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.23.html
+    # med["substanceAdministration"]["consumable"] = {}
+    # med["substanceAdministration"]["consumable"]["manufacturedProduct"] = {
+    #     "@classCode": "MANU",
+    #     "templateId": templateId("2.16.840.1.113883.10.20.22.4.23", "2014-06-09"),
+    #     "id": {"@root": uuid.uuid4()},
+    #     "manufacturedMaterial": {
+    #         # "code": [generate_code(x) for x in referenced_med.code.coding],
+    #         "code": code_with_translations(referenced_med.code.coding).model_dump(
+    #             by_alias=True, exclude_none=True
+    #         ),
+    #     },
+    # }
+
+    # med["substanceAdministration"]["entryRelationship"] = {
+    #     "@typeCode": "SUBJ",
+    #     "act": {
+    #         "@classCode": "ACT",
+    #         "@moodCode": "INT",
+    #         "templateId": templateId("2.16.840.1.113883.10.20.22.4.20", "2014-06-09"),
+    #         "code": {
+    #             "@code": "422037009",
+    #             "@displayName": "Provider medication administration instructions",
+    #             "@codeSystemName": "SNOMED CT",
+    #             "@codeSystem": "2.16.840.1.113883.6.96",
+    #         },
+    #         "text": {
+    #             "#text": f"{entry.dosage[0].text}\n Patient Instuctions: {entry.dosage[0].patientInstruction}"
+    #         },
+    #         # "patientInstruction": {"#text": entry.dosage[0].patientInstruction},
+    #         "statusCode": {"@code": "completed"},
+    #     },
+    # }
+    # create a sample substance administration
+    referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
+    # request = index[entry.basedOn[0].reference]
+    substance_administration = SubstanceAdministration(
+        templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
+        id=[
+            {
+                "@root": entry.identifier[0].value,
+                "@assigningAuthorityName": entry.identifier[0].system,
+            }
+        ],
+        statusCode={"@code": entry.status},
+        effectiveTime=effective_time_helper(entry.effectivePeriod).as_dict(),
+        consumable={
+            "manufacturedProduct": {
+                "templateId": templateId(
+                    root="2.16.840.1.113883.10.20.22.4.23", extension="2014-06-09"
+                ),
+                "id": {"@root": referenced_med.id},
+                "manufacturedMaterial": {
+                    "code": code_with_translations(referenced_med.code.coding),
+                },
+            }
+        },
+        entryRelationship=[
+            {
+                "inversionInd": True,
+                "act": {
+                    "moodCode": "Int",
+                    "templateId": templateId(
+                        "2.16.840.1.113883.10.20.22.4.20", "2014-06-09"
+                    ),
+                    "code": {
+                        "code": "422037009",
+                        "codeSystem": "2.16.840.1.113883.6.96",
+                        "displayName": "Provider medication administration instructions",
+                        "codeSystemName": "SNOMED CT",
+                    },
+                    "text": entry.dosage[0].text,
+                    "statusCode": {
+                        "code": "completed",
+                    },
+                },
+            }
+        ],
     )
-    med["substanceAdministration"]["id"] = {"@root": entry.identifier[0].value}
-    med["substanceAdministration"]["code"] = {
-        "@code": "CONC",
-        "@codeSystem": "2.16.840.1.113883.5.6",
+
+    return {
+        "substanceAdministration": substance_administration.model_dump(
+            by_alias=True, exclude_none=True
+        )
     }
-
-    med["substanceAdministration"]["statusCode"] = {"@code": entry.status}
-
-    # TODO add robust checking on this in case there's no high value
-    med["substanceAdministration"]["effectiveTime"] = {
-        "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)},
-        "high": {"@value": date_helper(entry.effectivePeriod.end.isostring)},
-    }
-
-    referenced_med: fhirmed.Medication() = index[entry.medicationReference.reference]
-    request = index[entry.basedOn[0].reference]
-
-    # medication information
-    # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.23.html
-    med["substanceAdministration"]["consumable"] = {}
-    med["substanceAdministration"]["consumable"]["manufacturedProduct"] = {
-        "@classCode": "MANU",
-        "templateId": templateId("2.16.840.1.113883.10.20.22.4.23", "2014-06-09"),
-        "id": {"@root": uuid.uuid4()},
-        "manufacturedMaterial": {
-            # "code": [generate_code(x) for x in referenced_med.code.coding],
-            "code": code_with_translations(referenced_med.code.coding).model_dump(
-                by_alias=True, exclude_none=True
-            ),
-        },
-    }
-
-    med["substanceAdministration"]["entryRelationship"] = {
-        "@typeCode": "SUBJ",
-        "act": {
-            "@classCode": "ACT",
-            "@moodCode": "INT",
-            "templateId": templateId("2.16.840.1.113883.10.20.22.4.20", "2014-06-09"),
-            "code": {
-                "@code": "422037009",
-                "@displayName": "Provider medication administration instructions",
-                "@codeSystemName": "SNOMED CT",
-                "@codeSystem": "2.16.840.1.113883.6.96",
-            },
-            "text": {
-                "#text": f"{entry.dosage[0].text}\n Patient Instuctions: {entry.dosage[0].patientInstruction}"
-            },
-            # "patientInstruction": {"#text": entry.dosage[0].patientInstruction},
-            "statusCode": {"@code": "completed"},
-        },
-    }
-
-    return med
 
 
 def problem(entry: condition.Condition) -> dict:

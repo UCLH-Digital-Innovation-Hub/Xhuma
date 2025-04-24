@@ -1,6 +1,11 @@
+from unittest.mock import patch
+
+import pytest
 from fhirclient.models import medication, medicationstatement
 
-from app.ccda.helpers import code_with_translations, date_helper, templateId, effective_time_helper
+from app.ccda.entries import medication as medication_entry
+from app.ccda.helpers import (code_with_translations, effective_time_helper,
+                              templateId)
 from app.ccda.models.base import SubstanceAdministration
 from app.ccda.models.datatypes import II
 
@@ -86,57 +91,24 @@ med_statement = medicationstatement.MedicationStatement(
 
 
 # write tests to check if the pydantic models are working correctly
+# @patch("app.ccda.entries.medication.referenced_med", return_value=med)
 def test_substance_administration():
     """
     Test the SubstanceAdministration model
     """
 
-    # create a sample substance administration
-    substance_administration = SubstanceAdministration(
-        templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
-        id = [{
-            "@root": med_statement.identifier[0].value,
-            "@assigningAuthorityName": med_statement.identifier[0].system,
-        }],
-        statusCode={"@code": med_statement.status},
-        effectiveTime= effective_time_helper(med_statement.effectivePeriod),
-        consumable={
-            "manufacturedProduct": {
-                "templateId": templateId(
-                    root="2.16.840.1.113883.10.20.22.4.23", extension="2014-06-09"
-                ),
-                "id": {"@root": med.id},
-                "manufacturedMaterial": {
-                    "code": code_with_translations(med.code.coding).model_dump(
-                        by_alias=True, exclude_none=True
-                    ),
-                },
-            }
-        },
-        entryRelationship=[{
-            "inversionInd": True,
-            "act":{
-                "moodCode": "Int",
-                "templateId": templateId("2.16.840.1.113883.10.20.22.4.20", "2014-06-09"),
-                "code": {
-                    "code": "422037009",
-                    "codeSystem": "2.16.840.1.113883.6.96",
-                    "displayName": "Provider medication administration instructions",
-                    "codeSystemName": "SNOMED CT",
-                },
-                "text": med_statement.dosage[0].text,
-                "statusCode": {
-                    "code": "completed",
-                },
-            }
-        }]
-    )
+    index_dict = {
+        "Medication/21": med,
+        "MedicationStatement/9": med,
+    }
+    substance_administration = medication_entry(med_statement, index_dict)
+    print(substance_administration)
 
-    assert substance_administration.classCode == "SBADM"
-    assert substance_administration.moodCode == "INT"
-    assert substance_administration.code.codeSystem == "2.16.840.1.113883.5.6"
-    assert len(substance_administration.id) == 1
+    assert substance_administration["@classCode"] == "SBADM"
+    assert substance_administration["@moodCode"] == "INT"
+    assert substance_administration["code"]["@codeSystem"] == "2.16.840.1.113883.5.6"
+    assert len(substance_administration["id"]) == 1
     # assert effective time list contains low
-    assert substance_administration.effectiveTime[0].operator == "low"
-    assert substance_administration.effectiveTime[0].value =="20240522"
-    assert substance_administration.id[0].root is not None
+    assert substance_administration["effectiveTime"][0]["operator"] == "low"
+    assert substance_administration["effectiveTime"][0]["@value"] == "20240522"
+    # assert substance_administration.id[0].root is not None

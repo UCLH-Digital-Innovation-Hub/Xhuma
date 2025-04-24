@@ -1,11 +1,11 @@
 import unittest
 from datetime import datetime
-
-from app.ccda.helpers import date_helper, readable_date
 from unittest import TestCase
 from unittest.mock import MagicMock
-from app.ccda.helpers import effective_time_helper, date_helper
+
 from fhirclient.models import period
+
+from app.ccda.helpers import date_helper, effective_time_helper, readable_date
 from app.ccda.models.datatypes import SXCM_TS
 
 
@@ -60,16 +60,19 @@ class TestReadableDate(unittest.TestCase):
         with self.assertRaises(ValueError):
             readable_date(date)
 
+
 class TestEffectiveTimeHelper(TestCase):
     def test_effective_time_with_start_and_end(self):
         """Test effective_time_helper with both start and end dates."""
         # mock_period = MagicMock(spec=period.Period)
         # mock_period.start.isostring = "2023-03-15T12:34:56Z"
         # mock_period.end.isostring = "2023-03-20T12:34:56Z"
-        mock_period = period.Period({
-            "start": "2024-05-22T00:00:00+01:00",
-            "end": "2025-03-26T00:00:00+00:00",
-        })
+        mock_period = period.Period(
+            {
+                "start": "2024-05-22T00:00:00+01:00",
+                "end": "2025-03-26T00:00:00+00:00",
+            }
+        )
         expected_start = SXCM_TS(operator="low")
         expected_start.value = date_helper(mock_period.start.isostring)
 
@@ -86,10 +89,12 @@ class TestEffectiveTimeHelper(TestCase):
 
     def test_effective_time_with_only_start(self):
         """Test effective_time_helper with only a start date."""
-        mock_period = period.Period({
-            "start": "2024-05-22T00:00:00+01:00",
-            "end": None,
-        })
+        mock_period = period.Period(
+            {
+                "start": "2024-05-22T00:00:00+01:00",
+                "end": None,
+            }
+        )
 
         expected_start = SXCM_TS(operator="low")
         expected_start.value = date_helper(mock_period.start.isostring)

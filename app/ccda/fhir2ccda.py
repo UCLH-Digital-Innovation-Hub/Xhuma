@@ -272,32 +272,28 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         )
                     elif list.title == "Medications and medical devices":
                         entry_data = medication(referenced_item, index)
+                        print(entry_data)
                         comp["section"]["entry"].append(entry_data)
-                        print(
-                            entry_data["substanceAdministration"]["consumable"][
-                                "manufacturedProduct"
-                            ]["manufacturedMaterial"]["code"]
-                        )
                         rows.append(
                             create_row(
                                 [
                                     readable_date(
                                         entry_data["substanceAdministration"][
                                             "effectiveTime"
-                                        ]["low"]["@value"]
+                                        ][0]["@value"]
                                     ),
                                     entry_data["substanceAdministration"][
                                         "effectiveTime"
-                                    ]["high"]["@value"],
+                                    ][1]["@value"],
                                     entry_data["substanceAdministration"]["statusCode"][
                                         "@code"
                                     ],
                                     entry_data["substanceAdministration"]["consumable"][
                                         "manufacturedProduct"
-                                    ]["manufacturedMaterial"]["code"]["displayName"],
+                                    ]["manufacturedMaterial"]["code"]["@displayName"],
                                     entry_data["substanceAdministration"][
                                         "entryRelationship"
-                                    ]["act"]["text"]["#text"],
+                                    ][0]["act"]["text"],
                                 ]
                             )
                         )

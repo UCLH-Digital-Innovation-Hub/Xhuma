@@ -60,7 +60,7 @@ class SubstanceAdministration(BaseModel):
     """
 
     classCode: str = Field(alias="@classCode", default="SBADM")
-    moodCode: str = Field(alias="@classCode", default="INT")
+    moodCode: str = Field(alias="@moodCode", default="INT")
     templateId: List[II] = Field(default_factory=list)
     id: List[II] = Field(default_factory=list)
     code: Optional[CD] = Field(
