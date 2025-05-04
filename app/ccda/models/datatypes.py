@@ -75,7 +75,9 @@ class II(ANY):
         description="An identifier that uniquely identifies a thing or object.",
         alias="@xsi:type",
     )
-    assigningAuthorityName: Optional[str] = None
+    assigningAuthorityName: Optional[str] = Field(
+        alias="@assigningAuthorityName", default=None
+    )
     displayable: Optional[bool] = None
     extension: Optional[str] = Field(alias="@extension", default=None)
     root: Optional[str] = Field(alias="@root")

@@ -105,7 +105,9 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 "templateId": templateId(
                     root="2.16.840.1.113883.10.20.22.4.23", extension="2014-06-09"
                 ),
-                "id": {"@root": referenced_med.id},
+                "id": {
+                    "@root": referenced_med.id,
+                },
                 "manufacturedMaterial": {
                     "code": code_with_translations(referenced_med.code.coding),
                 },
@@ -123,7 +125,8 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 "translation": {
                     "@value": entry.dosage[0].doseQuantity.value,
                     "@code": entry.dosage[0].doseQuantity.code,
-                    "@codeSystem": entry.dosage[0].doseQuantity.system,
+                    "@codeSystemName": entry.dosage[0].doseQuantity.system,
+                    "@codeSystem": "2.16.840.1.113883.6.96",
                     "originalText": entry.dosage[0].doseQuantity.unit,
                 },
             },

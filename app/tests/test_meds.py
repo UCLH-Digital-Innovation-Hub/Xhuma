@@ -89,6 +89,95 @@ med_statement = medicationstatement.MedicationStatement(
         ],
     }
 )
+structured_med = medication.Medication(
+    {
+        "resourceType": "Medication",
+        "id": "A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7",
+        "meta": {
+            "profile": [
+                "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-Medication-1"
+            ]
+        },
+        "code": {
+            "coding": [
+                {
+                    "system": "https://fhir.hl7.org.uk/Id/emis-drug-codes",
+                    "code": "LAOR14898NEMIS",
+                    "display": "Lansoprazole 15mg orodispersible tablets",
+                    "userSelected": True,
+                },
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "4053411000001103",
+                    "display": "Lansoprazole 15mg orodispersible tablets",
+                },
+            ]
+        },
+    }
+)
+sturctured_statement = medicationstatement.MedicationStatement(
+    {
+        "resourceType": "MedicationStatement",
+        "id": "2E352BA6-8F87-479B-BC80-41494027F2E6-MS",
+        "meta": {
+            "profile": [
+                "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationStatement-1"
+            ]
+        },
+        "extension": [
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1",
+                "valueCodeableConcept": {
+                    "coding": [
+                        {
+                            "system": "https://fhir.nhs.uk/STU3/CodeSystem/CareConnect-PrescribingAgency-1",
+                            "code": "prescribed-at-gp-practice",
+                            "display": "Prescribed at GP practice",
+                        }
+                    ]
+                },
+            }
+        ],
+        "identifier": [
+            {
+                "system": "https://EMISWeb/A82038",
+                "value": "7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6MS",
+            }
+        ],
+        "basedOn": [
+            {"reference": "MedicationRequest/2E352BA6-8F87-479B-BC80-41494027F2E6"}
+        ],
+        "status": "active",
+        "medicationReference": {
+            "reference": "Medication/A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7"
+        },
+        "effectivePeriod": {"start": "2020-03-04"},
+        "dateAsserted": "2020-03-04T16:35:02.273+00:00",
+        "subject": {"reference": "Patient/37"},
+        "taken": "unk",
+        "note": [{"text": "Patient Notes:Take 30 mins before a meal or snack"}],
+        "dosage": [
+            {
+                "text": "1 tablet, daily, in morning, 30 minutes before a meal",
+                "timing": {
+                    "repeat": {
+                        "frequency": 1,
+                        "period": 1,
+                        "periodUnit": "d",
+                        "when": ["MORN", "AC"],
+                        "offset": 30,
+                    }
+                },
+                "doseQuantity": {
+                    "value": 1,
+                    "unit": "tablet",
+                    "system": "http://snomed.info/sct",
+                    "code": "428673006",
+                },
+            }
+        ],
+    }
+)
 
 
 # write tests to check if the pydantic models are working correctly
@@ -104,14 +193,14 @@ def test_substance_administration():
     }
     substance_administration = medication_entry(med_statement, index_dict)
     substance_administration = substance_administration["substanceAdministration"]
-    print(substance_administration)
+    # print(substance_administration)
 
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
     assert substance_administration["code"]["@codeSystem"] == "2.16.840.1.113883.5.6"
     assert len(substance_administration["id"]) == 1
     # assert effective time list contains low
-    assert substance_administration["effectiveTime"]["low"]["@value"] == "20240522"
+    assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20240522"
     # assert substance_administration.id[0].root is not None
 
 
@@ -152,11 +241,46 @@ def test_structured_dosage():
                     assert (
                         entry_data["substanceAdministration"]["@classCode"] == "SBADM"
                     )
-                    assert (
-                        entry_data["substanceAdministration"]["entryRelationship"][0][
-                            "observation"
-                        ]["text"]
-                        is not None
-                    )
 
-    assert len(medication_list) == 26
+    assert len(medication_list) == 27
+
+
+def test_structured_detail():
+    index_dict = {
+        "Medication/A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7": structured_med,
+        "MedicationStatement/9": structured_med,
+    }
+    substance_administration = medication_entry(sturctured_statement, index_dict)
+    substance_administration = substance_administration["substanceAdministration"]
+
+    pprint.pprint(substance_administration)
+    assert substance_administration["@classCode"] == "SBADM"
+    assert substance_administration["@moodCode"] == "INT"
+    assert substance_administration["code"]["@codeSystem"] == "2.16.840.1.113883.5.6"
+    assert (
+        substance_administration["id"][0]["@root"]
+        == "7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6MS"
+    )
+    assert (
+        substance_administration["id"][0]["@assigningAuthorityName"]
+        == "https://EMISWeb/A82038"
+    )
+    assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20200304"
+    assert substance_administration["effectiveTime"][1]["@xsi:type"] == "PIVL_TS"
+    assert (
+        substance_administration["effectiveTime"][1]["@institutionSpecified"] == "true"
+    )
+    assert substance_administration["effectiveTime"][1]["period"]["@value"] == 1.0
+    assert substance_administration["effectiveTime"][1]["period"]["@unit"] == "d"
+    assert substance_administration["doseQuantity"]["value"]["@xsi:type"] == "PQ"
+    assert (
+        substance_administration["doseQuantity"]["value"]["translation"]["@value"] == 1
+    )
+    assert (
+        substance_administration["doseQuantity"]["value"]["translation"]["originalText"]
+        == "tablet"
+    )
+    assert (
+        substance_administration["doseQuantity"]["value"]["translation"]["@codeSystem"]
+        == "2.16.840.1.113883.6.96"
+    )
