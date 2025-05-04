@@ -276,7 +276,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         )
                     elif list.title == "Medications and medical devices":
                         entry_data = medication(referenced_item, index)
-                        print(entry_data)
+                        # pprint.pprint(entry_data)
                         comp["section"]["entry"].append(entry_data)
                         rows.append(
                             create_row(
@@ -284,18 +284,18 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                     readable_date(
                                         entry_data["substanceAdministration"][
                                             "effectiveTime"
-                                        ]["low"]["@value"]
+                                        ][0]["low"]["@value"]
                                     ),
                                     (
                                         readable_date(
                                             entry_data["substanceAdministration"][
                                                 "effectiveTime"
-                                            ]["high"]["@value"]
+                                            ][0]["high"]["@value"]
                                         )
                                         if "high"
                                         in entry_data["substanceAdministration"][
                                             "effectiveTime"
-                                        ]
+                                        ][0]
                                         else ""
                                     ),
                                     entry_data["substanceAdministration"]["statusCode"][
@@ -349,6 +349,6 @@ if __name__ == "__main__":
 
     # ccda = await convert_bundle(fhir_bundle, bundle_index)
     ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))
-    pprint.pprint(ccda)
+    # pprint.pprint(ccda)
     with open("output.xml", "w") as output:
         output.write(xmltodict.unparse(ccda, pretty=True))

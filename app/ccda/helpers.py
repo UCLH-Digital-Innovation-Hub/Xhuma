@@ -70,16 +70,15 @@ def code_with_translations(codings: List[coding.Coding]) -> CD:
     # Create the CD object
     cd = CD(
         code=codings[0].code,
-        codeSystem=codings[0].system,
+        codeSystemName=codings[0].system,
         displayName=codings[0].display,
     )
     # Add translations for each coding
     if len(codings) > 1:
-        # print("More than one coding found")
         cd.translation = [
             CD(
                 code=coding.code,
-                codeSystem=coding.system,
+                codeSystemName=coding.system,
                 displayName=coding.display,
             )
             for coding in codings[1:]

@@ -89,6 +89,8 @@ CODE_SYSTEM_NAMES = {
     "http://snomed.info/sct": "2.16.840.1.113883.6.96",
     "LOINC": "2.16.840.1.113883.6.1",
     "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
+    "https://fhir.hl7.org.uk/Id/resipuk-gemscript-drug-codes": "2.16.840.1.113883.2.1.6.15",
+    "https://fhir.hl7.org.uk/Id/emis-drug-codes": "2.16.840.1.113883.2.1.6.9",
 }
 
 
@@ -108,10 +110,14 @@ class CD(ANY):
     translation: Optional[List["CD"]] = None  # Forward reference
 
     @model_validator(mode="before")
-    def set_code_system_name(cls, values):
-        cs = values.get("codeSystem")
-        if cs and not values.get("codeSystemName"):
-            values["codeSystemName"] = CODE_SYSTEM_NAMES.get(cs)
+    def set_code_system_from_name(cls, values):
+        cs = values.get("codeSystemName")
+        if cs and not values.get("codeSystem"):
+            values["codeSystem"] = CODE_SYSTEM_NAMES.get(cs)
+
+        # if codesystem is not in code_system_names, print an alert to console
+        if cs and not values.get("codeSystem"):
+            print(f"Warning🚨: Code system '{cs}' not found in CODE_SYSTEM_NAMES.")
         return values
 
     model_config = {
@@ -128,6 +134,7 @@ class CE(CD):
         description="Coded data, consists of a coded value (CV) and, optionally, "
         "coded value(s) from other coding systems that identify the same "
         "concept. Used when alternative codes may exist.",
+        alias="@xsi:type",
     )
 
 
@@ -162,10 +169,11 @@ class PQ(QTY):
     resource_type: str = Field(
         "PQ",
         description="A dimensioned quantity expressing the result of a measurement act.",
+        alias="@xsi:type",
     )
     translation: Optional[List[PQR]] = None
-    unit: Optional[str] = None
-    value: Optional[float] = None
+    unit: Optional[str] = Field(alias="@unit", default=None)
+    value: Optional[float] = Field(alias="@value", default=None)
 
 
 class TS(QTY):
@@ -179,7 +187,10 @@ class TS(QTY):
 
 class SXCM_TS(TS):
     resource_type: str = Field("SXCM_TS", description="", alias="@xsi:type")
-    operator: Optional[str] = None  # enumeration
+    operator: Optional[str] = Field(alias="@operator", default=None)
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 class SXCM_PQ(PQ):
@@ -201,12 +212,21 @@ class IVXB_PQ(PQ):
     )
 
 
-class IVL_PQ(SXCM_PQ):
-    resource_type: str = Field("IVL_PQ", description="", alias="@xsi:type")
+class IVL_PQ(ANY):
+    resource_type: str = Field(
+        "IVL_PQ",
+        alias="@xsi:type",
+    )
+    unit: Optional[CS] = Field(alias="@unit", default=None)
+    value: Optional[PQ] = Field(alias="@value", default=None)
+    operator: Optional[CS] = Field(alias="@operator", default=None)
     low: Optional[IVXB_PQ] = None
     center: Optional[PQ] = None
     width: Optional[PQ] = None
     high: Optional[IVXB_PQ] = None
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 class IVL_TS(IVXB_TS):
@@ -217,20 +237,31 @@ class IVL_TS(IVXB_TS):
     center: Optional[TS] = None
     width: Optional[PQ] = None
     high: Optional[IVXB_TS] = None
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 class PIVL_TS(SXCM_TS):
     resource_type: str = Field("PIVL_TS", description="", alias="@xsi:type")
     phase: Optional[IVL_TS] = None
     period: Optional[PQ] = None
-    alignment: Optional[CalendarCycle] = None
-    institutionSpecified: Optional[bool] = False
+    alignment: Optional[CalendarCycle] = Field(alias="@alignment", default=None)
+    institutionSpecified: Optional[str] = Field(
+        alias="@institutionSpecified", default=None
+    )
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 class EIVL_TS(SXCM_TS):
     resource_type: str = Field("EIVL_TS", description="", alias="@xsi:type")
     event: Optional[CE] = None
     offset: Optional[IVL_PQ] = None
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 class CalendarCycle(ANY):

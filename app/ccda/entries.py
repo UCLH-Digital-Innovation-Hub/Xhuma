@@ -11,8 +11,12 @@ from .helpers import (
     generate_code,
     templateId,
 )
-from .models.base import InstructionObservation, SubstanceAdministration
-from .models.datatypes import EIVL_TS, PIVL_TS
+from .models.base import (
+    EntryRelationship,
+    InstructionObservation,
+    SubstanceAdministration,
+)
+from .models.datatypes import EIVL_TS, IVL_PQ, PIVL_TS
 
 
 def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
@@ -81,10 +85,10 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
     # }
     # create a sample substance administration
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
-    request = index[entry.basedOn[0].reference]
-    dosage_instructions = request.dosageInstruction
-    for dose in dosage_instructions:
-        print(dose.as_json())
+    # request = index[entry.basedOn[0].reference]
+    # dosage_instructions = request.dosageInstruction
+    # for dose in dosage_instructions:
+    #     print(dose.as_json())
     # print(dosage_instructions.as_json())
     substance_administration = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
@@ -140,14 +144,14 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 entry.dosage[0].timing.repeat.period
                 / entry.dosage[0].timing.repeat.frequency
             )
-
+        # print(f"dose period: {dose_period}")
         substance_administration.effectiveTime.append(
             PIVL_TS(
                 **{
                     "@xsi:type": "PIVL_TS",
                     "@operator": "A",
                     "@institutionSpecified": (
-                        "true" if entry.dosage[0].timing.repeat.frequencyMax else None
+                        "true" if entry.dosage[0].timing.repeat.frequency else None
                     ),
                     "period": {
                         "@value": dose_period,
@@ -209,35 +213,22 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
 
     for dose in entry.dosage:
         substance_administration.entryRelationship.append(
-            {
-                "sequenceNumber": (
-                    entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
-                ),
-                "inversionInd": True,
-                "act": {
-                    "moodCode": "Int",
-                    "templateId": templateId(
-                        "2.16.840.1.113883.10.20.22.4.20", "2014-06-09"
+            EntryRelationship(
+                **{
+                    "sequenceNumber": (
+                        entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
                     ),
-                    "code": {
-                        "code": "422037009",
-                        "codeSystem": "2.16.840.1.113883.6.96",
-                        "displayName": "Provider medication administration instructions",
-                        "codeSystemName": "SNOMED CT",
-                    },
-                    "text": dose.text,
-                    "statusCode": {
-                        "code": "completed",
-                    },
-                },
-                "observation": InstructionObservation(
-                    text=dose.text,
-                    value={
-                        "@xsi:type": "ST",
-                        "#text": dose.text,
-                    },
-                ),
-            }
+                    "inversionInd": True,
+                    "observation": InstructionObservation(
+                        text=dose.text,
+                        # free text must be in xsi type st for care everywhere to parse
+                        value={
+                            "@xsi:type": "ST",
+                            "#text": dose.text,
+                        },
+                    ),
+                }
+            )
         )
     return {
         "substanceAdministration": substance_administration.model_dump(

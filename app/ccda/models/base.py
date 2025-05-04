@@ -69,7 +69,12 @@ class InstructionObservation(Observation):
 
     templateId: List[II] = Field(
         default=[
-            {"@root": "2.16.840.1.113883.10.20.22.4.515", "@extension": "2025-05-01"}
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.4.515",
+                    "@extension": "2025-05-01",
+                }
+            )
         ]
     )
     code: Optional[CD] = Field(
@@ -80,9 +85,11 @@ class InstructionObservation(Observation):
             }
         )
     )
-    statusCode: Optional[CS] = {
-        "@code": "completed",
-    }
+    statusCode: Optional[CS] = CS(
+        **{
+            "@code": "completed",
+        }
+    )
     # value: Optional[CD]  = {
     #     "@code": "422037009",
     #     "@codeSystem": "2.16.840.1.113883.6.96",
@@ -131,15 +138,32 @@ class SubstanceAdministration(BaseModel):
     # precondition: List[Precondition] = Field(default_factory=list)
 
     @field_serializer("effectiveTime")
-    def serialize_effective_time(self, sxcm_ts_list: List[SXCM_TS]) -> Dict:
+    def serialize_effective_time(
+        self, sxcm_ts_list: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]]
+    ) -> Dict:
         """
         Takes a list of SXCM_TS objects and returns a dictionary with operator as key
         """
-        return {
-            sxcm_ts.operator: {"@value": sxcm_ts.value}
-            for sxcm_ts in sxcm_ts_list
-            if sxcm_ts.operator is not None and sxcm_ts.value is not None
-        }
+        # print(sxcm_ts_list)
+        time_list = []
+        for eff_time in sxcm_ts_list:
+            # print(f"eff_time: {eff_time}")
+            # print(isinstance(eff_time, SXCM_TS))
+            if eff_time.resource_type == "SXCM_TS":
+                time_list.append(
+                    {
+                        eff_time.operator: (
+                            {"@value": eff_time.value}
+                            if eff_time.value is not None
+                            else None
+                        )
+                    }
+                )
+            else:
+                time_list.append(eff_time.model_dump(by_alias=True, exclude_none=True))
+
+        return time_list
+        # print(time_list)
 
 
 class Entry(BaseModel):

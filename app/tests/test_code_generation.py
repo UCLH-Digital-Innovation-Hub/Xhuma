@@ -17,7 +17,7 @@ def test_single_snomed_code_only():
     ]
     result = code_with_translations(codings)
     assert result.code == "1102181000000102"
-    assert result.codeSystemName == "2.16.840.1.113883.6.96"
+    assert result.codeSystem == "2.16.840.1.113883.6.96"
     assert result.translation is None
 
 
@@ -42,12 +42,12 @@ def test_snomed_priority_and_translation():
     ]
     result = code_with_translations(codings)
     assert result.code == "325242002"
-    assert result.codeSystem == "http://snomed.info/sct"
-    assert result.codeSystemName == "2.16.840.1.113883.6.96"
+    assert result.codeSystemName == "http://snomed.info/sct"
+    assert result.codeSystem == "2.16.840.1.113883.6.96"
     assert result.translation is not None
     assert result.translation[0].code == "03716001"
     assert (
-        result.translation[0].codeSystem
+        result.translation[0].codeSystemName
         == "https://fhir.hl7.org.uk/Id/multilex-drug-codes"
     )
-    assert result.translation[0].codeSystemName == "2.16.840.1.113883.2.1.6.4"
+    assert result.translation[0].codeSystem == "2.16.840.1.113883.2.1.6.4"
