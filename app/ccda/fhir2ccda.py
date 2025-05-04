@@ -1,5 +1,9 @@
+import asyncio
 import datetime
+import json
+import pprint
 
+import xmltodict
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
@@ -282,10 +286,17 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                             "effectiveTime"
                                         ]["low"]["@value"]
                                     ),
-                                    readable_date(
-                                        entry_data["substanceAdministration"][
+                                    (
+                                        readable_date(
+                                            entry_data["substanceAdministration"][
+                                                "effectiveTime"
+                                            ]["high"]["@value"]
+                                        )
+                                        if "high"
+                                        in entry_data["substanceAdministration"][
                                             "effectiveTime"
-                                        ]["high"]["@value"]
+                                        ]
+                                        else ""
                                     ),
                                     entry_data["substanceAdministration"]["statusCode"][
                                         "@code"
@@ -295,11 +306,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                     ]["manufacturedMaterial"]["code"]["@displayName"],
                                     entry_data["substanceAdministration"][
                                         "entryRelationship"
-                                    ][0]["act"]["text"],
+                                    ][0]["observation"]["text"],
                                 ]
                             )
                         )
-                        print(rows)
+                        # print(rows)
                 # Close the table after all entries are processed
                 comp["section"]["text"] = {
                     "table": {
@@ -318,3 +329,26 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     ] = bundle_components
 
     return ccda
+
+
+if __name__ == "__main__":
+    # Example usage
+    with open("app/tests/fixtures/bundles/9690937472.json", "r") as f:
+        structured_dosage_bundle = json.load(f)
+
+    fhir_bundle = bundle.Bundle(structured_dosage_bundle)
+
+    # index resources to allow for resolution
+    bundle_index = {}
+    for entry in fhir_bundle.entry:
+        try:
+            address = f"{entry.resource.resource_type}/{entry.resource.id}"
+            bundle_index[address] = entry.resource
+        except:
+            pass
+
+    # ccda = await convert_bundle(fhir_bundle, bundle_index)
+    ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))
+    pprint.pprint(ccda)
+    with open("output.xml", "w") as output:
+        output.write(xmltodict.unparse(ccda, pretty=True))

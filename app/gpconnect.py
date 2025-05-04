@@ -101,7 +101,7 @@ async def gpconnect(nhsno: int):
     xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
     # xop = convert_mime(xml_ccda)
     xop = base64_xml(xml_ccda)
-    print(xop)
+    # print(xop)
     doc_uuid = str(uuid4())
 
     # TODO set this as background task

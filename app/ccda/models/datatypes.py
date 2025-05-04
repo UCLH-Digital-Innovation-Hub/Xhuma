@@ -227,6 +227,12 @@ class PIVL_TS(SXCM_TS):
     institutionSpecified: Optional[bool] = False
 
 
+class EIVL_TS(SXCM_TS):
+    resource_type: str = Field("EIVL_TS", description="", alias="@xsi:type")
+    event: Optional[CE] = None
+    offset: Optional[IVL_PQ] = None
+
+
 class CalendarCycle(ANY):
     resource_type: str = Field("CalendarCycle", description="", alias="@xsi:type")
     name: Optional[str] = None

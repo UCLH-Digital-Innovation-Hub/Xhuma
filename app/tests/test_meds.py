@@ -1,6 +1,9 @@
+import json
+import pprint
 from unittest.mock import patch
 
-import pytest
+from fhirclient.models import bundle
+from fhirclient.models import list as fhirlist
 from fhirclient.models import medication, medicationstatement
 
 from app.ccda.entries import medication as medication_entry
@@ -110,3 +113,50 @@ def test_substance_administration():
     # assert effective time list contains low
     assert substance_administration["effectiveTime"]["low"]["@value"] == "20240522"
     # assert substance_administration.id[0].root is not None
+
+
+def test_structured_dosage():
+    """
+    Test the structured dosage
+    """
+    with open("app/tests/fixtures/bundles/9690937472.json", "r") as f:
+        structured_dosage_bundle = json.load(f)
+
+    fhir_bundle = bundle.Bundle(structured_dosage_bundle)
+
+    # index resources to allow for resolution
+    bundle_index = {}
+    for entry in fhir_bundle.entry:
+        try:
+            address = f"{entry.resource.resource_type}/{entry.resource.id}"
+            bundle_index[address] = entry.resource
+        except:
+            pass
+    medication_list = []
+    for list in fhir_bundle.entry:
+        if isinstance(list.resource, fhirlist.List):
+            # print(entry.resource.title)
+            if list.resource.title == "Medications and medical devices":
+                # pprint.pprint(list.resource.as_json())
+                for entry in list.resource.entry:
+                    # pprint.pprint(entry.as_json())
+                    referenced_item = bundle_index[entry.item.reference]
+                    # pprint.pprint(referenced_item.as_json())
+
+                    entry_data = medication_entry(
+                        referenced_item,
+                        bundle_index,
+                    )
+                    medication_list.append(entry_data)
+
+                    assert (
+                        entry_data["substanceAdministration"]["@classCode"] == "SBADM"
+                    )
+                    assert (
+                        entry_data["substanceAdministration"]["entryRelationship"][0][
+                            "observation"
+                        ]["text"]
+                        is not None
+                    )
+
+    assert len(medication_list) == 26

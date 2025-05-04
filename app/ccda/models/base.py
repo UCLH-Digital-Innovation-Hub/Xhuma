@@ -1,9 +1,9 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_serializer
 
-from .datatypes import CD, CE, CS, ED, II, IVL_PQ, IVL_TS, SXCM_TS
+from .datatypes import CD, CE, CS, ED, EIVL_TS, II, IVL_PQ, IVL_TS, PIVL_TS, SXCM_TS
 
 
 class ManufacturedMaterial(BaseModel):
@@ -45,12 +45,59 @@ class Act(BaseModel):
     effectiveTime: Optional[IVL_TS] = None
 
 
+class Observation(BaseModel):
+    """
+    Representation of CDA model object Observation. Only contain relevant attributes.
+    """
+
+    classCode: str = Field(alias="@classCode", default="OBS")
+    moodCode: str = Field(alias="@moodCode", default="EVN")
+    templateId: List[II] = Field(default_factory=list)
+    id: Optional[List[II]] = Field(default_factory=list)
+    code: Optional[CD] = None
+    text: Optional[str] = None
+    statusCode: Optional[CS] = None
+    effectiveTime: Optional[IVL_TS] = None
+    value: Optional[dict] = None
+    entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
+
+
+class InstructionObservation(Observation):
+    """
+    Representation of CDA model object Instruction Observation.
+    """
+
+    templateId: List[II] = Field(
+        default=[
+            {"@root": "2.16.840.1.113883.10.20.22.4.515", "@extension": "2025-05-01"}
+        ]
+    )
+    code: Optional[CD] = Field(
+        default=CD(
+            **{
+                "@code": "89187-7",
+                "@codeSystem": "2.16.840.1.113883.6.1",
+            }
+        )
+    )
+    statusCode: Optional[CS] = {
+        "@code": "completed",
+    }
+    # value: Optional[CD]  = {
+    #     "@code": "422037009",
+    #     "@codeSystem": "2.16.840.1.113883.6.96",
+    #     "@displayName": "Provider medication administration instructions",
+    #     "@codeSystemName": "SNOMED CT",
+    # }
+
+
 class EntryRelationship(BaseModel):
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
     sequenceNumber: Optional[int] = None
     act: Optional[Act] = None
+    observation: Optional[Observation] = None
 
 
 class SubstanceAdministration(BaseModel):
@@ -73,10 +120,13 @@ class SubstanceAdministration(BaseModel):
     )
     text: Optional[ED] = None
     statusCode: Optional[CS] = None
-    effectiveTime: List[SXCM_TS] = Field(default_factory=list)
+    effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
+        default_factory=list
+    )
     consumable: Optional[Consumable] = None
     routeCode: Optional[CE] = None
     doseQuantity: Optional[IVL_PQ] = None
+    rateQuantity: Optional[IVL_PQ] = None
     entryRelationship: List[EntryRelationship] = Field(default_factory=list)
     # precondition: List[Precondition] = Field(default_factory=list)
 
@@ -85,7 +135,11 @@ class SubstanceAdministration(BaseModel):
         """
         Takes a list of SXCM_TS objects and returns a dictionary with operator as key
         """
-        return {sxcm_ts.operator: {"@value": sxcm_ts.value} for sxcm_ts in sxcm_ts_list}
+        return {
+            sxcm_ts.operator: {"@value": sxcm_ts.value}
+            for sxcm_ts in sxcm_ts_list
+            if sxcm_ts.operator is not None and sxcm_ts.value is not None
+        }
 
 
 class Entry(BaseModel):

@@ -4,9 +4,15 @@ from fhirclient.models import allergyintolerance, coding, condition
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationstatement
 
-from .helpers import (code_with_translations, date_helper,
-                      effective_time_helper, generate_code, templateId)
-from .models.base import SubstanceAdministration
+from .helpers import (
+    code_with_translations,
+    date_helper,
+    effective_time_helper,
+    generate_code,
+    templateId,
+)
+from .models.base import InstructionObservation, SubstanceAdministration
+from .models.datatypes import EIVL_TS, PIVL_TS
 
 
 def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
@@ -75,7 +81,11 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
     # }
     # create a sample substance administration
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
-    # request = index[entry.basedOn[0].reference]
+    request = index[entry.basedOn[0].reference]
+    dosage_instructions = request.dosageInstruction
+    for dose in dosage_instructions:
+        print(dose.as_json())
+    # print(dosage_instructions.as_json())
     substance_administration = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
         id=[
@@ -98,29 +108,105 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
             }
         },
         entryRelationship=[],
-        # go through doses in dosage
-        # entryRelationship=[
-        #     {
-        #         "inversionInd": True,
-        #         "act": {
-        #             "moodCode": "Int",
-        #             "templateId": templateId(
-        #                 "2.16.840.1.113883.10.20.22.4.20", "2014-06-09"
-        #             ),
-        #             "code": {
-        #                 "code": "422037009",
-        #                 "codeSystem": "2.16.840.1.113883.6.96",
-        #                 "displayName": "Provider medication administration instructions",
-        #                 "codeSystemName": "SNOMED CT",
-        #             },
-        #             "text": entry.dosage[0].text,
-        #             "statusCode": {
-        #                 "code": "completed",
-        #             },
-        #         },
-        #     }
-        # ],
     )
+    # if dose quantiy is in dosage
+    if entry.dosage[0].doseQuantity:
+        # assumption that all structuered dosage will be snomed
+        substance_administration.doseQuantity = {
+            "value": {
+                "@xsi:type": "PQ",
+                "@nullFlavor": "OTH",
+                "translation": {
+                    "@value": entry.dosage[0].doseQuantity.value,
+                    "@code": entry.dosage[0].doseQuantity.code,
+                    "@codeSystem": entry.dosage[0].doseQuantity.system,
+                    "originalText": entry.dosage[0].doseQuantity.unit,
+                },
+            },
+        }
+    # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
+    if entry.dosage[0].timing:
+        # check if medication is prn
+        if entry.dosage[0].timing.repeat.frequencyMax:
+            # medicine is prn
+            dose_period = (
+                entry.dosage[0].timing.repeat.period
+                / entry.dosage[0].timing.repeat.frequencyMax
+            )
+
+        else:
+            # frequency is the occurrence per period. C-CDA has a single period between doses hence division
+            dose_period = (
+                entry.dosage[0].timing.repeat.period
+                / entry.dosage[0].timing.repeat.frequency
+            )
+
+        substance_administration.effectiveTime.append(
+            PIVL_TS(
+                **{
+                    "@xsi:type": "PIVL_TS",
+                    "@operator": "A",
+                    "@institutionSpecified": (
+                        "true" if entry.dosage[0].timing.repeat.frequencyMax else None
+                    ),
+                    "period": {
+                        "@value": dose_period,
+                        "@unit": entry.dosage[0].timing.repeat.periodUnit,
+                    },
+                }
+            )
+        )
+        # https://hl7.org/fhir/R4/valueset-event-timing.html
+        event_codes = [
+            "MORN",
+            "MORN.early",
+            "MORN.late",
+            "NOON",
+            "AFT",
+            "AFT.early",
+            "AFT.late",
+            "EVE",
+            "EVE.early",
+            "EVE.late",
+            "NIGHT",
+            "PHS",
+            "HS",
+            "WAKE",
+            "C",
+            "CM",
+            "CD",
+            "CV",
+            "AC",
+            "ACM",
+            "ACD",
+            "ACV",
+            "PC",
+            "PCM",
+            "PCD",
+            "PCV",
+        ]
+        # check if timing contains event codes
+        if entry.dosage[0].timing.repeat.when:
+            for event in entry.dosage[0].timing.repeat.when:
+                if event in event_codes:
+                    substance_administration.effectiveTime.append(
+                        EIVL_TS(
+                            **{
+                                "@xsi:type": "EIVL_TS",
+                                "@operator": "A",
+                                "event": {
+                                    "@code": event,
+                                },
+                            }
+                        )
+                    )
+
+    #   check if route is in dosage
+    if entry.dosage[0].method:
+        substance_administration.routeCode = code_with_translations(
+            entry.dosage[0].method.coding
+        )
+
     for dose in entry.dosage:
         substance_administration.entryRelationship.append(
             {
@@ -144,6 +230,13 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                         "code": "completed",
                     },
                 },
+                "observation": InstructionObservation(
+                    text=dose.text,
+                    value={
+                        "@xsi:type": "ST",
+                        "#text": dose.text,
+                    },
+                ),
             }
         )
     return {
