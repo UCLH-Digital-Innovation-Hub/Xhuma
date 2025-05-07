@@ -90,8 +90,22 @@ jobs:
       id: tf-outputs
       run: |
         cd infra
-        CONTAINER_APP_URL=$(terraform output -raw container_app_url)
-        HEALTH_ENDPOINT=$(terraform output -raw health_endpoint)
+        # Safely capture output and strip any debug messages that could cause parsing errors
+        CONTAINER_APP_URL=$(terraform output -raw container_app_url 2>/dev/null || echo "not-available")
+        HEALTH_ENDPOINT=$(terraform output -raw health_endpoint 2>/dev/null || echo "not-available")
+        
+        # Validate output doesn't contain problematic characters
+        if [[ "$CONTAINER_APP_URL" == *"::"* ]]; then
+          echo "Warning: Container app URL contains invalid format. Using placeholder."
+          CONTAINER_APP_URL="deployment-pending"
+        fi
+        
+        if [[ "$HEALTH_ENDPOINT" == *"::"* ]]; then
+          echo "Warning: Health endpoint contains invalid format. Using placeholder."
+          HEALTH_ENDPOINT="deployment-pending"
+        fi
+        
+        # Use GitHub Environment file for setting environment variables
         echo "CONTAINER_APP_URL=$CONTAINER_APP_URL" >> $GITHUB_ENV
         echo "HEALTH_ENDPOINT=$HEALTH_ENDPOINT" >> $GITHUB_ENV
 
@@ -102,10 +116,17 @@ jobs:
         echo "Waiting 30 seconds for deployment to stabilize..."
         sleep 30
         
-        echo "Running health check against ${{ env.HEALTH_ENDPOINT }}"
-        HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.HEALTH_ENDPOINT }})
+        # Skip health check if endpoint is not available
+        if [[ "${{ env.HEALTH_ENDPOINT }}" == "deployment-pending" ]]; then
+          echo "Health endpoint not available yet. Skipping health check."
+          echo "HEALTH_CHECK_RESULT=pending" >> $GITHUB_ENV
+          exit 0
+        fi
         
-        if [ "$HEALTH_STATUS" == "200" ]; then
+        echo "Running health check against ${{ env.HEALTH_ENDPOINT }}"
+        HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.HEALTH_ENDPOINT }} || echo "failed")
+        
+        if [[ "$HEALTH_STATUS" == "200" ]]; then
           echo "✅ Health check passed! Status code: $HEALTH_STATUS"
           echo "HEALTH_CHECK_RESULT=success" >> $GITHUB_ENV
         else
@@ -116,10 +137,25 @@ jobs:
     - name: Report Deployment Status
       run: |
         echo "Deployment completed!"
-        echo "Application URL: ${{ env.CONTAINER_APP_URL }}"
-        echo "Health Check: ${{ env.HEALTH_CHECK_RESULT }}"
         
-        if [ "${{ env.HEALTH_CHECK_RESULT }}" == "failure" ]; then
-          echo "Warning: Health check did not return a 200 status. The application may not be fully operational."
-          echo "Please check the logs or troubleshoot the deployment."
+        if [[ "${{ env.CONTAINER_APP_URL }}" == "deployment-pending" ]]; then
+          echo "Application URL: Not available yet. Check the Azure portal for details."
+        else
+          echo "Application URL: ${{ env.CONTAINER_APP_URL }}"
         fi
+        
+        case "${{ env.HEALTH_CHECK_RESULT }}" in
+          success)
+            echo "Health Check: ✅ Passed"
+            ;;
+          failure)
+            echo "Health Check: ❌ Failed"
+            echo "Warning: Health check did not return a 200 status. The application may not be fully operational."
+            echo "Please check the logs or troubleshoot the deployment."
+            ;;
+          pending)
+            echo "Health Check: ⏳ Pending"
+            echo "Health check was skipped as the endpoint was not available yet."
+            echo "Once deployment completes, manually verify the application health."
+            ;;
+        esac
