@@ -50,15 +50,26 @@ resource "azurerm_container_app" "xhuma" {
         value = var.redis_password
       }
 
-      # Health probe for application monitoring
+      # Health probes for application monitoring
       liveness_probe {
-        path                = "/health"
-        port                = 80
-        initial_delay       = 30
-        interval_seconds    = 10
-        timeout             = 3
-        failure_threshold   = 3
-        success_threshold   = 1
+        transport               = "HTTP"
+        path                    = "/health"
+        port                    = 8080
+        initial_delay           = 5
+        interval_seconds        = 10
+        timeout                 = 2
+        failure_count_threshold = 3
+      }
+      
+      readiness_probe {
+        transport               = "HTTP"
+        path                    = "/ready"
+        port                    = 8080
+        initial_delay           = 5
+        interval_seconds        = 10
+        timeout                 = 2
+        failure_count_threshold = 3
+        success_count_threshold = 1
       }
     }
 
@@ -68,13 +79,12 @@ resource "azurerm_container_app" "xhuma" {
 
   ingress {
     external_enabled = true
-    target_port      = 80
+    target_port      = 8080
+    transport        = "http"
     traffic_weight {
       latest_revision = true
       percentage      = 100
     }
-    # HTTP is currently enabled. For HTTPS, add the following commented section:
-    # transport = "http" # Options are: auto, http, http2
   }
 
   # ACR authentication
@@ -151,6 +161,7 @@ resource "azurerm_container_app" "postgres" {
   ingress {
     external_enabled = false
     target_port      = 5432
+    transport        = "tcp"
     traffic_weight {
       latest_revision = true
       percentage      = 100

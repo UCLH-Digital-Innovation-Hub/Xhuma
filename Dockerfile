@@ -13,4 +13,9 @@ COPY app /code/app
 
 # Note: JWTKEY should be passed as an environment variable at runtime
 # Do not store sensitive keys in the image
-CMD uvicorn app.main:app --host=0.0.0.0 --port=${PORT:-80}
+
+# Configure app to listen on port 8080 to match probe and ingress settings
+ENV PORT=8080
+EXPOSE 8080
+
+CMD uvicorn app.main:app --host=0.0.0.0 --port=${PORT:-8080}
