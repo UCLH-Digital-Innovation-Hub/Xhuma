@@ -1,11 +1,15 @@
+import asyncio
 import datetime
+import json
+import pprint
 
+import xmltodict
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
 
 from .entries import allergy, medication, problem
-from .helpers import date_helper, templateId
+from .helpers import date_helper, readable_date, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -15,6 +19,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         for entry in bundle.entry
         if isinstance(entry.resource, fhirlist.List)
     ]
+
     subject = [
         entry.resource
         for entry in bundle.entry
@@ -184,7 +189,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 headers = []
                 for header in table_headers[title]:
                     headers.append({header})
-                return {"tr": {"th":  table_headers[title]}}
+                return {"tr": {"th": table_headers[title]}}
 
             def create_row(entry_data) -> dict:
                 """generates a table row from a list of inputs
@@ -221,60 +226,91 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 rows = []
                 for entry in list.entry:
                     referenced_item = index[entry.item.reference]
-                    
 
                     if list.title == "Allergies and adverse reactions":
                         entry_data = allergy(referenced_item)
                         comp["section"]["entry"].append(entry_data)
                         rows.append(
                             create_row(
-                                [entry_data["act"]["effectiveTime"]["low"]["@value"],
-                                entry_data["act"]["statusCode"]["@code"],
-                                entry_data["act"]["entryRelationship"]["observation"][
-                                    "participant"
-                                ]["participantRole"]["playingEntity"]["code"][
-                                    "@displayName"
-                                ],
-                                entry_data["act"]["entryRelationship"]["observation"][
-                                    "entryRelationship"
-                                ]["observation"]["value"]["@displayName"],]
+                                [
+                                    readable_date(
+                                        entry_data["act"]["effectiveTime"]["low"][
+                                            "@value"
+                                        ]
+                                    ),
+                                    entry_data["act"]["statusCode"]["@code"],
+                                    entry_data["act"]["entryRelationship"][
+                                        "observation"
+                                    ]["participant"]["participantRole"][
+                                        "playingEntity"
+                                    ][
+                                        "code"
+                                    ][
+                                        "@displayName"
+                                    ],
+                                    entry_data["act"]["entryRelationship"][
+                                        "observation"
+                                    ]["entryRelationship"]["observation"]["value"][
+                                        "@displayName"
+                                    ],
+                                ]
                             )
                         )
                     elif list.title == "Problems":
                         entry_data = problem(referenced_item)
                         comp["section"]["entry"].append(entry_data)
                         rows.append(
-                            create_row([
-                                entry_data["act"]["effectiveTime"]["low"]["@value"],
-                                entry_data["act"]["statusCode"]["@code"],
-                                entry_data["act"]["entryRelationship"]["observation"][
-                                    "value"
-                                ]["@displayName"],]
+                            create_row(
+                                [
+                                    readable_date(
+                                        entry_data["act"]["effectiveTime"]["low"][
+                                            "@value"
+                                        ]
+                                    ),
+                                    entry_data["act"]["statusCode"]["@code"],
+                                    entry_data["act"]["entryRelationship"][
+                                        "observation"
+                                    ]["value"]["@displayName"],
+                                ]
                             )
                         )
                     elif list.title == "Medications and medical devices":
                         entry_data = medication(referenced_item, index)
+                        # pprint.pprint(entry_data)
                         comp["section"]["entry"].append(entry_data)
                         rows.append(
-                            create_row([
-                                entry_data["substanceAdministration"]["effectiveTime"][
-                                    "low"
-                                ]["@value"],
-                                entry_data["substanceAdministration"]["effectiveTime"][
-                                    "high"
-                                ]["@value"],
-                                entry_data["substanceAdministration"]["statusCode"][
-                                    "@code"
-                                ],
-                                entry_data["substanceAdministration"]["consumable"][
-                                    "manufacturedProduct"
-                                ]["manufacturedMaterial"]["code"][0]["@displayName"],
-                                entry_data["substanceAdministration"][
-                                    "entryRelationship"
-                                ]["act"]["text"]["#text"],]
+                            create_row(
+                                [
+                                    readable_date(
+                                        entry_data["substanceAdministration"][
+                                            "effectiveTime"
+                                        ][0]["low"]["@value"]
+                                    ),
+                                    (
+                                        readable_date(
+                                            entry_data["substanceAdministration"][
+                                                "effectiveTime"
+                                            ][0]["high"]["@value"]
+                                        )
+                                        if "high"
+                                        in entry_data["substanceAdministration"][
+                                            "effectiveTime"
+                                        ][0]
+                                        else ""
+                                    ),
+                                    entry_data["substanceAdministration"]["statusCode"][
+                                        "@code"
+                                    ],
+                                    entry_data["substanceAdministration"]["consumable"][
+                                        "manufacturedProduct"
+                                    ]["manufacturedMaterial"]["code"]["@displayName"],
+                                    entry_data["substanceAdministration"][
+                                        "entryRelationship"
+                                    ][0]["observation"]["text"],
+                                ]
                             )
                         )
-                        print(rows)
+                        # print(rows)
                 # Close the table after all entries are processed
                 comp["section"]["text"] = {
                     "table": {
@@ -293,3 +329,26 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     ] = bundle_components
 
     return ccda
+
+
+if __name__ == "__main__":
+    # Example usage
+    with open("app/tests/fixtures/bundles/9690937472.json", "r") as f:
+        structured_dosage_bundle = json.load(f)
+
+    fhir_bundle = bundle.Bundle(structured_dosage_bundle)
+
+    # index resources to allow for resolution
+    bundle_index = {}
+    for entry in fhir_bundle.entry:
+        try:
+            address = f"{entry.resource.resource_type}/{entry.resource.id}"
+            bundle_index[address] = entry.resource
+        except:
+            pass
+
+    # ccda = await convert_bundle(fhir_bundle, bundle_index)
+    ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))
+    # pprint.pprint(ccda)
+    with open("output.xml", "w") as output:
+        output.write(xmltodict.unparse(ccda, pretty=True))
