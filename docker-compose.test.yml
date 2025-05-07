@@ -1,0 +1,54 @@
+services:
+  redis:
+    image: redis:7.2
+    command:
+      - /bin/sh
+      - -c
+      - |
+        redis-server \
+        --requirepass "$${REDIS_PASSWORD:-redis}" \
+        --maxmemory 256mb \
+        --maxmemory-policy volatile-lru \
+        --appendonly yes \
+        --appendfsync everysec \
+        --save 900 1 \
+        --save 300 10 \
+        --save 60 10000 \
+        --maxclients 100 \
+        --timeout 300 \
+        --tcp-keepalive 60
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redis}
+    networks:
+      - xhuma-test-net
+
+  xhuma-tests:
+    build: .
+    depends_on:
+      - redis
+    environment:
+      API_KEY: ${API_KEY:-test_key}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis}
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      TEST_MODE: "true"
+    volumes:
+      - ./app:/code/app
+      - ./xml:/code/xml
+      - ./app/tests/fixtures:/code/app/tests/fixtures
+    command: >
+      bash -c "
+        echo 'Waiting for Redis to be ready...' &&
+        sleep 5 &&
+        echo 'Running tests...' &&
+        python -m pytest app/tests -v
+      "
+    networks:
+      - xhuma-test-net
+
+networks:
+  xhuma-test-net:
+    driver: bridge

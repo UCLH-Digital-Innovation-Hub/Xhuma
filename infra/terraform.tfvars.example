@@ -1,0 +1,24 @@
+# Example Terraform Variables for Xhuma Azure Deployment
+# Save a copy of this file as terraform.tfvars and customize as needed
+
+# Resource group and location
+resource_group_name = "rg-xhuma-play"  # Existing resource group
+location            = "uksouth"
+
+# Credentials and secrets - do not store actual values in version control!
+# These values should be passed securely via GitHub Secrets or Azure Key Vault
+redis_password         = "REDIS_PASSWORD_PLACEHOLDER"  # Must be provided
+postgres_password      = "POSTGRES_PASSWORD_PLACEHOLDER"  # Optional
+api_key                = "API_KEY_PLACEHOLDER"  # Must be provided
+grafana_admin_password = "GRAFANA_ADMIN_PASSWORD_PLACEHOLDER"  # Optional
+
+# Docker image
+image_tag = "latest"  # Will be replaced with Git SHA during CI/CD
+
+# Feature flags
+enable_postgres      = true
+enable_observability = true
+
+# Container scaling
+min_replicas = 1
+max_replicas = 10

@@ -1,0 +1,119 @@
+name: CD - Deploy to Azure
+
+on:
+  push:
+    branches: [ simplified-deployment ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: play # Use appropriate environment (play, dev, test, prod)
+    
+    env:
+      ENVIRONMENT: rg-xhuma-play
+      TF_VAR_resource_group_name: rg-xhuma-play
+      TF_VAR_location: uksouth
+      TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
+      TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
+      TF_VAR_api_key: ${{ secrets.API_KEY }}
+      TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+      TF_VAR_image_tag: ${{ github.sha }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # Fetch all history for correct versioning
+
+    - name: Login to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Select Azure subscription
+      run: |
+        az account show
+        az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    - name: Login to Azure Container Registry
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Build and push Xhuma image to ACR
+      uses: docker/build-push-action@v3
+      with:
+        context: .
+        push: true
+        tags: ${{ secrets.ACR_LOGIN_SERVER }}/xhuma:${{ github.sha }},${{ secrets.ACR_LOGIN_SERVER }}/xhuma:latest
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.10.5
+
+    - name: Terraform Init
+      run: |
+        cd infra
+        terraform init
+
+    - name: Terraform Validate
+      run: |
+        cd infra
+        terraform validate
+
+    - name: Terraform Plan
+      id: plan
+      run: |
+        cd infra
+        terraform plan -out=tfplan
+
+    - name: Terraform Apply
+      id: apply
+      run: |
+        cd infra
+        terraform apply -auto-approve tfplan
+
+    - name: Get Terraform outputs
+      id: tf-outputs
+      run: |
+        cd infra
+        CONTAINER_APP_URL=$(terraform output -raw container_app_url)
+        HEALTH_ENDPOINT=$(terraform output -raw health_endpoint)
+        echo "CONTAINER_APP_URL=$CONTAINER_APP_URL" >> $GITHUB_ENV
+        echo "HEALTH_ENDPOINT=$HEALTH_ENDPOINT" >> $GITHUB_ENV
+
+    - name: Smoke Test - Health Check
+      id: health-check
+      continue-on-error: true
+      run: |
+        echo "Waiting 30 seconds for deployment to stabilize..."
+        sleep 30
+        
+        echo "Running health check against ${{ env.HEALTH_ENDPOINT }}"
+        HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ env.HEALTH_ENDPOINT }})
+        
+        if [ "$HEALTH_STATUS" == "200" ]; then
+          echo "✅ Health check passed! Status code: $HEALTH_STATUS"
+          echo "HEALTH_CHECK_RESULT=success" >> $GITHUB_ENV
+        else
+          echo "❌ Health check failed! Status code: $HEALTH_STATUS"
+          echo "HEALTH_CHECK_RESULT=failure" >> $GITHUB_ENV
+        fi
+
+    - name: Report Deployment Status
+      run: |
+        echo "Deployment completed!"
+        echo "Application URL: ${{ env.CONTAINER_APP_URL }}"
+        echo "Health Check: ${{ env.HEALTH_CHECK_RESULT }}"
+        
+        if [ "${{ env.HEALTH_CHECK_RESULT }}" == "failure" ]; then
+          echo "Warning: Health check did not return a 200 status. The application may not be fully operational."
+          echo "Please check the logs or troubleshoot the deployment."
+        fi
