@@ -89,6 +89,10 @@ terraform import module.log_analytics.azurerm_log_analytics_workspace.workspace 
 # Redis Cache
 terraform import module.redis.azurerm_redis_cache.redis \
   "/subscriptions/<subscription-id>/resourceGroups/rg-xhuma-play/providers/Microsoft.Cache/redis/redis-xhuma-play"
+
+# Container App Environment
+terraform import module.container_apps_environment.azurerm_container_app_environment.env \
+  "/subscriptions/<subscription-id>/resourceGroups/rg-xhuma-play/providers/Microsoft.App/managedEnvironments/caexhumaplay"
 ```
 
 ### CI/CD Integration

@@ -22,6 +22,7 @@ SUBSCRIPTION_ID="$1"
 RESOURCE_GROUP="rg-xhuma-play"
 LOG_ANALYTICS_NAME="logxhumaplay"
 REDIS_NAME="redis-xhuma-play"
+CONTAINER_APP_ENV_NAME="caexhumaplay"
 
 echo "🔄 Importing existing Azure resources into Terraform state..."
 echo "Subscription: $SUBSCRIPTION_ID"
@@ -56,6 +57,15 @@ if ! resource_in_state "module.redis.azurerm_redis_cache.redis"; then
     "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Cache/redis/$REDIS_NAME"
 else
   echo "✅ Redis Cache already in Terraform state"
+fi
+
+# Import Container App Environment if not already in state
+if ! resource_in_state "module.container_apps_environment.azurerm_container_app_environment.env"; then
+  echo "📝 Importing Container App Environment: $CONTAINER_APP_ENV_NAME"
+  terraform import module.container_apps_environment.azurerm_container_app_environment.env \
+    "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.App/managedEnvironments/$CONTAINER_APP_ENV_NAME"
+else
+  echo "✅ Container App Environment already in Terraform state"
 fi
 
 # Additional resources can be added here as needed
