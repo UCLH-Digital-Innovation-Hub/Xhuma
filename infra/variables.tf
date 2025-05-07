@@ -32,9 +32,14 @@ variable "api_key" {
 }
 
 variable "jwtkey" {
-  description = "Private key for JWT signing (in PEM format)"
+  description = "Private key for JWT signing (in PEM format). This is required and must be provided securely via environment variable TF_VAR_jwtkey or through a .tfvars file that is excluded from version control."
   type        = string
   sensitive   = true
+  
+  validation {
+    condition     = length(var.jwtkey) > 0
+    error_message = "The jwtkey variable must be provided for secure JWT signing. It should contain a PEM-formatted RSA private key."
+  }
 }
 
 variable "grafana_admin_password" {

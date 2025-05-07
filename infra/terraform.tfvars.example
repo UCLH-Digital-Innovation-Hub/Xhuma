@@ -10,6 +10,7 @@ location            = "uksouth"
 redis_password         = "REDIS_PASSWORD_PLACEHOLDER"  # Must be provided
 postgres_password      = "POSTGRES_PASSWORD_PLACEHOLDER"  # Optional
 api_key                = "API_KEY_PLACEHOLDER"  # Must be provided
+jwtkey                 = "JWTKEY_PLACEHOLDER"  # Required: PEM-formatted private key for JWT signing
 grafana_admin_password = "GRAFANA_ADMIN_PASSWORD_PLACEHOLDER"  # Optional
 
 # Docker image

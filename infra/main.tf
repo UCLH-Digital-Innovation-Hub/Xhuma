@@ -74,6 +74,25 @@ module "redis" {
   tags                = local.default_tags
 }
 
+# Validate that jwtkey is provided
+resource "null_resource" "validate_jwtkey" {
+  # This will fail if jwtkey is not set
+  provisioner "local-exec" {
+    command = <<-EOT
+      if [ -z "${var.jwtkey}" ]; then
+        echo "Error: jwtkey variable must be provided for secure JWT key handling."
+        exit 1
+      fi
+    EOT
+    interpreter = ["/bin/bash", "-c"]
+  }
+
+  # Trigger validation on any change to the jwtkey variable
+  triggers = {
+    jwtkey_provided = var.jwtkey != "" ? "true" : "error: jwtkey is required"
+  }
+}
+
 # Deploy Container Apps
 module "container_apps" {
   source                      = "./modules/container_apps"
@@ -88,7 +107,11 @@ module "container_apps" {
   redis_password              = var.redis_password
   postgres_password           = var.postgres_password # Optional: Used if enabling Postgres
   api_key                     = var.api_key
+  jwtkey                      = var.jwtkey  # Pass the JWT signing key to the container apps
   grafana_admin_password      = var.grafana_admin_password
   image_tag                   = var.image_tag
   tags                        = local.default_tags
+
+  # Ensure validation happens before container app deployment
+  depends_on = [null_resource.validate_jwtkey]
 }
