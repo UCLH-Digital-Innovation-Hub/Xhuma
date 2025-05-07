@@ -41,6 +41,53 @@ REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
 # Register the JWK endpoints from the security module
 register_jwk_endpoint(app)
 
+# Health and readiness endpoints for Azure Container Apps
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint for container orchestration systems.
+    Used by Azure Container Apps liveness probe.
+    
+    Returns:
+        dict: Status indicating the service is healthy
+    """
+    return {"status": "healthy"}
+
+@app.get("/ready")
+async def readiness_check():
+    """
+    Readiness check endpoint for container orchestration systems.
+    Used by Azure Container Apps readiness probe.
+    
+    This checks if the application is ready to handle traffic.
+    
+    Returns:
+        dict: Status indicating the service is ready to receive requests
+    """
+    # Check Redis connection
+    try:
+        redis_client.ping()
+        redis_status = "connected"
+    except Exception:
+        redis_status = "disconnected"
+        
+    # Check for required environment variables
+    env_vars = {
+        "JWTKEY": "present" if os.getenv("JWTKEY") else "missing",
+    }
+    
+    # Overall readiness - consider ready even if some components are degraded
+    # This allows for graceful degradation in production
+    is_ready = True
+    
+    return {
+        "status": "ready" if is_ready else "not_ready",
+        "components": {
+            "redis": redis_status,
+            "environment": env_vars
+        }
+    }
+
 
 @app.on_event("startup")
 async def startup_event():

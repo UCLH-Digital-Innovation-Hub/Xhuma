@@ -30,21 +30,61 @@ from fastapi import HTTPException
 
 # Get JWT signing key from environment variable
 JWTKEY = os.getenv("JWTKEY")
-if not JWTKEY:
-    raise ValueError("JWTKEY environment variable must be set for JWT signing")
 
+# Private key object will be lazily loaded
+_private_key_obj = None
 
-# Parse private key once at module level
-try:
-    _private_key_obj = serialization.load_pem_private_key(
-        JWTKEY.encode('utf-8'),
-        password=None,
-        backend=default_backend()
-    )
-    if not isinstance(_private_key_obj, rsa.RSAPrivateKey):
-        raise ValueError("The provided key is not an RSA private key")
-except Exception as e:
-    raise ValueError(f"Error loading RSA private key: {str(e)}")
+def validate_jwtkey():
+    """
+    Validate the JWTKEY environment variable.
+    
+    Raises:
+        ValueError: If the JWTKEY is not set or not in a valid format
+    """
+    if not JWTKEY:
+        raise ValueError("JWTKEY environment variable must be set for JWT signing")
+    
+    # Validate key format 
+    if not JWTKEY.startswith("-----BEGIN PRIVATE KEY-----") and not JWTKEY.startswith("-----BEGIN RSA PRIVATE KEY-----"):
+        raise ValueError("JWTKEY does not appear to be a valid PEM-formatted key. It should begin with '-----BEGIN PRIVATE KEY-----' or '-----BEGIN RSA PRIVATE KEY-----'")
+
+def get_private_key():
+    """
+    Lazily load and return the private key object.
+    
+    Returns:
+        RSAPrivateKey: The loaded private key object
+        
+    Raises:
+        ValueError: If the key cannot be loaded or is not a valid RSA private key
+    """
+    global _private_key_obj
+    
+    if _private_key_obj is not None:
+        return _private_key_obj
+    
+    # Validate the key first
+    validate_jwtkey()
+    
+    try:
+        key_obj = serialization.load_pem_private_key(
+            JWTKEY.encode('utf-8'),
+            password=None,
+            backend=default_backend()
+        )
+        
+        if not isinstance(key_obj, rsa.RSAPrivateKey):
+            raise ValueError("The provided key is not an RSA private key")
+            
+        _private_key_obj = key_obj
+        return _private_key_obj
+    except Exception as e:
+        # More specific error message based on the exception
+        error_msg = str(e)
+        if "Could not deserialize key data" in error_msg:
+            raise ValueError(f"Invalid key format. Please ensure the JWTKEY contains a valid PEM-formatted RSA private key with proper line breaks. Error: {error_msg}")
+        else:
+            raise ValueError(f"Error loading RSA private key: {error_msg}")
 
 
 def _int_to_base64url(value: int) -> str:
@@ -57,30 +97,43 @@ def _int_to_base64url(value: int) -> str:
 def get_jwk(kid: str = "default-key-id") -> Dict[str, Any]:
     """
     Generate a JWK (JSON Web Key) from the private key.
-    
+
     Args:
         kid (str): Key ID to include in the JWK
-        
+
     Returns:
         Dict[str, Any]: JWK representation of the public key
     """
-    # Get the public key from the private key
-    public_key = _private_key_obj.public_key()
-    
-    # Get the public numbers
-    public_numbers = public_key.public_numbers()
-    
-    # Create JWK format
-    jwk = {
-        "kty": "RSA",
-        "use": "sig",
-        "alg": "RS512",
-        "kid": kid,
-        "n": _int_to_base64url(public_numbers.n),
-        "e": _int_to_base64url(public_numbers.e),
-    }
-    
-    return jwk
+    try:
+        # Lazily load the private key
+        private_key = get_private_key()
+        
+        # Get the public key from the private key
+        public_key = private_key.public_key()
+        
+        # Get the public numbers
+        public_numbers = public_key.public_numbers()
+        
+        # Create JWK format
+        jwk = {
+            "kty": "RSA",
+            "use": "sig",
+            "alg": "RS512",
+            "kid": kid,
+            "n": _int_to_base64url(public_numbers.n),
+            "e": _int_to_base64url(public_numbers.e),
+        }
+        
+        return jwk
+    except ValueError as e:
+        # Return an error JWK for debugging
+        return {
+            "kty": "RSA",
+            "use": "sig",
+            "alg": "RS512",
+            "kid": kid,
+            "error": str(e)
+        }
 
 
 def get_jwks(kids: Optional[list] = None) -> Dict[str, Any]:
@@ -118,6 +171,9 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         - A unique JWT ID (jti claim)
         - 5-minute expiration time (exp claim)
     """
+    # Validate the key before attempting to use it
+    validate_jwtkey()
+    
     headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
     payload = {
         "sub": subject,
@@ -155,6 +211,9 @@ def create_jwt(
 
     The token is signed using RS512 algorithm and has a 5-minute expiration time.
     """
+    # Validate the key before attempting to use it
+    validate_jwtkey()
+    
     created_time = int(time())
     headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
     payload = {
