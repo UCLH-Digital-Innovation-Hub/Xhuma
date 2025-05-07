@@ -55,7 +55,6 @@ resource "azurerm_container_app" "xhuma" {
         transport               = "HTTP"
         path                    = "/health"
         port                    = 8080
-        initial_delay           = 5
         interval_seconds        = 10
         timeout                 = 2
         failure_count_threshold = 3
@@ -65,7 +64,6 @@ resource "azurerm_container_app" "xhuma" {
         transport               = "HTTP"
         path                    = "/ready"
         port                    = 8080
-        initial_delay           = 5
         interval_seconds        = 10
         timeout                 = 2
         failure_count_threshold = 3

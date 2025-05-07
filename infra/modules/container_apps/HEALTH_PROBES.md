@@ -20,7 +20,6 @@ liveness_probe {
   transport               = "HTTP"
   path                    = "/health"
   port                    = 8080
-  initial_delay           = 5
   interval_seconds        = 10
   timeout                 = 2
   failure_count_threshold = 3
@@ -30,7 +29,6 @@ readiness_probe {
   transport               = "HTTP"
   path                    = "/ready"
   port                    = 8080
-  initial_delay           = 5
   interval_seconds        = 10
   timeout                 = 2
   failure_count_threshold = 3
@@ -57,6 +55,7 @@ Recent Azure Terraform provider versions (3.75.0+) require these specific parame
 - The `transport` parameter is now required
 - `failure_threshold` is replaced with `failure_count_threshold`
 - `success_threshold` is replaced with `success_count_threshold`
+- Note that `initial_delay` is no longer supported
 
 ## Endpoints Implementation
 
