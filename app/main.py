@@ -16,12 +16,12 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fhirclient.models import bundle
-from jwcrypto import jwk
 
 from .gpconnect import gpconnect
 from .pds import pds
 from .redis_connect import redis_client
 from .soap import soap
+from .security import register_jwk_endpoint
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -38,6 +38,9 @@ app.include_router(pds.router)
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
 
+# Register the JWK endpoints from the security module
+register_jwk_endpoint(app)
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -46,23 +49,9 @@ async def startup_event():
 
     This function:
     1. Sets the registry ID in Redis
-    2. Checks for existing JWK (JSON Web Key)
-    3. Generates a new JWK from private key if none exists
     """
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
-
-    # Handle JWK generation/verification
-    if not os.path.isfile("keys/jwk.json"):
-        # Generate new JWK from private key
-        with open("keys/test-1.pem", "rb") as pemfile:
-            private_pem = pemfile.read()
-            public_jwk = jwk.JWK.from_pem(data=private_pem)
-            jwk_json = public_jwk.export_public(as_dict=True)
-
-            # Save generated JWK
-            with open("keys/jwk.json", "w") as f:
-                json.dump(jwk_json, f)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -110,17 +99,4 @@ async def demo(nhsno: int):
     return redis_client.get(bundle_id["document_id"])
 
 
-@app.get("/jwk")
-async def get_jwk():
-    """
-    Public endpoint that provides access to the service's JSON Web Key.
-
-    This endpoint is used by clients to verify JWT signatures and establish
-    trust with the service.
-
-    Returns:
-        dict: JSON Web Key in dictionary format.
-    """
-    with open("keys/jwk.json", "r") as jwk_file:
-        key = json.load(jwk_file)
-    return key
+# Note: The /jwk and /jwks endpoints are now registered through the security module

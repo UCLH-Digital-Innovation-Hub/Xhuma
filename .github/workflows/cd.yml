@@ -17,6 +17,8 @@ jobs:
       TF_VAR_redis_password: ${{ secrets.REDIS_PASSWORD }}
       TF_VAR_postgres_password: ${{ secrets.POSTGRES_PASSWORD }}
       TF_VAR_api_key: ${{ secrets.API_KEY }}
+      # Use API_KEY as JWTKEY if not explicitly set
+      TF_VAR_jwtkey: ${{ secrets.JWTKEY || secrets.API_KEY }}
       TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
       TF_VAR_image_tag: ${{ github.sha }}
 

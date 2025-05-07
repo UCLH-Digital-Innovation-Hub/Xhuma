@@ -10,15 +10,94 @@ The module provides two main JWT creation functions:
 2. create_jwt: Creates JWTs for GP Connect access
 
 All tokens are signed using RS512 algorithm and have a 5-minute expiration time.
+
+Additionally, this module provides JWK (JSON Web Key) functionality to expose
+the public key in JWK format for JWT verification by relying parties.
 """
 
 import os
 import uuid
+import base64
+import json
 from time import time
+from typing import Dict, Any, Optional
 
 import jwt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.backends import default_backend
+from fastapi import HTTPException
 
+# Get JWT signing key from environment variable
 JWTKEY = os.getenv("JWTKEY")
+if not JWTKEY:
+    raise ValueError("JWTKEY environment variable must be set for JWT signing")
+
+
+# Parse private key once at module level
+try:
+    _private_key_obj = serialization.load_pem_private_key(
+        JWTKEY.encode('utf-8'),
+        password=None,
+        backend=default_backend()
+    )
+    if not isinstance(_private_key_obj, rsa.RSAPrivateKey):
+        raise ValueError("The provided key is not an RSA private key")
+except Exception as e:
+    raise ValueError(f"Error loading RSA private key: {str(e)}")
+
+
+def _int_to_base64url(value: int) -> str:
+    """Convert an integer to a base64url-encoded string without padding."""
+    value_bytes = value.to_bytes((value.bit_length() + 7) // 8, byteorder='big')
+    encoded = base64.urlsafe_b64encode(value_bytes).decode('ascii')
+    return encoded.rstrip('=')  # Remove any padding
+
+
+def get_jwk(kid: str = "default-key-id") -> Dict[str, Any]:
+    """
+    Generate a JWK (JSON Web Key) from the private key.
+    
+    Args:
+        kid (str): Key ID to include in the JWK
+        
+    Returns:
+        Dict[str, Any]: JWK representation of the public key
+    """
+    # Get the public key from the private key
+    public_key = _private_key_obj.public_key()
+    
+    # Get the public numbers
+    public_numbers = public_key.public_numbers()
+    
+    # Create JWK format
+    jwk = {
+        "kty": "RSA",
+        "use": "sig",
+        "alg": "RS512",
+        "kid": kid,
+        "n": _int_to_base64url(public_numbers.n),
+        "e": _int_to_base64url(public_numbers.e),
+    }
+    
+    return jwk
+
+
+def get_jwks(kids: Optional[list] = None) -> Dict[str, Any]:
+    """
+    Generate a JWKS (JSON Web Key Set) containing the public key.
+    
+    Args:
+        kids (Optional[list]): List of key IDs to include
+        
+    Returns:
+        Dict[str, Any]: JWKS representation
+    """
+    if kids is None:
+        kids = ["default-key-id"]
+        
+    keys = [get_jwk(kid) for kid in kids]
+    return {"keys": keys}
 
 
 def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
@@ -48,24 +127,20 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         "exp": int(time()) + 300,
     }
 
-    # Get private key from environment or file
-    if JWTKEY is not None:
-        private_key = JWTKEY
-    else:
-        with open("keys/test-1.pem", "r") as f:
-            private_key = f.read()
-
-    return jwt.encode(payload, key=private_key, algorithm="RS512", headers=headers)
+    # Use the securely stored private key
+    return jwt.encode(payload, key=JWTKEY, algorithm="RS512", headers=headers)
 
 
 def create_jwt(
     audience: str = "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/documents/fhir",
+    key_id: str = "default-key-id",
 ) -> str:
     """
     Creates a JWT for GP Connect access with specific claims required by NHS Digital.
 
     Args:
         audience (str): The intended audience (aud claim). Defaults to test environment.
+        key_id (str): The key identifier (kid header). Defaults to "default-key-id".
 
     Returns:
         str: Encoded JWT string
@@ -78,19 +153,17 @@ def create_jwt(
         - requesting_organization
         - requesting_practitioner
 
-    TODO:
-        - Make requesting device dynamic
-        - Make requesting organisation dynamic
-        - Make requesting practitioner dynamic
-        - Make audience dynamic
+    The token is signed using RS512 algorithm and has a 5-minute expiration time.
     """
     created_time = int(time())
+    headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
     payload = {
         "iss": "https://orange.testlab.nhs.uk/",
         "sub": "1",
         "aud": audience,
         "iat": created_time,
         "exp": created_time + 300,
+        "jti": str(uuid.uuid4()),  # Added unique JWT ID
         "reason_for_request": "directcare",
         "requested_scope": "patient/*.read",
         "requesting_device": {
@@ -136,10 +209,66 @@ def create_jwt(
             ],
         },
     }
-    return jwt.encode(payload, headers={"alg": "none", "typ": "JWT"}, key=None)
+    return jwt.encode(payload, key=JWTKEY, algorithm="RS512", headers=headers)
+
+
+# Add the JWK endpoint to the app.main module
+def register_jwk_endpoint(app):
+    """
+    Register the JWK endpoint in the FastAPI app.
+    This should be called from the main app module.
+    
+    Args:
+        app: The FastAPI app instance
+    """
+    from fastapi import Request, Response
+    import time
+    
+    @app.get("/jwk")
+    async def get_jwk_endpoint(request: Request):
+        """Endpoint to retrieve the JWK for token verification."""
+        # Simple rate limiting based on client IP
+        client_ip = request.client.host
+        current_time = time.time()
+        
+        # Store request info in a global dict (in production, use Redis or similar)
+        if not hasattr(get_jwk_endpoint, 'rate_limit_store'):
+            get_jwk_endpoint.rate_limit_store = {}
+            
+        # Check if client has made too many requests
+        if client_ip in get_jwk_endpoint.rate_limit_store:
+            last_req_time, count = get_jwk_endpoint.rate_limit_store[client_ip]
+            # Reset counter if it's been more than 60 seconds
+            if current_time - last_req_time > 60:
+                get_jwk_endpoint.rate_limit_store[client_ip] = (current_time, 1)
+            # Otherwise increment counter
+            else:
+                get_jwk_endpoint.rate_limit_store[client_ip] = (last_req_time, count + 1)
+                # Rate limit: 10 requests per minute
+                if count >= 10:
+                    return Response(
+                        content=json.dumps({"error": "Too many requests"}),
+                        status_code=429,
+                        media_type="application/json"
+                    )
+        else:
+            get_jwk_endpoint.rate_limit_store[client_ip] = (current_time, 1)
+        
+        # Return the JWK
+        return get_jwk("default-key-id")
+    
+    @app.get("/jwks")
+    async def get_jwks_endpoint(request: Request):
+        """Endpoint to retrieve the JWKS (multiple keys) for token verification."""
+        # Same rate limiting logic as above could be implemented here
+        return get_jwks()
 
 
 if __name__ == "__main__":
     # Example usage
     token = create_jwt()
     print(token)
+    
+    # Print the JWK for verification
+    print("\nJWK for verification:")
+    print(json.dumps(get_jwk(), indent=2))

@@ -6,10 +6,11 @@ RUN pip install pipenv
 
 COPY Pipfile /code/Pipfile
 COPY Pipfile.lock /code/Pipfile.lock
-COPY keys/test-1.pem /code/keys/test-1.pem
 
 RUN pipenv install --system --deploy
 
 COPY app /code/app
 
+# Note: JWTKEY should be passed as an environment variable at runtime
+# Do not store sensitive keys in the image
 CMD uvicorn app.main:app --host=0.0.0.0 --port=${PORT:-80}

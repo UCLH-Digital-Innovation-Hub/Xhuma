@@ -12,6 +12,8 @@ jobs:
     env:
       REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD || 'redis-test-password' }}
       API_KEY: ${{ secrets.API_KEY || 'test-api-key' }}
+      # Use API_KEY as JWTKEY for testing if not set explicitly
+      JWTKEY: ${{ secrets.JWTKEY || secrets.API_KEY || 'test-key' }}
 
     steps:
     - name: Checkout repository
@@ -34,6 +36,7 @@ jobs:
       env:
         REDIS_PASSWORD: ${{ env.REDIS_PASSWORD }}
         API_KEY: ${{ env.API_KEY }}
+        JWTKEY: ${{ env.JWTKEY }}
 
     - name: Notify on success
       if: success()

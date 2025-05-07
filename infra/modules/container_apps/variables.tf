@@ -58,6 +58,12 @@ variable "api_key" {
   sensitive   = true
 }
 
+variable "jwtkey" {
+  description = "Private key for JWT signing (in PEM format)"
+  type        = string
+  sensitive   = true
+}
+
 variable "grafana_admin_password" {
   description = "Admin password for Grafana"
   type        = string

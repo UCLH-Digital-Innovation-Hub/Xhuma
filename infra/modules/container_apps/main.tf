@@ -36,6 +36,11 @@ resource "azurerm_container_app" "xhuma" {
       }
 
       env {
+        name  = "JWTKEY"
+        value = var.jwtkey
+      }
+
+      env {
         name  = "REDIS_HOST"
         value = var.redis_host
       }
