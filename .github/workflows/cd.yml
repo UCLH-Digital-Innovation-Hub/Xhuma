@@ -74,12 +74,16 @@ jobs:
       id: plan
       run: |
         cd infra
+        # Set environment variable to bypass provider registration
+        export ARM_SKIP_PROVIDER_REGISTRATION=true
         terraform plan -out=tfplan
 
     - name: Terraform Apply
       id: apply
       run: |
         cd infra
+        # Set environment variable to bypass provider registration
+        export ARM_SKIP_PROVIDER_REGISTRATION=true
         terraform apply -auto-approve tfplan
 
     - name: Get Terraform outputs

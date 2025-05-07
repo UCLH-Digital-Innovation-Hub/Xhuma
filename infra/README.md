@@ -85,6 +85,21 @@ To rotate the JWT signing key:
 
 ## Troubleshooting
 
+### Provider Registration Errors
+
+The configuration uses `skip_provider_registration = true` to avoid errors with missing Azure Resource Providers during deployment. This is particularly useful in CI/CD environments where the service principal may not have permissions to register providers.
+
+If you encounter the error:
+```
+Error: Error ensuring Resource Providers are registered.
+```
+
+This is already handled in the configuration by:
+1. Setting `skip_provider_registration = true` in the provider block
+2. Setting `ARM_SKIP_PROVIDER_REGISTRATION=true` in the CI/CD workflows
+
+### Key Validation Errors
+
 If you encounter the error `"Missing required argument: The argument "jwtkey" is required"`:
 
 - Ensure `jwtkey` is provided in `terraform.tfvars` or as an environment variable

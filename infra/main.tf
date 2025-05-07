@@ -22,6 +22,7 @@ terraform {
 
 provider "azurerm" {
   features {}
+  skip_provider_registration = true
 }
 
 # Reference the existing resource group
