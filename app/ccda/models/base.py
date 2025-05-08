@@ -190,3 +190,52 @@ class Section(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+class ResultsOrganizer(BaseModel):
+    """
+    Representation of a CDA Results Organizer model object.
+    """
+
+    templateId: List[II] = Field(
+        default_factory=list,
+        default=[
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.4.1",
+                    "@extension": "2015-08-01",
+                }
+            )
+        ],
+    )
+    id: Optional[List[II]] = Field(default_factory=list)
+    code: Optional[CD] = None
+    statusCode: Optional[CS] = None
+    effectiveTime: Optional[IVL_TS] = None
+    component: List[Observation] = Field(default_factory=list)
+
+
+class ResultsSection(Section):
+    """
+    Representation of a CDA Results Section model object.
+    """
+
+    templateId: List[II] = Field(
+        default=[
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.2.3.1",
+                    "@extension": "2015-08-01",
+                }
+            )
+        ]
+    )
+    code = CE(
+        **{
+            "@code": "30954-2",
+            "@codeSystem": "2.16.840.1.113883.6.1",
+        }
+    )
+    title: Optional[str] = "Results"
+    text: Optional[str] = None
+    entry: Optional[List[ResultsOrganizer]] = Field(default_factory=list)
