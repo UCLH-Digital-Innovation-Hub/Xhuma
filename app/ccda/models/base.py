@@ -198,7 +198,6 @@ class ResultsOrganizer(BaseModel):
     """
 
     templateId: List[II] = Field(
-        default_factory=list,
         default=[
             II(
                 **{
@@ -230,11 +229,11 @@ class ResultsSection(Section):
             )
         ]
     )
-    code = CE(
+    code:CE = Field(default=CE(
         **{
             "@code": "30954-2",
             "@codeSystem": "2.16.840.1.113883.6.1",
-        }
+        })
     )
     title: Optional[str] = "Results"
     text: Optional[str] = None
