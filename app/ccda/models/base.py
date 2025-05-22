@@ -117,6 +117,7 @@ class SubstanceAdministration(BaseModel):
     moodCode: str = Field(alias="@moodCode", default="INT")
     templateId: List[II] = Field(default_factory=list)
     id: List[II] = Field(default_factory=list)
+    # ?code needed
     code: Optional[CD] = Field(
         default=CD(
             **{

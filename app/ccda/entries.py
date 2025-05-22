@@ -32,11 +32,10 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
         id=[
             {
-                "@value": entry.identifier[0].value,
                 # root for url base id
                 # https://build.fhir.org/ig/HL7/ccda-on-fhir/mappingGuidance.html#fhir-identifier--cda-id-with-example-mapping
-                "@root": "2.16.840.1.113883.4.873",
-                "@extension": f"{entry.identifier[0].system}/{entry.identifier[0].value}",
+                "@root": entry.identifier[0].system,
+                "@extension": entry.identifier[0].value,
             }
         ],
         statusCode={"@code": entry.status},
