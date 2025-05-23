@@ -117,6 +117,7 @@ class SubstanceAdministration(BaseModel):
     moodCode: str = Field(alias="@moodCode", default="INT")
     templateId: List[II] = Field(default_factory=list)
     id: List[II] = Field(default_factory=list)
+    # ?code needed
     code: Optional[CD] = Field(
         default=CD(
             **{
@@ -146,22 +147,18 @@ class SubstanceAdministration(BaseModel):
         """
         # print(sxcm_ts_list)
         time_list = []
+        sxcm = {}
         for eff_time in sxcm_ts_list:
             # print(f"eff_time: {eff_time}")
             # print(isinstance(eff_time, SXCM_TS))
             if eff_time.resource_type == "SXCM_TS":
-                time_list.append(
-                    {
-                        eff_time.operator: (
-                            {"@value": eff_time.value}
-                            if eff_time.value is not None
-                            else None
-                        )
-                    }
-                )
+                # add the operator to the dictionary
+                sxcm[eff_time.operator] = {"@value": eff_time.value}
             else:
                 time_list.append(eff_time.model_dump(by_alias=True, exclude_none=True))
-
+        # append the sxcm dictionary to the time_list at the start
+        if sxcm:
+            time_list.insert(0, sxcm)
         return time_list
         # print(time_list)
 

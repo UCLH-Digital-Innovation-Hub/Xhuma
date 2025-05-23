@@ -22,68 +22,6 @@ from .models.datatypes import EIVL_TS, IVL_PQ, PIVL_TS
 def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
-    # med = {
-    #     "substanceAdministration": {
-    #         "@classCode": "SBADM",
-    #         "@moodCode": "INT",
-    #     }
-    # }
-
-    # med["substanceAdministration"]["templateId"] = templateId(
-    #     "2.16.840.1.113883.10.20.22.4.16", "2014-06-09"
-    # )
-    # med["substanceAdministration"]["id"] = {"@root": entry.identifier[0].value}
-    # med["substanceAdministration"]["code"] = {
-    #     "@code": "CONC",
-    #     "@codeSystem": "2.16.840.1.113883.5.6",
-    # }
-
-    # med["substanceAdministration"]["statusCode"] = {"@code": entry.status}
-
-    # # TODO add robust checking on this in case there's no high value
-    # med["substanceAdministration"]["effectiveTime"] = {
-    #     "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)},
-    #     "high": {"@value": date_helper(entry.effectivePeriod.end.isostring)},
-    # }
-
-    # referenced_med: fhirmed.Medication() = index[entry.medicationReference.reference]
-    # request = index[entry.basedOn[0].reference]
-
-    # # medication information
-    # # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.23.html
-    # med["substanceAdministration"]["consumable"] = {}
-    # med["substanceAdministration"]["consumable"]["manufacturedProduct"] = {
-    #     "@classCode": "MANU",
-    #     "templateId": templateId("2.16.840.1.113883.10.20.22.4.23", "2014-06-09"),
-    #     "id": {"@root": uuid.uuid4()},
-    #     "manufacturedMaterial": {
-    #         # "code": [generate_code(x) for x in referenced_med.code.coding],
-    #         "code": code_with_translations(referenced_med.code.coding).model_dump(
-    #             by_alias=True, exclude_none=True
-    #         ),
-    #     },
-    # }
-
-    # med["substanceAdministration"]["entryRelationship"] = {
-    #     "@typeCode": "SUBJ",
-    #     "act": {
-    #         "@classCode": "ACT",
-    #         "@moodCode": "INT",
-    #         "templateId": templateId("2.16.840.1.113883.10.20.22.4.20", "2014-06-09"),
-    #         "code": {
-    #             "@code": "422037009",
-    #             "@displayName": "Provider medication administration instructions",
-    #             "@codeSystemName": "SNOMED CT",
-    #             "@codeSystem": "2.16.840.1.113883.6.96",
-    #         },
-    #         "text": {
-    #             "#text": f"{entry.dosage[0].text}\n Patient Instuctions: {entry.dosage[0].patientInstruction}"
-    #         },
-    #         # "patientInstruction": {"#text": entry.dosage[0].patientInstruction},
-    #         "statusCode": {"@code": "completed"},
-    #     },
-    # }
-    # create a sample substance administration
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
     # request = index[entry.basedOn[0].reference]
     # dosage_instructions = request.dosageInstruction
@@ -94,8 +32,10 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
         id=[
             {
-                "@root": entry.identifier[0].value,
-                "@assigningAuthorityName": entry.identifier[0].system,
+                # root for url base id
+                # https://build.fhir.org/ig/HL7/ccda-on-fhir/mappingGuidance.html#fhir-identifier--cda-id-with-example-mapping
+                "@root": entry.identifier[0].system,
+                "@extension": entry.identifier[0].value,
             }
         ],
         statusCode={"@code": entry.status},
