@@ -56,17 +56,17 @@ async def gpconnect(nhsno: int):
                     "value": f"{nhsno}",
                 },
             },
-            {
-                "name": "includeAllergies",
-                "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
-            },
+            # {
+            #     "name": "includeAllergies",
+            #     "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
+            # },
             {
                 "name": "includeMedication",
                 "part": [{"name": "includePrescriptionIssues", "valueBoolean": False}],
             },
-            {"name": "includeProblems"},
-            {"name": "includeImmunisations"},
-            {"name": "includeInvestigations"},
+            # {"name": "includeProblems"},
+            # {"name": "includeImmunisations"},
+            # {"name": "includeInvestigations"},
         ],
     }
     r = httpx.post(
@@ -105,8 +105,8 @@ async def gpconnect(nhsno: int):
     doc_uuid = str(uuid4())
 
     # TODO set this as background task
-    # redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
-    # redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
+    redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
+    redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
 
     # pprint(xml_ccda)
     with open(f"{nhsno}.xml", "w") as output:

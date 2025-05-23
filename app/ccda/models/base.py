@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, Extra
 
 from .datatypes import CD, CE, CS, ED, EIVL_TS, II, IVL_PQ, IVL_TS, PIVL_TS, SXCM_TS
 
@@ -97,14 +97,15 @@ class InstructionObservation(Observation):
     #     "@codeSystemName": "SNOMED CT",
     # }
 
-
-class EntryRelationship(BaseModel):
+class EntryRelationship(BaseModel, extra=Extra.allow):
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
     sequenceNumber: Optional[int] = None
     act: Optional[Act] = None
     observation: Optional[Observation] = None
+    # accept any type of object
+
 
 
 class SubstanceAdministration(BaseModel):
@@ -118,14 +119,14 @@ class SubstanceAdministration(BaseModel):
     templateId: List[II] = Field(default_factory=list)
     id: List[II] = Field(default_factory=list)
     # ?code needed
-    code: Optional[CD] = Field(
-        default=CD(
-            **{
-                "@code": "CONC",
-                "@codeSystem": "2.16.840.1.113883.5.6",
-            }
-        )
-    )
+    # code: Optional[CD] = Field(
+    #     default=CD(
+    #         **{
+    #             "@code": "CONC",
+    #             "@codeSystem": "2.16.840.1.113883.5.6",
+    #         }
+    #     )
+    # )
     text: Optional[ED] = None
     statusCode: Optional[CS] = None
     effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
@@ -161,6 +162,7 @@ class SubstanceAdministration(BaseModel):
             time_list.insert(0, sxcm)
         return time_list
         # print(time_list)
+
 
 
 class Entry(BaseModel):
