@@ -153,7 +153,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "@displayName": templates[list.title]["displayName"],
                     "@codeSystem": "2.16.840.1.113883.6.1",
                 },
-                "title": list.title,
+                "title": templates[list.title]["displayName"],
                 "text": "",  # Will be populated with table
             }
 

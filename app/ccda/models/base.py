@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_serializer, Extra
+from pydantic import BaseModel, Extra, Field, field_serializer
 
 from .datatypes import CD, CE, CS, ED, EIVL_TS, II, IVL_PQ, IVL_TS, PIVL_TS, SXCM_TS
 
@@ -97,6 +97,7 @@ class InstructionObservation(Observation):
     #     "@codeSystemName": "SNOMED CT",
     # }
 
+
 class EntryRelationship(BaseModel, extra=Extra.allow):
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
@@ -105,7 +106,6 @@ class EntryRelationship(BaseModel, extra=Extra.allow):
     act: Optional[Act] = None
     observation: Optional[Observation] = None
     # accept any type of object
-
 
 
 class SubstanceAdministration(BaseModel):
@@ -137,7 +137,8 @@ class SubstanceAdministration(BaseModel):
     doseQuantity: Optional[IVL_PQ] = None
     rateQuantity: Optional[IVL_PQ] = None
     entryRelationship: List[EntryRelationship] = Field(default_factory=list)
-    # precondition: List[Precondition] = Field(default_factory=list)
+    # TODO flesh out precondition model
+    precondition: Optional[Dict] = None
 
     @field_serializer("effectiveTime")
     def serialize_effective_time(
@@ -162,7 +163,6 @@ class SubstanceAdministration(BaseModel):
             time_list.insert(0, sxcm)
         return time_list
         # print(time_list)
-
 
 
 class Entry(BaseModel):
@@ -228,11 +228,13 @@ class ResultsSection(Section):
             )
         ]
     )
-    code:CE = Field(default=CE(
-        **{
-            "@code": "30954-2",
-            "@codeSystem": "2.16.840.1.113883.6.1",
-        })
+    code: CE = Field(
+        default=CE(
+            **{
+                "@code": "30954-2",
+                "@codeSystem": "2.16.840.1.113883.6.1",
+            }
+        )
     )
     title: Optional[str] = "Results"
     text: Optional[str] = None

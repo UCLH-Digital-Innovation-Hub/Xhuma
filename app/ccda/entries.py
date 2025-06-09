@@ -81,6 +81,38 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 / entry.dosage[0].timing.repeat.frequencyMax
             )
 
+            # populate precondition
+            substance_administration.precondition = {
+                "@typeCode": "PRCN",
+                "criterion": {
+                    "templateId": templateId(
+                        root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"
+                    ),
+                    "code": {
+                        "@code": "ASSERTION",
+                        "@codeSystem": "2.16.840.1.113883.5.4",
+                    },
+                },
+            }
+            # if there is a asNeededCodeableConcept, use it
+            if entry.dosage[0].asNeededCodeableConcept:
+                substance_administration.precondition["criterion"]["value"] = {
+                    "@xsi:type": "CD",
+                    "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
+                    "@displayName": entry.dosage[0]
+                    .asNeededCodeableConcept.coding[0]
+                    .display,
+                    "@codeSystemName": entry.dosage[0]
+                    .asNeededCodeableConcept.coding[0]
+                    .value,
+                }
+            else:
+                # if no asNeededCodeableConcept, use NI
+                substance_administration.precondition["criterion"]["value"] = {
+                    "@xsi:type": "CD",
+                    "@nullFlavor": "NI",
+                }
+
         else:
             # frequency is the occurrence per period. C-CDA has a single period between doses hence division
             dose_period = (
@@ -88,53 +120,53 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 / entry.dosage[0].timing.repeat.frequency
             )
         # print(f"dose period: {dose_period}")
-        
+
         # https://hl7.org/fhir/R4/valueset-event-timing.html
-        event_codes = [
-            "MORN",
-            "MORN.early",
-            "MORN.late",
-            "NOON",
-            "AFT",
-            "AFT.early",
-            "AFT.late",
-            "EVE",
-            "EVE.early",
-            "EVE.late",
-            "NIGHT",
-            "PHS",
-            "HS",
-            "WAKE",
-            "C",
-            "CM",
-            "CD",
-            "CV",
-            "AC",
-            "ACM",
-            "ACD",
-            "ACV",
-            "PC",
-            "PCM",
-            "PCD",
-            "PCV",
-        ]
-        # check if timing contains event codes
-        if entry.dosage[0].timing.repeat.when:
-            for event in entry.dosage[0].timing.repeat.when:
-                if event in event_codes:
-                    substance_administration.effectiveTime.append(
-                        EIVL_TS(
-                            **{
-                                "@xsi:type": "EIVL_TS",
-                                "@operator": "A",
-                                "event": {
-                                    "@code": event,
-                                },
-                            }
-                        )
-                    )
-        else:
-            substance_administration.effectiveTime.append(
+        # event_codes = [
+        #     "MORN",
+        #     "MORN.early",
+        #     "MORN.late",
+        #     "NOON",
+        #     "AFT",
+        #     "AFT.early",
+        #     "AFT.late",
+        #     "EVE",
+        #     "EVE.early",
+        #     "EVE.late",
+        #     "NIGHT",
+        #     "PHS",
+        #     "HS",
+        #     "WAKE",
+        #     "C",
+        #     "CM",
+        #     "CD",
+        #     "CV",
+        #     "AC",
+        #     "ACM",
+        #     "ACD",
+        #     "ACV",
+        #     "PC",
+        #     "PCM",
+        #     "PCD",
+        #     "PCV",
+        # ]
+        # # check if timing contains event codes
+        # if entry.dosage[0].timing.repeat.when:
+        #     for event in entry.dosage[0].timing.repeat.when:
+        #         if event in event_codes:
+        #             substance_administration.effectiveTime.append(
+        #                 EIVL_TS(
+        #                     **{
+        #                         "@xsi:type": "EIVL_TS",
+        #                         "@operator": "A",
+        #                         "event": {
+        #                             "@code": event,
+        #                         },
+        #                     }
+        #                 )
+        #             )
+        # else:
+        substance_administration.effectiveTime.append(
             PIVL_TS(
                 **{
                     "@xsi:type": "PIVL_TS",
@@ -172,7 +204,7 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                             "@code": "76662-6",
                             "@codeSystem": "2.16.840.1.113883.6.1",
                         },
-                    "text": dose.text,
+                        "text": dose.text,
                     },
                 }
             )
