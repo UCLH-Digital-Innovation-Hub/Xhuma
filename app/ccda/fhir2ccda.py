@@ -306,7 +306,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                     ]["manufacturedMaterial"]["code"]["@displayName"],
                                     entry_data["substanceAdministration"][
                                         "entryRelationship"
-                                    ][0]["observation"]["text"],
+                                    ][0]["substanceAdministration"]["text"],
                                 ]
                             )
                         )

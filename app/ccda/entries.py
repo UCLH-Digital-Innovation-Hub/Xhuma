@@ -88,21 +88,7 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 / entry.dosage[0].timing.repeat.frequency
             )
         # print(f"dose period: {dose_period}")
-        substance_administration.effectiveTime.append(
-            PIVL_TS(
-                **{
-                    "@xsi:type": "PIVL_TS",
-                    "@operator": "A",
-                    "@institutionSpecified": (
-                        "true" if entry.dosage[0].timing.repeat.frequency else None
-                    ),
-                    "period": {
-                        "@value": dose_period,
-                        "@unit": entry.dosage[0].timing.repeat.periodUnit,
-                    },
-                }
-            )
-        )
+        
         # https://hl7.org/fhir/R4/valueset-event-timing.html
         event_codes = [
             "MORN",
@@ -147,7 +133,22 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                             }
                         )
                     )
-
+        else:
+            substance_administration.effectiveTime.append(
+            PIVL_TS(
+                **{
+                    "@xsi:type": "PIVL_TS",
+                    "@operator": "A",
+                    "@institutionSpecified": (
+                        "true" if entry.dosage[0].timing.repeat.frequency else None
+                    ),
+                    "period": {
+                        "@value": dose_period,
+                        "@unit": entry.dosage[0].timing.repeat.periodUnit,
+                    },
+                }
+            )
+        )
     #   check if route is in dosage
     if entry.dosage[0].method:
         substance_administration.routeCode = code_with_translations(
@@ -161,18 +162,23 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                     "sequenceNumber": (
                         entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
                     ),
-                    "inversionInd": True,
-                    "observation": InstructionObservation(
-                        text=dose.text,
-                        # free text must be in xsi type st for care everywhere to parse
-                        value={
-                            "@xsi:type": "ST",
-                            "#text": dose.text,
+                    "@typeCode": "COMP",
+                    "@inversionInd": True,
+                    "substanceAdministration": {
+                        "@classCode": "SBADM",
+                        "@moodCode": "EVN",
+                        "templateId": [{"@root": "2.16.840.1.113883.10.20.22.4.147"}],
+                        "code": {
+                            "@code": "76662-6",
+                            "@codeSystem": "2.16.840.1.113883.6.1",
                         },
-                    ),
+                    "text": dose.text,
+                    },
                 }
             )
         )
+
+    print(substance_administration.entryRelationship)
     return {
         "substanceAdministration": substance_administration.model_dump(
             by_alias=True, exclude_none=True
