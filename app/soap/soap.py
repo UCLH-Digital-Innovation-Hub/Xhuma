@@ -308,6 +308,7 @@ async def iti39(request: Request):
         body = await request.body()
         soap = extract_soap_request(body.decode("utf-8"))
         envelope = clean_soap(soap)
+        message_id = envelope["Header"]["MessageID"]
         try:
             document_id = envelope["Body"]["RetrieveDocumentSetRequest"][
                 "DocumentRequest"
@@ -318,7 +319,6 @@ async def iti39(request: Request):
         document = client.get(document_id)
 
         if document is not None:
-            message_id = envelope["Header"]["MessageID"]
             data = await iti_39_response(message_id, document_id, document)
             # mime encode the data
             boundary = f"uuid:{uuid.uuid4()}"
