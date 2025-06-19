@@ -142,6 +142,8 @@ async def iti55(request: Request):
             )
 
         patient = await lookup_patient(nhsno)
+        # TODO implement checking of demographics
+
         print(f"Patient: {patient}")
         # TODO refine this to return a proper error message as this will 500
         if not patient:

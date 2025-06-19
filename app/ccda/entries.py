@@ -2,7 +2,7 @@ import uuid
 
 from fhirclient.models import allergyintolerance, coding, condition
 from fhirclient.models import medication as fhirmed
-from fhirclient.models import medicationstatement
+from fhirclient.models import medicationstatement, observation
 
 from .helpers import (
     code_with_translations,
@@ -13,10 +13,12 @@ from .helpers import (
 )
 from .models.base import (
     EntryRelationship,
-    InstructionObservation,
+    Observation,
+    ResultObservation,
+    ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import EIVL_TS, IVL_PQ, PIVL_TS
+from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 
 def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
@@ -354,3 +356,70 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> dict:
     all["act"]["entryRelationship"]["observation"] = observation
 
     return all
+
+
+def result(entry, index: dict) -> dict:
+    """
+    Entry for results section. Entries are defined by lists that contain the related type has-member indicating results groups
+    """
+    organizer = ResultsOrganizer()
+    organizer.code = code_with_translations(entry.code.coding)
+    organizer.statusCode = {"@code": entry.status}
+    effective_time = entry.issued
+
+    # check if entry is group
+    if hasattr(entry, "related") and entry.related:
+        components = []
+        for related in entry.related:
+            if related.type == "has-member":
+                related_resource = index.get(related.target.reference)
+                comp = ResultObservation(
+                    id=[{"@root": related_resource.id}],
+                    code=code_with_translations(related_resource.code.coding),
+                    status={"@code": related_resource.status},
+                    # effectiveDateTime=IVL_TS(value=entry.issued.isostring),
+                    value=PQ(
+                        **{
+                            "@value": related_resource.valueQuantity.value,
+                            "@unit": related_resource.valueQuantity.unit,
+                        }
+                    ),
+                )
+                if (
+                    hasattr(related_resource, "interpretation")
+                    and related_resource.interpretation
+                ):
+                    comp.interpretationCode = code_with_translations(
+                        related_resource.interpretation.coding
+                    )
+
+                if related_resource.referenceRange:
+                    comp.referenceRange = {"observationRange": []}
+                    for range in related_resource.referenceRange:
+                        if range.text:
+                            comp.referenceRange["observationRange"].append(
+                                {"text": range.text}
+                            )
+                        if range.low:
+                            comp.referenceRange["observationRange"].append(
+                                {
+                                    "value": {
+                                        "@xsi:type": "IVL_PQ",
+                                        "low": {
+                                            "@value": range.low.value,
+                                            "@unit": related_resource.valueQuantity.unit,
+                                        },
+                                        "high": {
+                                            "@value": range.high.value,
+                                            "@unit": related_resource.valueQuantity.unit,
+                                        },
+                                    }
+                                }
+                            )
+                print(comp.model_dump(by_alias=True, exclude_none=True))
+                components.append(comp)
+
+        organizer.component = components
+
+    print(organizer.model_dump(by_alias=True, exclude_none=True))
+    return organizer.model_dump(by_alias=True, exclude_none=True)

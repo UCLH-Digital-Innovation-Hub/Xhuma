@@ -3,7 +3,21 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Extra, Field, field_serializer
 
-from .datatypes import CD, CE, CS, ED, EIVL_TS, II, IVL_PQ, IVL_TS, PIVL_TS, SXCM_TS
+from ..helpers import templateId
+from .datatypes import (
+    ANY,
+    CD,
+    CE,
+    CS,
+    ED,
+    EIVL_TS,
+    II,
+    IVL_PQ,
+    IVL_TS,
+    PIVL_TS,
+    PQ,
+    SXCM_TS,
+)
 
 
 class ManufacturedMaterial(BaseModel):
@@ -58,8 +72,27 @@ class Observation(BaseModel):
     text: Optional[str] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
-    value: Optional[dict] = None
+    value: Optional[ANY] = None
     entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
+
+
+class ResultObservation(Observation):
+    """
+    Representation of CDA model object Result Observation.
+    """
+
+    templateId: List[II] = Field(
+        default=[
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.4.2",
+                    "@extension": "2015-08-01",
+                }
+            )
+        ]
+    )
+    referenceRange: Optional[Dict] = None
+    value: Optional[PQ] = None  # PQ is used for numeric values
 
 
 class InstructionObservation(Observation):
@@ -196,6 +229,8 @@ class ResultsOrganizer(BaseModel):
     Representation of a CDA Results Organizer model object.
     """
 
+    classCode: str = Field(alias="@classCode", default="BATTERY")
+    moodCode: str = Field(alias="@moodCode", default="EVN")
     templateId: List[II] = Field(
         default=[
             II(
@@ -210,7 +245,7 @@ class ResultsOrganizer(BaseModel):
     code: Optional[CD] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
-    component: List[Observation] = Field(default_factory=list)
+    component: List[ResultObservation] = Field(default_factory=list)
 
 
 class ResultsSection(Section):

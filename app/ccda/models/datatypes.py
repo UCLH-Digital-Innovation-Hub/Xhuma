@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field, model_validator
 
 class ANY(BaseModel):
     resource_type: str = Field(
-        "Any", description="This field provides a description for each date type"
+        "Any",
+        description="This field provides a description for each date type",
+        alias="@xsi:type",
     )
     nullFlavor: Optional[str] = None  # enumeration
 

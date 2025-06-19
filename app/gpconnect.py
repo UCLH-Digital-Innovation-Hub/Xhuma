@@ -65,7 +65,6 @@ async def gpconnect(nhsno: int):
                 "part": [{"name": "includePrescriptionIssues", "valueBoolean": False}],
             },
             # {"name": "includeProblems"},
-            # {"name": "includeImmunisations"},
             # {"name": "includeInvestigations"},
         ],
     }
