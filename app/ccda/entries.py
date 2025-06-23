@@ -212,7 +212,7 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
             )
         )
 
-    print(substance_administration.entryRelationship)
+    # print(substance_administration.entryRelationship)
     return {
         "substanceAdministration": substance_administration.model_dump(
             by_alias=True, exclude_none=True
@@ -362,17 +362,25 @@ def result(entry, index: dict) -> dict:
     """
     Entry for results section. Entries are defined by lists that contain the related type has-member indicating results groups
     """
-    organizer = ResultsOrganizer()
-    organizer.code = code_with_translations(entry.code.coding)
-    organizer.statusCode = {"@code": entry.status}
-    performer = index.get(entry.performer[0].reference)
-    organizer.author = organization_to_author(performer)
-    effective_time = entry.issued
 
     # check if entry is group
     if hasattr(entry, "related") and entry.related:
+        organizer = ResultsOrganizer()
+        organizer.code = code_with_translations(entry.code.coding)
+        organizer.statusCode = {"@code": entry.status}
+        performer = index.get(entry.performer[0].reference)
+        organizer.author = organization_to_author(performer)
+        organizer.id = [
+            {
+                "@root": ident.system,
+                "@extension": ident.value,
+            }
+            for ident in entry.identifier
+        ]
+        effective_time = entry.issued
         components = []
         for related in entry.related:
+            print(f"Related: {related.type} - {related.target.reference}")
             if related.type == "has-member":
                 related_resource = index.get(related.target.reference)
                 comp = ResultObservation(
@@ -418,10 +426,10 @@ def result(entry, index: dict) -> dict:
                                     }
                                 }
                             )
-                print(comp.model_dump(by_alias=True, exclude_none=True))
                 components.append(comp)
 
         organizer.component = components
+        # print(organizer.model_dump(by_alias=True, exclude_none=True))
 
-    print(organizer.model_dump(by_alias=True, exclude_none=True))
-    return organizer.model_dump(by_alias=True, exclude_none=True)
+        # only return groups for now
+        return organizer.model_dump(by_alias=True, exclude_none=True)

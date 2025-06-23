@@ -208,8 +208,8 @@ def organization_to_author(
             for ident in organization.identifier
         ],
     )
-
-    print(author)
+    if organization.name:
+        author.representedOrganization = {"name": organization.name}
 
     if organization.telecom:
         author.telecom = [

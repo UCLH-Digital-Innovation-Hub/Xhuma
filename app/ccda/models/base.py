@@ -74,7 +74,7 @@ class Observation(BaseModel):
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
     value: Optional[ANY] = None
-    entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
+    entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
 
 
 class ResultObservation(Observation):
