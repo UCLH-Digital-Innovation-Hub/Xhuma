@@ -8,7 +8,7 @@ from .helpers import (
     code_with_translations,
     date_helper,
     effective_time_helper,
-    generate_code,
+    organization_to_author,
     templateId,
 )
 from .models.base import (
@@ -365,6 +365,8 @@ def result(entry, index: dict) -> dict:
     organizer = ResultsOrganizer()
     organizer.code = code_with_translations(entry.code.coding)
     organizer.statusCode = {"@code": entry.status}
+    performer = index.get(entry.performer[0].reference)
+    organizer.author = organization_to_author(performer)
     effective_time = entry.issued
 
     # check if entry is group

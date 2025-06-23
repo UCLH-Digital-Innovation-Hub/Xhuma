@@ -4,6 +4,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Extra, Field, field_serializer
 
 from ..helpers import templateId
+from .admin import AuthorParticipation
 from .datatypes import (
     ANY,
     CD,
@@ -245,6 +246,7 @@ class ResultsOrganizer(BaseModel):
     code: Optional[CD] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
+    author: Optional[AuthorParticipation] = None
     component: List[ResultObservation] = Field(default_factory=list)
 
 

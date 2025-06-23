@@ -4,8 +4,9 @@ from typing import List
 from xml.etree import ElementTree
 
 import xmltodict
-from fhirclient.models import coding, period
+from fhirclient.models import coding, organization, period
 
+from .models.admin import AssignedAuthor, AuthorParticipation
 from .models.datatypes import CD, SXCM_TS
 
 
@@ -189,3 +190,38 @@ def extract_soap_request(message):
             return line
     # if can't find a soap envelope raise an error
     raise ValueError("SOAP envelope not found in the message.")
+
+
+def organization_to_author(
+    organization: organization.Organization,
+) -> AuthorParticipation:
+    """
+    Converts a FHIR Organization resource to an AuthoeParticpation object.
+    Args:
+        organization (organization.Organization): FHIR Organization resource.
+    Returns:
+        AuthorParticipation: An AuthorParticipation object with the organization details.
+    """
+    author = AssignedAuthor(
+        id=[
+            {"@root": ident.system, "@extension": ident.value}
+            for ident in organization.identifier
+        ],
+    )
+
+    print(author)
+
+    if organization.telecom:
+        author.telecom = [
+            {
+                "@use": telecom.use,
+                "@value": telecom.value,
+            }
+            for telecom in organization.telecom
+        ]
+    if organization.address:
+        author.address = [addr.as_json() for addr in organization.address]
+
+    org = AuthorParticipation(assignedAuthor=author)
+
+    return org
