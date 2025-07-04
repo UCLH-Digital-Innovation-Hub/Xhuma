@@ -25,7 +25,9 @@ services:
       - xhuma-test-net
 
   xhuma-tests:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.test
     depends_on:
       - redis
     environment:
