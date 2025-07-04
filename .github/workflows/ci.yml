@@ -27,7 +27,7 @@ jobs:
     - name: Build the Docker image
       run: |
         echo "Building Docker image for testing..."
-        docker build -f Dockerfile.test -t xhuma:test
+        docker build -f Dockerfile.test -t xhuma:test .
 
         
     - name: Run tests with Docker Compose
