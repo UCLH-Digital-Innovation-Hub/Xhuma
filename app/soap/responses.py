@@ -331,7 +331,7 @@ async def iti_47_response(message_id, patient, ceid, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
-async def iti_38_response(nhsno: int, ceid, queryid: str):
+async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
 
     body = {}
     body["AdhocQueryResponse"] = {
@@ -345,7 +345,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
     if docid is None:
         # no cached ccda
         try:
-            r = await gpconnect(nhsno)
+            r = await gpconnect(nhsno, saml_attrs)
             logging.info(f"used internal call for {nhsno}")
             print(r)
             docid = r["document_id"]

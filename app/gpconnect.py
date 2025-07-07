@@ -1,5 +1,6 @@
 import json
 import logging
+import pprint
 from datetime import timedelta
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from fhirclient.models import bundle
 from .ccda.convert_mime import base64_xml, convert_mime
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
-from .pds import pds
+from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 
@@ -19,7 +20,7 @@ router = APIRouter()
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(nhsno: int):
+async def gpconnect(nhsno: int, saml_attrs: dict):
     """accesses gp connect endpoint for nhs number"""
 
     # validate nhsnumber
@@ -27,18 +28,39 @@ async def gpconnect(nhsno: int):
         logging.error(f"{nhsno} is not a valid NHS number")
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
-    # TODO pds search
-    pds_search = await pds.lookup_patient(nhsno)
-    print(pds_search)
+    pds_search = await lookup_patient(nhsno)
+    pprint.pprint(pds_search)
+    gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
 
     # TODO sds search
+    asid_trace = await sds_trace(gp_ods)
+    pprint.pprint(asid_trace)
+    print("Device")
+    # pprint.pprint(asid_trace["entry"]["resource"]["identifier"])
+    for item in asid_trace["entry"][0]["resource"]["identifier"]:
+        if item["system"] == "https://fhir.nhs.uk/Id/nhsSpineASID":
+            asid = item["value"]
+        elif item["system"] == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+            nhsmhsparty = item["value"]
 
-    token = create_jwt()
+    print("ASID:", asid)
+    print("NHS MHS Party Key:", nhsmhsparty)
+    print("-" * 20)
+
+    print("Endpoint")
+    endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+    fhir_endpoint_url = endpoint_trace["entry"][0]["fullUrl"]
+    print(fhir_endpoint_url)
+    print("-" * 20)
+
+    token = create_jwt(saml_attrs)
 
     headers = {
-        "Ssp-TraceID": "09a01679-2564-0fb4-5129-aecc81ea2706",
-        "Ssp-From": "200000000359",
-        "Ssp-To": "918999198738",
+        # unique uuid per request (TODO maybe use the correlation id?)
+        "Ssp-TraceID": str(uuid4()),
+        # ASID for originating organisation e.g. Hospital not Xhuma
+        "Ssp-From": asid,
+        "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
         "accept": "application/fhir+json",
@@ -69,10 +91,12 @@ async def gpconnect(nhsno: int):
         ],
     }
     r = httpx.post(
-        "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
+        # "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
+        f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}",
         json=body,
         headers=headers,
     )
+    logging.info(r)
     print(r.text)
     logging.info(r.text)
 
@@ -112,3 +136,42 @@ async def gpconnect(nhsno: int):
         output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     return {"document_id": doc_uuid}
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    audit_dict = {
+        "subject_id": "CONE, Stephen",
+        "organization": "UCLH - University College London Hospitals - TST",
+        "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+        "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+        "role": {
+            "Role": {
+                "@codeSystem": "2.16.840.1.113883.6.96",
+                "@code": "224608005",
+                "@codeSystemName": "SNOMED_CT",
+                "@displayName": "Administrative healthcare staff",
+                "@xmlns": "urn:hl7-org:v3",
+                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+            }
+        },
+        "purpose_of_use": {
+            "PurposeForUse": {
+                "@xsi:type": "CE",
+                "@code": "TREATMENT",
+                "@codeSystem": "2.16.840.1.113883.3.18.7.1",
+                "@codeSystemName": "nhin-purpose",
+                "@displayName": "Treatment",
+                "@xmlns": "urn:hl7-org:v3",
+                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+            },
+        },
+        "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
+    }
+
+    # result = await gpconnect(9690937278, audit_dict)
+    result = asyncio.run(gpconnect(9690937286, audit_dict))
+    assert result["resourceType"] == "Patient"
