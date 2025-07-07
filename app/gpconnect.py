@@ -18,6 +18,11 @@ from .security import create_jwt
 
 router = APIRouter()
 
+client = httpx.AsyncClient(verify="app/client/nhs_certs/nhs_bundle.pem")
+logging.basicConfig(level=logging.DEBUG)
+httpx_logger = logging.getLogger("httpx")
+httpx_logger.setLevel(logging.DEBUG)
+
 
 @router.get("/gpconnect/{nhsno}")
 async def gpconnect(nhsno: int, saml_attrs: dict):
@@ -29,12 +34,12 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
     pds_search = await lookup_patient(nhsno)
-    pprint.pprint(pds_search)
+    # pprint.pprint(pds_search)
     gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
 
     # TODO sds search
     asid_trace = await sds_trace(gp_ods)
-    pprint.pprint(asid_trace)
+    # pprint.pprint(asid_trace)
     print("Device")
     # pprint.pprint(asid_trace["entry"]["resource"]["identifier"])
     for item in asid_trace["entry"][0]["resource"]["identifier"]:
@@ -53,7 +58,9 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
     print(fhir_endpoint_url)
     print("-" * 20)
 
-    token = create_jwt(saml_attrs)
+    token = create_jwt(
+        saml_attrs, audience=f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}"
+    )
 
     headers = {
         # unique uuid per request (TODO maybe use the correlation id?)
@@ -90,9 +97,10 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
             {"name": "includeInvestigations"},
         ],
     }
-    r = httpx.post(
+    r = await client.post(
         # "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
-        f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}",
+        # f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}",
+        f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}",
         json=body,
         headers=headers,
     )

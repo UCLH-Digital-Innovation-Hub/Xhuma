@@ -67,7 +67,7 @@ def create_jwt(
     Creates a JWT for GP Connect access with specific claims required by NHS Digital.
 
     Args:
-        audit (dict): Audit information for the JWT from teh SOAP SAML headers
+        audit (dict): Audit information for the JWT from the SOAP SAML headers
         audience (str): The intended audience (aud claim). Defaults to test environment.
 
     Returns:
@@ -101,26 +101,30 @@ def create_jwt(
                 }
             ],
             "model": "Xhuma",
-            "version": os.getenv("VERSION", "1.0"),
+            "version": os.getenv("VERSION", "0.9"),
         },
         "requesting_organization": {
             "resourceType": "Organization",
             "identifier": [
                 {
                     "system": "https://fhir.nhs.uk/Id/ods-organization-code",
-                    "value": os.getenv("ORG_CODE", "RRV"),
-                }
+                    "value": os.getenv("ORG_CODE", "RRV00"),
+                },
+                {
+                    "system": "2.16.840.1.113883.2.1.4",
+                    "value": audit["organization_id"],
+                },
             ],
             "name": audit["organization"],
         },
         # "requesting_practitioner": f"{audit["organisation_id"]}|{audit["subject_id"]}",
         "requesting_practitioner": {
             "resourceType": "Practitioner",
-            # "id": audit["subject_id"],
-            "id": 1,
+            "id": audit["subject_id"],
+            # "id": 1,
             "identifier": [
                 {
-                    "system": audit["organization_id"],
+                    "system": audit["organization"],
                     "value": audit["subject_id"],
                 },
                 {
@@ -141,9 +145,20 @@ def create_jwt(
             # ],
         },
     }
-    print("JWT PAYLOAD")
-    print(payload)
-    return jwt.encode(payload, headers={"alg": "none", "typ": "JWT"}, key=None)
+    # print("JWT PAYLOAD")
+    # print(payload)
+    # Get private key from environment or file
+    if JWTKEY is not None:
+        private_key = JWTKEY
+    else:
+        with open("keys/test-1.pem", "r") as f:
+            private_key = f.read()
+    return jwt.encode(
+        payload,
+        headers={"alg": "RS512", "typ": "JWT", "kid": "test-1"},
+        key=private_key,
+        algorithm="RS512",
+    )
 
 
 if __name__ == "__main__":

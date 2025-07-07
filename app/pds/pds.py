@@ -257,6 +257,23 @@ if __name__ == "__main__":
     # print(patient.name[0].family)
     # print(patient.generalPractitioner[0].identifier.value)
 
-    ods = asyncio.run(sds_trace("B82617"))
+    ods = asyncio.run(sds_trace("RRV00"))
+    pprint.pprint(ods)
     for i in ods["entry"]:
         pprint.pprint(i)
+
+    # try self lookup
+    prefix = "https://fhir.nhs.uk/Id/"
+    "https://fhir.nhs.uk/Id/objectClass|nhsAs"
+    parameters = {
+        "nhsIDCode": "RVV00",
+        "objectClass": "nhsAs",
+        "nhsAsSvcIAD": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
+        "nhsMhsManufacturerOrg": "RRV00",
+    }
+    indentifiers = [
+        f"{prefix}nhsIDCode|RVV00",
+        f"{prefix}objectClass|nhsAs",
+    ]
+    # url = f"{INT_BASE_PATH}spine-directory/FHIR/R4/{suffix}"
+    # r = httpx.get(url, headers=headers, params=parameters)
