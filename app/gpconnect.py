@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import pprint
 from datetime import timedelta
 from uuid import uuid4
@@ -25,30 +26,37 @@ httpx_logger.setLevel(logging.DEBUG)
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(nhsno: int, saml_attrs: dict):
+async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
     """accesses gp connect endpoint for nhs number"""
 
     # validate nhsnumber
     if validateNHSnumber(nhsno) == False:
         logging.error(f"{nhsno} is not a valid NHS number")
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "w") as f:
+                f.write(f"{nhsno} is not a valid NHS number\n")
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
     # TODO add in caching
-    pds_search = await pds.lookup_patient(nhsno)
+    pds_search = await lookup_patient(nhsno)
     # make sure patient is unrestricted
     security_code = pds_search["meta"]["security"][0]["code"]
+
     if security_code != "U":
         logging.error(
             f"{nhsno} is not an unrestricted patient, GP connect access not permitted"
         )
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "w") as f:
+                f.write(f"{nhsno} is restricted\n")
         raise HTTPException(
             status_code=403,
             detail="Patient is not unrestricted, access to GP connect is not permitted",
         )
 
     # print(pds_search)
+    gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
 
-    # TODO sds search
     asid_trace = await sds_trace(gp_ods)
     # pprint.pprint(asid_trace)
     print("Device")
@@ -108,6 +116,12 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
             {"name": "includeInvestigations"},
         ],
     }
+    if log_dir:
+        with open(os.path.join(log_dir, "request_headers.json"), "w") as f:
+            json.dump(headers, f, indent=2)
+        with open(os.path.join(log_dir, "request_body.json"), "w") as f:
+            json.dump(body, f, indent=2)
+
     r = await client.post(
         # "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
         # f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}",
@@ -115,8 +129,10 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
         json=body,
         headers=headers,
     )
-    logging.info(r)
-    print(r.text)
+
+    if log_dir:
+        with open(os.path.join(log_dir, "response.json"), "w") as f:
+            f.write(r.text)
     logging.info(r.text)
 
     scr_bundle = json.loads(r.text)
@@ -141,6 +157,9 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
             pass
 
     xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+    if log_dir:
+        with open(os.path.join(log_dir, f"{nhsno}.xml"), "w") as output:
+            output.write(xmltodict.unparse(xml_ccda, pretty=True))
     # xop = convert_mime(xml_ccda)
     xop = base64_xml(xml_ccda)
     # print(xop)

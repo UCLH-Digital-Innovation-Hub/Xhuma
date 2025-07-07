@@ -1,386 +1,382 @@
 """
 Script to run through consumer tests for GP CONNECT Scal
 """
-
-import asyncio
+import pytest
+from log_context import capture_test_logs
 
 from app.gpconnect import gpconnect
 
-
-def test_GPC_STR_TST_GEN_02():
-    """Given I have imported GP Connect data
-    And I support data sharing with other systems
-    When I receive a request for patient record data for a patient I hold GP Connect data for
-    Then I only include GP Connect data where the request is for Direct Care use only
-    And I always include the resource identifiers received from GP Connect messages when exporting the data, adding any other identifiers as appropriate
-    """
-    pass
-
-
-def test_GPC_STR_TST_GEN_05():
-    """Given I am at a point in the system where I have access to attempt a call to a GP Connect service
-    When I make that attempt to access GP Connect
-    Then an audit record is written to an appropriate auidit log including when access is blocked, unsuccessful or successful
-    And the audit record confirms to NHS Digital audit standards
-    """
-    nhsnos = ["9658218873", "9658220142", "9476718943"]
-    pass
-
-
-def test_GPC_STR_TST_GEN_06():
-    """Given I have access to request data from GP Connect and the patient trace was [time] ago
-    When I make that attempt to access GP Connect
-    Then the GP Connect is request message is [result]
-    Examples result: blocked, time: > 24 hours; result sent, time: < 24 hours
-    """
-    nhsno = "9658218873"
-    pass
+audit_dict = {
+    "subject_id": "Test Subject",
+    "organization": "Test Org",
+    "organization_id": "urn:oid:test-org-id",
+    "home_community_id": "urn:oid:test-home-id",
+    "role": {
+        "Role": {
+            "@codeSystem": "2.16.840.1.113883.6.96",
+            "@code": "224608005",
+            "@displayName": "Admin",
+            "@xmlns": "urn:hl7-org:v3",
+        }
+    },
+    "purpose_of_use": {
+        "PurposeForUse": {
+            "@xsi:type": "CE",
+            "@code": "TREATMENT",
+            "@codeSystem": "2.16.840.1.113883.3.18.7.1",
+            "@displayName": "Treatment",
+            "@xmlns": "urn:hl7-org:v3",
+        },
+    },
+    "resource_id": "test-resource-id",
+}
 
 
-def test_GPC_STR_TST_GEN_07():
-    """Given I have made a successful request to GP Connect
-    When I receive a valid response including a patient resource
-    Then I verify the patient resource details for family name, given name, gender, date of birth and GP Practice Code match to those presented to the user from the local system in the patient record
-    And I alert the user to any mismatch between the local record demographics and those provided in the GP Connect response message
-    """
-    nhsno = "9658218873"
-    # this is satisfied by the iti47 or 55 request prior to a gp connect request
-    pass
-
-
-def test_GPC_STR_TST_GEN_08():
-    """Given I have access to request data from GP Connect and the patient trace was within the last 24 hours
-    When I make that attempt to access GP Connect
-    Then the registered GP practice from the last PDS trace is used to identify the practice to submit the request to
-    """
-    nhsno = "9658218873"
-    pass
-
-
-def test_GPC_STR_TST_GEN_09():
-    """Given I have access to request data from GP Connect but I cannot confirm the registered practice either because it is not on PDS or the patient has an s-flag
-    When I attempt to access GP Connect
-    Then the request to GP Connect is blocked and handled gracefully so the user is aware that access is not available for that patient at that time
-    """
-    nhsnos = ["9658220142", "9658220150"]
-
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_05():
+    """GPC-STR-TST-GEN-05"""
+    nhsnos = ["9690937286", "9690938533"]
     for nhsno in nhsnos:
-        response = asyncio.run(gpconnect(nhsno))
-        assert response.status_code == 403
+        async with capture_test_logs("GPC-STR-TST-GEN-05", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_10():
-    """Given I access a patient which is recorded as deceased on PDS or on the local system
-    When I am at a point where I would normally be able to access GP Connect
-    Then the system prevents access to GP Connect
-    And handles the prevention gracefully so the users is aware that GP Connect is not available for this patient
-    """
-    nhsno = "9690938681"
-
-    response = asyncio.run(gpconnect(nhsno))
-    assert response.status_code == 403
+@pytest.mark.asyncio
+async def test_PC_STR_TST_GEN_06():
+    """PC-STR-TST-GEN-06"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("PC-STR-TST-GEN-06", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_11():
-    """Given I have made a request to a GP Connect service
-    When I receive a aptient not found error response
-    Then I handle the response gracefully
-    And I make available all the diagnostic details to appropriate people to enable fault resolution
-    """
-    nhsno = "9999999999"
-    response = asyncio.run(gpconnect(nhsno))
-    assert response.status_code == 404
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_07():
+    """GPC-STR-TST-GEN-07"""
+    nhsnos = []
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-07", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_12():
-    """Given I have made a request to a GP Connect service
-    When I receive a patient dissent to share error response
-    Then I handle the response gracefully
-    And I make available all the diagnostic details to appropriate people to enable fault resolution
-    """
-    nhsno = "9658220169"
-    response = asyncio.run(gpconnect(nhsno))
-    assert response.status_code == 403
+@pytest.mark.asyncio
+async def test_PC_STR_TST_GEN_08():
+    """PC-STR-TST-GEN-08"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("PC-STR-TST-GEN-08", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_13():
-    """Given I have made a request to a GP Connect service using an Invalid Resource (The Parameters resource passed does not conform to that specified in the GPConnect-GetStructuredRecord-Operation-1 OperationDefinition)
-    When I receive an invalid resource error response
-    Then I handle the response gracefully
-    And I make available all the diagnostic details to appropriate people to enable fault resolution
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_09():
+    """GPC-STR-TST-GEN-09"""
+    nhsnos = ["9690938533", "9690938541"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-09", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_14():
-    """Given I have made a request to a GP Connect service using an Invalid NHS Number
-    When I receive an invalid NHS number error response
-    Then I handle the response gracefully
-    And I make available all the diagnostic details to appropriate people to enable fault resolution
-    """
-    nhsno = "965821883"
-    try:
-        response = asyncio.run(gpconnect(nhsno))
-    except Exception as e:
-        assert "Invalid NHS Number" in str(e)
-
-    nhsno = "testing"
-    try:
-        response = asyncio.run(gpconnect(nhsno))
-    except Exception as e:
-        assert "Invalid NHS Number" in str(e)
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_10():
+    """GPC-STR-TST-GEN-10"""
+    nhsnos = ["9690938681"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-10", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_15():
-    """Given I have made a request for allergies to a GP Connect service with invalid Allergies Parameters/Part Parameters
-    When I receive an invalid parameter error response
-    Then I handle the response gracefully
-    And I make available all the diagnostic details to appropriate people to enable fault resolution
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_11():
+    """GPC-STR-TST-GEN-11"""
+    nhsnos = ["9999999999"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-11", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_16():
-    """Given I have made a request for medications to a GP Connect service invalid Medications Parametes/Part Parameters
-    When I receive an invalid parameter error response
-    Then I handle the response gracefully
-    And I make available all the diagnostic details to appropriate people to enable fault resolution
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_12():
+    """GPC-STR-TST-GEN-12"""
+    nhsnos = ["9690938576"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-12", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_17():
-    """Given I have sent a valid message to GP Connect
-    When I receive a response including a data in transit warning
-    Then I make the user aware as appropriate
-    """
-    nhsno = "9658219705"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_13():
+    """GPC-STR-TST-GEN-13"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-13", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_18():
-    """Given I have sent a valid message to GP Connect
-    And I have requested allergies are included
-    When I receive a response including a confidential items warning for allergies
-    Then I make the user aware and apply controls as appropriate
-    """
-    nhsno = "9658219705"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_14():
+    """GPC-STR-TST-GEN-14"""
+    nhsnos = []
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-14", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_19():
-    """Given I have sent a valid message to GP Connect
-    And I have requested medications are included
-    When I receive a response including a confidential items warning for medications
-    Then I make the user aware and apply controls as appropriate
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_17():
+    """GPC-STR-TST-GEN-17"""
+    nhsnos = ["9690938096"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-17", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_20():
-    """Given I have received a valid message response
-    When I present the data to the end user
-    Then the user is aware that the data has come from the patient's registered GP record (this may be expressed generically or specific to the source practice)
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_PC_STR_TST_GEN_20():
+    """PC-STR-TST-GEN-20"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("PC-STR-TST-GEN-20", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_24():
-    """Given I have received a successful, valid response message
-    When I import the GP Connect resource / data into the local system
-    Then I always retain resource identifiers including, but not limited to, system and value
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_MED_02():
+    """GPC-STR-TST-MED-02"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-MED-02", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_GEN_25():
-    """Given I have sent a valid message to GP Connect
-    And I have included a request for medications data
-    When I receive a response including a data in transit warning and a confidential data items warning for medications
-    Then I make the user aware as appropriate and that the data in transit warning is shown as applicable to all data
-    And the confidential data warning is shown to apply to medications data only
-    """
-    nhsno = "9658219705"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_MED_07():
+    """GPC-STR-TST-MED-07"""
+    nhsnos = ["9690937308"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-MED-07", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_MED_01():
-    """Given I am enabled to access GP Connect data for a given patient
-    And I want to retrieve a full medication history
-    When I make the medication request to GP Connect
-    Then the request conforms to the GP Connect specification
-    And includes the patient's NHS Number
-    And the request has the includeMedication parameter
-    And the request sets the includePrescriptionIssues part parameter to true
-    And the request does NOT include the medicationSearchFromDate parameter
-    And the resulting response is processed successfully by the Consumer
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_ALG_01():
+    """GPC-STR-TST-ALG-01"""
+    nhsnos = ["9690937308"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-ALG-01", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_MED_02():
-    """Given I have received a successful, valid medications message response
-    When I display or use the medication information
-    Then I display or utilise all the key information to represent or process the medication record(s) commenserate with the original record meaning and my specific use case
-    """
-    nhsno = "9658218873"
-    # test fhir response marries up to ccda sections
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_ALG_07():
+    """GPC-STR-TST-ALG-07"""
+    nhsnos = ["9690937308"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-ALG-07", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_MED_03():
-    """Given I am enabled to access GP Connect data for a given patient
-    And I want to retrieve medication details but I do not require a full medication history
-    When I make the medication request to GP Connect
-    Then the request conforms to the GP Connect specification
-    And includes the patient's NHS Number
-    And the request has the includeMedication parameter
-    And the request sets the includePrescriptionIssues part parameter to true or false
-    And the request includes the medicationSearchFromDate parameter
-    And the medicationSearchFromDate is in the defined format
-    And the medicationSearchFromDate is equal or less than the current date
-    And the resulting response is processed successfully by the Consumer
-    """
-    nhsno = "9658218873"
-    # may be N/a?
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_ALG_08():
+    """GPC-STR-TST-ALG-08"""
+    nhsnos = ["9690937375"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-ALG-08", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_MED_04():
-    """Given I am enabled to access GP Connect data for a given patient
-    And I am able to specify the date from which I want medications
-    When I attempt to request medications by a future date
-    Then I am prevented from submitting the request
-    """
-    nhsno = "9658218873"
-    # N/A user not able to select date
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_15():
+    """GPC-STR-TST-GEN-15"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-15", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_MED_05():
-    """Given I am enabled to access GP Connect data for a given patient
-    And my use case [inc issue] require medication issues to be included
-    When I make the medication request to GP Connect
-    Then the request conforms to the GP Connect specification
-    And includes the patient's NHS Number
-    And the request has the includeMedication parameter
-    And the request sets the includePrescriptionIssues part parameter to [param value]
-    And the resulting response is processed successfully by the Consumer
-    Examples: inc Issues: does, does not; param value: true, false
-    """
-    nhsno = "9658218873"
-    # N/A user not able to select issues
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_16():
+    """GPC-STR-TST-GEN-16"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-16", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_MED_07():
-    """Given I have received a successful, valid medications message response
-    And the response has a list with an empty reason
-    And the response does not include medication resourcese
-    When I display or use the medication information
-    Then I display or utilise the list empty reson to inform the user that the patient has no medication records within the request parameters in a way appropriate to my use case
-    """
-    nhsno = "9658218903"
-    # check ccda shows no information
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_18():
+    """GPC-STR-TST-GEN-18"""
+    nhsnos = ["9690938118"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-18", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_MED_08():
-    """Given I am enabled to access GP Connect data for a given patient
-    And I want to retrieve a full medication history
-    When I make the medication request to GP Connect
-    Then the request conforms to the GP Connect specification
-    And includes the patient's NHS Number
-    And the request has the includeMedication parameter
-    And the request does NOT include the includePrescriptionIssues part parameter OR includes and sets the includePrescriptionIssues part parameter to true
-    And the request does NOT include the medicationSearchFromDate parameter
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_INV_07():
+    """GPC-STR-TST-INV-07"""
+    nhsnos = ["9690937294"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-INV-07", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_ALG_01():
-    """Given the user wishes to view / import all current allergies OR the system is set to only view / import all current allergies
-    When the user selects to access current allergies from GP Connect
-    Then the resulting request is populated with valid syntax using the includeAllergies parameter with part parameter includeResolvedAllergies set to false
-    And the resulting response is processed successfully by the Consumer.
-    """
-    nhsno = "9658218873"
-    # we always ask for allergies do check they come through
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_INV_02():
+    """GPC-STR-TST-INV-02"""
+    nhsnos = ["9690937294"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-INV-02", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_ALG_02():
-    """Given the user wishes to view / import all allergies, including resolved allergies OR the system is set to only view / import all allergies, including resolved allergies
-    When the user selects to access all allergies from GP Connect
-    Then the resulting request is populated with valid syntax using the includeAllergies parameter with part parameter includeResolvedAllergies set to true
-    And the resulting response is processed successfully by the Consumer.
-    """
-    nhsno = "9658218873"
-    # ? N/A as we don't ask for resolved currently
-    pass
+@pytest.mark.asyncio
+async def test_PC_STR_TST_INV_05():
+    """PC-STR-TST-INV-05"""
+    nhsnos = ["9690937308"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("PC-STR-TST-INV-05", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_ALG_03():
-    """Given I have received a successful, valid allergies message response
-    And the response includes resolved allergies
-    When I display or use the allergies information
-    Then my system identifies the resolved allergies and handles them in a clinical safe manner such that they remain distinct from current allergies
-    And where the resolved allergies are presented in the UI they are clearly and prominently labelled as ended, resolved or equivalent
-    And ensures that the resolved allergies cannot be utilised by decision support (where decision support is in use)
-    """
-    nhsno = "9658218873"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_INV_06():
+    """GPC-STR-TST-INV-06"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-INV-06", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_ALG_04():
-    """Given I have received a successful, valid allergies message response
-    When I display or use the allergy information
-    Then I display or utilise all the key information to represent or process the allergy record(s) commenserate with the original record meaning and my specific use case
-    """
-    nhsno = "9658218873"
-    # check CCDA allergy section
-    pass
+@pytest.mark.asyncio
+async def test_PC_STR_TST_PRB_01():
+    """PC-STR-TST-PRB-01"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("PC-STR-TST-PRB-01", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_ALG_05():
-    """Given I have received a successful, valid allergies message response
-    And the response includes allergies which is not recognised by my system
-    When I display or use the allergy information
-    Then I display or utilise any SNOMED code or alternative code system coding, as applicable to my use case
-    And I display or utilise the allergy name as provided which represents the name of the allergy as entered by the original user, as applicable to my use case
-    And I can handle any records which are sent as allergies but are not recognised as allergy codes by my system
-    And if the unrecognised record is stored it is degraded
-    """
-    # check snomed codes are on all allergies
-    pass  # Need discussion if this test and requirement is applicable
+@pytest.mark.asyncio
+async def test_PC_STR_TST_PRB_04():
+    """PC-STR-TST-PRB-04"""
+    nhsnos = ["9690937308"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("PC-STR-TST-PRB-04", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_ALG_07():
-    """Given I have received a successful, valid allergies message response
-    And the response includes an empty active allergies list resource indicating that the patient record has no content recorded
-    When I display or use the allergies response
-    Then I recognise this as a record with no active allergies recorded
-    And I handle it appropriate to my use case and in such a way it is not confused with a clinical assertion of no known allergies
-    """
-    nhsno = "9658218865"
-    #  check ccda allergy for no information
-    pass
+@pytest.mark.asyncio
+async def test_PC_STR_TST_PRB_05():
+    """PC-STR-TST-PRB-05"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("PC-STR-TST-PRB-05", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
 
 
-def test_GPC_STR_TST_ALG_08():
-    """Given I have received a successful, valid allergies message response
-    And the response includes a single code item which indicates that the clinician has recorded that the patient has no known allergies
-    When I display or use the allergies response
-    Then I recognise this as a clinical assertion of no known allergies
-    And I handle it appropriate to my use case and in such a way it is not confused with an empty list response
-    """
-    nhsno = "9658218989"
-    pass
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_PRB_08():
+    """GPC-STR-TST-PRB-08"""
+    nhsnos = ["9658218873"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-PRB-08", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
+
+
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_IMM_01():
+    """GPC-STR-TST-IMM-01"""
+    nhsnos = ["9690938207"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-IMM-01", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
+
+
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_IMM_03():
+    """GPC-STR-TST-IMM-03"""
+    nhsnos = ["9690938207"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-IMM-03", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
+
+
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_IMM_05():
+    """GPC-STR-TST-IMM-05"""
+    nhsnos = ["965821890"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-IMM-05", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
+
+
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_IMM_06():
+    """GPC-STR-TST-IMM-06"""
+    nhsnos = ["9690938207"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-IMM-06", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
+
+
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_IMM_08():
+    """GPC-STR-TST-IMM-08"""
+    nhsnos = ["9658218873"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-IMM-08", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
+
+
+@pytest.mark.asyncio
+async def test_PC_STR_TST_GEN_15():
+    """PC-STR-TST-GEN-15"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("PC-STR-TST-GEN-15", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
+
+
+@pytest.mark.asyncio
+async def test_GPC_STR_TST_GEN_16():
+    """GPC-STR-TST-GEN-16"""
+    nhsnos = ["9690937286"]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-STR-TST-GEN-16", nhsno) as log_dir:
+            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            assert "document_id" in result
