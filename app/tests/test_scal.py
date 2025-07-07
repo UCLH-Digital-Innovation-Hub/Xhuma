@@ -2,9 +2,10 @@
 Script to run through consumer tests for GP CONNECT Scal
 """
 import pytest
-from log_context import capture_test_logs
 
 from app.gpconnect import gpconnect
+
+from .log_context import capture_test_logs
 
 audit_dict = {
     "subject_id": "Test Subject",

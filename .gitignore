@@ -141,3 +141,6 @@ ccda.xml
 #key files
 *.pem
 keys/
+
+# scal evidence logs
+scal_logs/

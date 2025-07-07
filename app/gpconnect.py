@@ -123,9 +123,9 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
             json.dump(body, f, indent=2)
 
     r = await client.post(
-        # "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
+        "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
         # f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}",
-        f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}",
+        # f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}",
         json=body,
         headers=headers,
     )
@@ -134,7 +134,6 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
         with open(os.path.join(log_dir, "response.json"), "w") as f:
             f.write(r.text)
     logging.info(r.text)
-
     scr_bundle = json.loads(r.text)
 
     # get rid of fhir_comments

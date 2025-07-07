@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def capture_test_logs(test_id: str, nhsno: str):
-    base_dir = f"logs/{test_id}/{nhsno}"
+    base_dir = f"scal_logs/{test_id}/{nhsno}"
     os.makedirs(base_dir, exist_ok=True)
 
     # Setup HTTPX logger
