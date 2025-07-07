@@ -29,10 +29,29 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
     med["substanceAdministration"]["statusCode"] = {"@code": entry.status}
 
     # TODO add robust checking on this in case there's no high value
+    # check if entry.effectivePeriod.end
+    # if entry.effectivePeriod.end:
+    #     med["substanceAdministration"]["effectiveTime"] = {
+    #         "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)},
+    #         "high": {"@value": date_helper(entry.effectivePeriod.end.isostring)},
+    #     }
+    # else:
+    #     med["substanceAdministration"]["effectiveTime"] = {
+    #         "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)}
+    #     }
     med["substanceAdministration"]["effectiveTime"] = {
-        "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)},
-        "high": {"@value": date_helper(entry.effectivePeriod.end.isostring)},
+        "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)}
     }
+    # if (
+    #     entry.effectivePeriod
+    #     and hasattr(entry.effectivePeriod, "end")
+    #     and entry.effectivePeriod.end
+    # ):
+    if entry.effectivePeriod.end is not None:
+        # print(vars(entry.effectivePeriod))
+        med["substanceAdministration"]["effectiveTime"]["high"] = {
+            "@value": date_helper(entry.effectivePeriod.end.isostring)
+        }
 
     referenced_med: fhirmed.Medication() = index[entry.medicationReference.reference]
     request = index[entry.basedOn[0].reference]

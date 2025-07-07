@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import pprint
 import uuid
@@ -9,6 +10,7 @@ import fastapi
 import httpx
 from fhirclient.models import patient as p
 
+from app.logging import log_request, log_response
 from app.redis_connect import redis_client
 from app.security import pds_jwt
 
@@ -43,9 +45,12 @@ async def lookup_patient(nhsno: int):
         return nhs_token
 
     # if nhs token expired or not request, get one and cache
+
     if not redis_client.exists("access_token"):
+        logging.info("NHS token expired or not found, getting new one")
         nhs_token = get_pds_token()
     else:
+        logging.info("NHS token found in cache")
         nhs_token = redis_client.get("access_token").decode("utf-8")
 
     # print(f"nhs_token: {nhs_token}")
@@ -61,24 +66,27 @@ async def lookup_patient(nhsno: int):
 
     url = f"{INT_BASE_PATH}personal-demographics/FHIR/R4/Patient/{nhsno}"
     # print(url)
-
-    r = httpx.get(url, headers=headers)
+    async with httpx.AsyncClient(
+        event_hooks={"request": [log_request], "response": [log_response]}
+    ) as client:
+        r = await client.get(url, headers=headers)
+    # r = httpx.get(url, headers=headers)
     if r.status_code != 200:
         raise Exception(f"{r.status_code}: {r.text}")
         # print(r.text)
 
     # if 401, get new one and try again
-    if r.status_code == 401:
-        print("401: trying to refresh token")
-        nhs_token = get_pds_token()
-        headers = {
-            "X-Request-ID": str(uuid.uuid4()),
-            "X-Correlation-ID": str(uuid.uuid4()),
-            "NHSD-End-User-Organisation-ODS": "Y12345",
-            "Authorization": f"Bearer {nhs_token}",
-            "accept": "application/fhir+json",
-        }
-        r = httpx.get(url, headers=headers)
+    # if r.status_code == 401:
+    #     print("401: trying to refresh token")
+    #     nhs_token = get_pds_token()
+    #     headers = {
+    #         "X-Request-ID": str(uuid.uuid4()),
+    #         "X-Correlation-ID": str(uuid.uuid4()),
+    #         "NHSD-End-User-Organisation-ODS": "Y12345",
+    #         "Authorization": f"Bearer {nhs_token}",
+    #         "accept": "application/fhir+json",
+    #     }
+    #     r = httpx.get(url, headers=headers)
 
     if r.status_code != 200:
         # raise Exception(f"{r.status_code}: {r.text}")
@@ -245,6 +253,8 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
         "apikey": api_key,
     }
     r = httpx.get(url, headers=headers, params=parameters)
+    if r.status_code != 200:
+        raise Exception(f"{r.status_code}: {r.text}")
 
     return json.loads(r.text)
 

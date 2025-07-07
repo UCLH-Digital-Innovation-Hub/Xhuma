@@ -39,7 +39,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         "@codeSystem": "2.16.840.1.113883.6.1",
     }
 
-    ccda["ClinicalDocument"]["title"] = {"#text": "Summary Care Record"}
+    ccda["ClinicalDocument"]["title"] = {
+        "#text": "GP Connect: Access Record Structured"
+    }
 
     # patient
     # TODO refine address parsing as may have multiple
@@ -76,8 +78,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "addr": {"@nullFlavor": "NA"},
             "telecom": {"@nullFlavor": "NA"},
             "assignedAuthoringDevice": {
-                "manufacturerModelName": {"#text": "SCR Connector"},
-                "softwareName": {"#text": "SCR Connector v0.1"},
+                "manufacturerModelName": {"#text": "Xhuma"},
+                "softwareName": {"#text": "Xhuma v0.1"},
             },
         },
     }
@@ -139,7 +141,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
         # check if list is one of the desired ones
         if list.title in sections:
-            # print(list.title)
+            print(list.title)
             comp = {}
             comp["section"] = {
                 "templateId": templateId(templates[list.title]["root"], "2015-8-1"),
@@ -200,6 +202,26 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     row.append({data})
                 return {"td": entry_data}
 
+            # if list has attribute empty reason
+            # check if the list is empty
+            # if hasattr(list, "emptyReason"):
+            #     print(f"list {list.title} is empty")
+            #     # if the list is empty
+            #     comp["section"]["text"] = {
+            #         "table": {
+            #             "thead": create_headers(list.title),
+            #             "tbody": {
+            #                 "tr": {
+            #                     "td": {
+            #                         "@colspan": len(table_headers[list.title]),
+            #                         # "#text": list.emptyReason[0].text,
+            #                         "#text": "No Information Available",
+            #                     }
+            #                 }
+            #             },
+            #         }
+            #     }
+            #     return comp
             if not list.entry:
                 # if there are no entries
                 # Initialize empty table with appropriate headers based on section
@@ -270,9 +292,12 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                     entry_data["substanceAdministration"][
                                         "effectiveTime"
                                     ]["low"]["@value"],
+                                    # if no high value should be blank
                                     entry_data["substanceAdministration"][
                                         "effectiveTime"
-                                    ]["high"]["@value"],
+                                    ]
+                                    .get("high", {})
+                                    .get("@value", ""),
                                     entry_data["substanceAdministration"]["statusCode"][
                                         "@code"
                                     ],
@@ -287,7 +312,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                 ]
                             )
                         )
-                        print(rows)
                 # Close the table after all entries are processed
                 comp["section"]["text"] = {
                     "table": {
@@ -295,7 +319,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "tbody": {"tr": rows},
                     }
                 }
-                return comp
+            return comp
 
     bundle_components = [create_section(list) for list in lists]
     bundle_components = [x for x in bundle_components if x is not None]

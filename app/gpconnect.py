@@ -33,9 +33,20 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
         logging.error(f"{nhsno} is not a valid NHS number")
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
-    pds_search = await lookup_patient(nhsno)
-    # pprint.pprint(pds_search)
-    gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
+    # TODO add in caching
+    pds_search = await pds.lookup_patient(nhsno)
+    # make sure patient is unrestricted
+    security_code = pds_search["meta"]["security"][0]["code"]
+    if security_code != "U":
+        logging.error(
+            f"{nhsno} is not an unrestricted patient, GP connect access not permitted"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Patient is not unrestricted, access to GP connect is not permitted",
+        )
+
+    # print(pds_search)
 
     # TODO sds search
     asid_trace = await sds_trace(gp_ods)
@@ -132,7 +143,7 @@ async def gpconnect(nhsno: int, saml_attrs: dict):
     xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
     # xop = convert_mime(xml_ccda)
     xop = base64_xml(xml_ccda)
-    print(xop)
+    # print(xop)
     doc_uuid = str(uuid4())
 
     # TODO set this as background task
