@@ -27,12 +27,13 @@ jobs:
     - name: Build the Docker image
       run: |
         echo "Building Docker image for testing..."
-        docker build -t xhuma:test .
+        docker build -f Dockerfile.test -t xhuma:test .
 
+        
     - name: Run tests with Docker Compose
       run: |
         echo "Starting test environment with Redis..."
-        docker-compose -f docker-compose.test.yml up --build --exit-code-from xhuma-tests xhuma-tests
+        docker compose -f docker-compose.test.yml up --build --exit-code-from xhuma-tests xhuma-tests
       env:
         REDIS_PASSWORD: ${{ env.REDIS_PASSWORD }}
         API_KEY: ${{ env.API_KEY }}
