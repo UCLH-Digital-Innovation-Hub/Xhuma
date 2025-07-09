@@ -35,38 +35,62 @@ resource_in_state() {
   return $?
 }
 
+# Function to check if a Azure resource exists
+resource_exists() {
+  local resource_type="$1"
+  local resource_name="$2"
+  local resource_group="$3"
+
+  # Using Azure CLI to check if the resource exists
+  az resource show --resource-type "$resource_type" --name "$resource_name" --resource-group "$resource_group" --subscription "$SUBSCRIPTION_ID" &>/dev/null
+  return $?
+}
+
 # Change to the directory containing Terraform configuration
 cd "$(dirname "$0")"
 
 # Initialize Terraform (if not already initialized)
 terraform init -reconfigure
 
-# Import Log Analytics Workspace if not already in state
-if ! resource_in_state "module.log_analytics.azurerm_log_analytics_workspace.workspace"; then
-  echo "📝 Importing Log Analytics Workspace: $LOG_ANALYTICS_NAME"
-  terraform import module.log_analytics.azurerm_log_analytics_workspace.workspace \
-    "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.OperationalInsights/workspaces/$LOG_ANALYTICS_NAME"
+# Import Log Analytics Workspace if it exists and not already in state
+if resource_exists "Microsoft.OperationalInsights/workspaces" "$LOG_ANALYTICS_NAME" "$RESOURCE_GROUP"; then
+  if ! resource_in_state "module.log_analytics.azurerm_log_analytics_workspace.workspace"; then
+    echo "📝 Importing Log Analytics Workspace: $LOG_ANALYTICS_NAME"
+    terraform import module.log_analytics.azurerm_log_analytics_workspace.workspace \
+      "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.OperationalInsights/workspaces/$LOG_ANALYTICS_NAME"
+  else
+    echo "✅ Log Analytics Workspace already in Terraform state"
+  fi
 else
-  echo "✅ Log Analytics Workspace already in Terraform state"
+  echo "❌ Log Analytics Workspace does not exist in Azure. Skipping import."
 fi
 
-# Import Redis Cache if not already in state
-if ! resource_in_state "module.redis.azurerm_redis_cache.redis"; then
-  echo "📝 Importing Redis Cache: $REDIS_NAME"
-  terraform import module.redis.azurerm_redis_cache.redis \
-    "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Cache/redis/$REDIS_NAME"
+# Import Redis Cache if it exists and not already in state
+if resource_exists "Microsoft.Cache/redis" "$REDIS_NAME" "$RESOURCE_GROUP"; then
+  if ! resource_in_state "module.redis.azurerm_redis_cache.redis"; then
+    echo "📝 Importing Redis Cache: $REDIS_NAME"
+    terraform import module.redis.azurerm_redis_cache.redis \
+      "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Cache/redis/$REDIS_NAME"
+  else
+    echo "✅ Redis Cache already in Terraform state"
+  fi
 else
-  echo "✅ Redis Cache already in Terraform state"
+  echo "❌ Redis Cache does not exist in Azure. Skipping import."
 fi
 
-# Import Container App Environment if not already in state
-if ! resource_in_state "module.container_apps_environment.azurerm_container_app_environment.env"; then
-  echo "📝 Importing Container App Environment: $CONTAINER_APP_ENV_NAME"
-  terraform import module.container_apps_environment.azurerm_container_app_environment.env \
-    "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.App/managedEnvironments/$CONTAINER_APP_ENV_NAME"
+# Import Container App Environment if it exists and not already in state
+if resource_exists "Microsoft.App/managedEnvironments" "$CONTAINER_APP_ENV_NAME" "$RESOURCE_GROUP"; then
+  if ! resource_in_state "module.container_apps_environment.azurerm_container_app_environment.env"; then
+    echo "📝 Importing Container App Environment: $CONTAINER_APP_ENV_NAME"
+    terraform import module.container_apps_environment.azurerm_container_app_environment.env \
+      "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.App/managedEnvironments/$CONTAINER_APP_ENV_NAME"
+  else
+    echo "✅ Container App Environment already in Terraform state"
+  fi
 else
-  echo "✅ Container App Environment already in Terraform state"
+  echo "❌ Container App Environment does not exist in Azure. Skipping import."
 fi
+
 
 # Additional resources can be added here as needed
 # For example, Key Vault, Storage Account, etc.
