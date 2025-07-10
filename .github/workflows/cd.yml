@@ -87,15 +87,13 @@ jobs:
       id: detect-env-deletion
       run: |
         cd infra
-        terraform show -no-color -json tfplan | jq
-
+        # terraform show -no-color -json tfplan | jq
         echo "Checking tfplan.json for Container Apps Environment deletion."
 
-
-        # DELETE_COUNT=$(jq '
-        #   .resource_changes[] 
-        #   | select(.type == "azurerm_container_app_environment" and .change.actions | index("delete"))
-        # ' tfplan.json | wc -l)
+        DELETE_COUNT=$(terraform show -no-color -json tfplan | jq '
+          .resource_changes[] 
+          | select(.type == "azurerm_container_app_environment" and .change.actions | index("delete"))
+        ' | wc -l)
         echo "Container Apps Environment delete count: $DELETE_COUNT"
         
         if [ "$DELETE_COUNT" -gt 0 ]; then
