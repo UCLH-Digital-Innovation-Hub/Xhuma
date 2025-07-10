@@ -59,6 +59,7 @@ jobs:
       uses: hashicorp/setup-terraform@v2
       with:
         terraform_version: 1.10.5
+        terraform_wrapper: false
 
     - name: Terraform Init and Import Existing Resources
       run: |
@@ -86,9 +87,7 @@ jobs:
       id: detect-env-deletion
       run: |
         cd infra
-        cat tfplan
-        jq tfplan
-        # terraform show -no-color -json tfplan 
+        terraform show -no-color -json tfplan | jq
 
         echo "Checking tfplan.json for Container Apps Environment deletion."
 
