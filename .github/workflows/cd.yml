@@ -94,7 +94,7 @@ jobs:
           | select(.type == "azurerm_container_app_environment" and .change.actions )
           | any(index("delete"))
         ')
-        echo "Container Apps Environment contains delete: $DELETE_COUNT"
+        echo "Container Apps Environment contains delete?: $DELETE_EXISTS"
         
         if [ "$DELETE_EXISTS" = true ]; then
           echo "Environment is being deleted - setting flag to delete container apps."
