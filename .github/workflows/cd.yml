@@ -78,7 +78,7 @@ jobs:
       id: plan
       run: |
         cd infra
-        # Set environment variable to bypass provider registration
+        # Set environmen+t variable to bypass provider registration
         export ARM_SKIP_PROVIDER_REGISTRATION=true
         terraform plan -out=tfplan
 
@@ -86,17 +86,17 @@ jobs:
       id: detect-env-deletion
       run: |
         cd infra
-        terraform show -json tfplan | jq '.' > tfplan.json
-        jq '.resource_changes[] | select(.type == "azurerm_container_app_environment")' tfplan.json
-        jq '.resource_changes[] | select(.type == "azurerm_container_app_environment") | .change.actions' tfplan.json
+        terraform show -json tfplan 
 
         echo "Checking tfplan.json for Container Apps Environment deletion."
+
+
         DELETE_COUNT=$(jq '
           .resource_changes[] 
           | select(.type == "azurerm_container_app_environment" and .change.actions | index("delete"))
         ' tfplan.json | wc -l)
         echo "Container Apps Environment delete count: $DELETE_COUNT"
-
+        
         if [ "$DELETE_COUNT" -gt 0 ]; then
           echo "Environment is being deleted - setting flag to delete container apps."
           echo "DELETE_APPS=true" >> $GITHUB_ENV
