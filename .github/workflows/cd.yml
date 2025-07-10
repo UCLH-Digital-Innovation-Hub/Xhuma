@@ -82,6 +82,52 @@ jobs:
         export ARM_SKIP_PROVIDER_REGISTRATION=true
         terraform plan -out=tfplan
 
+    - name: Check if Container Apps Environment is being deleted
+    - id: detect-env-deletion
+    - run: |
+        cd infra
+        terraform show -json tfplan > tfplan.json
+
+        echo "Checking tfplan.json for Container Apps Environment deletion."
+        DELETE_COUNT=$(jq '
+          .resource_changes[] 
+          | select(.type == "azurerm_container_app_environment" and .change.actions | index("delete"))
+        ' tfplan.json | wc -l)
+        echo "Container Apps Environment delete count: $DELETE_COUNT"
+
+        if [ "$DELETE_COUNT" -gt 0 ]; then
+          echo "Environment is being deleted - setting flag to delete container apps."
+          echo "DELETE_APPS=true" >> $GITHUB_ENV
+        else
+          echo "Environment is not being deleted - no need to tear down container apps."
+          echo "DELETE_APPS=false" >> $GITHUB_ENV
+        fi
+
+    - name: Delete Container Apps if Needed
+      if: env.DELETE_APPS == 'true'
+      run: |
+        echo "Fetching list of container apps in the environment..."
+        ENV_ID=$(az containerapp env show \
+          --name "cae-xhuma-play" \
+          --resource-group "rg-xhuma-play" \
+          --query "id" -o tsv)
+
+        CONTAINER_APPS=$(az containerapp list \
+          --resource-group "rg-xhuma-play" \
+          --query "[?environmentId=='$ENV_ID'].name" \
+          -o tsv)
+
+        for APP in $CONTAINER_APPS; do
+          echo "Deleting container app: $APP"
+          az containerapp delete --name "$APP" --resource-group "rg-xhuma-play" --yes
+        done
+
+    - name: Re-run Terraform Plan after container app deletion
+      if: env.DELETE_APPS == 'true'
+      run: |
+        cd infra
+        terraform plan -out=tfplan
+
     - name: Terraform Apply
       id: apply
       run: |
