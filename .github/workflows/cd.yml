@@ -87,7 +87,7 @@ jobs:
       run: |
         cd infra
         terraform show -json tfplan > tfplan.json
-
+        cat tfplan.json 
         echo "Checking tfplan.json for Container Apps Environment deletion."
         DELETE_COUNT=$(jq '
           .resource_changes[] 
