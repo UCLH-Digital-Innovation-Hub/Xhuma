@@ -91,8 +91,7 @@ jobs:
         echo "Checking tfplan.json for Container Apps Environment deletion."
         DELETE_EXISTS=$(terraform show -no-color -json tfplan | jq '
           .resource_changes[] 
-          | select(.type == "azurerm_container_app_environment" and .change.actions )
-          | any(index("delete"))
+          | select(.type == "azurerm_container_app_environment" and (.change.actions | index("delete")))
         ')
         echo "Container Apps Environment contains delete?: $DELETE_EXISTS"
         
