@@ -83,8 +83,8 @@ jobs:
         terraform plan -out=tfplan
 
     - name: Check if Container Apps Environment is being deleted
-    - id: detect-env-deletion
-    - run: |
+      id: detect-env-deletion
+      run: |
         cd infra
         terraform show -json tfplan > tfplan.json
 
