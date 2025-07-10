@@ -109,7 +109,7 @@ jobs:
       run: |
         echo "Fetching list of container apps in the environment..."
         ENV_ID=$(az containerapp env show \
-          --name "cae-xhuma-play" \
+          --name "caexhumaplay" \
           --resource-group "rg-xhuma-play" \
           --query "id" -o tsv)
 
