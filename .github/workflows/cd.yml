@@ -80,7 +80,7 @@ jobs:
         cd infra
         # Set environmen+t variable to bypass provider registration
         export ARM_SKIP_PROVIDER_REGISTRATION=true
-        terraform plan -out=tfplan
+        terraform plan -out=tfplan -no-color
 
     - name: Check if Container Apps Environment is being deleted
       id: detect-env-deletion
