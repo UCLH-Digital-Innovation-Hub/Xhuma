@@ -86,9 +86,9 @@ jobs:
       id: detect-env-deletion
       run: |
         cd infra
-        terraform show -json tfplan | jq '.' > tfplan.json
-        cat tfplan.json | jq -r '(.resource_changes[] | [.change.actions[], .type, .change.after.name]) | @tsv'
-        cat tfplan.json | jq '[.resource_changes[] | {type: .type, name: .change.after.name, actions: .change.actions[]}]'
+        terraform show -json tfplan | jq '.' > raw_tfplan.json
+        sed 's/\*\*\*/"REDACTED"/g' raw_tfplan.json > tfplan.json
+        cat tfplan.json 
         echo "Checking tfplan.json for Container Apps Environment deletion."
         DELETE_COUNT=$(jq '
           .resource_changes[] 
