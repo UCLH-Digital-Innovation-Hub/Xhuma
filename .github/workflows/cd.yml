@@ -86,7 +86,9 @@ jobs:
       id: detect-env-deletion
       run: |
         cd infra
-        terraform show -no-color -json tfplan 
+        cat tfplan
+        jq tfplan
+        # terraform show -no-color -json tfplan 
 
         echo "Checking tfplan.json for Container Apps Environment deletion."
 
