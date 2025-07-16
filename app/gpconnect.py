@@ -19,7 +19,10 @@ from .security import create_jwt
 
 router = APIRouter()
 
-client = httpx.AsyncClient(verify="app/client/nhs_certs/nhs_bundle.pem")
+client = httpx.AsyncClient(
+    cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
+    verify="keys/nhs_certs/nhs_bundle.pem",
+)
 logging.basicConfig(level=logging.DEBUG)
 httpx_logger = logging.getLogger("httpx")
 httpx_logger.setLevel(logging.DEBUG)
@@ -78,14 +81,14 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
     print("-" * 20)
 
     token = create_jwt(
-        saml_attrs, audience=f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}"
+        saml_attrs, audience=fhir_endpoint_url
     )
 
     headers = {
         # unique uuid per request (TODO maybe use the correlation id?)
         "Ssp-TraceID": str(uuid4()),
         # ASID for originating organisation e.g. Hospital not Xhuma
-        "Ssp-From": asid,
+        "Ssp-From": "200000002574",
         "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
@@ -122,13 +125,17 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
         with open(os.path.join(log_dir, "request_body.json"), "w") as f:
             json.dump(body, f, indent=2)
 
-    r = await client.post(
-        "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/structured/fhir/Patient/$gpc.getstructuredrecord",
-        # f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}",
-        # f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}",
-        json=body,
-        headers=headers,
-    )
+    url = f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}"
+    
+    try:
+        r = await client.post(url, json=body, headers=headers)
+        print(r.status_code)
+        print(r.text)
+    except httpx.ReadError as e:
+        print("❌ ReadError: server closed connection before responding")
+    except Exception as e:
+        print("❌ Unexpected error:", e)
+    
 
     if log_dir:
         with open(os.path.join(log_dir, "response.json"), "w") as f:

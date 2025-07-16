@@ -85,13 +85,14 @@ def create_jwt(
     created_time = int(time())
     family, given = audit["subject_id"].split(", ")
     payload = {
-        "iss": "https://orange.testlab.nhs.uk/",
+        "iss": "http://int.apis.ptl.api.platform.nhs.uk/Device/EA2027FD-B486-4033-B48C-E87222F6FA1C",
         "sub": audit["subject_id"],
         "aud": audience,
         "iat": created_time,
         "exp": created_time + 300,
         "reason_for_request": "directcare",
         "requested_scope": "patient/*.read",
+        # "requesting_system": "https://fhir.nhs.uk/Id/accredited-system|200000002574",
         "requesting_device": {
             "resourceType": "Device",
             "identifier": [
@@ -148,17 +149,16 @@ def create_jwt(
     # print("JWT PAYLOAD")
     # print(payload)
     # Get private key from environment or file
+
+    headers = {"alg": "RS512", "typ": "JWT", "kid": "test-1"}
+
     if JWTKEY is not None:
         private_key = JWTKEY
     else:
         with open("keys/test-1.pem", "r") as f:
             private_key = f.read()
-    return jwt.encode(
-        payload,
-        headers={"alg": "RS512", "typ": "JWT", "kid": "test-1"},
-        key=private_key,
-        algorithm="RS512",
-    )
+
+    return jwt.encode(payload, key=private_key, algorithm="RS512", headers=headers)
 
 
 if __name__ == "__main__":
