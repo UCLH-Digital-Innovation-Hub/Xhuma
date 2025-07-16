@@ -23,6 +23,7 @@ from .datatypes import (
 
 class ManufacturedMaterial(BaseModel):
     code: CD
+    lotNumberText: Optional[str] = None
 
 
 class ManufacturedProduct(BaseModel):

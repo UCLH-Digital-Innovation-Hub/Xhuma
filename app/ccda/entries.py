@@ -1,6 +1,6 @@
 import uuid
 
-from fhirclient.models import allergyintolerance, coding, condition
+from fhirclient.models import allergyintolerance, coding, condition, immunization
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationstatement, observation
 
@@ -356,6 +356,33 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> dict:
     all["act"]["entryRelationship"]["observation"] = observation
 
     return all
+
+
+def immunization_entry(entry: immunization.Immunization, index: dict) -> dict:
+    # https://build.fhir.org/ig/HL7/CDA-ccda-2.2/StructureDefinition-2.16.840.1.113883.10.20.22.2.2.1.html
+
+    immunization_entry = SubstanceAdministration(
+        templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
+        id=[{"@root": entry.id}],
+        statusCode={"@code": entry.status},
+        effectiveTime=effective_time_helper(entry.date),
+        consumable={
+            "manufacturedProduct": {
+                "templateId": templateId(
+                    "2.16.840.1.113883.10.20.22.4.54", "2014-06-09"
+                ),
+                "manufacturedMaterial": {
+                    "code": code_with_translations(entry.vaccineCode.coding),
+                    "lotNumberText": entry.lotNumber,
+                },
+            }
+        },
+    )
+
+    if entry.route:
+        immunization_entry.route = code_with_translations(entry.route.coding)
+
+    return immunization_entry.model_dump(by_alias=True, exclude_none=True)
 
 
 def result(entry, index: dict) -> dict:

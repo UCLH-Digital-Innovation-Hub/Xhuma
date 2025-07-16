@@ -8,7 +8,7 @@ from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
 
-from .entries import allergy, medication, problem, result
+from .entries import allergy, immunization_entry, medication, problem, result
 from .helpers import date_helper, readable_date, templateId
 
 
@@ -124,8 +124,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             },
             "Immunisations": {
                 "displayName": "Immunisations",
-                "root": "2.16.840.1.113883.10.20.22.2.5",
-                "Code": "11450-4",
+                "root": "2.16.840.1.113883.10.20.22.2.2",
+                "Code": "11369-6",
             },
             "Vital Signs": {
                 "displayName": "Vital Signs",
@@ -147,13 +147,13 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "Vital Signs",
             "Investigations and results",
         ]
-
+        # print(list.title)
         # check if list is one of the desired ones
         if list.title in sections:
             print(list.title)
             comp = {}
             comp["section"] = {
-                "templateId": templateId(templates[list.title]["root"], "2015-8-1"),
+                "templateId": templateId(templates[list.title]["root"], "2015-08-01"),
                 "code": {
                     "@code": templates[list.title]["Code"],
                     "@displayName": templates[list.title]["displayName"],
@@ -178,7 +178,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "Instructions",
                 ],
                 "Problems": ["Date", "Status", "Condition"],
-                "Immunisations": ["Date", "Type", "Details"],
+                "Immunisations": ["Date", "Vaccuine", "Lot Number", "Status"],
                 "Vital Signs": ["Date", "Type", "Value", "Units"],
                 "Investigations and results": ["Date", "Type", "Result"],
             }
@@ -317,54 +317,77 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                 ]
                             )
                         )
-                    elif list.title == "Investigations and results":
-                        for resource in referenced_item.result:
-                            result_resource = index.get(resource.reference)
+                    elif list.title == "Immunisations":
+                        entry_data = immunization_entry(referenced_item, index)
+                        comp["section"]["entry"].append(entry_data)
+                        rows.append(
+                            create_row(
+                                [
+                                    readable_date(
+                                        entry_data["substanceAdministration"][
+                                            "effectiveTime"
+                                        ][0]["low"]["@value"]
+                                    ),
+                                    entry_data["substanceAdministration"]["consumable"][
+                                        "manufacturedProduct"
+                                    ]["manufacturedMaterial"]["code"]["@displayName"],
+                                    entry_data["substanceAdministration"]["consumable"][
+                                        "manufacturedProduct"
+                                    ]["lotNumberText"],
+                                    entry_data["substanceAdministration"]["statusCode"][
+                                        "@code"
+                                    ],
+                                ]
+                            )
+                        )
+                    # elif list.title == "Investigations and results":
+                    #     for resource in referenced_item.result:
+                    #         result_resource = index.get(resource.reference)
 
-                            entry_data = result(result_resource, index)
-                            # pprint.pprint(entry_data)
-                            # check if entry_data is not None
-                            if entry_data is not None:
-                                comp["section"]["entry"].append(entry_data)
-                                # pprint.pprint(entry_data)
-                                rows.append(
-                                    {
-                                        "td": [
-                                            {
-                                                "content": [
-                                                    entry_data["code"]["@displayName"]
-                                                ],
-                                            }
-                                        ],
-                                    }
-                                )
-                                rows.append(
-                                    {
-                                        "td": [
-                                            {
-                                                "content": [
-                                                    entry_data["author"][
-                                                        "assignedAuthor"
-                                                    ]["representedOrganization"][
-                                                        "name"
-                                                    ],
-                                                    f"ODS:{entry_data["author"]["assignedAuthor"]["id"][0]["@extension"]}",
-                                                ],
-                                            }
-                                        ],
-                                    }
-                                )
-                                for res in entry_data["component"]:
-                                    rows.append(
-                                        create_row(
-                                            [
-                                                " ",
-                                                res["code"]["@displayName"],
-                                                f"{res["value"]["@value"]}/{res["value"]["@unit"]}",
-                                            ]
-                                        )
-                                    )
-                        # print(rows)
+                    #         entry_data = result(result_resource, index)
+                    #         # pprint.pprint(entry_data)
+                    #         # check if entry_data is not None
+                    #         if entry_data is not None:
+                    #             comp["section"]["entry"].append(entry_data)
+                    #             # pprint.pprint(entry_data)
+                    #             rows.append(
+                    #                 {
+                    #                     "td": [
+                    #                         {
+                    #                             "content": [
+                    #                                 entry_data["code"]["@displayName"]
+                    #                             ],
+                    #                         }
+                    #                     ],
+                    #                 }
+                    #             )
+                    #             rows.append(
+                    #                 {
+                    #                     "td": [
+                    #                         {
+                    #                             "content": [
+                    #                                 entry_data["author"][
+                    #                                     "assignedAuthor"
+                    #                                 ]["representedOrganization"][
+                    #                                     "name"
+                    #                                 ],
+                    #                                 f"ODS:{entry_data["author"]["assignedAuthor"]["id"][0]["@extension"]}",
+                    #                             ],
+                    #                         }
+                    #                     ],
+                    #                 }
+                    #             )
+                    #             for res in entry_data["component"]:
+                    #                 rows.append(
+                    #                     create_row(
+                    #                         [
+                    #                             " ",
+                    #                             res["code"]["@displayName"],
+                    #                             f"{res["value"]["@value"]}/{res["value"]["@unit"]}",
+                    #                         ]
+                    #                     )
+                    #                 )
+                    print(rows)
                 # Close the table after all entries are processed
                 comp["section"]["text"] = {
                     "table": {
