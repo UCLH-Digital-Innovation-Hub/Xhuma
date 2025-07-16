@@ -28,8 +28,12 @@ from starlette.background import BackgroundTask
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
-from .responses import (iti_38_response, iti_39_response, iti_47_response,
-                        iti_55_response)
+from .responses import (
+    iti_38_response,
+    iti_39_response,
+    iti_47_response,
+    iti_55_response,
+)
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -127,7 +131,6 @@ async def iti55(request: Request):
         for param in query_params["livingSubjectId"]["value"]:
             if param["@root"] == "2.16.840.1.113883.2.1.4.1":
                 nhsno = param["@extension"]
-                print(f"NHSNO: {nhsno}")
 
         if not nhsno:
             raise HTTPException(
@@ -135,10 +138,16 @@ async def iti55(request: Request):
             )
 
         patient = await lookup_patient(nhsno)
-        print(f"Patient: {patient}")
+        # print(f"Patient: {patient}")
         # TODO refine this to return a proper error message as this will 500
         if not patient:
+            # patient not found, return error
             print("Patient not found")
+
+        # check if patient is unrestricted
+        elif patient["meta"]["security"][0]["code"] != "U":
+            # unrestricted patient, return None
+            patient = None
 
         data = await iti_55_response(
             envelope["Header"]["MessageID"],
@@ -147,7 +156,10 @@ async def iti55(request: Request):
                 "queryByParameter"
             ],
         )
-        return Response(content=data, media_type="application/soap+xml")
+        return Response(
+            content=data,
+            media_type="application/soap+xml",
+        )
     else:
         raise HTTPException(
             status_code=400, detail=f"Content type {content_type} not supported"
