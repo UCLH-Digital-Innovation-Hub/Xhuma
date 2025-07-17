@@ -16,25 +16,12 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from contextlib import asynccontextmanager
-from fhirclient.models import bundle
 from jwcrypto import jwk
 
 from .gpconnect import gpconnect
 from .pds import pds
 from .redis_connect import redis_client
 from .soap import soap
-
-# Initialize FastAPI application
-app = FastAPI(
-    title="Xhuma",
-    description="A stateless middleware service for GP Connect to CCDA conversion",
-    version="1.0.0",
-)
-
-# Include routers for different service components
-app.include_router(soap.router)
-app.include_router(pds.router)
-# app.include_router(gpconnect.router)  # Currently disabled
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
@@ -62,7 +49,19 @@ async def lifespan(app: FastAPI):
                 json.dump(jwk_json, f)
 
     yield  # Application runs here
+# Initialize FastAPI application
+app = FastAPI(
+    title="Xhuma",
+    description="A stateless middleware service for GP Connect to CCDA conversion",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
+# Include routers for different service components
+app.include_router(soap.router)
+app.include_router(pds.router)
+
+# app.include_router(gpconnect.router)  # Currently disabled
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root():
     """
