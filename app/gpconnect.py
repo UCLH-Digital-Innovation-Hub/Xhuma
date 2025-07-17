@@ -42,6 +42,7 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
 
     # TODO add in caching
     pds_search = await lookup_patient(nhsno)
+
     # make sure patient is unrestricted
     security_code = pds_search["meta"]["security"][0]["code"]
 
@@ -52,6 +53,8 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "w") as f:
                 f.write(f"{nhsno} is restricted\n")
+
+        return Response({"success": False, "error": "Patient is not unrestricted, access to GP connect is not permitted"})
         raise HTTPException(
             status_code=403,
             detail="Patient is not unrestricted, access to GP connect is not permitted",
@@ -61,24 +64,38 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
     gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
 
     asid_trace = await sds_trace(gp_ods)
-    # pprint.pprint(asid_trace)
-    print("Device")
-    # pprint.pprint(asid_trace["entry"]["resource"]["identifier"])
     for item in asid_trace["entry"][0]["resource"]["identifier"]:
         if item["system"] == "https://fhir.nhs.uk/Id/nhsSpineASID":
             asid = item["value"]
         elif item["system"] == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
             nhsmhsparty = item["value"]
 
-    print("ASID:", asid)
-    print("NHS MHS Party Key:", nhsmhsparty)
-    print("-" * 20)
-
-    print("Endpoint")
+    # log error if unable to find ASID or nhsMhsPartyKey
+    if not asid or not nhsmhsparty:
+        logging.error(f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}")
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "w") as f:
+                f.write(f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}\n")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to find ASID or nhsMhsPartyKey for the provided ODS code",
+        )
+    
     endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+
+    # if unable to find fhirendpoint, log error and raise exception
+    if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
+        logging.error(f"Unable to find FHIR endpoint for ODS code {gp_ods}")
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "w") as f:
+                f.write(f"Unable to find FHIR endpoint for ODS code {gp_ods}\n")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to find FHIR endpoint for the provided ODS code",
+        )
+    
     fhir_endpoint_url = endpoint_trace["entry"][0]["fullUrl"]
-    print(fhir_endpoint_url)
-    print("-" * 20)
+
 
     token = create_jwt(
         saml_attrs, audience=fhir_endpoint_url
@@ -179,7 +196,7 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
     with open(f"{nhsno}.xml", "w") as output:
         output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
-    return {"document_id": doc_uuid}
+    return {"success": True, "document_id": doc_uuid}
 
 
 if __name__ == "__main__":
