@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from contextlib import asynccontextmanager
 from fhirclient.models import bundle
 from jwcrypto import jwk
 
@@ -39,16 +40,12 @@ app.include_router(pds.router)
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
 
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """
-    Startup event handler that initializes necessary configurations.
-
-    This function:
-    1. Sets the registry ID in Redis
-    2. Checks for existing JWK (JSON Web Key)
-    3. Generates a new JWK from private key if none exists
+    Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
+    # --- Startup logic ---
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
 
@@ -64,6 +61,7 @@ async def startup_event():
             with open("keys/jwk.json", "w") as f:
                 json.dump(jwk_json, f)
 
+    yield  # Application runs here
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root():
