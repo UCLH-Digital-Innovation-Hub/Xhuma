@@ -112,7 +112,8 @@ module "container_apps" {
   grafana_admin_password      = var.grafana_admin_password
   image_tag                   = var.image_tag
   tags                        = local.default_tags
+  redis_dependency            = modules.redis
 
   # Ensure validation happens before container app deployment
-  depends_on = [null_resource.validate_jwtkey]
+  depends_on = [null_resource.validate_jwtkey, var.redis_dependency]
 }

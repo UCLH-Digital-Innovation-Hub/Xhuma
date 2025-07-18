@@ -106,3 +106,8 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "redis_dependency" {
+  description = "Terraform dependency to ensure Redis is available before starting container apps"
+  type        = any
+}

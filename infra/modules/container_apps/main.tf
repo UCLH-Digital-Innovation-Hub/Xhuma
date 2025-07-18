@@ -23,6 +23,8 @@ resource "azurerm_container_app" "xhuma" {
     ]
   }
 
+  depends_on = [var.redis_dependency]
+
   template {
     container {
       name   = "xhuma"
