@@ -30,9 +30,10 @@ logger = logging.getLogger(__name__)
 
 # Redis connection configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6380))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+REDIS_SSL = os.getenv("REDIS_SSL", "true").lower() == "true"
 
 # Connection pool configuration
 POOL_MAX_CONNECTIONS = 10
@@ -80,6 +81,7 @@ class RedisClient:
             port=REDIS_PORT,
             db=REDIS_DB,
             password=REDIS_PASSWORD,
+            ssl=REDIS_SSL,
             max_connections=POOL_MAX_CONNECTIONS,
             socket_timeout=SOCKET_TIMEOUT,
             socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
@@ -89,6 +91,7 @@ class RedisClient:
         )
         self._client = redis.Redis(
             connection_pool=self._pool,
+            ssl=REDIS_SSL
             socket_timeout=SOCKET_TIMEOUT,
             retry_on_timeout=True,
             decode_responses=False,  # Keep as bytes for MIME data
