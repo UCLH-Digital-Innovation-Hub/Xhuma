@@ -115,5 +115,5 @@ module "container_apps" {
   redis_dependency            = module.redis
 
   # Ensure validation happens before container app deployment
-  depends_on = [null_resource.validate_jwtkey, var.redis_dependency]
+  depends_on = [null_resource.validate_jwtkey, module.redis]
 }
