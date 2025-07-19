@@ -91,7 +91,7 @@ class RedisClient:
         )
         self._client = redis.Redis(
             connection_pool=self._pool,
-            ssl=REDIS_SSL
+            ssl=REDIS_SSL,
             socket_timeout=SOCKET_TIMEOUT,
             retry_on_timeout=True,
             decode_responses=False,  # Keep as bytes for MIME data
