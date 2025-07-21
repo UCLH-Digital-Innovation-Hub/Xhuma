@@ -219,7 +219,7 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 - Internal network for container communication
 - Exposed ports:
   - 8000: Application API
-  - 6379: Redis (internal only)
+  - 6380: Redis (SSL internal only)
   - 9090: Prometheus metrics
   - 3000: Grafana dashboards
 
