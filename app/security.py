@@ -22,11 +22,20 @@ import json
 from time import time
 from typing import Dict, Any, Optional
 
+from redis import Redis
+
 import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from fastapi import HTTPException
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.storage import RedisStorage
 
 # Get JWT signing key from environment variable
 JWTKEY = os.getenv("JWTKEY")
@@ -280,46 +289,41 @@ def register_jwk_endpoint(app):
     Args:
         app: The FastAPI app instance
     """
-    from fastapi import Request, Response
-    import time
-    
+    def real_ip(request: Request) -> str:
+        """Resolve the client's real IP considering X-Forwarded-For."""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host
+
+    redis_url = os.getenv("SLOWAPI_REDIS_URL")
+    if redis_url:
+        try:
+            storage = RedisStorage(Redis.from_url(redis_url))
+            limiter = Limiter(key_func=real_ip, storage=storage)
+        except Exception:
+            limiter = Limiter(key_func=real_ip)
+    else:
+        limiter = Limiter(key_func=real_ip)
+
+    app.state.limiter = limiter
+
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(status_code=429, content={"error": "Too many requests"})
+
+    app.add_middleware(SlowAPIMiddleware)
+
     @app.get("/jwk")
+    @limiter.limit("5/minute")
     async def get_jwk_endpoint(request: Request):
         """Endpoint to retrieve the JWK for token verification."""
-        # Simple rate limiting based on client IP
-        client_ip = request.client.host
-        current_time = time.time()
-        
-        # Store request info in a global dict (in production, use Redis or similar)
-        if not hasattr(get_jwk_endpoint, 'rate_limit_store'):
-            get_jwk_endpoint.rate_limit_store = {}
-            
-        # Check if client has made too many requests
-        if client_ip in get_jwk_endpoint.rate_limit_store:
-            last_req_time, count = get_jwk_endpoint.rate_limit_store[client_ip]
-            # Reset counter if it's been more than 60 seconds
-            if current_time - last_req_time > 60:
-                get_jwk_endpoint.rate_limit_store[client_ip] = (current_time, 1)
-            # Otherwise increment counter
-            else:
-                get_jwk_endpoint.rate_limit_store[client_ip] = (last_req_time, count + 1)
-                # Rate limit: 10 requests per minute
-                if count >= 10:
-                    return Response(
-                        content=json.dumps({"error": "Too many requests"}),
-                        status_code=429,
-                        media_type="application/json"
-                    )
-        else:
-            get_jwk_endpoint.rate_limit_store[client_ip] = (current_time, 1)
-        
-        # Return the JWK
         return get_jwk("default-key-id")
-    
+
     @app.get("/jwks")
+    @limiter.limit("10/minute")
     async def get_jwks_endpoint(request: Request):
         """Endpoint to retrieve the JWKS (multiple keys) for token verification."""
-        # Same rate limiting logic as above could be implemented here
         return get_jwks()
 
 

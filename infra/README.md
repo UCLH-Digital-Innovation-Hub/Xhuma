@@ -104,11 +104,11 @@ The GitHub Actions workflow (`cd.yml`) automatically runs the import script befo
 The `jwtkey` variable is required and must contain a PEM-formatted RSA private key for JWT signing. This key is:
 
 - Never stored in Docker images or on disk
-- Passed securely at runtime via environment variable
+- Passed securely via an Azure Container Apps secret
 - Validated before deployment to prevent errors
 - Used to dynamically generate JWK for token verification
 
-Each Xhuma container gets this key injected as the `JWTKEY` environment variable.
+Each Xhuma container app stores this key as a secret and injects it at runtime using the `secret_name` mechanism. The application reads it as the `JWTKEY` environment variable.
 
 ## Security Best Practices
 

@@ -37,9 +37,14 @@ resource "azurerm_container_app" "xhuma" {
         value = var.api_key
       }
 
-      env {
+      secret {
         name  = "JWTKEY"
         value = var.jwtkey
+      }
+
+      env {
+        name        = "JWTKEY"
+        secret_name = "JWTKEY"
       }
 
       env {

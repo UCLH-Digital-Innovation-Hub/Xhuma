@@ -15,6 +15,7 @@ cryptography = "*"
 jwcrypto = "*"
 celery = "*"
 pydantic = "*"
+slowapi = "*"
 
 [dev-packages]
 black = "*"
