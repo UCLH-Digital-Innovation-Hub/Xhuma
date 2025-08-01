@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import pprint
+import ssl
 from datetime import timedelta
 from uuid import uuid4
 
@@ -19,10 +20,35 @@ from .security import create_jwt
 
 router = APIRouter()
 
+# client = httpx.AsyncClient(
+#     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
+#     verify="keys/nhs_certs/nhs_bundle.pem",
+# )
+
+
+def create_nhs_ssl_context(cert_path, key_path, ca_path):
+    ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    ssl_context.check_hostname = True
+    ssl_context.verify_mode = ssl.CERT_REQUIRED
+    ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    ssl_context.load_cert_chain(cert_path, key_path)
+    ssl_context.load_verify_locations(ca_path)
+    return ssl_context
+
+
+ssl_context = create_nhs_ssl_context(
+    "keys/nhs_certs/client_cert.pem",
+    "keys/nhs_certs/client_key.pem",
+    "keys/nhs_certs/nhs_bundle.pem",
+)
+
 client = httpx.AsyncClient(
     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
-    verify="keys/nhs_certs/nhs_bundle.pem",
+    verify=ssl_context,  # This fixes the silent failures!
+    timeout=httpx.Timeout(30.0),
+    http2=False,
 )
+
 logging.basicConfig(level=logging.DEBUG)
 httpx_logger = logging.getLogger("httpx")
 httpx_logger.setLevel(logging.DEBUG)
@@ -54,7 +80,12 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
             with open(os.path.join(log_dir, "error.log"), "w") as f:
                 f.write(f"{nhsno} is restricted\n")
 
-        return Response({"success": False, "error": "Patient is not unrestricted, access to GP connect is not permitted"})
+        return Response(
+            {
+                "success": False,
+                "error": "Patient is not unrestricted, access to GP connect is not permitted",
+            }
+        )
         raise HTTPException(
             status_code=403,
             detail="Patient is not unrestricted, access to GP connect is not permitted",
@@ -75,13 +106,17 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
         logging.error(f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "w") as f:
-                f.write(f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}\n")
+                f.write(
+                    f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}\n"
+                )
         raise HTTPException(
             status_code=500,
             detail="Unable to find ASID or nhsMhsPartyKey for the provided ODS code",
         )
-    
+
     endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+    # print("Endpoint trace:")
+    # pprint.pprint(endpoint_trace)
 
     # if unable to find fhirendpoint, log error and raise exception
     if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
@@ -93,13 +128,14 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
             status_code=500,
             detail="Unable to find FHIR endpoint for the provided ODS code",
         )
-    
-    fhir_endpoint_url = endpoint_trace["entry"][0]["fullUrl"]
 
+    fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
+    # edit fhhir endpoint url to go from http to https
+    # if fhir_endpoint_url.startswith("http://"):
+    #     fhir_endpoint_url = fhir_endpoint_url.replace("http://", "https://")
+    # print(fhir_endpoint_url)
 
-    token = create_jwt(
-        saml_attrs, audience=fhir_endpoint_url
-    )
+    token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
 
     headers = {
         # unique uuid per request (TODO maybe use the correlation id?)
@@ -142,8 +178,9 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
         with open(os.path.join(log_dir, "request_body.json"), "w") as f:
             json.dump(body, f, indent=2)
 
-    url = f"https://msg.intspineservices.nhs.uk/{fhir_endpoint_url}"
-    
+    url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+    print(f"Requesting {url} for {nhsno}")
+
     try:
         r = await client.post(url, json=body, headers=headers)
         print(r.status_code)
@@ -152,7 +189,6 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
         print("❌ ReadError: server closed connection before responding")
     except Exception as e:
         print("❌ Unexpected error:", e)
-    
 
     if log_dir:
         with open(os.path.join(log_dir, "response.json"), "w") as f:
@@ -234,5 +270,7 @@ if __name__ == "__main__":
     }
 
     # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(gpconnect(9690937286, audit_dict))
+    result = asyncio.run(
+        gpconnect(9690937286, audit_dict, log_dir="app/logs/int_troubleshooting")
+    )
     assert result["resourceType"] == "Patient"

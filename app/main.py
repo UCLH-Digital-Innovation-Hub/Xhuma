@@ -11,11 +11,11 @@ profiles for healthcare interoperability.
 
 import json
 import os
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from contextlib import asynccontextmanager
 from jwcrypto import jwk
 
 from .gpconnect import gpconnect
@@ -49,6 +49,8 @@ async def lifespan(app: FastAPI):
                 json.dump(jwk_json, f)
 
     yield  # Application runs here
+
+
 # Initialize FastAPI application
 app = FastAPI(
     title="Xhuma",
@@ -60,6 +62,7 @@ app = FastAPI(
 # Include routers for different service components
 app.include_router(soap.router)
 app.include_router(pds.router)
+
 
 # app.include_router(gpconnect.router)  # Currently disabled
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

@@ -1,6 +1,7 @@
 """
 Script to run through consumer tests for GP CONNECT Scal
 """
+
 import pytest
 
 from app.gpconnect import gpconnect

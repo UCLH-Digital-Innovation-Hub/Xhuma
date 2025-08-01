@@ -146,8 +146,13 @@ def create_jwt(
             # ],
         },
     }
-    # print("JWT PAYLOAD")
-    # print(payload)
+    print("JWT PAYLOAD")
+    print(payload)
+    # write payload to file for debugging
+    with open("app/logs/int_troubleshooting/jwt_payload.json", "w") as f:
+        import json
+
+        json.dump(payload, f, indent=4)
     # Get private key from environment or file
 
     headers = {"alg": "RS512", "typ": "JWT", "kid": "test-1"}

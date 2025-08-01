@@ -367,8 +367,8 @@ async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
     if not r.get("success"):
         logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
         body["AdhocQueryResponse"][
-                "@status"
-            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            "@status"
+        ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
         body["AdhocQueryResponse"]["RegistryErrorList"] = {
             "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
             "RegistryError": {
@@ -380,7 +380,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
         }
     else:
         docid = r["document_id"]
-        
+
     if docid is not None:
         # add the ccda as registry object list
         # object_id = f"CCDA_{docid}"
