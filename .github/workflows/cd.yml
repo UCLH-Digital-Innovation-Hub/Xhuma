@@ -83,21 +83,6 @@ jobs:
         export ARM_SKIP_PROVIDER_REGISTRATION=true
         terraform plan -out=tfplan -no-color
 
-    - name: Convert Terraform Plan to JSON
-      run: |
-        cd infra
-        terraform show -json tfplan > tfplan.json
-
-    - name: Trivy scan Terraform plan JSON
-      uses: aquasecurity/trivy-action@master
-      with:
-        scan-type: config
-        scan-ref: ./infra/tfplan.json
-        format: table
-        exit-code: 0
-        ignore-unfixed: false
-        severity: CRITICAL,HIGH
-
     - name: Check if Container Apps Environment is being deleted
       id: detect-env-deletion
       run: |
@@ -144,6 +129,21 @@ jobs:
       run: |
         cd infra
         terraform plan -out=tfplan
+    
+    - name: Convert Terraform Plan to JSON
+      run: |
+        cd infra
+        terraform show -json tfplan > tfplan.json
+
+    - name: Trivy scan Terraform plan JSON
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: config
+        scan-ref: ./infra/tfplan.json
+        format: table
+        exit-code: 1
+        ignore-unfixed: false
+        severity: CRITICAL,HIGH
 
     - name: Terraform Apply
       id: apply
