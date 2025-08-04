@@ -2,7 +2,7 @@ name: CD - Deploy to Azure
 
 on:
   push:
-    branches: [ simplified-deployment, trivy-implementation ] #remove trivy once done testing
+    branches: [ simplified-deployment ]
   workflow_dispatch:
 
 jobs:

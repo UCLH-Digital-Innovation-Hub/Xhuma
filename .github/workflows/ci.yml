@@ -63,7 +63,7 @@ jobs:
       uses: aquasecurity/trivy-action@master
       with:
         scan-type: 'fs'
-        scanners: 'config'
+        scanners: 'misconfig'
         scan-ref: '.'        
         format: 'sarif'
         output: 'trivy-config-results.sarif'
