@@ -44,6 +44,7 @@ jobs:
       uses: github/codeql-action/upload-sarif@v2
       with:
         sarif_file: 'trivy-container-results.sarif'
+        category: 'trivy-container-scan'
 
 
     - name: Run Trivy filesystem scan on source code
@@ -75,6 +76,7 @@ jobs:
       uses: github/codeql-action/upload-sarif@v2
       with:
         sarif_file: 'trivy-config-results.sarif'
+        category: 'trivy-config-scan'
 
         
     - name: Run tests with Docker Compose
