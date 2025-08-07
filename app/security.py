@@ -91,7 +91,7 @@ def create_jwt(
         "iat": created_time,
         "exp": created_time + 300,
         "reason_for_request": "directcare",
-        "requested_scope": "patient/*.read",  
+        "requested_scope": "patient/*.read",
         "requesting_device": {
             "resourceType": "Device",
             "identifier": [
@@ -121,13 +121,13 @@ def create_jwt(
             "resourceType": "Practitioner",
             "id": audit["subject_id"],
             "identifier": [
-                 {
+                {
                     "system": "https://fhir.nhs.uk/Id/sds-user-id",
-                    "value": "UNK"  # As per NHS spec when not using NHS smartcard
+                    "value": "UNK",  # As per NHS spec when not using NHS smartcard
                 },
                 {
-                    "system": "https://fhir.nhs.uk/Id/sds-role-profile-id", 
-                    "value": "UNK"  # As per NHS spec when not using NHS smartcard
+                    "system": "https://fhir.nhs.uk/Id/sds-role-profile-id",
+                    "value": "UNK",  # As per NHS spec when not using NHS smartcard
                 },
                 {
                     "system": audit["organization"],
@@ -138,7 +138,7 @@ def create_jwt(
                     "value": audit["role"]["Role"]["@code"],
                 },
             ],
-            "name": [ 
+            "name": [
                 {
                     "family": family,
                     "given": [given],
@@ -160,6 +160,7 @@ def create_jwt(
     # log headers to file for debugging
     with open("app/logs/int_troubleshooting/jwt_headers.json", "w") as f:
         import json
+
         json.dump(headers, f, indent=4)
     # headers = {"alg": "none", "typ": "JWT"}
 

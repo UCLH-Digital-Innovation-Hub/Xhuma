@@ -55,6 +55,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - ./app:/code/app
+      - ./keys:/app/keys:ro
     networks:
       - xhuma-net
 

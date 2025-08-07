@@ -172,7 +172,9 @@ def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
 
 # Example usage
 if __name__ == "__main__":
-    generate_pfx_from_cert_chain("gpc-int-RRV00.xhuma.thirdparty.nhs.uk", "keys/nhs_certs")
+    generate_pfx_from_cert_chain(
+        "gpc-int-RRV00.xhuma.thirdparty.nhs.uk", "keys/nhs_certs"
+    )
     # generate_csr(
     #     out_dir="keys/nhs_certs", fqdn="gpc-int-test-RRV00.xhuma.thirdparty.nhs.uk"
     # )
