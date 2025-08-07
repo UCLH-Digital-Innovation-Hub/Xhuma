@@ -91,8 +91,7 @@ def create_jwt(
         "iat": created_time,
         "exp": created_time + 300,
         "reason_for_request": "directcare",
-        "requested_scope": "patient/*.read",
-        # "requesting_system": "https://fhir.nhs.uk/Id/accredited-system|200000002574",
+        "requested_scope": "patient/*.read",  
         "requesting_device": {
             "resourceType": "Device",
             "identifier": [
@@ -118,32 +117,34 @@ def create_jwt(
             ],
             "name": audit["organization"],
         },
-        # "requesting_practitioner": f"{audit["organisation_id"]}|{audit["subject_id"]}",
         "requesting_practitioner": {
             "resourceType": "Practitioner",
             "id": audit["subject_id"],
-            # "id": 1,
             "identifier": [
+                 {
+                    "system": "https://fhir.nhs.uk/Id/sds-user-id",
+                    "value": "UNK"  # As per NHS spec when not using NHS smartcard
+                },
+                {
+                    "system": "https://fhir.nhs.uk/Id/sds-role-profile-id", 
+                    "value": "UNK"  # As per NHS spec when not using NHS smartcard
+                },
                 {
                     "system": audit["organization"],
                     "value": audit["subject_id"],
                 },
                 {
-                    # role ID
                     "system": audit["role"]["Role"]["@codeSystem"],
                     "value": audit["role"]["Role"]["@code"],
                 },
             ],
-            "name": humanname.HumanName(
-                dict(
-                    family=family,
-                    given=[given],
-                    prefix=["Dr"],
-                )
-            ).as_json(),
-            # "name": [
-            #     {"family": "Demonstrator", "given": ["GPConnect"], "prefix": ["Dr"]}
-            # ],
+            "name": [ 
+                {
+                    "family": family,
+                    "given": [given],
+                    "prefix": ["Dr"],
+                }
+            ],
         },
     }
     print("JWT PAYLOAD")
@@ -156,6 +157,11 @@ def create_jwt(
     # Get private key from environment or file
 
     headers = {"alg": "RS512", "typ": "JWT", "kid": "test-1"}
+    # log headers to file for debugging
+    with open("app/logs/int_troubleshooting/jwt_headers.json", "w") as f:
+        import json
+        json.dump(headers, f, indent=4)
+    # headers = {"alg": "none", "typ": "JWT"}
 
     if JWTKEY is not None:
         private_key = JWTKEY
@@ -163,7 +169,9 @@ def create_jwt(
         with open("keys/test-1.pem", "r") as f:
             private_key = f.read()
 
-    return jwt.encode(payload, key=private_key, algorithm="RS512", headers=headers)
+    return jwt.encode(payload, headers={"alg": "none", "typ": "JWT"}, key=None)
+
+    # return jwt.encode(payload, private_key, algorithm="RS512", headers={"alg": "RS512", "typ": "JWT", "kid": "test-1"})
 
 
 if __name__ == "__main__":

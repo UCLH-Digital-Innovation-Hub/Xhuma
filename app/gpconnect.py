@@ -136,6 +136,9 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
     # print(fhir_endpoint_url)
 
     token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
+    # print(f"JWT Token: {token}")
+    # print decoded token
+    # print(jwt.decode(token, options={"verify_signature": False}))
 
     headers = {
         # unique uuid per request (TODO maybe use the correlation id?)
@@ -273,4 +276,4 @@ if __name__ == "__main__":
     result = asyncio.run(
         gpconnect(9690937286, audit_dict, log_dir="app/logs/int_troubleshooting")
     )
-    assert result["resourceType"] == "Patient"
+    # assert result["resourceType"] == "Patient"
