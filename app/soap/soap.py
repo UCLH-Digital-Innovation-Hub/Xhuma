@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict
 from urllib.request import Request
 
 import httpx
+import xmltodict
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
@@ -29,6 +30,8 @@ from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .responses import (
+    create_envelope,
+    create_header,
     iti_38_response,
     iti_39_response,
     iti_47_response,
@@ -139,6 +142,8 @@ async def iti55(request: Request):
             )
 
         patient = await lookup_patient(nhsno)
+        # TODO implement checking of demographics
+
         print(f"Patient: {patient}")
         # TODO refine this to return a proper error message as this will 500
         if not patient:
@@ -305,6 +310,7 @@ async def iti39(request: Request):
         body = await request.body()
         soap = extract_soap_request(body.decode("utf-8"))
         envelope = clean_soap(soap)
+        message_id = envelope["Header"]["MessageID"]
         try:
             document_id = envelope["Body"]["RetrieveDocumentSetRequest"][
                 "DocumentRequest"
@@ -315,7 +321,6 @@ async def iti39(request: Request):
         document = client.get(document_id)
 
         if document is not None:
-            message_id = envelope["Header"]["MessageID"]
             data = await iti_39_response(message_id, document_id, document)
             # mime encode the data
             boundary = f"uuid:{uuid.uuid4()}"
@@ -365,10 +370,42 @@ async def iti39(request: Request):
 
             return Response(content=data, media_type="application/soap+xml")
         else:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Document with Id {document_id} not found or is empty",
+            # return iti39 error
+            body = {
+                "ns4:RetrieveDocumentSetResponse": {
+                    "@xmlns:ns4": "urn:ihe:iti:xds-b:2007",
+                    "@xmlns:ns8": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
+                    "ns8:RegistryResponse": {
+                        "@id": uuid.uuid4(),
+                        "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure",
+                        # "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
+                        "RegistryErrorList": {
+                            "RegistryError": {
+                                "@errorCode": "XDSDocumentUniqueIdError",
+                                "@codeContext": f"Document with Id {document_id} not found",
+                                "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                            }
+                        },
+                    },
+                },
+            }
+            soap_response = create_envelope(
+                create_header(
+                    "urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id
+                ),
+                body,
             )
+            error_response = xmltodict.unparse(
+                soap_response, full_document=False, pretty=True
+            )
+            return Response(
+                content=error_response,
+                media_type="application/soap+xml",
+            )
+            # raise HTTPException(
+            #     status_code=404,
+            #     detail=f"Document with Id {document_id} not found or is empty",
+            # )
     else:
         raise HTTPException(
             status_code=400, detail=f"Content type {content_type} not supported"

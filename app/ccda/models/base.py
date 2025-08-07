@@ -1,13 +1,29 @@
 from typing import Dict, List, Optional, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Extra, Field, field_serializer
 
-from .datatypes import CD, CE, CS, ED, EIVL_TS, II, IVL_PQ, IVL_TS, PIVL_TS, SXCM_TS
+from ..helpers import templateId
+from .admin import AuthorParticipation
+from .datatypes import (
+    ANY,
+    CD,
+    CE,
+    CS,
+    ED,
+    EIVL_TS,
+    II,
+    IVL_PQ,
+    IVL_TS,
+    PIVL_TS,
+    PQ,
+    SXCM_TS,
+)
 
 
 class ManufacturedMaterial(BaseModel):
     code: CD
+    lotNumberText: Optional[str] = None
 
 
 class ManufacturedProduct(BaseModel):
@@ -58,8 +74,27 @@ class Observation(BaseModel):
     text: Optional[str] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
-    value: Optional[dict] = None
-    entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
+    value: Optional[ANY] = None
+    entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
+
+
+class ResultObservation(Observation):
+    """
+    Representation of CDA model object Result Observation.
+    """
+
+    templateId: List[II] = Field(
+        default=[
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.4.2",
+                    "@extension": "2015-08-01",
+                }
+            )
+        ]
+    )
+    referenceRange: Optional[Dict] = None
+    value: Optional[PQ] = None  # PQ is used for numeric values
 
 
 class InstructionObservation(Observation):
@@ -98,13 +133,14 @@ class InstructionObservation(Observation):
     # }
 
 
-class EntryRelationship(BaseModel):
+class EntryRelationship(BaseModel, extra=Extra.allow):
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
     sequenceNumber: Optional[int] = None
     act: Optional[Act] = None
     observation: Optional[Observation] = None
+    # accept any type of object
 
 
 class SubstanceAdministration(BaseModel):
@@ -117,14 +153,15 @@ class SubstanceAdministration(BaseModel):
     moodCode: str = Field(alias="@moodCode", default="INT")
     templateId: List[II] = Field(default_factory=list)
     id: List[II] = Field(default_factory=list)
-    code: Optional[CD] = Field(
-        default=CD(
-            **{
-                "@code": "CONC",
-                "@codeSystem": "2.16.840.1.113883.5.6",
-            }
-        )
-    )
+    # ?code needed
+    # code: Optional[CD] = Field(
+    #     default=CD(
+    #         **{
+    #             "@code": "CONC",
+    #             "@codeSystem": "2.16.840.1.113883.5.6",
+    #         }
+    #     )
+    # )
     text: Optional[ED] = None
     statusCode: Optional[CS] = None
     effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
@@ -135,7 +172,8 @@ class SubstanceAdministration(BaseModel):
     doseQuantity: Optional[IVL_PQ] = None
     rateQuantity: Optional[IVL_PQ] = None
     entryRelationship: List[EntryRelationship] = Field(default_factory=list)
-    # precondition: List[Precondition] = Field(default_factory=list)
+    # TODO flesh out precondition model
+    precondition: Optional[Dict] = None
 
     @field_serializer("effectiveTime")
     def serialize_effective_time(
@@ -146,22 +184,18 @@ class SubstanceAdministration(BaseModel):
         """
         # print(sxcm_ts_list)
         time_list = []
+        sxcm = {}
         for eff_time in sxcm_ts_list:
             # print(f"eff_time: {eff_time}")
             # print(isinstance(eff_time, SXCM_TS))
             if eff_time.resource_type == "SXCM_TS":
-                time_list.append(
-                    {
-                        eff_time.operator: (
-                            {"@value": eff_time.value}
-                            if eff_time.value is not None
-                            else None
-                        )
-                    }
-                )
+                # add the operator to the dictionary
+                sxcm[eff_time.operator] = {"@value": eff_time.value}
             else:
                 time_list.append(eff_time.model_dump(by_alias=True, exclude_none=True))
-
+        # append the sxcm dictionary to the time_list at the start
+        if sxcm:
+            time_list.insert(0, sxcm)
         return time_list
         # print(time_list)
 
@@ -190,3 +224,56 @@ class Section(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+
+
+class ResultsOrganizer(BaseModel):
+    """
+    Representation of a CDA Results Organizer model object.
+    """
+
+    classCode: str = Field(alias="@classCode", default="BATTERY")
+    moodCode: str = Field(alias="@moodCode", default="EVN")
+    templateId: List[II] = Field(
+        default=[
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.4.1",
+                    "@extension": "2015-08-01",
+                }
+            )
+        ],
+    )
+    id: Optional[List[II]] = Field(default_factory=list)
+    code: Optional[CD] = None
+    statusCode: Optional[CS] = None
+    effectiveTime: Optional[IVL_TS] = None
+    author: Optional[AuthorParticipation] = None
+    component: List[ResultObservation] = Field(default_factory=list)
+
+
+class ResultsSection(Section):
+    """
+    Representation of a CDA Results Section model object.
+    """
+
+    templateId: List[II] = Field(
+        default=[
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.2.3.1",
+                    "@extension": "2015-08-01",
+                }
+            )
+        ]
+    )
+    code: CE = Field(
+        default=CE(
+            **{
+                "@code": "30954-2",
+                "@codeSystem": "2.16.840.1.113883.6.1",
+            }
+        )
+    )
+    title: Optional[str] = "Results"
+    text: Optional[str] = None
+    entry: Optional[List[ResultsOrganizer]] = Field(default_factory=list)
