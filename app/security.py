@@ -147,21 +147,21 @@ def create_jwt(
             ],
         },
     }
-    print("JWT PAYLOAD")
-    print(payload)
+    # print("JWT PAYLOAD")
+    # print(payload)
     # write payload to file for debugging
-    with open("app/logs/int_troubleshooting/jwt_payload.json", "w") as f:
-        import json
+    # with open("app/logs/int_troubleshooting/jwt_payload.json", "w") as f:
+    #     import json
 
-        json.dump(payload, f, indent=4)
+    #     json.dump(payload, f, indent=4)
     # Get private key from environment or file
 
     headers = {"alg": "RS512", "typ": "JWT", "kid": "test-1"}
     # log headers to file for debugging
-    with open("app/logs/int_troubleshooting/jwt_headers.json", "w") as f:
-        import json
+    # with open("app/logs/int_troubleshooting/jwt_headers.json", "w") as f:
+    #     import json
 
-        json.dump(headers, f, indent=4)
+    #     json.dump(headers, f, indent=4)
     # headers = {"alg": "none", "typ": "JWT"}
 
     if JWTKEY is not None:
