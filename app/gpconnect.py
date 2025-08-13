@@ -42,16 +42,16 @@ ssl_context = create_nhs_ssl_context(
     "keys/nhs_certs/nhs_bundle.pem",
 )
 
+logging.basicConfig(level=logging.DEBUG)
+httpx_logger = logging.getLogger("httpx")
+httpx_logger.setLevel(logging.DEBUG)
+
 client = httpx.AsyncClient(
     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
     verify=ssl_context,  # This fixes the silent failures!
     timeout=httpx.Timeout(30.0),
     http2=False,
 )
-
-logging.basicConfig(level=logging.DEBUG)
-httpx_logger = logging.getLogger("httpx")
-httpx_logger.setLevel(logging.DEBUG)
 
 
 @router.get("/gpconnect/{nhsno}")
@@ -77,7 +77,7 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
             f"{nhsno} is not an unrestricted patient, GP connect access not permitted"
         )
         if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "w") as f:
+            with open(os.path.join(log_dir, "diff_error.log"), "w") as f:
                 f.write(f"{nhsno} is restricted\n")
 
         return Response(
@@ -186,17 +186,22 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
 
     try:
         r = await client.post(url, json=body, headers=headers)
-        print(r.status_code)
-        print(r.text)
+        # print(r.status_code)
+        # print(r.text)
+        if log_dir:
+            with open(
+                os.path.join(log_dir, f"{r.status_code}_response.json"), "w"
+            ) as f:
+                f.write(r.text)
+        logging.info(r.text)
     except httpx.ReadError as e:
         print("❌ ReadError: server closed connection before responding")
     except Exception as e:
         print("❌ Unexpected error:", e)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "w") as f:
+                f.write(f"Unexpected error: {e}\n")
 
-    if log_dir:
-        with open(os.path.join(log_dir, "response.json"), "w") as f:
-            f.write(r.text)
-    logging.info(r.text)
     scr_bundle = json.loads(r.text)
 
     # get rid of fhir_comments
@@ -274,6 +279,6 @@ if __name__ == "__main__":
 
     # result = await gpconnect(9690937278, audit_dict)
     result = asyncio.run(
-        gpconnect(9690937286, audit_dict, log_dir="app/logs/int_troubleshooting")
+        gpconnect(9690938533, audit_dict, log_dir="app/logs/int_troubleshooting")
     )
     # assert result["resourceType"] == "Patient"

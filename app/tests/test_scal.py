@@ -9,16 +9,19 @@ from app.gpconnect import gpconnect
 from .log_context import capture_test_logs
 
 audit_dict = {
-    "subject_id": "Test Subject",
-    "organization": "Test Org",
-    "organization_id": "urn:oid:test-org-id",
-    "home_community_id": "urn:oid:test-home-id",
+    "subject_id": "CONE, Stephen",
+    "organization": "UCLH - University College London Hospitals - TST",
+    "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+    "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
     "role": {
         "Role": {
             "@codeSystem": "2.16.840.1.113883.6.96",
             "@code": "224608005",
-            "@displayName": "Admin",
+            "@codeSystemName": "SNOMED_CT",
+            "@displayName": "Administrative healthcare staff",
             "@xmlns": "urn:hl7-org:v3",
+            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
         }
     },
     "purpose_of_use": {
@@ -26,11 +29,14 @@ audit_dict = {
             "@xsi:type": "CE",
             "@code": "TREATMENT",
             "@codeSystem": "2.16.840.1.113883.3.18.7.1",
+            "@codeSystemName": "nhin-purpose",
             "@displayName": "Treatment",
             "@xmlns": "urn:hl7-org:v3",
+            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
         },
     },
-    "resource_id": "test-resource-id",
+    "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
 }
 
 
@@ -51,6 +57,7 @@ async def test_PC_STR_TST_GEN_06():
     for nhsno in nhsnos:
         async with capture_test_logs("PC-STR-TST-GEN-06", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            print(f"Result for {nhsno}: {result}")
             assert "document_id" in result
 
 

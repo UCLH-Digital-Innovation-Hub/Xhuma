@@ -241,9 +241,18 @@ async def iti38(request: Request):
     content_type = request.headers["Content-Type"]
     if "application/soap+xml" in content_type:
         body = await request.body()
+        print("-" * 40)
+        # print(f"Received body: {body}")
         envelope = clean_soap(body)
+        # print(f"Envelope: {envelope["Header"]["Security"]["Assertion"]}")
+        # for key, value in envelope["Header"]["Security"]["Assertion"].items():
+        #     print(f"{key}: {value}")
+
+        # for item in envelope["Header"]["Security"]["Assertion"].items():
+        #     print(f"{item[0]}: {item[1]}")
         saml_attrs = process_saml_attributes(
             envelope["Header"]["Security"]["Assertion"]["AttributeStatement"]
+            # envelope["Header"]["Security"]["AttributeStatement"]
         )
 
         soap_body = envelope["Body"]
@@ -256,14 +265,19 @@ async def iti38(request: Request):
             if x["@name"] == "$XDSDocumentEntryPatientId"
         )
 
+        print(f"Patient ID: {patient_id}")
         # TODO rewrite this pattern if we don't need to map CEID to NHSNO
         if not validateNHSnumber(patient_id):
             try:
                 pattern = r"[0-9]{10}"
                 poss_nhs = re.search(pattern, patient_id).group(0)
+                print(f"Possible NHS number: {poss_nhs}")
+                print(validateNHSnumber(poss_nhs))
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
-                    data = await iti_38_response(patient_id, "NOCEID", query_id)
+                    data = await iti_38_response(
+                        patient_id, "NOCEID", query_id, saml_attrs
+                    )
             except:
                 pattern = r"[A-Z0-9]{15}"
                 ceid = re.search(pattern, patient_id).group(0)
