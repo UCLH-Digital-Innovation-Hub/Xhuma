@@ -278,16 +278,9 @@ async def iti38(request: Request):
                     data = await iti_38_response(
                         patient_id, "NOCEID", query_id, saml_attrs
                     )
-            except:
-                pattern = r"[A-Z0-9]{15}"
-                ceid = re.search(pattern, patient_id).group(0)
-                print(f"CEID: {ceid}")
-                logging.info(f"Patient ID is CEID: {ceid}")
-                patient_id = client.get(ceid)
-                print(f"NHS no for CEID is: {patient_id}")
-                logging.info(f"Mapped NHSNO is: {patient_id} from {ceid}")
-
-                data = await iti_38_response(patient_id, ceid, query_id)
+            except AttributeError:
+                print(f"No valid NHS number found in patient ID's {patient_id}")
+                logging.info(f"No valid NHS number found in patient ID's {patient_id}")
         else:
             data = await iti_38_response(patient_id, "NOCEID", query_id, saml_attrs)
         return Response(content=data, media_type="application/soap+xml")
