@@ -24,7 +24,7 @@ async def capture_test_logs(test_id: str, nhsno: str):
     try:
         yield base_dir
     except Exception:
-        with open(os.path.join(base_dir, "error.log"), "w") as f:
+        with open(os.path.join(base_dir, "error.log"), "a") as f:
             f.write(traceback.format_exc())
         raise
     finally:

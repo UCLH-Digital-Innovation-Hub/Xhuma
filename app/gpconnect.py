@@ -9,6 +9,7 @@ from uuid import uuid4
 import httpx
 import xmltodict
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
 from .ccda.convert_mime import base64_xml, convert_mime
@@ -55,95 +56,107 @@ client = httpx.AsyncClient(
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
+async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
-    # validate nhsnumber
-    if validateNHSnumber(nhsno) == False:
-        logging.error(f"{nhsno} is not a valid NHS number")
+    # 1) Validate NHS number
+    if validateNHSnumber(nhsno) is False:
+        msg = f"{nhsno} is not a valid NHS number"
+        logging.error(msg)
         if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "w") as f:
-                f.write(f"{nhsno} is not a valid NHS number\n")
-        raise HTTPException(status_code=400, detail="Invalid NHS number")
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=400, content={"success": False, "error": msg})
 
-    # TODO add in caching
-    pds_search = await lookup_patient(nhsno)
+    # 2) PDS lookup (consider caching in future)
+    try:
+        pds_search = await lookup_patient(nhsno)
+    except Exception as e:
+        msg = f"PDS lookup failed: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    # make sure patient is unrestricted
-    security_code = pds_search["meta"]["security"][0]["code"]
+    # 3) Security/U flag
+    try:
+        security_code = pds_search["meta"]["security"][0]["code"]
+    except Exception:
+        security_code = None
 
     if security_code != "U":
-        logging.error(
-            f"{nhsno} is not an unrestricted patient, GP connect access not permitted"
-        )
+        msg = "Patient is not unrestricted, access to GP Connect is not permitted"
+        logging.error(f"{nhsno} is restricted")
         if log_dir:
-            with open(os.path.join(log_dir, "diff_error.log"), "w") as f:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(f"{nhsno} is restricted\n")
+        return JSONResponse(status_code=403, content={"success": False, "error": msg})
 
-        return Response(
-            {
-                "success": False,
-                "error": "Patient is not unrestricted, access to GP connect is not permitted",
-            }
-        )
-        raise HTTPException(
-            status_code=403,
-            detail="Patient is not unrestricted, access to GP connect is not permitted",
-        )
+    # 4) Resolve ODS → ASID + PartyKey
+    try:
+        gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
+    except Exception as e:
+        msg = f"Unable to read GP ODS from PDS response: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
-    # print(pds_search)
-    gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
+    try:
+        asid_trace = await sds_trace(gp_ods)
+    except Exception as e:
+        msg = f"SDS trace failed: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    asid_trace = await sds_trace(gp_ods)
-    for item in asid_trace["entry"][0]["resource"]["identifier"]:
-        if item["system"] == "https://fhir.nhs.uk/Id/nhsSpineASID":
-            asid = item["value"]
-        elif item["system"] == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
-            nhsmhsparty = item["value"]
+    asid = None
+    nhsmhsparty = None
+    for item in (
+        asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
+    ):
+        if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
+            asid = item.get("value")
+        elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+            nhsmhsparty = item.get("value")
 
-    # log error if unable to find ASID or nhsMhsPartyKey
     if not asid or not nhsmhsparty:
-        logging.error(f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}")
+        msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"
+        logging.error(msg)
         if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "w") as f:
-                f.write(
-                    f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}\n"
-                )
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to find ASID or nhsMhsPartyKey for the provided ODS code",
-        )
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
-    endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
-    # print("Endpoint trace:")
-    # pprint.pprint(endpoint_trace)
+    # 5) Endpoint lookup
+    try:
+        endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+    except Exception as e:
+        msg = f"SDS endpoint trace failed: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    # if unable to find fhirendpoint, log error and raise exception
     if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
-        logging.error(f"Unable to find FHIR endpoint for ODS code {gp_ods}")
+        msg = f"Unable to find FHIR endpoint for ODS code {gp_ods}"
+        logging.error(msg)
         if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "w") as f:
-                f.write(f"Unable to find FHIR endpoint for ODS code {gp_ods}\n")
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to find FHIR endpoint for the provided ODS code",
-        )
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
-    # edit fhhir endpoint url to go from http to https
-    # if fhir_endpoint_url.startswith("http://"):
-    #     fhir_endpoint_url = fhir_endpoint_url.replace("http://", "https://")
-    # print(fhir_endpoint_url)
 
+    # 6) Build request
     token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
-    # print(f"JWT Token: {token}")
-    # print decoded token
-    # print(jwt.decode(token, options={"verify_signature": False}))
-
     headers = {
-        # unique uuid per request (TODO maybe use the correlation id?)
         "Ssp-TraceID": str(uuid4()),
-        # ASID for originating organisation e.g. Hospital not Xhuma
         "Ssp-From": "200000002574",
         "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
@@ -151,7 +164,6 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
         "accept": "application/fhir+json",
         "Content-Type": "application/fhir+json",
     }
-
     body = {
         "resourceType": "Parameters",
         "parameter": [
@@ -182,65 +194,94 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None):
             json.dump(body, f, indent=2)
 
     url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-    print(f"Requesting {url} for {nhsno}")
 
+    # 7) Make request with a per-call client (avoid leaking across event loops)
+    resp = None
     try:
-        r = await client.post(url, json=body, headers=headers)
-        # print(r.status_code)
-        # print(r.text)
+        async with httpx.AsyncClient(
+            cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
+            verify=create_nhs_ssl_context(
+                "keys/nhs_certs/client_cert.pem",
+                "keys/nhs_certs/client_key.pem",
+                "keys/nhs_certs/nhs_bundle.pem",
+            ),
+            timeout=httpx.Timeout(30.0),
+            http2=False,
+        ) as session:
+            resp = await session.post(url, json=body, headers=headers)
+
         if log_dir:
             with open(
-                os.path.join(log_dir, f"{r.status_code}_response.json"), "w"
+                os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
             ) as f:
-                f.write(r.text)
-        logging.info(r.text)
+                f.write(resp.text)
+        logging.info(resp.text)
+
     except httpx.ReadError as e:
-        print("❌ ReadError: server closed connection before responding")
-    except Exception as e:
-        print("❌ Unexpected error:", e)
+        msg = "ReadError: server closed connection before responding"
+        print("❌", msg)
         if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "w") as f:
-                f.write(f"Unexpected error: {e}\n")
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    scr_bundle = json.loads(r.text)
+    except Exception as e:
+        msg = f"Unexpected error during request: {e}"
+        print("❌", msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    # get rid of fhir_comments
+    # 8) Non-200 handling
+    if resp.status_code != 200:
+        msg = f"Error from GP Connect endpoint {resp.status_code}"
+        logging.error(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(
+            status_code=resp.status_code, content={"success": False, "error": msg}
+        )
+
+    # 9) Convert to CCDA, store in Redis, return JSONResponse
+    scr_bundle = json.loads(resp.text)
+    # remove any single 'fhir_comments' entry to keep fhirclient happy
     comment_index = None
-    for j, i in enumerate(scr_bundle["entry"]):
-        if "fhir_comments" in i.keys():
+    for j, i in enumerate(scr_bundle.get("entry", [])):
+        if "fhir_comments" in i:
             comment_index = j
+            break
     if comment_index is not None:
         scr_bundle["entry"].pop(comment_index)
 
     fhir_bundle = bundle.Bundle(scr_bundle)
 
-    # index resources to allow for resolution
+    # index resources for resolution
     bundle_index = {}
-    for entry in fhir_bundle.entry:
+    for entry in fhir_bundle.entry or []:
         try:
-            address = f"{entry.resource.resource_type}/{entry.resource.id}"
-            bundle_index[address] = entry.resource
-        except:
+            addr = f"{entry.resource.resource_type}/{entry.resource.id}"
+            bundle_index[addr] = entry.resource
+        except Exception:
             pass
 
     xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
     if log_dir:
         with open(os.path.join(log_dir, f"{nhsno}.xml"), "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
-    # xop = convert_mime(xml_ccda)
-    xop = base64_xml(xml_ccda)
-    # print(xop)
-    doc_uuid = str(uuid4())
 
-    # TODO set this as background task
+    xop = base64_xml(xml_ccda)
+    doc_uuid = str(uuid4())
     redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
     redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
 
-    # pprint(xml_ccda)
     with open(f"{nhsno}.xml", "w") as output:
         output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
-    return {"success": True, "document_id": doc_uuid}
+    return JSONResponse(
+        status_code=200, content={"success": True, "document_id": doc_uuid}
+    )
 
 
 if __name__ == "__main__":
@@ -279,6 +320,11 @@ if __name__ == "__main__":
 
     # result = await gpconnect(9690937278, audit_dict)
     result = asyncio.run(
-        gpconnect(9690938533, audit_dict, log_dir="app/logs/int_troubleshooting")
+        gpconnect(9690937375, audit_dict, log_dir="app/logs/int_troubleshooting")
     )
+    print(result.body.decode())
+    print(result.status_code)
+    assert "error" in result.body.decode()
+    body = json.loads(result.body)
+    assert body["success"] is False
     # assert result["resourceType"] == "Patient"

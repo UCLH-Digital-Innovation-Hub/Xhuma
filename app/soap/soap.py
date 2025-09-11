@@ -29,8 +29,12 @@ from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .audit import process_saml_attributes
-from .responses import (iti_38_response, iti_39_response, iti_47_response,
-                        iti_55_response)
+from .responses import (
+    iti_38_response,
+    iti_39_response,
+    iti_47_response,
+    iti_55_response,
+)
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):

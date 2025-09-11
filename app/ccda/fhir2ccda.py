@@ -52,12 +52,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "@extension": subject[0].identifier[0].value,
                 "@root": "2.16.840.1.113883.2.1.4.1",
             },
-            "addr": {
-                "@use": "HP",
-                "streetAddressLine": [x for x in subject[0].address[0].line],
-                "city": {"#text": subject[0].address[0].city},
-                "postalCode": {"#text": subject[0].address[0].postalCode},
-            },
             "patient": {
                 "name": {
                     "@use": "L",
@@ -68,6 +62,19 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             },
         }
     }
+    # "addr": {
+    #             "@use": "HP",
+    #             "streetAddressLine": [x for x in subject[0].address[0].line],
+    #             "city": {"#text": subject[0].address[0].city},
+    #             "postalCode": {"#text": subject[0].address[0].postalCode},
+    #         },
+    if subject[0].address:
+        patient_dict["patientRole"]["patient"]["addr"] = {
+            "@use": "HP",
+            "streetAddressLine": [x for x in subject[0].address[0].line],
+            "city": {"#text": subject[0].address[0].city},
+            "postalCode": {"#text": subject[0].address[0].postalCode},
+        }
 
     ccda["ClinicalDocument"]["recordTarget"] = patient_dict
 
