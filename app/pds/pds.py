@@ -10,6 +10,7 @@ import fastapi
 import httpx
 from fhirclient.models import patient as p
 
+from app.caching import redis_cache
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
 from app.security import pds_jwt
@@ -258,6 +259,14 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
         raise Exception(f"{r.status_code}: {r.text}")
 
     return json.loads(r.text)
+
+
+@redis_cache(ttl=43200, prefix="pds_lookup_patient")  # 12 hours
+async def lookup_patient_cached(nhsno: int):
+    """
+    Cached version of lookup_patient using Redis
+    Cache TTL is 12 hours (43200 seconds)"""
+    return await lookup_patient(nhsno)
 
 
 if __name__ == "__main__":
