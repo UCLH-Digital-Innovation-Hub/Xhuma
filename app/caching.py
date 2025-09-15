@@ -55,10 +55,12 @@ def redis_cache(ttl: int = 300, prefix: str = "", redis=redis_client):
             # Check Redis
             cached = await redis.get(cache_key)
             if cached:
+                print(f"Cache hit for key: {cache_key}")
                 return json.loads(cached)
 
             # Call the function and cache the result
             result = await func(*args, **kwargs)
+            print(f"Caching result for key: {cache_key} with TTL {ttl}")
             await redis.set(cache_key, json.dumps(result), ex=ttl)
             return result
 
