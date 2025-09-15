@@ -11,11 +11,11 @@ profiles for healthcare interoperability.
 
 import json
 import os
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from fhirclient.models import bundle
 from jwcrypto import jwk
 
 from .gpconnect import gpconnect
@@ -23,32 +23,16 @@ from .pds import pds
 from .redis_connect import redis_client
 from .soap import soap
 
-# Initialize FastAPI application
-app = FastAPI(
-    title="Xhuma",
-    description="A stateless middleware service for GP Connect to CCDA conversion",
-    version="1.0.0",
-)
-
-# Include routers for different service components
-app.include_router(soap.router)
-app.include_router(pds.router)
-# app.include_router(gpconnect.router)  # Currently disabled
-
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
 
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """
-    Startup event handler that initializes necessary configurations.
-
-    This function:
-    1. Sets the registry ID in Redis
-    2. Checks for existing JWK (JSON Web Key)
-    3. Generates a new JWK from private key if none exists
+    Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
+    # --- Startup logic ---
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
 
@@ -64,7 +48,23 @@ async def startup_event():
             with open("keys/jwk.json", "w") as f:
                 json.dump(jwk_json, f)
 
+    yield  # Application runs here
 
+
+# Initialize FastAPI application
+app = FastAPI(
+    title="Xhuma",
+    description="A stateless middleware service for GP Connect to CCDA conversion",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Include routers for different service components
+app.include_router(soap.router)
+app.include_router(pds.router)
+
+
+# app.include_router(gpconnect.router)  # Currently disabled
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root():
     """
@@ -106,7 +106,37 @@ async def demo(nhsno: int):
     Returns:
         bytes: MIME encoded CCDA document retrieved from Redis cache.
     """
-    bundle_id = await gpconnect(nhsno)
+    audit_dict = {
+        "subject_id": "CONE, Stephen",
+        "organization": "UCLH - University College London Hospitals - TST",
+        "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+        "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+        "role": {
+            "Role": {
+                "@codeSystem": "2.16.840.1.113883.6.96",
+                "@code": "224608005",
+                "@codeSystemName": "SNOMED_CT",
+                "@displayName": "Administrative healthcare staff",
+                "@xmlns": "urn:hl7-org:v3",
+                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+            }
+        },
+        "purpose_of_use": {
+            "PurposeForUse": {
+                "@xsi:type": "CE",
+                "@code": "TREATMENT",
+                "@codeSystem": "2.16.840.1.113883.3.18.7.1",
+                "@codeSystemName": "nhin-purpose",
+                "@displayName": "Treatment",
+                "@xmlns": "urn:hl7-org:v3",
+                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+            },
+        },
+        "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
+    }
+    bundle_id = await gpconnect(nhsno, audit_dict)
     return redis_client.get(bundle_id["document_id"])
 
 

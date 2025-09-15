@@ -29,7 +29,7 @@ from redis.exceptions import ConnectionError, RedisError
 logger = logging.getLogger(__name__)
 
 # Redis connection configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
@@ -79,7 +79,7 @@ class RedisClient:
             host=REDIS_HOST,
             port=REDIS_PORT,
             db=REDIS_DB,
-            password=REDIS_PASSWORD,
+            # password=REDIS_PASSWORD,
             max_connections=POOL_MAX_CONNECTIONS,
             socket_timeout=SOCKET_TIMEOUT,
             socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,

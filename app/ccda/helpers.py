@@ -47,6 +47,8 @@ def generate_code(coding: coding.Coding) -> dict:
 
     if coding.system == "http://snomed.info/sct":
         code["@codeSystem"] = "2.16.840.1.113883.6.96"
+    elif coding.system == "https://fhir.hl7.org.uk/Id/multilex-drug-codes":
+        code["@codeSystem"] = "2.16.840.1.113883.2.1.6.4"
 
     return code
 
@@ -152,6 +154,9 @@ def clean_soap(
         "urn:ihe:iti:xds-b:2007": None,
         "urn:hl7-org:v3": None,
         "soap": None,
+        "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd": None,
+        "urn:oasis:names:tc:SAML:2.0:assertion": None,
+        "urn:oasis:names:tc:SAML:2.0:assertion": None,
     },
 ) -> dict:
     """

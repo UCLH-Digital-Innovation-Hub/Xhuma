@@ -29,6 +29,7 @@ from starlette.background import BackgroundTask
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
+from .audit import process_saml_attributes
 from .responses import (
     create_envelope,
     create_header,
@@ -187,6 +188,7 @@ async def iti47(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
+
         query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
             "queryByParameter"
         ]["parameterList"]
@@ -204,8 +206,8 @@ async def iti47(request: Request):
                 status_code=400, detail=f"Invalid request, no care everywhere id found"
             )
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
-        # Cache NHSNO to CEID mapping for 24 hours (86400 seconds)
-        client.setex(ceid, 86400, nhsno)
+        client.set(ceid, nhsno)
+        # TODO add audit stuff here too
         patient = await lookup_patient(nhsno)
         print(f"Patient: {patient}")
         if not patient:
@@ -248,7 +250,20 @@ async def iti38(request: Request):
     content_type = request.headers["Content-Type"]
     if "application/soap+xml" in content_type:
         body = await request.body()
+        print("-" * 40)
+        # print(f"Received body: {body}")
         envelope = clean_soap(body)
+        # print(f"Envelope: {envelope["Header"]["Security"]["Assertion"]}")
+        # for key, value in envelope["Header"]["Security"]["Assertion"].items():
+        #     print(f"{key}: {value}")
+
+        # for item in envelope["Header"]["Security"]["Assertion"].items():
+        #     print(f"{item[0]}: {item[1]}")
+        saml_attrs = process_saml_attributes(
+            envelope["Header"]["Security"]["Assertion"]["AttributeStatement"]
+            # envelope["Header"]["Security"]["AttributeStatement"]
+        )
+
         soap_body = envelope["Body"]
         slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
         query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
@@ -259,26 +274,24 @@ async def iti38(request: Request):
             if x["@name"] == "$XDSDocumentEntryPatientId"
         )
 
+        print(f"Patient ID: {patient_id}")
         # TODO rewrite this pattern if we don't need to map CEID to NHSNO
         if not validateNHSnumber(patient_id):
             try:
                 pattern = r"[0-9]{10}"
                 poss_nhs = re.search(pattern, patient_id).group(0)
+                print(f"Possible NHS number: {poss_nhs}")
+                print(validateNHSnumber(poss_nhs))
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
-                    data = await iti_38_response(patient_id, "NOCEID", query_id)
-            except:
-                pattern = r"[A-Z0-9]{15}"
-                ceid = re.search(pattern, patient_id).group(0)
-                print(f"CEID: {ceid}")
-                logging.info(f"Patient ID is CEID: {ceid}")
-                patient_id = client.get(ceid)
-                print(f"NHS no for CEID is: {patient_id}")
-                logging.info(f"Mapped NHSNO is: {patient_id} from {ceid}")
-
-                data = await iti_38_response(patient_id, ceid, query_id)
+                    data = await iti_38_response(
+                        patient_id, "NOCEID", query_id, saml_attrs
+                    )
+            except AttributeError:
+                print(f"No valid NHS number found in patient ID's {patient_id}")
+                logging.info(f"No valid NHS number found in patient ID's {patient_id}")
         else:
-            data = await iti_38_response(patient_id, "NOCEID", query_id)
+            data = await iti_38_response(patient_id, "NOCEID", query_id, saml_attrs)
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(

@@ -44,7 +44,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         "@codeSystem": "2.16.840.1.113883.6.1",
     }
 
-    ccda["ClinicalDocument"]["title"] = {"#text": "Summary Care Record"}
+    ccda["ClinicalDocument"]["title"] = {
+        "#text": "GP Connect: Access Record Structured"
+    }
 
     # patient
     # TODO refine address parsing as may have multiple
@@ -54,12 +56,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "id": {
                 "@extension": subject[0].identifier[0].value,
                 "@root": "2.16.840.1.113883.2.1.4.1",
-            },
-            "addr": {
-                "@use": "HP",
-                "streetAddressLine": [x for x in subject[0].address[0].line],
-                "city": {"#text": subject[0].address[0].city},
-                "postalCode": {"#text": subject[0].address[0].postalCode},
             },
             "patient": {
                 "name": {
@@ -71,6 +67,19 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             },
         }
     }
+    # "addr": {
+    #             "@use": "HP",
+    #             "streetAddressLine": [x for x in subject[0].address[0].line],
+    #             "city": {"#text": subject[0].address[0].city},
+    #             "postalCode": {"#text": subject[0].address[0].postalCode},
+    #         },
+    if subject[0].address:
+        patient_dict["patientRole"]["patient"]["addr"] = {
+            "@use": "HP",
+            "streetAddressLine": [x for x in subject[0].address[0].line],
+            "city": {"#text": subject[0].address[0].city},
+            "postalCode": {"#text": subject[0].address[0].postalCode},
+        }
 
     ccda["ClinicalDocument"]["recordTarget"] = patient_dict
 
@@ -212,6 +221,26 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     row.append({data})
                 return {"td": entry_data}
 
+            # if list has attribute empty reason
+            # check if the list is empty
+            # if hasattr(list, "emptyReason"):
+            #     print(f"list {list.title} is empty")
+            #     # if the list is empty
+            #     comp["section"]["text"] = {
+            #         "table": {
+            #             "thead": create_headers(list.title),
+            #             "tbody": {
+            #                 "tr": {
+            #                     "td": {
+            #                         "@colspan": len(table_headers[list.title]),
+            #                         # "#text": list.emptyReason[0].text,
+            #                         "#text": "No Information Available",
+            #                     }
+            #                 }
+            #             },
+            #         }
+            #     }
+            #     return comp
             if not list.entry:
                 # if there are no entries
                 # Initialize empty table with appropriate headers based on section
@@ -288,23 +317,15 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         rows.append(
                             create_row(
                                 [
-                                    readable_date(
-                                        entry_data["substanceAdministration"][
-                                            "effectiveTime"
-                                        ][0]["low"]["@value"]
-                                    ),
-                                    (
-                                        readable_date(
-                                            entry_data["substanceAdministration"][
-                                                "effectiveTime"
-                                            ][0]["high"]["@value"]
-                                        )
-                                        if "high"
-                                        in entry_data["substanceAdministration"][
-                                            "effectiveTime"
-                                        ][0]
-                                        else ""
-                                    ),
+                                    entry_data["substanceAdministration"][
+                                        "effectiveTime"
+                                    ]["low"]["@value"],
+                                    # if no high value should be blank
+                                    entry_data["substanceAdministration"][
+                                        "effectiveTime"
+                                    ]
+                                    .get("high", {})
+                                    .get("@value", ""),
                                     entry_data["substanceAdministration"]["statusCode"][
                                         "@code"
                                     ],
@@ -317,77 +338,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                 ]
                             )
                         )
-                    elif list.title == "Immunisations":
-                        entry_data = immunization_entry(referenced_item, index)
-                        comp["section"]["entry"].append(entry_data)
-                        rows.append(
-                            create_row(
-                                [
-                                    readable_date(
-                                        entry_data["substanceAdministration"][
-                                            "effectiveTime"
-                                        ][0]["low"]["@value"]
-                                    ),
-                                    entry_data["substanceAdministration"]["consumable"][
-                                        "manufacturedProduct"
-                                    ]["manufacturedMaterial"]["code"]["@displayName"],
-                                    entry_data["substanceAdministration"]["consumable"][
-                                        "manufacturedProduct"
-                                    ]["lotNumberText"],
-                                    entry_data["substanceAdministration"]["statusCode"][
-                                        "@code"
-                                    ],
-                                ]
-                            )
-                        )
-                    # elif list.title == "Investigations and results":
-                    #     for resource in referenced_item.result:
-                    #         result_resource = index.get(resource.reference)
-
-                    #         entry_data = result(result_resource, index)
-                    #         # pprint.pprint(entry_data)
-                    #         # check if entry_data is not None
-                    #         if entry_data is not None:
-                    #             comp["section"]["entry"].append(entry_data)
-                    #             # pprint.pprint(entry_data)
-                    #             rows.append(
-                    #                 {
-                    #                     "td": [
-                    #                         {
-                    #                             "content": [
-                    #                                 entry_data["code"]["@displayName"]
-                    #                             ],
-                    #                         }
-                    #                     ],
-                    #                 }
-                    #             )
-                    #             rows.append(
-                    #                 {
-                    #                     "td": [
-                    #                         {
-                    #                             "content": [
-                    #                                 entry_data["author"][
-                    #                                     "assignedAuthor"
-                    #                                 ]["representedOrganization"][
-                    #                                     "name"
-                    #                                 ],
-                    #                                 f"ODS:{entry_data["author"]["assignedAuthor"]["id"][0]["@extension"]}",
-                    #                             ],
-                    #                         }
-                    #                     ],
-                    #                 }
-                    #             )
-                    #             for res in entry_data["component"]:
-                    #                 rows.append(
-                    #                     create_row(
-                    #                         [
-                    #                             " ",
-                    #                             res["code"]["@displayName"],
-                    #                             f"{res["value"]["@value"]}/{res["value"]["@unit"]}",
-                    #                         ]
-                    #                     )
-                    #                 )
-                    print(rows)
                 # Close the table after all entries are processed
                 comp["section"]["text"] = {
                     "table": {
@@ -396,7 +346,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "tbody": {"tr": rows},
                     }
                 }
-                return comp
+            return comp
 
     bundle_components = [create_section(list) for list in lists]
     bundle_components = [x for x in bundle_components if x is not None]

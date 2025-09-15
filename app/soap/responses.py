@@ -331,7 +331,7 @@ async def iti_47_response(message_id, patient, ceid, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
-async def iti_38_response(nhsno: int, ceid, queryid: str):
+async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
 
     body = {}
     body["AdhocQueryResponse"] = {
@@ -345,8 +345,8 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
     if docid is None:
         # no cached ccda
         try:
-            r = await gpconnect(nhsno)
-            logging.info(f"used internal call for {nhsno}")
+            r = await gpconnect(nhsno, saml_attrs)
+            logging.info(f"no cached ccda, used internal call for {nhsno}")
             print(r)
             docid = r["document_id"]
         except Exception as e:
@@ -364,6 +364,22 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
                     "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 },
             }
+    if not r.get("success"):
+        logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
+        body["AdhocQueryResponse"][
+            "@status"
+        ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+        body["AdhocQueryResponse"]["RegistryErrorList"] = {
+            "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+            "RegistryError": {
+                "@errorCode": "XDSRegistryError",
+                "@codeContext": r.get("error", "Unknown error"),
+                "@location": "",
+                "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+            },
+        }
+    else:
+        docid = r["document_id"]
 
     if docid is not None:
         # add the ccda as registry object list
