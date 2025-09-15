@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import timedelta
@@ -28,8 +29,8 @@ async def gpconnect(nhsno: int):
         raise HTTPException(status_code=400, detail="Invalid NHS number")
 
     # TODO pds search
-    pds_search = await pds.lookup_patient(nhsno)
-    print(pds_search)
+    # pds_search = await pds.lookup_patient(nhsno)
+    # print(pds_search)
 
     # TODO sds search
 
@@ -55,17 +56,16 @@ async def gpconnect(nhsno: int):
                     "value": f"{nhsno}",
                 },
             },
-            {
-                "name": "includeAllergies",
-                "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
-            },
+            # {
+            #     "name": "includeAllergies",
+            #     "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
+            # },
             {
                 "name": "includeMedication",
                 "part": [{"name": "includePrescriptionIssues", "valueBoolean": False}],
             },
-            {"name": "includeProblems"},
-            {"name": "includeImmunisations"},
-            {"name": "includeInvestigations"},
+            # {"name": "includeProblems"},
+            # {"name": "includeInvestigations"},
         ],
     }
     r = httpx.post(
@@ -100,7 +100,7 @@ async def gpconnect(nhsno: int):
     xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
     # xop = convert_mime(xml_ccda)
     xop = base64_xml(xml_ccda)
-    print(xop)
+    # print(xop)
     doc_uuid = str(uuid4())
 
     # TODO set this as background task
@@ -112,3 +112,8 @@ async def gpconnect(nhsno: int):
         output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     return {"document_id": doc_uuid}
+
+
+if __name__ == "__main__":
+
+    document = asyncio.run(gpconnect(9690937472))
