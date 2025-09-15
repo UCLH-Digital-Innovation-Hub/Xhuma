@@ -41,6 +41,7 @@ async def lookup_patient(nhsno: int):
         nhs_token = response_dict["access_token"]
 
         redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
+        return nhs_token
 
         return nhs_token
 

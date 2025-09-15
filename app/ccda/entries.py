@@ -1,94 +1,223 @@
 import uuid
 
-from fhirclient.models import allergyintolerance, coding, condition
+from fhirclient.models import allergyintolerance, coding, condition, immunization
 from fhirclient.models import medication as fhirmed
-from fhirclient.models import medicationstatement
+from fhirclient.models import medicationstatement, observation
 
-from .helpers import date_helper, generate_code, templateId
+from .helpers import (
+    code_with_translations,
+    date_helper,
+    effective_time_helper,
+    organization_to_author,
+    templateId,
+)
+from .models.base import (
+    EntryRelationship,
+    Observation,
+    ResultObservation,
+    ResultsOrganizer,
+    SubstanceAdministration,
+)
+from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 
 def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
-    med = {
-        "substanceAdministration": {
-            "@classCode": "SBADM",
-            "@moodCode": "INT",
-        }
-    }
-
-    med["substanceAdministration"]["templateId"] = templateId(
-        "2.16.840.1.113883.10.20.22.4.16", "2014-06-09"
+    referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
+    # request = index[entry.basedOn[0].reference]
+    # dosage_instructions = request.dosageInstruction
+    # for dose in dosage_instructions:
+    #     print(dose.as_json())
+    # print(dosage_instructions.as_json())
+    substance_administration = SubstanceAdministration(
+        templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
+        id=[
+            {
+                # root for url base id
+                # https://build.fhir.org/ig/HL7/ccda-on-fhir/mappingGuidance.html#fhir-identifier--cda-id-with-example-mapping
+                "@root": entry.identifier[0].system,
+                "@extension": entry.identifier[0].value,
+            }
+        ],
+        statusCode={"@code": entry.status},
+        effectiveTime=effective_time_helper(entry.effectivePeriod),
+        consumable={
+            "manufacturedProduct": {
+                "templateId": templateId(
+                    root="2.16.840.1.113883.10.20.22.4.23", extension="2014-06-09"
+                ),
+                "id": {
+                    "@root": referenced_med.id,
+                },
+                "manufacturedMaterial": {
+                    "code": code_with_translations(referenced_med.code.coding),
+                },
+            }
+        },
+        entryRelationship=[],
     )
-    med["substanceAdministration"]["id"] = {"@root": entry.identifier[0].value}
-    med["substanceAdministration"]["code"] = {
-        "@code": "CONC",
-        "@codeSystem": "2.16.840.1.113883.5.6",
-    }
-
-    med["substanceAdministration"]["statusCode"] = {"@code": entry.status}
-
-    # TODO add robust checking on this in case there's no high value
-    # check if entry.effectivePeriod.end
-    # if entry.effectivePeriod.end:
-    #     med["substanceAdministration"]["effectiveTime"] = {
-    #         "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)},
-    #         "high": {"@value": date_helper(entry.effectivePeriod.end.isostring)},
-    #     }
-    # else:
-    #     med["substanceAdministration"]["effectiveTime"] = {
-    #         "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)}
-    #     }
-    med["substanceAdministration"]["effectiveTime"] = {
-        "low": {"@value": date_helper(entry.effectivePeriod.start.isostring)}
-    }
-    # if (
-    #     entry.effectivePeriod
-    #     and hasattr(entry.effectivePeriod, "end")
-    #     and entry.effectivePeriod.end
-    # ):
-    if entry.effectivePeriod.end is not None:
-        # print(vars(entry.effectivePeriod))
-        med["substanceAdministration"]["effectiveTime"]["high"] = {
-            "@value": date_helper(entry.effectivePeriod.end.isostring)
+    # if dose quantiy is in dosage
+    if entry.dosage[0].doseQuantity:
+        # assumption that all structuered dosage will be snomed
+        substance_administration.doseQuantity = {
+            "value": {
+                "@xsi:type": "PQ",
+                "@nullFlavor": "OTH",
+                "translation": {
+                    "@value": entry.dosage[0].doseQuantity.value,
+                    "@code": entry.dosage[0].doseQuantity.code,
+                    "@codeSystemName": entry.dosage[0].doseQuantity.system,
+                    "@codeSystem": "2.16.840.1.113883.6.96",
+                    "originalText": entry.dosage[0].doseQuantity.unit,
+                },
+            },
         }
+    # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
+    if entry.dosage[0].timing:
+        # check if medication is prn
+        if entry.dosage[0].timing.repeat.frequencyMax:
+            # medicine is prn
+            dose_period = (
+                entry.dosage[0].timing.repeat.period
+                / entry.dosage[0].timing.repeat.frequencyMax
+            )
 
-    referenced_med: fhirmed.Medication() = index[entry.medicationReference.reference]
-    request = index[entry.basedOn[0].reference]
+            # populate precondition
+            substance_administration.precondition = {
+                "@typeCode": "PRCN",
+                "criterion": {
+                    "templateId": templateId(
+                        root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"
+                    ),
+                    "code": {
+                        "@code": "ASSERTION",
+                        "@codeSystem": "2.16.840.1.113883.5.4",
+                    },
+                },
+            }
+            # if there is a asNeededCodeableConcept, use it
+            if entry.dosage[0].asNeededCodeableConcept:
+                substance_administration.precondition["criterion"]["value"] = {
+                    "@xsi:type": "CD",
+                    "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
+                    "@displayName": entry.dosage[0]
+                    .asNeededCodeableConcept.coding[0]
+                    .display,
+                    "@codeSystemName": entry.dosage[0]
+                    .asNeededCodeableConcept.coding[0]
+                    .value,
+                }
+            else:
+                # if no asNeededCodeableConcept, use NI
+                substance_administration.precondition["criterion"]["value"] = {
+                    "@xsi:type": "CD",
+                    "@nullFlavor": "NI",
+                }
 
-    # medication information
-    # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.23.html
-    med["substanceAdministration"]["consumable"] = {}
-    med["substanceAdministration"]["consumable"]["manufacturedProduct"] = {
-        "@classCode": "MANU",
-        "templateId": templateId("2.16.840.1.113883.10.20.22.4.23", "2014-06-09"),
-        "id": {"@root": uuid.uuid4()},
-        "manufacturedMaterial": {
-            "code": [generate_code(x) for x in referenced_med.code.coding],
-        },
+        else:
+            # frequency is the occurrence per period. C-CDA has a single period between doses hence division
+            dose_period = (
+                entry.dosage[0].timing.repeat.period
+                / entry.dosage[0].timing.repeat.frequency
+            )
+        # print(f"dose period: {dose_period}")
+
+        # https://hl7.org/fhir/R4/valueset-event-timing.html
+        # event_codes = [
+        #     "MORN",
+        #     "MORN.early",
+        #     "MORN.late",
+        #     "NOON",
+        #     "AFT",
+        #     "AFT.early",
+        #     "AFT.late",
+        #     "EVE",
+        #     "EVE.early",
+        #     "EVE.late",
+        #     "NIGHT",
+        #     "PHS",
+        #     "HS",
+        #     "WAKE",
+        #     "C",
+        #     "CM",
+        #     "CD",
+        #     "CV",
+        #     "AC",
+        #     "ACM",
+        #     "ACD",
+        #     "ACV",
+        #     "PC",
+        #     "PCM",
+        #     "PCD",
+        #     "PCV",
+        # ]
+        # # check if timing contains event codes
+        # if entry.dosage[0].timing.repeat.when:
+        #     for event in entry.dosage[0].timing.repeat.when:
+        #         if event in event_codes:
+        #             substance_administration.effectiveTime.append(
+        #                 EIVL_TS(
+        #                     **{
+        #                         "@xsi:type": "EIVL_TS",
+        #                         "@operator": "A",
+        #                         "event": {
+        #                             "@code": event,
+        #                         },
+        #                     }
+        #                 )
+        #             )
+        # else:
+        substance_administration.effectiveTime.append(
+            PIVL_TS(
+                **{
+                    "@xsi:type": "PIVL_TS",
+                    "@operator": "A",
+                    "@institutionSpecified": (
+                        "true" if entry.dosage[0].timing.repeat.frequency else None
+                    ),
+                    "period": {
+                        "@value": dose_period,
+                        "@unit": entry.dosage[0].timing.repeat.periodUnit,
+                    },
+                }
+            )
+        )
+    #   check if route is in dosage
+    if entry.dosage[0].method:
+        substance_administration.routeCode = code_with_translations(
+            entry.dosage[0].method.coding
+        )
+
+    for dose in entry.dosage:
+        substance_administration.entryRelationship.append(
+            EntryRelationship(
+                **{
+                    "sequenceNumber": (
+                        entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
+                    ),
+                    "@typeCode": "COMP",
+                    "@inversionInd": True,
+                    "substanceAdministration": {
+                        "@classCode": "SBADM",
+                        "@moodCode": "EVN",
+                        "templateId": [{"@root": "2.16.840.1.113883.10.20.22.4.147"}],
+                        "code": {
+                            "@code": "76662-6",
+                            "@codeSystem": "2.16.840.1.113883.6.1",
+                        },
+                        "text": dose.text,
+                    },
+                }
+            )
+        )
+
+    # print(substance_administration.entryRelationship)
+    return {
+        "substanceAdministration": substance_administration.model_dump(
+            by_alias=True, exclude_none=True
+        )
     }
-
-    med["substanceAdministration"]["entryRelationship"] = {
-        "@typeCode": "SUBJ",
-        "act": {
-            "@classCode": "ACT",
-            "@moodCode": "INT",
-            "templateId": templateId("2.16.840.1.113883.10.20.22.4.20", "2014-06-09"),
-            "code": {
-                "@code": "422037009",
-                "@displayName": "Provider medication administration instructions",
-                "@codeSystemName": "SNOMED CT",
-                "@codeSystem": "2.16.840.1.113883.6.96",
-            },
-            "text": {
-                "#text": f"{entry.dosage[0].text}\n Patient Instuctions: {entry.dosage[0].patientInstruction}"
-            },
-            # "patientInstruction": {"#text": entry.dosage[0].patientInstruction},
-            "statusCode": {"@code": "completed"},
-        },
-    }
-
-    return med
 
 
 def problem(entry: condition.Condition) -> dict:
@@ -227,3 +356,107 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> dict:
     all["act"]["entryRelationship"]["observation"] = observation
 
     return all
+
+
+def immunization_entry(entry: immunization.Immunization, index: dict) -> dict:
+    # https://build.fhir.org/ig/HL7/CDA-ccda-2.2/StructureDefinition-2.16.840.1.113883.10.20.22.2.2.1.html
+
+    immunization_entry = SubstanceAdministration(
+        templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
+        id=[{"@root": entry.id}],
+        statusCode={"@code": entry.status},
+        effectiveTime=effective_time_helper(entry.date),
+        consumable={
+            "manufacturedProduct": {
+                "templateId": templateId(
+                    "2.16.840.1.113883.10.20.22.4.54", "2014-06-09"
+                ),
+                "manufacturedMaterial": {
+                    "code": code_with_translations(entry.vaccineCode.coding),
+                    "lotNumberText": entry.lotNumber,
+                },
+            }
+        },
+    )
+
+    if entry.route:
+        immunization_entry.route = code_with_translations(entry.route.coding)
+
+    return immunization_entry.model_dump(by_alias=True, exclude_none=True)
+
+
+def result(entry, index: dict) -> dict:
+    """
+    Entry for results section. Entries are defined by lists that contain the related type has-member indicating results groups
+    """
+
+    # check if entry is group
+    if hasattr(entry, "related") and entry.related:
+        organizer = ResultsOrganizer()
+        organizer.code = code_with_translations(entry.code.coding)
+        organizer.statusCode = {"@code": entry.status}
+        performer = index.get(entry.performer[0].reference)
+        organizer.author = organization_to_author(performer)
+        organizer.id = [
+            {
+                "@root": ident.system,
+                "@extension": ident.value,
+            }
+            for ident in entry.identifier
+        ]
+        effective_time = entry.issued
+        components = []
+        for related in entry.related:
+            print(f"Related: {related.type} - {related.target.reference}")
+            if related.type == "has-member":
+                related_resource = index.get(related.target.reference)
+                comp = ResultObservation(
+                    id=[{"@root": related_resource.id}],
+                    code=code_with_translations(related_resource.code.coding),
+                    status={"@code": related_resource.status},
+                    # effectiveDateTime=IVL_TS(value=entry.issued.isostring),
+                    value=PQ(
+                        **{
+                            "@value": related_resource.valueQuantity.value,
+                            "@unit": related_resource.valueQuantity.unit,
+                        }
+                    ),
+                )
+                if (
+                    hasattr(related_resource, "interpretation")
+                    and related_resource.interpretation
+                ):
+                    comp.interpretationCode = code_with_translations(
+                        related_resource.interpretation.coding
+                    )
+
+                if related_resource.referenceRange:
+                    comp.referenceRange = {"observationRange": []}
+                    for range in related_resource.referenceRange:
+                        if range.text:
+                            comp.referenceRange["observationRange"].append(
+                                {"text": range.text}
+                            )
+                        if range.low:
+                            comp.referenceRange["observationRange"].append(
+                                {
+                                    "value": {
+                                        "@xsi:type": "IVL_PQ",
+                                        "low": {
+                                            "@value": range.low.value,
+                                            "@unit": related_resource.valueQuantity.unit,
+                                        },
+                                        "high": {
+                                            "@value": range.high.value,
+                                            "@unit": related_resource.valueQuantity.unit,
+                                        },
+                                    }
+                                }
+                            )
+                components.append(comp)
+
+        organizer.component = components
+        # print(organizer.model_dump(by_alias=True, exclude_none=True))
+
+        # only return groups for now
+        return organizer.model_dump(by_alias=True, exclude_none=True)

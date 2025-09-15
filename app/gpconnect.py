@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -174,17 +175,16 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
                     "value": f"{nhsno}",
                 },
             },
-            {
-                "name": "includeAllergies",
-                "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
-            },
+            # {
+            #     "name": "includeAllergies",
+            #     "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
+            # },
             {
                 "name": "includeMedication",
                 "part": [{"name": "includePrescriptionIssues", "valueBoolean": False}],
             },
-            {"name": "includeProblems"},
-            {"name": "includeImmunisations"},
-            {"name": "includeInvestigations"},
+            # {"name": "includeProblems"},
+            # {"name": "includeInvestigations"},
         ],
     }
     if log_dir:

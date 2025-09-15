@@ -5,7 +5,6 @@ name = "pypi"
 
 [packages]
 fastapi = "*"
-pydantic = "*"
 pyjwt = "*"
 httpx = "*"
 xmltodict = "*"
@@ -14,6 +13,8 @@ fhirclient = "~=3.0.0"
 redis = "*"
 cryptography = "*"
 jwcrypto = "*"
+celery = "*"
+pydantic = "*"
 
 [dev-packages]
 black = "*"
@@ -21,8 +22,13 @@ websockets = "*"
 isort = "*"
 pytest = "*"
 xmlschema = "*"
+<<<<<<< HEAD
 pre-commit = "*"
 pytest-asyncio = "*"
+=======
+flower = "*"
+pytest-benchmark = "*"
+>>>>>>> daf9d862806b62a6e6ebcc3732b8f45f5ff41815
 
 [requires]
 python_version = "3.13"

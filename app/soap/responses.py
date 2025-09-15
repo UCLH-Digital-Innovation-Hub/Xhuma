@@ -536,6 +536,7 @@ async def iti_39_response(message_id: str, document_id: str, document):
     # )
 
     # Verify that all values are serializable
+    # TODO DELETE THIS?
     def ensure_serializable(data):
         if isinstance(data, bytes):
             return data.decode("utf-8")  # Decode bytes to string
@@ -548,7 +549,7 @@ async def iti_39_response(message_id: str, document_id: str, document):
 
     soap_response = ensure_serializable(soap_response)
 
-    pprint.pprint(soap_response)
+    # pprint.pprint(soap_response)
     # print(type(soap_response))
 
     # with open(f"{document_id}.xml", "w") as output:
