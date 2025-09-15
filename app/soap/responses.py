@@ -203,6 +203,72 @@ async def iti_55_response(message_id, patient, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
+async def iti_55_error(message_id, query, error_text):
+    """ITI55 error response message generator
+
+    Args:
+        message_id (_type_): _description_
+        query (_type_): _description_
+        error_text (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
+    body = {
+        "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+    }
+
+    body["PRPA_IN201306UV02"] = {
+        "@xmlns": "urn:hl7-org:v3",
+        "@ITSVersion": "XML_1.0",
+        "id": {"@root": str(uuid.uuid4())},
+        "creationTime": {"@value": int(datetime.now().timestamp())},
+        "interactionId": {
+            "@root": "2.16.840.1.113883.1.18",
+            "@extension": "PRPA_IN201306UV02",
+        },
+        "processingCode": {"@code": "T"},
+        "processingModeCode": {"@code": "T"},
+        "acceptAckCode": {"@code": "NE"},
+        "receiver": {
+            "@typeCode": "RCV",
+            "device": {"@classCode": "DEV", "@determinerCode": "INSTANCE"},
+        },
+        "sender": {
+            "@typeCode": "SND",
+            "device": {"@classCode": "DEV", "@determinerCode": "INSTANCE"},
+        },
+        "acknowledgement": {
+            "typeCode": {"@code": "AE"},
+            "targetMessage": {"id": {"@root": message_id}},
+            "acknowledgementDetail": {
+                "@text": error_text,
+            },
+        },
+        "controlActProcess": {
+            "@classCode": "CACT",
+            "@moodCode": "EVN",
+            "code": {
+                "@code": "PRPA_TE201306UV02",
+                "@codeSystem": "2.16.840.1.113883.1.18",
+            },
+            "queryAck": {
+                "queryId": query["queryId"],
+                "queryResponseCode": {"@code": "AE"},
+                "statusCode": {"@code": "aborted"},
+            },
+            "queryByParameter": query,
+        },
+    }
+    header = create_header(
+        "urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery", message_id
+    )
+
+    return xmltodict.unparse(create_envelope(header, body), pretty=True)
+
+
 async def iti_47_response(message_id, patient, ceid, query):
     """ITI47 response message generator
 

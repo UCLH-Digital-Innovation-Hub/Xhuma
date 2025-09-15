@@ -36,6 +36,7 @@ from .responses import (
     iti_38_response,
     iti_39_response,
     iti_47_response,
+    iti_55_error,
     iti_55_response,
 )
 
@@ -135,20 +136,32 @@ async def iti55(request: Request):
         for param in query_params["livingSubjectId"]["value"]:
             if param["@root"] == "2.16.840.1.113883.2.1.4.1":
                 nhsno = param["@extension"]
-                print(f"NHSNO: {nhsno}")
+                # print(f"NHSNO: {nhsno}")
 
         if not nhsno:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid request, no nhs number found"
+            data = await iti_55_error(
+                envelope["Header"]["MessageID"],
+                "No NHS number found in request",
+                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                    "queryByParameter"
+                ],
             )
+            return Response(content=data, media_type="application/soap+xml")
 
         patient = await lookup_patient(nhsno)
         # TODO implement checking of demographics
 
-        print(f"Patient: {patient}")
-        # TODO refine this to return a proper error message as this will 500
-        if not patient:
-            print("Patient not found")
+        # check security code
+        security_code = patient["meta"]["security"][0]["code"]
+        if security_code != "U":
+            data = await iti_55_error(
+                envelope["Header"]["MessageID"],
+                "Patient record has restricted access",
+                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                    "queryByParameter"
+                ],
+            )
+            return Response(content=data, media_type="application/soap+xml")
 
         data = await iti_55_response(
             envelope["Header"]["MessageID"],
