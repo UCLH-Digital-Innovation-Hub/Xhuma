@@ -76,6 +76,9 @@ if USE_RELAY:
     # alert that we're using relay
     print("Using HSCN Relay")
 
+else:
+    print(f"{USE_RELAY} is not a valid setting for USE_RELAY, defaulting to no relay")
+
 
 # app.include_router(gpconnect.router)  # Currently disabled
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
