@@ -14,7 +14,9 @@ import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
 
@@ -62,6 +64,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 1) Trusted hosts: allow local & your domain
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["xhumademo.com", "localhost", "127.0.0.1", "0.0.0.0", "*"],  # "*" ok for dev
+)
+
+# 2) CORS: allow local & your domain (Starlette applies CORS to WebSockets too)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://xhumademo.com", "http://localhost", "http://127.0.0.1", "http://0.0.0.0", "*"],  # "*" ok for dev
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include routers for different service components
 app.include_router(soap.router)

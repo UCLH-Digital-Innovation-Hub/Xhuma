@@ -5,8 +5,8 @@ from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 router = APIRouter(prefix="/relay", tags=["relay"])
 
 
-@router.websocket("/ws")
-async def relay_ws(websocket: WebSocket):
+@router.websocket("/ws/{client_id}")
+async def relay_ws(websocket: WebSocket, client_id: str):
     hub = websocket.app.state.relay_hub
     await websocket.accept()
     await hub.register(websocket)
