@@ -19,6 +19,7 @@ from .ccda.helpers import validateNHSnumber
 from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
+from .settings import RELAY_TIMEOUT, USE_RELAY
 
 router = APIRouter()
 
@@ -57,7 +58,9 @@ client = httpx.AsyncClient(
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONResponse:
+async def gpconnect(
+    nhsno: int, request: Request, saml_attrs: dict, log_dir: str = None
+) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
     # 1) Validate NHS number
@@ -193,11 +196,8 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
         with open(os.path.join(log_dir, "request_body.json"), "w") as f:
             json.dump(body, f, indent=2)
 
-    url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-
-    # 7) Make request with a per-call client (avoid leaking across event loops)
-    resp = None
-    try:
+    async def _direct_http_call(headers: dict, body: dict) -> tuple[int, str]:
+        """Your existing direct call (trimmed). Return (status_code, text)."""
         async with httpx.AsyncClient(
             cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
             verify=create_nhs_ssl_context(
@@ -208,14 +208,52 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
             timeout=httpx.Timeout(30.0),
             http2=False,
         ) as session:
-            resp = await session.post(url, json=body, headers=headers)
+            r = await session.post(url, json=body, headers=headers)
+            return r.status_code, r.text
 
+    async def _relay_call(
+        request: Request, url: str, headers: dict, body: dict
+    ) -> tuple[int, str]:
+        """Send via relay and return (status_code, text)."""
+        hub = getattr(request.app.state, "relay_hub", None)
+
+        if not hub:
+            raise HTTPException(404, "Relay not available in this process")
+        relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
+        resp: dict = await hub.send(relay_req)
+        return int(resp.get("status_code", 502)), (resp.get("body") or "")
+
+    # 7) Make request with a per-call client (avoid leaking across event loops)
+    resp = None
+    try:
+        if USE_RELAY:
+            try:
+                url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+                status_code, resp_text = await _relay_call(request, url, headers, body)
+            except HTTPException as e:
+                # Optional fallback if relay enabled but not connected
+                logging.warning(
+                    f"Relay path failed ({e.status_code}:{e.detail}); falling back to direct HTTP"
+                )
+                resp = await _direct_http_call(url, headers, body)
+        else:
+            url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            resp = await _direct_http_call(url, headers, body)
+
+        # (your existing logging)
         if log_dir:
             with open(
                 os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
             ) as f:
                 f.write(resp.text)
         logging.info(resp.text)
+
+    except Exception as e:
+        msg = f"Transport error: {e}"
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
     except httpx.ReadError as e:
         msg = "ReadError: server closed connection before responding"

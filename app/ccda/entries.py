@@ -1,23 +1,15 @@
 import uuid
 
-from fhirclient.models import allergyintolerance, coding, condition, immunization
+from fhirclient.models import (allergyintolerance, coding, condition,
+                               immunization)
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationstatement, observation
 
-from .helpers import (
-    code_with_translations,
-    date_helper,
-    effective_time_helper,
-    organization_to_author,
-    templateId,
-)
-from .models.base import (
-    EntryRelationship,
-    Observation,
-    ResultObservation,
-    ResultsOrganizer,
-    SubstanceAdministration,
-)
+from .helpers import (code_with_translations, date_helper,
+                      effective_time_helper, organization_to_author,
+                      templateId)
+from .models.base import (EntryRelationship, Observation, ResultObservation,
+                          ResultsOrganizer, SubstanceAdministration)
 from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 

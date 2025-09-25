@@ -21,6 +21,9 @@ from jwcrypto import jwk
 from .gpconnect import gpconnect
 from .pds import pds
 from .redis_connect import redis_client
+from .relay import routes
+from .relay.hub import WebSocketHub
+from .settings import USE_RELAY
 from .soap import soap
 
 # Generate or retrieve registry ID from environment
@@ -59,9 +62,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 # Include routers for different service components
 app.include_router(soap.router)
 app.include_router(pds.router)
+
+# if using HSCN relay, set up WebSocket hub and routes
+if USE_RELAY:
+    # Initialize and store WebSocketHub in app state
+    app.state.relay_hub = WebSocketHub()
+    app.include_router(routes.router)
 
 
 # app.include_router(gpconnect.router)  # Currently disabled
@@ -94,27 +104,6 @@ async def root():
     </html>
     """
 
-@app.websocket("/relay/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: int):
-    """
-    WebSocket endpoint that establishes a connection with the client and relays messages.
-
-    Args:
-        websocket (WebSocket): The WebSocket connection instance.
-        client_id (int): Unique identifier for the client.
-
-    This endpoint accepts WebSocket connections, acknowledges the connection,
-    and continuously listens for incoming messages. It echoes received messages
-    back to the client. If the connection is closed, it handles the disconnection gracefully.
-    """
-    await websocket.accept()
-    try:
-        while True:
-            data = await websocket.receive_text()
-            await websocket.send_text(f"Message text was: {data}")
-    except WebSocketDisconnect:
-        print(f"Client {client_id} disconnected")
-        
 
 @app.get("/demo/{nhsno}")
 async def demo(nhsno: int):
