@@ -73,6 +73,9 @@ if USE_RELAY:
     app.state.relay_hub = WebSocketHub()
     app.include_router(routes.router)
 
+    # alert that we're using relay
+    print("Using HSCN Relay")
+
 
 # app.include_router(gpconnect.router)  # Currently disabled
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -146,8 +149,11 @@ async def demo(nhsno: int):
         },
         "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
     }
+
     bundle_id = await gpconnect(nhsno, audit_dict)
-    return redis_client.get(bundle_id["document_id"])
+    gpcon_response = json.loads(bundle_id)  # validate json
+    document_id = gpcon_response.get("document_id")
+    return redis_client.get(document_id)
 
 
 @app.get("/jwk")

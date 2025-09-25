@@ -58,8 +58,8 @@ client = httpx.AsyncClient(
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(
-    nhsno: int, request: Request, saml_attrs: dict, log_dir: str = None
+async def gpconnect(request: Request,
+    nhsno: int,  saml_attrs: dict, log_dir: str = None
 ) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
