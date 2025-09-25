@@ -14,7 +14,7 @@ import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
 
@@ -94,6 +94,27 @@ async def root():
     </html>
     """
 
+@app.websocket("/relay/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: int):
+    """
+    WebSocket endpoint that establishes a connection with the client and relays messages.
+
+    Args:
+        websocket (WebSocket): The WebSocket connection instance.
+        client_id (int): Unique identifier for the client.
+
+    This endpoint accepts WebSocket connections, acknowledges the connection,
+    and continuously listens for incoming messages. It echoes received messages
+    back to the client. If the connection is closed, it handles the disconnection gracefully.
+    """
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await websocket.send_text(f"Message text was: {data}")
+    except WebSocketDisconnect:
+        print(f"Client {client_id} disconnected")
+        
 
 @app.get("/demo/{nhsno}")
 async def demo(nhsno: int):
