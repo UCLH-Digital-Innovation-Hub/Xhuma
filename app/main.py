@@ -64,6 +64,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# register soap error handler
+soap.register_handlers(app)
+
 # 1) Trusted hosts: allow local & your domain
 app.add_middleware(
     TrustedHostMiddleware,
