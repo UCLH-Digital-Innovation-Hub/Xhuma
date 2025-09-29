@@ -30,9 +30,15 @@ from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .audit import process_saml_attributes
-from .responses import (create_envelope, create_header, iti_38_response,
-                        iti_39_response, iti_47_response, iti_55_error,
-                        iti_55_response)
+from .responses import (
+    create_envelope,
+    create_header,
+    iti_38_response,
+    iti_39_response,
+    iti_47_response,
+    iti_55_error,
+    iti_55_response,
+)
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -127,10 +133,15 @@ async def iti55(request: Request):
         query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
             "queryByParameter"
         ]["parameterList"]
-        for param in query_params["livingSubjectId"]["value"]:
-            if param["@root"] == "2.16.840.1.113883.2.1.4.1":
-                nhsno = param["@extension"]
-                # print(f"NHSNO: {nhsno}")
+
+        try:
+            for param in query_params["livingSubjectId"]["value"]:
+                if param["@root"] == "2.16.840.1.113883.2.1.4.1":
+                    nhsno = param["@extension"]
+                    # print(f"NHSNO: {nhsno}")
+
+        except Exception:
+            nhsno = None
 
         if not nhsno:
             data = await iti_55_error(
