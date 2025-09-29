@@ -16,9 +16,9 @@ from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .gpconnect import gpconnect
 from .pds import pds
@@ -67,13 +67,25 @@ app = FastAPI(
 # 1) Trusted hosts: allow local & your domain
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["xhumademo.com", "localhost", "127.0.0.1", "0.0.0.0", "*"],  # "*" ok for dev
+    allowed_hosts=[
+        "xhumademo.com",
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "*",
+    ],  # "*" ok for dev
 )
 
 # 2) CORS: allow local & your domain (Starlette applies CORS to WebSockets too)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://xhumademo.com", "http://localhost", "http://127.0.0.1", "http://0.0.0.0", "*"],  # "*" ok for dev
+    allow_origins=[
+        "https://xhumademo.com",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://0.0.0.0",
+        "*",
+    ],  # "*" ok for dev
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -172,7 +184,7 @@ async def demo(nhsno: int):
     bundle_id = await gpconnect(nhsno, audit_dict)
     gpcon_response = json.loads(bundle_id)  # validate json
     document_id = gpcon_response.get("document_id")
-    return redis_client.get(document_id)
+    return gpcon_response
 
 
 @app.get("/jwk")

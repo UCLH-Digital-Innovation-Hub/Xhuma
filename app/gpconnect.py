@@ -58,11 +58,13 @@ client = httpx.AsyncClient(
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(request: Request,
-    nhsno: int,  saml_attrs: dict, log_dir: str = None
-) -> JSONResponse:
+async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
+    # LOG SAML ATTRS FOR TESTING ONLY
+    with open("saml_attrs.json", "a") as f:
+        json.dump(saml_attrs, f, indent=2)
+    pprint.pprint(saml_attrs)
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
