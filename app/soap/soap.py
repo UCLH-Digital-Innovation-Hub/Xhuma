@@ -30,15 +30,9 @@ from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .audit import process_saml_attributes
-from .responses import (
-    create_envelope,
-    create_header,
-    iti_38_response,
-    iti_39_response,
-    iti_47_response,
-    iti_55_error,
-    iti_55_response,
-)
+from .responses import (create_envelope, create_header, iti_38_response,
+                        iti_39_response, iti_47_response, iti_55_error,
+                        iti_55_response)
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -353,7 +347,9 @@ async def iti38(request: Request):
                 print(f"No valid NHS number found in patient ID's {patient_id}")
                 logging.info(f"No valid NHS number found in patient ID's {patient_id}")
         else:
-            data = await iti_38_response(patient_id, "NOCEID", query_id, saml_attrs)
+            data = await iti_38_response(
+                request, patient_id, "NOCEID", query_id, saml_attrs
+            )
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(

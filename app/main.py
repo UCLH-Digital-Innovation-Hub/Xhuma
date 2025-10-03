@@ -14,7 +14,7 @@ import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
@@ -143,7 +143,7 @@ async def root():
 
 
 @app.get("/demo/{nhsno}")
-async def demo(nhsno: int):
+async def demo(nhsno: int, request: Request):
     """
     Demo endpoint that retrieves and returns a CCDA document for a given NHS number.
 
@@ -184,10 +184,12 @@ async def demo(nhsno: int):
         "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
     }
 
-    bundle_id = await gpconnect(nhsno, audit_dict)
-    gpcon_response = json.loads(bundle_id)  # validate json
-    document_id = gpcon_response.get("document_id")
-    return gpcon_response
+    bundle_id = await gpconnect(nhsno, audit_dict, request=request)
+    # decode jsonresponse
+
+    # gpcon_response = json.loads(bundle_id)  # validate json
+    # document_id = gpcon_response.get("document_id")
+    return bundle_id
 
 
 @app.get("/jwk")

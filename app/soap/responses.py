@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import xmltodict
+from fastapi import Request
 from httpx import AsyncClient
 
 from ..gpconnect import gpconnect
@@ -397,7 +398,9 @@ async def iti_47_response(message_id, patient, ceid, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
-async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
+async def iti_38_response(
+    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: dict
+):
 
     body = {}
     body["AdhocQueryResponse"] = {
@@ -411,7 +414,7 @@ async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
     if docid is None:
         # no cached ccda
         try:
-            r = await gpconnect(nhsno, saml_attrs)
+            r = await gpconnect(nhsno, saml_attrs, request=request)
             logging.info(f"no cached ccda, used internal call for {nhsno}")
             print(r)
             docid = r["document_id"]

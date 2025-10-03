@@ -58,7 +58,9 @@ client = httpx.AsyncClient(
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONResponse:
+async def gpconnect(
+    nhsno: int, saml_attrs: dict, log_dir: str = None, request: Request = None
+) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
     # LOG SAML ATTRS FOR TESTING ONLY
@@ -198,7 +200,7 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
         with open(os.path.join(log_dir, "request_body.json"), "w") as f:
             json.dump(body, f, indent=2)
 
-    async def _direct_http_call(headers: dict, body: dict) -> tuple[int, str]:
+    async def _direct_http_call(url, headers: dict, body: dict) -> tuple[int, str]:
         """Your existing direct call (trimmed). Return (status_code, text)."""
         async with httpx.AsyncClient(
             cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
@@ -213,9 +215,7 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
             r = await session.post(url, json=body, headers=headers)
             return r.status_code, r.text
 
-    async def _relay_call(
-        request: Request, url: str, headers: dict, body: dict
-    ) -> tuple[int, str]:
+    async def _relay_call(url: str, headers: dict, body: dict) -> tuple[int, str]:
         """Send via relay and return (status_code, text)."""
         hub = getattr(request.app.state, "relay_hub", None)
 
@@ -231,7 +231,7 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
         if USE_RELAY:
             try:
                 url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-                status_code, resp_text = await _relay_call(request, url, headers, body)
+                status_code, resp_text = await _relay_call(url, headers, body)
             except HTTPException as e:
                 # Optional fallback if relay enabled but not connected
                 logging.warning(
