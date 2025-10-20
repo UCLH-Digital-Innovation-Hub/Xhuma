@@ -320,6 +320,8 @@ async def iti38(request: Request):
             # envelope["Header"]["Security"]["AttributeStatement"]
         )
 
+        print(f"SAML Attributes: {saml_attrs}")
+
         soap_body = envelope["Body"]
         slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
         query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
@@ -340,7 +342,7 @@ async def iti38(request: Request):
                 print(validateNHSnumber(poss_nhs))
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
-                    data = await iti_38_response(
+                    data = await iti_38_response(request,
                         patient_id, "NOCEID", query_id, saml_attrs
                     )
             except AttributeError:
