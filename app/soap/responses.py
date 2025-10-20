@@ -433,7 +433,7 @@ async def iti_38_response(
                     "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 },
             }
-            
+
         if not r.get("success"):
             logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
             body["AdhocQueryResponse"][
@@ -600,6 +600,8 @@ async def iti_39_response(message_id: str, document_id: str, document):
     soap_response = create_envelope(
         create_header("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id), body
     )
+
+    print(f"ITI39 response: {soap_response}")
 
     # soap_response = create_envelope(
     #     create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", "test"), body
