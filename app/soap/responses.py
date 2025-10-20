@@ -433,22 +433,23 @@ async def iti_38_response(
                     "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 },
             }
-    if not r.get("success"):
-        logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
-        body["AdhocQueryResponse"][
-            "@status"
-        ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-        body["AdhocQueryResponse"]["RegistryErrorList"] = {
-            "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-            "RegistryError": {
-                "@errorCode": "XDSRegistryError",
-                "@codeContext": r.get("error", "Unknown error"),
-                "@location": "",
-                "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-            },
-        }
-    else:
-        docid = r["document_id"]
+            
+        if not r.get("success"):
+            logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
+            body["AdhocQueryResponse"][
+                "@status"
+            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            body["AdhocQueryResponse"]["RegistryErrorList"] = {
+                "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                "RegistryError": {
+                    "@errorCode": "XDSRegistryError",
+                    "@codeContext": r.get("error", "Unknown error"),
+                    "@location": "",
+                    "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                },
+            }
+        else:
+            docid = r["document_id"]
 
     if docid is not None:
         # add the ccda as registry object list
