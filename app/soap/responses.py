@@ -2,6 +2,7 @@ import base64
 import logging
 import os
 import pprint
+import json
 import uuid
 from datetime import datetime, timedelta
 
@@ -416,6 +417,7 @@ async def iti_38_response(
         try:
             r = await gpconnect(nhsno, saml_attrs, request=request)
             logging.info(f"no cached ccda, used internal call for {nhsno}")
+            r = json.loads(r)
             print(r)
             docid = r["document_id"]
         except Exception as e:
