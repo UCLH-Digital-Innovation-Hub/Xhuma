@@ -417,8 +417,8 @@ async def iti_38_response(
         try:
             r = await gpconnect(nhsno, saml_attrs, request=request)
             logging.info(f"no cached ccda, used internal call for {nhsno}")
-            r = json.loads(r)
-            print(r)
+            r = json.loads(r)[0]
+            print(f"gpconnect response: {r}")
             docid = r["document_id"]
         except Exception as e:
             logging.error(f"Error: {e}")
