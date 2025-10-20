@@ -450,6 +450,10 @@ async def iti_38_response(
             }
         else:
             docid = r["document_id"]
+    
+    # make sure docid is a string and not bytes
+    if isinstance(docid, bytes):
+        docid = docid.decode("utf-8")
 
     if docid is not None:
         # add the ccda as registry object list
