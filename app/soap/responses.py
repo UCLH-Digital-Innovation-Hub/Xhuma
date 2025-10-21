@@ -1,8 +1,8 @@
 import base64
+import json
 import logging
 import os
 import pprint
-import json
 import uuid
 from datetime import datetime, timedelta
 
@@ -416,13 +416,20 @@ async def iti_38_response(
         # no cached ccda
         try:
             r = await gpconnect(nhsno, saml_attrs, request=request)
+            print("-" * 40)
+            print(f"gpconnect raw response: {r}")
+            print("-" * 40)
             logging.info(f"no cached ccda, used internal call for {nhsno}")
             r = json.loads(r)[0]
-            print(f"gpconnect response: {r}")
+            # print(f"gpconnect response: {r}")
             docid = r["document_id"]
         except Exception as e:
             logging.error(f"Error: {e}")
             print(f"iti_38_error: {e}")
+            r = {
+                "success": False,
+                "error": f"Internal error retrieving structured record for NHS number {nhsno}. error: {e}",
+            }
             body["AdhocQueryResponse"][
                 "@status"
             ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
@@ -452,7 +459,7 @@ async def iti_38_response(
             }
         else:
             docid = r["document_id"]
-    
+
     # make sure docid is a string and not bytes
     if isinstance(docid, bytes):
         docid = docid.decode("utf-8")

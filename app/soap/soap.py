@@ -342,8 +342,8 @@ async def iti38(request: Request):
                 print(validateNHSnumber(poss_nhs))
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
-                    data = await iti_38_response(request,
-                        patient_id, "NOCEID", query_id, saml_attrs
+                    data = await iti_38_response(
+                        request, patient_id, "NOCEID", query_id, saml_attrs
                     )
             except AttributeError:
                 print(f"No valid NHS number found in patient ID's {patient_id}")
