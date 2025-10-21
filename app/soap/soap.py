@@ -447,20 +447,19 @@ async def iti39(request: Request):
             body = {
                 "ns4:RetrieveDocumentSetResponse": {
                     "@xmlns:ns4": "urn:ihe:iti:xds-b:2007",
-                    "@xmlns:ns8": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-                    "ns8:RegistryResponse": {
-                        "@id": uuid.uuid4(),
+                    "@xmlns:rs": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
+                    "rs:RegistryResponse": {
                         "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure",
-                        # "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-                        "RegistryErrorList": {
-                            "RegistryError": {
+                        "rs:RegistryErrorList": {
+                            "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                            "rs:RegistryError": {
                                 "@errorCode": "XDSDocumentUniqueIdError",
                                 "@codeContext": f"Document with Id {document_id} not found",
                                 "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                            }
+                            },
                         },
                     },
-                },
+                }
             }
             soap_response = create_envelope(
                 create_header(
