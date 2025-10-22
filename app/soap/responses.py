@@ -421,7 +421,7 @@ async def iti_38_response(
             print(r.body)
             print("-" * 40)
             logging.info(f"no cached ccda, used internal call for {nhsno}")
-            r = r.body
+            r = json.loads(r.body)
             docid = r["document_id"]
         except Exception as e:
             logging.error(f"Error: {e}")
