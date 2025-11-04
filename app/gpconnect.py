@@ -200,8 +200,8 @@ async def gpconnect(
         with open(os.path.join(log_dir, "request_body.json"), "w") as f:
             json.dump(body, f, indent=2)
 
-    async def _direct_http_call(url, headers: dict, body: dict) -> tuple[int, str]:
-        """Your existing direct call (trimmed). Return (status_code, text)."""
+    async def _direct_http_call(url: str, headers: dict, body: dict) -> httpx.Response:
+        """Make a direct POST and return an httpx.Response."""
         async with httpx.AsyncClient(
             cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
             verify=create_nhs_ssl_context(
@@ -215,17 +215,43 @@ async def gpconnect(
             r = await session.post(url, json=body, headers=headers)
             print(f"Direct HTTP call response status: {r.status_code}")
             print(f"Direct HTTP call response text: {r.text}")
-            return r.status_code, r.text
+            return r  # return a real httpx.Response
 
-    async def _relay_call(url: str, headers: dict, body: dict) -> tuple[int, str]:
-        """Send via relay and return (status_code, text)."""
+    async def _relay_call(url: str, headers: dict, body: dict) -> httpx.Response:
+        """Send via relay and return an httpx.Response constructed from the relay reply."""
         hub = getattr(request.app.state, "relay_hub", None)
-
         if not hub:
             raise HTTPException(404, "Relay not available in this process")
+
+        # The relay request your hub expects; adjust if your hub needs raw string body.
         relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
         resp: dict = await hub.send(relay_req)
-        return int(resp.get("status_code", 502)), (resp.get("body") or "")
+
+        status_code = int(resp.get("status_code", 502))
+        # Accept bytes or str; prefer text to avoid double encoding issues.
+        # If your hub returns bytes in "body", coerce to text safely.
+        body_raw = resp.get("body")
+        if isinstance(body_raw, (dict, list)):
+            # If hub returns parsed JSON, re-serialize to match .text semantics
+            body_text = json.dumps(body_raw)
+        elif isinstance(body_raw, bytes):
+            try:
+                body_text = body_raw.decode("utf-8", errors="replace")
+            except Exception:
+                # Fallback: leave as Latin-1 compatible decode
+                body_text = body_raw.decode("iso-8859-1", errors="replace")
+        else:
+            body_text = body_raw or ""
+
+        resp_headers = resp.get("headers") or {}
+
+        # Build a proper httpx.Response; use 'text' so httpx sets .text and .content sensibly.
+        return httpx.Response(
+            status_code=status_code,
+            headers=resp_headers,
+            text=body_text,
+            request=httpx.Request("POST", url, headers=headers),
+        )
 
     # 7) Make request with a per-call client (avoid leaking across event loops)
     resp = None
