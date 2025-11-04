@@ -223,33 +223,38 @@ async def gpconnect(
         if not hub:
             raise HTTPException(404, "Relay not available in this process")
 
-        # The relay request your hub expects; adjust if your hub needs raw string body.
         relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
         resp: dict = await hub.send(relay_req)
 
         status_code = int(resp.get("status_code", 502))
-        # Accept bytes or str; prefer text to avoid double encoding issues.
-        # If your hub returns bytes in "body", coerce to text safely.
-        body_raw = resp.get("body")
-        if isinstance(body_raw, (dict, list)):
-            # If hub returns parsed JSON, re-serialize to match .text semantics
-            body_text = json.dumps(body_raw)
-        elif isinstance(body_raw, bytes):
-            try:
-                body_text = body_raw.decode("utf-8", errors="replace")
-            except Exception:
-                # Fallback: leave as Latin-1 compatible decode
-                body_text = body_raw.decode("iso-8859-1", errors="replace")
-        else:
-            body_text = body_raw or ""
-
         resp_headers = resp.get("headers") or {}
 
-        # Build a proper httpx.Response; use 'text' so httpx sets .text and .content sensibly.
+        # Build body bytes robustly
+        body_raw = resp.get("body")
+        if isinstance(body_raw, (dict, list)):
+            body_bytes = json.dumps(body_raw).encode("utf-8")
+        elif isinstance(body_raw, str):
+            body_bytes = body_raw.encode("utf-8", errors="replace")
+        elif isinstance(body_raw, (bytes, bytearray)):
+            body_bytes = bytes(body_raw)
+        else:
+            body_bytes = b""
+
+        # If the relay already decompressed the payload but left Content-Encoding,
+        # httpx will try to decompress again and raise "incorrect header check".
+        # Drop headers that can cause mis-decoding or length mismatch.
+        cleaned_headers = {
+            k: v
+            for k, v in resp_headers.items()
+            if k.lower()
+            not in ("content-encoding", "transfer-encoding", "content-length")
+        }
+
+        # Construct a proper Response. Use content= (bytes) so httpx won’t re-encode.
         return httpx.Response(
             status_code=status_code,
-            headers=resp_headers,
-            text=body_text,
+            headers=cleaned_headers,
+            content=body_bytes,
             request=httpx.Request("POST", url, headers=headers),
         )
 
