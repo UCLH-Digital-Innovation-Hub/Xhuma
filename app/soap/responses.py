@@ -408,9 +408,6 @@ async def iti_38_response(
         "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Success",
         "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0",
     }
-    # make sure docid is a string and not bytes
-    if isinstance(docid, bytes):
-        docid = docid.decode("utf-8")
 
     # check the redis cache if there's an existing ccda
     docid = redis_client.get(nhsno)
@@ -464,6 +461,11 @@ async def iti_38_response(
             docid = r["document_id"]
 
     if docid is not None:
+
+        # make sure docid is a string and not bytes
+        if isinstance(docid, bytes):
+            docid = docid.decode("utf-8")
+
         # add the ccda as registry object list
         # object_id = f"CCDA_{docid}"
         object_id = docid
