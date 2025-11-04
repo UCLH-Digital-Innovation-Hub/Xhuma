@@ -225,6 +225,7 @@ async def gpconnect(
 
         relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
         resp: dict = await hub.send(relay_req)
+        print(f"Relay raw response: {resp}")
 
         status_code = int(resp.get("status_code", 502))
         resp_headers = resp.get("headers") or {}
