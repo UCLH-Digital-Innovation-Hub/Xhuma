@@ -218,47 +218,30 @@ async def gpconnect(
             return r  # return a real httpx.Response
 
     async def _relay_call(url: str, headers: dict, body: dict) -> httpx.Response:
-        """Send via relay and return an httpx.Response constructed from the relay reply."""
+        """Send via relay and return an httpx.Response with status_code and text."""
         hub = getattr(request.app.state, "relay_hub", None)
         if not hub:
             raise HTTPException(404, "Relay not available in this process")
 
         relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
-        wire: dict = await hub.send(relay_req)
+        resp: dict = await hub.send(relay_req)
 
-        status_code = int(wire.get("status_code", 502))
-        resp_headers = wire.get("headers") or {}
-        raw_body = wire.get("body")
+        status_code = int(resp.get("status_code", 502))
+        body_raw = resp.get("body")
 
-        # --- Body -> bytes (no double-encoding) ---------------------------------
-        if isinstance(raw_body, (dict, list)):
-            body_bytes = json.dumps(raw_body).encode("utf-8")
-        elif isinstance(raw_body, str):
-            body_bytes = raw_body.encode("utf-8", errors="replace")
-        elif isinstance(raw_body, (bytes, bytearray)):
-            body_bytes = bytes(raw_body)
+        # Make sure body is text
+        if isinstance(body_raw, (dict, list)):
+            body_text = json.dumps(body_raw)
+        elif isinstance(body_raw, bytes):
+            body_text = body_raw.decode("utf-8", errors="replace")
         else:
-            body_bytes = b""
+            body_text = str(body_raw or "")
 
-        # --- Strip problematic hop/encoding headers ------------------------------
-        # Relay already decompressed & de-chunked, but left these headers on.
-        cleaned_headers = {
-            k: v
-            for k, v in resp_headers.items()
-            if k.lower()
-            not in ("content-encoding", "transfer-encoding", "content-length")
-        }
-
-        # Optional: if you *know* it's JSON, ensure a sane content-type
-        if "content-type" not in {k.lower(): v for k, v in cleaned_headers.items()}:
-            cleaned_headers["Content-Type"] = "application/fhir+json; charset=utf-8"
-
-        # --- Construct a proper httpx.Response with bytes content ----------------
+        # Build a minimal httpx.Response — no header reuse (prevents gzip errors)
         return httpx.Response(
             status_code=status_code,
-            headers=cleaned_headers,
-            content=body_bytes,  # bytes -> httpx won't try to (de)compress
-            request=httpx.Request("POST", url, headers=headers),
+            content=body_text.encode("utf-8"),
+            request=httpx.Request("POST", url),
         )
 
     # 7) Make request with a per-call client (avoid leaking across event loops)
