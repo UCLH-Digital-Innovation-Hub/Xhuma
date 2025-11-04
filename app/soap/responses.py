@@ -414,6 +414,10 @@ async def iti_38_response(
 
     if docid is None:
         # no cached ccda
+        r = await gpconnect(nhsno, saml_attrs, request=request)
+        print("-" * 40)
+        print(r.body)
+        print("-" * 40)
         try:
             r = await gpconnect(nhsno, saml_attrs, request=request)
 
