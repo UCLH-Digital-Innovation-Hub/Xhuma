@@ -224,26 +224,24 @@ async def gpconnect(
             raise HTTPException(404, "Relay not available in this process")
 
         relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
-        resp: dict = await hub.send(relay_req)
-        print(f"Relay raw response: {resp}")
+        wire: dict = await hub.send(relay_req)
 
-        status_code = int(resp.get("status_code", 502))
-        resp_headers = resp.get("headers") or {}
+        status_code = int(wire.get("status_code", 502))
+        resp_headers = wire.get("headers") or {}
+        raw_body = wire.get("body")
 
-        # Build body bytes robustly
-        body_raw = resp.get("body")
-        if isinstance(body_raw, (dict, list)):
-            body_bytes = json.dumps(body_raw).encode("utf-8")
-        elif isinstance(body_raw, str):
-            body_bytes = body_raw.encode("utf-8", errors="replace")
-        elif isinstance(body_raw, (bytes, bytearray)):
-            body_bytes = bytes(body_raw)
+        # --- Body -> bytes (no double-encoding) ---------------------------------
+        if isinstance(raw_body, (dict, list)):
+            body_bytes = json.dumps(raw_body).encode("utf-8")
+        elif isinstance(raw_body, str):
+            body_bytes = raw_body.encode("utf-8", errors="replace")
+        elif isinstance(raw_body, (bytes, bytearray)):
+            body_bytes = bytes(raw_body)
         else:
             body_bytes = b""
 
-        # If the relay already decompressed the payload but left Content-Encoding,
-        # httpx will try to decompress again and raise "incorrect header check".
-        # Drop headers that can cause mis-decoding or length mismatch.
+        # --- Strip problematic hop/encoding headers ------------------------------
+        # Relay already decompressed & de-chunked, but left these headers on.
         cleaned_headers = {
             k: v
             for k, v in resp_headers.items()
@@ -251,11 +249,15 @@ async def gpconnect(
             not in ("content-encoding", "transfer-encoding", "content-length")
         }
 
-        # Construct a proper Response. Use content= (bytes) so httpx won’t re-encode.
+        # Optional: if you *know* it's JSON, ensure a sane content-type
+        if "content-type" not in {k.lower(): v for k, v in cleaned_headers.items()}:
+            cleaned_headers["Content-Type"] = "application/fhir+json; charset=utf-8"
+
+        # --- Construct a proper httpx.Response with bytes content ----------------
         return httpx.Response(
             status_code=status_code,
             headers=cleaned_headers,
-            content=body_bytes,
+            content=body_bytes,  # bytes -> httpx won't try to (de)compress
             request=httpx.Request("POST", url, headers=headers),
         )
 
