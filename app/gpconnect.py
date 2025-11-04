@@ -182,16 +182,16 @@ async def gpconnect(
                     "value": f"{nhsno}",
                 },
             },
-            # {
-            #     "name": "includeAllergies",
-            #     "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
-            # },
+            {
+                "name": "includeAllergies",
+                "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
+            },
             {
                 "name": "includeMedication",
                 "part": [{"name": "includePrescriptionIssues", "valueBoolean": False}],
             },
-            # {"name": "includeProblems"},
-            # {"name": "includeInvestigations"},
+            {"name": "includeProblems"},
+            {"name": "includeInvestigations"},
         ],
     }
     if log_dir:
