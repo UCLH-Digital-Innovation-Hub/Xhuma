@@ -249,10 +249,10 @@ async def gpconnect(
     try:
         if USE_RELAY:
             url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-            status_code, resp_text = await _relay_call(url, headers, body)
-            print(f"Relay response status: {status_code}")
-            print(f"Relay response text: {resp_text}")
-            resp = httpx.Response(status_code=status_code, content=resp_text)
+            resp = await _relay_call(url, headers, body)
+            # print(f"Relay response status: {status_code}")
+            # print(f"Relay response text: {resp_text}")
+            # resp = httpx.Response(status_code=status_code, content=resp_text)
 
         else:
             url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
