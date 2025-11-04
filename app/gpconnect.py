@@ -263,18 +263,12 @@ async def gpconnect(
     resp = None
     try:
         if USE_RELAY:
-            try:
-                url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-                status_code, resp_text = await _relay_call(url, headers, body)
-                print(f"Relay response status: {status_code}")
-                print(f"Relay response text: {resp_text}")
-                resp = httpx.Response(status_code=status_code, content=resp_text)
-            except HTTPException as e:
-                # Optional fallback if relay enabled but not connected
-                logging.warning(
-                    f"Relay path failed ({e.status_code}:{e.detail}); falling back to direct HTTP"
-                )
-                resp = await _direct_http_call(url, headers, body)
+            url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            status_code, resp_text = await _relay_call(url, headers, body)
+            print(f"Relay response status: {status_code}")
+            print(f"Relay response text: {resp_text}")
+            resp = httpx.Response(status_code=status_code, content=resp_text)
+
         else:
             url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             resp = await _direct_http_call(url, headers, body)
