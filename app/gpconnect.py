@@ -213,6 +213,8 @@ async def gpconnect(
             http2=False,
         ) as session:
             r = await session.post(url, json=body, headers=headers)
+            print(f"Direct HTTP call response status: {r.status_code}")
+            print(f"Direct HTTP call response text: {r.text}")
             return r.status_code, r.text
 
     async def _relay_call(url: str, headers: dict, body: dict) -> tuple[int, str]:
