@@ -7,6 +7,7 @@ import xmltodict
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
+from typing import List
 
 from .entries import allergy, immunization_entry, medication, problem, result
 from .helpers import date_helper, readable_date, templateId
@@ -317,44 +318,35 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
                         # TODO make this better and more robust
                         # fix for some times being in a list
-                        time_entry = {}
+                        med_time = {}
                         if isinstance(
-                            entry_data["substanceAdministration"]["effectiveTime"], list
+                            entry_data["substanceAdministration"]["effectiveTime"], List
                         ):
                             # search for the low and high values in the list
                             for time_entry in entry_data["substanceAdministration"][
                                 "effectiveTime"
                             ]:
                                 if "low" in time_entry:
-                                    entry_data["substanceAdministration"][
-                                        "effectiveTime"
-                                    ]["low"] = time_entry["low"]
+                                    med_time["low"] = readable_date(time_entry["low"]["@value"])
                                 if "high" in time_entry:
-                                    entry_data["substanceAdministration"][
-                                        "effectiveTime"
-                                    ]["high"] = time_entry["high"]
+                                    med_time["high"] = readable_date(time_entry["high"]["@value"])
                         else:
-                            time_entry["low"] = (
+                            med_time["low"] = (
                                 entry_data["substanceAdministration"]["effectiveTime"]
                                 .get("low", {})
                                 .get("@value", "")
                             )
-                            time_entry["high"] = (
+                            med_time["high"] = (
                                 entry_data["substanceAdministration"]["effectiveTime"]
                                 .get("high", {})
                                 .get("@value", "")
                             )
-                            
+
                         rows.append(
                             create_row(
                                 [
-                                    readable_date(time_entry.get("low", "")),
-                                    readable_date(time_entry.get("high", "")),
-                                    entry_data["substanceAdministration"]["statusCode"][
-                                        "effectiveTime"
-                                    ]
-                                    .get("high", {})
-                                    .get("@value", ""),
+                                    med_time.get("low", ""),
+                                    med_time.get("high", ""),
                                     entry_data["substanceAdministration"]["statusCode"][
                                         "@code"
                                     ],
@@ -390,7 +382,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9690937472.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None
