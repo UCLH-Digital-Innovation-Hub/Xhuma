@@ -414,15 +414,16 @@ async def iti_38_response(
 
     if docid is None:
         # no cached ccda
+        r = await gpconnect(nhsno, saml_attrs, request=request)
+        print("-" * 40)
+        print(r.body)
+        print("-" * 40)
         try:
             r = await gpconnect(nhsno, saml_attrs, request=request)
 
             print("-" * 40)
             logging.info(f"no cached ccda, used internal call for {nhsno}")
             r = json.loads(r.body)
-            print(r)
-            print("-" * 40)
-
         except Exception as e:
             logging.error(f"Error: {e}")
             print(f"iti_38_error: {e}")
@@ -458,13 +459,15 @@ async def iti_38_response(
                 },
             }
         else:
+            print(r)
             docid = r["document_id"]
 
-    # make sure docid is a string and not bytes
-    if isinstance(docid, bytes):
-        docid = docid.decode("utf-8")
-
     if docid is not None:
+
+        # make sure docid is a string and not bytes
+        if isinstance(docid, bytes):
+            docid = docid.decode("utf-8")
+
         # add the ccda as registry object list
         # object_id = f"CCDA_{docid}"
         object_id = docid

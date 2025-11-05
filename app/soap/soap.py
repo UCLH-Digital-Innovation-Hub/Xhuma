@@ -30,9 +30,15 @@ from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .audit import process_saml_attributes
-from .responses import (create_envelope, create_header, iti_38_response,
-                        iti_39_response, iti_47_response, iti_55_error,
-                        iti_55_response)
+from .responses import (
+    create_envelope,
+    create_header,
+    iti_38_response,
+    iti_39_response,
+    iti_47_response,
+    iti_55_error,
+    iti_55_response,
+)
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -474,10 +480,6 @@ async def iti39(request: Request):
                 content=error_response,
                 media_type="application/soap+xml",
             )
-            # raise HTTPException(
-            #     status_code=404,
-            #     detail=f"Document with Id {document_id} not found or is empty",
-            # )
     else:
         raise HTTPException(
             status_code=400, detail=f"Content type {content_type} not supported"

@@ -319,7 +319,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                 [
                                     entry_data["substanceAdministration"][
                                         "effectiveTime"
-                                    ]["low"]["@value"],
+                                    ]
+                                    .get("low", {})
+                                    .get("@value", ""),
                                     # if no high value should be blank
                                     entry_data["substanceAdministration"][
                                         "effectiveTime"

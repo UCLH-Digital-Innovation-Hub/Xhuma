@@ -182,16 +182,16 @@ async def gpconnect(
                     "value": f"{nhsno}",
                 },
             },
-            # {
-            #     "name": "includeAllergies",
-            #     "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
-            # },
+            {
+                "name": "includeAllergies",
+                "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
+            },
             {
                 "name": "includeMedication",
                 "part": [{"name": "includePrescriptionIssues", "valueBoolean": False}],
             },
-            # {"name": "includeProblems"},
-            # {"name": "includeInvestigations"},
+            {"name": "includeProblems"},
+            {"name": "includeInvestigations"},
         ],
     }
     if log_dir:
@@ -200,8 +200,8 @@ async def gpconnect(
         with open(os.path.join(log_dir, "request_body.json"), "w") as f:
             json.dump(body, f, indent=2)
 
-    async def _direct_http_call(url, headers: dict, body: dict) -> tuple[int, str]:
-        """Your existing direct call (trimmed). Return (status_code, text)."""
+    async def _direct_http_call(url: str, headers: dict, body: dict) -> httpx.Response:
+        """Make a direct POST and return an httpx.Response."""
         async with httpx.AsyncClient(
             cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
             verify=create_nhs_ssl_context(
@@ -213,34 +213,47 @@ async def gpconnect(
             http2=False,
         ) as session:
             r = await session.post(url, json=body, headers=headers)
-            return r.status_code, r.text
+            print(f"Direct HTTP call response status: {r.status_code}")
+            print(f"Direct HTTP call response text: {r.text}")
+            return r  # return a real httpx.Response
 
-    async def _relay_call(url: str, headers: dict, body: dict) -> tuple[int, str]:
-        """Send via relay and return (status_code, text)."""
+    async def _relay_call(url: str, headers: dict, body: dict) -> httpx.Response:
+        """Send via relay and return an httpx.Response with status_code and text."""
         hub = getattr(request.app.state, "relay_hub", None)
-
         if not hub:
             raise HTTPException(404, "Relay not available in this process")
+
         relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
         resp: dict = await hub.send(relay_req)
-        return int(resp.get("status_code", 502)), (resp.get("body") or "")
+
+        status_code = int(resp.get("status_code", 502))
+        body_raw = resp.get("body")
+
+        # Make sure body is text
+        if isinstance(body_raw, (dict, list)):
+            body_text = json.dumps(body_raw)
+        elif isinstance(body_raw, bytes):
+            body_text = body_raw.decode("utf-8", errors="replace")
+        else:
+            body_text = str(body_raw or "")
+
+        # Build a minimal httpx.Response — no header reuse (prevents gzip errors)
+        return httpx.Response(
+            status_code=status_code,
+            content=body_text.encode("utf-8"),
+            request=httpx.Request("POST", url),
+        )
 
     # 7) Make request with a per-call client (avoid leaking across event loops)
     resp = None
     try:
         if USE_RELAY:
-            try:
-                url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-                status_code, resp_text = await _relay_call(url, headers, body)
-                print(f"Relay response status: {status_code}")
-                print(f"Relay response text: {resp_text}")
-                resp = httpx.Response(status_code=status_code, content=resp_text)
-            except HTTPException as e:
-                # Optional fallback if relay enabled but not connected
-                logging.warning(
-                    f"Relay path failed ({e.status_code}:{e.detail}); falling back to direct HTTP"
-                )
-                resp = await _direct_http_call(url, headers, body)
+            url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            resp = await _relay_call(url, headers, body)
+            # print(f"Relay response status: {status_code}")
+            # print(f"Relay response text: {resp_text}")
+            # resp = httpx.Response(status_code=status_code, content=resp_text)
+
         else:
             url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             resp = await _direct_http_call(url, headers, body)
