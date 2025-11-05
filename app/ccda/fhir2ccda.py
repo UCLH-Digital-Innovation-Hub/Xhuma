@@ -314,16 +314,43 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         entry_data = medication(referenced_item, index)
                         # pprint.pprint(entry_data)
                         comp["section"]["entry"].append(entry_data)
+
+                        # TODO make this better and more robust
+                        # fix for some times being in a list
+                        time_entry = {}
+                        if isinstance(
+                            entry_data["substanceAdministration"]["effectiveTime"], list
+                        ):
+                            # search for the low and high values in the list
+                            for time_entry in entry_data["substanceAdministration"][
+                                "effectiveTime"
+                            ]:
+                                if "low" in time_entry:
+                                    entry_data["substanceAdministration"][
+                                        "effectiveTime"
+                                    ]["low"] = time_entry["low"]
+                                if "high" in time_entry:
+                                    entry_data["substanceAdministration"][
+                                        "effectiveTime"
+                                    ]["high"] = time_entry["high"]
+                        else:
+                            time_entry["low"] = (
+                                entry_data["substanceAdministration"]["effectiveTime"]
+                                .get("low", {})
+                                .get("@value", "")
+                            )
+                            time_entry["high"] = (
+                                entry_data["substanceAdministration"]["effectiveTime"]
+                                .get("high", {})
+                                .get("@value", "")
+                            )
+                            
                         rows.append(
                             create_row(
                                 [
-                                    entry_data["substanceAdministration"][
-                                        "effectiveTime"
-                                    ]
-                                    .get("low", {})
-                                    .get("@value", ""),
-                                    # if no high value should be blank
-                                    entry_data["substanceAdministration"][
+                                    readable_date(time_entry.get("low", "")),
+                                    readable_date(time_entry.get("high", "")),
+                                    entry_data["substanceAdministration"]["statusCode"][
                                         "effectiveTime"
                                     ]
                                     .get("high", {})
