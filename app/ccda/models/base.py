@@ -5,20 +5,8 @@ from pydantic import BaseModel, Extra, Field, field_serializer
 
 from ..helpers import templateId
 from .admin import AuthorParticipation
-from .datatypes import (
-    ANY,
-    CD,
-    CE,
-    CS,
-    ED,
-    EIVL_TS,
-    II,
-    IVL_PQ,
-    IVL_TS,
-    PIVL_TS,
-    PQ,
-    SXCM_TS,
-)
+from .datatypes import (ANY, CD, CE, CS, ED, EIVL_TS, II, IVL_PQ, IVL_TS,
+                        PIVL_TS, PQ, SXCM_TS)
 
 
 class ManufacturedMaterial(BaseModel):

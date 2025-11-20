@@ -311,7 +311,15 @@ async def gpconnect(
     if comment_index is not None:
         scr_bundle["entry"].pop(comment_index)
 
-    fhir_bundle = bundle.Bundle(scr_bundle)
+    try:
+        fhir_bundle = bundle.Bundle(scr_bundle)
+    except Exception as e:
+        msg = f"Failed to parse FHIR Bundle from GP Connect response: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     # index resources for resolution
     bundle_index = {}

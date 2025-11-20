@@ -2,12 +2,12 @@ import asyncio
 import datetime
 import json
 import pprint
+from typing import List
 
 import xmltodict
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
-from typing import List
 
 from .entries import allergy, immunization_entry, medication, problem, result
 from .helpers import date_helper, readable_date, templateId
@@ -327,9 +327,13 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                 "effectiveTime"
                             ]:
                                 if "low" in time_entry:
-                                    med_time["low"] = readable_date(time_entry["low"]["@value"])
+                                    med_time["low"] = readable_date(
+                                        time_entry["low"]["@value"]
+                                    )
                                 if "high" in time_entry:
-                                    med_time["high"] = readable_date(time_entry["high"]["@value"])
+                                    med_time["high"] = readable_date(
+                                        time_entry["high"]["@value"]
+                                    )
                         else:
                             med_time["low"] = (
                                 entry_data["substanceAdministration"]["effectiveTime"]
