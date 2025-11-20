@@ -257,7 +257,8 @@ async def iti_55_error(message_id, query, error_text):
                 "@codeSystem": "2.16.840.1.113883.1.18",
             },
             "queryAck": {
-                "queryId": query["queryId"],
+                # todo: handle missing queryId
+                "queryId": query["queryId"] if "queryId" in query else "can't find queryID",
                 "queryResponseCode": {"@code": "AE"},
                 "statusCode": {"@code": "aborted"},
             },
