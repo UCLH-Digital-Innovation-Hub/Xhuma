@@ -240,7 +240,7 @@ def test_structured_dosage():
                     assert (
                         entry_data["substanceAdministration"]["@classCode"] == "SBADM"
                     )
-
+    # print(medication_list)
     assert len(medication_list) == 27
 
 

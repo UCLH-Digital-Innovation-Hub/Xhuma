@@ -22,7 +22,7 @@ from urllib.request import Request
 
 import httpx
 import xmltodict
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
@@ -30,15 +30,9 @@ from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
 from .audit import process_saml_attributes
-from .responses import (
-    create_envelope,
-    create_header,
-    iti_38_response,
-    iti_39_response,
-    iti_47_response,
-    iti_55_error,
-    iti_55_response,
-)
+from .responses import (create_envelope, create_header, iti_38_response,
+                        iti_39_response, iti_47_response, iti_55_error,
+                        iti_55_response)
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -107,6 +101,28 @@ NAMESPACES = (
 )
 
 
+class SoapError(Exception):
+    """Signal an ITI-55 SOAP fault that should be returned as application/soap+xml."""
+
+    def __init__(
+        self, message_id: str, reason: str, query_params: dict, http_status: int = 200
+    ):
+        self.message_id = message_id
+        self.reason = reason
+        self.query_params = query_params
+        self.http_status = http_status
+        super().__init__(reason)
+
+
+def register_handlers(app: FastAPI):
+    @app.exception_handler(SoapError)
+    async def soap_error_handler(request: Request, exc: SoapError):
+        xml = await iti_55_error(exc.message_id, exc.query_params, exc.reason)
+        return Response(
+            content=xml, media_type="application/soap+xml", status_code=exc.http_status
+        )
+
+
 @router.post("/iti55")
 async def iti55(request: Request):
     """
@@ -115,7 +131,7 @@ async def iti55(request: Request):
     This endpoint processes PDQ requests by:
     1. Extracting NHS number from the request
     2. Performing PDS lookup
-    3.. Returning demographics in ITI-55 response format
+    3. Returning demographics in ITI-55 response format
 
     Args:
         request (Request): The incoming SOAP request
@@ -126,17 +142,23 @@ async def iti55(request: Request):
     Raises:
         HTTPException: For invalid content type, missing NHS number, or missing CEID
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
         query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
             "queryByParameter"
         ]["parameterList"]
-        for param in query_params["livingSubjectId"]["value"]:
-            if param["@root"] == "2.16.840.1.113883.2.1.4.1":
-                nhsno = param["@extension"]
-                # print(f"NHSNO: {nhsno}")
+
+        nhsno = None
+        try:
+            for param in query_params["livingSubjectId"]["value"]:
+                if param["@root"] == "2.16.840.1.113883.2.1.4.1":
+                    nhsno = param["@extension"]
+                    # print(f"NHSNO: {nhsno}")
+
+        except Exception:
+            nhsno = None
 
         if not nhsno:
             data = await iti_55_error(
@@ -151,8 +173,29 @@ async def iti55(request: Request):
         patient = await lookup_patient(nhsno)
         # TODO implement checking of demographics
 
-        # check security code
-        security_code = patient["meta"]["security"][0]["code"]
+        if (not patient) or (
+            "resourceType" in patient and patient["resourceType"] == "OperationOutcome"
+        ):
+            data = await iti_55_error(
+                envelope["Header"]["MessageID"],
+                f"Patient with NHS number {nhsno} not found",
+                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                    "queryByParameter"
+                ],
+            )
+            return Response(content=data, media_type="application/soap+xml")
+
+        security_code = None
+        if (
+            patient
+            and "meta" in patient
+            and "security" in patient["meta"]
+            and isinstance(patient["meta"]["security"], list)
+            and len(patient["meta"]["security"]) > 0
+            and "code" in patient["meta"]["security"][0]
+        ):
+            security_code = patient["meta"]["security"][0]["code"]
+
         if security_code != "U":
             data = await iti_55_error(
                 envelope["Header"]["MessageID"],
@@ -277,6 +320,8 @@ async def iti38(request: Request):
             # envelope["Header"]["Security"]["AttributeStatement"]
         )
 
+        print(f"SAML Attributes: {saml_attrs}")
+
         soap_body = envelope["Body"]
         slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
         query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
@@ -298,13 +343,15 @@ async def iti38(request: Request):
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
                     data = await iti_38_response(
-                        patient_id, "NOCEID", query_id, saml_attrs
+                        request, patient_id, "NOCEID", query_id, saml_attrs
                     )
             except AttributeError:
                 print(f"No valid NHS number found in patient ID's {patient_id}")
                 logging.info(f"No valid NHS number found in patient ID's {patient_id}")
         else:
-            data = await iti_38_response(patient_id, "NOCEID", query_id, saml_attrs)
+            data = await iti_38_response(
+                request, patient_id, "NOCEID", query_id, saml_attrs
+            )
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(
@@ -400,20 +447,19 @@ async def iti39(request: Request):
             body = {
                 "ns4:RetrieveDocumentSetResponse": {
                     "@xmlns:ns4": "urn:ihe:iti:xds-b:2007",
-                    "@xmlns:ns8": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-                    "ns8:RegistryResponse": {
-                        "@id": uuid.uuid4(),
+                    "@xmlns:rs": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
+                    "rs:RegistryResponse": {
                         "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure",
-                        # "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-                        "RegistryErrorList": {
-                            "RegistryError": {
+                        "rs:RegistryErrorList": {
+                            "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                            "rs:RegistryError": {
                                 "@errorCode": "XDSDocumentUniqueIdError",
                                 "@codeContext": f"Document with Id {document_id} not found",
                                 "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                            }
+                            },
                         },
                     },
-                },
+                }
             }
             soap_response = create_envelope(
                 create_header(
@@ -428,10 +474,6 @@ async def iti39(request: Request):
                 content=error_response,
                 media_type="application/soap+xml",
             )
-            # raise HTTPException(
-            #     status_code=404,
-            #     detail=f"Document with Id {document_id} not found or is empty",
-            # )
     else:
         raise HTTPException(
             status_code=400, detail=f"Content type {content_type} not supported"

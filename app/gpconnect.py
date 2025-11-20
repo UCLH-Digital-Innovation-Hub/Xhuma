@@ -19,6 +19,7 @@ from .ccda.helpers import validateNHSnumber
 from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
+from .settings import RELAY_TIMEOUT, USE_RELAY
 
 router = APIRouter()
 
@@ -57,9 +58,15 @@ client = httpx.AsyncClient(
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONResponse:
+async def gpconnect(
+    nhsno: int, saml_attrs: dict, log_dir: str = None, request: Request = None
+) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
+    # LOG SAML ATTRS FOR TESTING ONLY
+    with open("saml_attrs.json", "a") as f:
+        json.dump(saml_attrs, f, indent=2)
+    pprint.pprint(saml_attrs)
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
@@ -175,16 +182,16 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
                     "value": f"{nhsno}",
                 },
             },
-            # {
-            #     "name": "includeAllergies",
-            #     "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
-            # },
+            {
+                "name": "includeAllergies",
+                "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
+            },
             {
                 "name": "includeMedication",
                 "part": [{"name": "includePrescriptionIssues", "valueBoolean": False}],
             },
-            # {"name": "includeProblems"},
-            # {"name": "includeInvestigations"},
+            {"name": "includeProblems"},
+            {"name": "includeInvestigations"},
         ],
     }
     if log_dir:
@@ -193,11 +200,8 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
         with open(os.path.join(log_dir, "request_body.json"), "w") as f:
             json.dump(body, f, indent=2)
 
-    url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-
-    # 7) Make request with a per-call client (avoid leaking across event loops)
-    resp = None
-    try:
+    async def _direct_http_call(url: str, headers: dict, body: dict) -> httpx.Response:
+        """Make a direct POST and return an httpx.Response."""
         async with httpx.AsyncClient(
             cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
             verify=create_nhs_ssl_context(
@@ -208,14 +212,66 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
             timeout=httpx.Timeout(30.0),
             http2=False,
         ) as session:
-            resp = await session.post(url, json=body, headers=headers)
+            r = await session.post(url, json=body, headers=headers)
+            print(f"Direct HTTP call response status: {r.status_code}")
+            print(f"Direct HTTP call response text: {r.text}")
+            return r  # return a real httpx.Response
 
+    async def _relay_call(url: str, headers: dict, body: dict) -> httpx.Response:
+        """Send via relay and return an httpx.Response with status_code and text."""
+        hub = getattr(request.app.state, "relay_hub", None)
+        if not hub:
+            raise HTTPException(404, "Relay not available in this process")
+
+        relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
+        resp: dict = await hub.send(relay_req)
+
+        status_code = int(resp.get("status_code", 502))
+        body_raw = resp.get("body")
+
+        # Make sure body is text
+        if isinstance(body_raw, (dict, list)):
+            body_text = json.dumps(body_raw)
+        elif isinstance(body_raw, bytes):
+            body_text = body_raw.decode("utf-8", errors="replace")
+        else:
+            body_text = str(body_raw or "")
+
+        # Build a minimal httpx.Response — no header reuse (prevents gzip errors)
+        return httpx.Response(
+            status_code=status_code,
+            content=body_text.encode("utf-8"),
+            request=httpx.Request("POST", url),
+        )
+
+    # 7) Make request with a per-call client (avoid leaking across event loops)
+    resp = None
+    try:
+        if USE_RELAY:
+            url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            resp = await _relay_call(url, headers, body)
+            # print(f"Relay response status: {status_code}")
+            # print(f"Relay response text: {resp_text}")
+            # resp = httpx.Response(status_code=status_code, content=resp_text)
+
+        else:
+            url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            resp = await _direct_http_call(url, headers, body)
+
+        # (your existing logging)
         if log_dir:
             with open(
                 os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
             ) as f:
                 f.write(resp.text)
         logging.info(resp.text)
+
+    except Exception as e:
+        msg = f"Transport error: {e}"
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
     except httpx.ReadError as e:
         msg = "ReadError: server closed connection before responding"
@@ -255,7 +311,15 @@ async def gpconnect(nhsno: int, saml_attrs: dict, log_dir: str = None) -> JSONRe
     if comment_index is not None:
         scr_bundle["entry"].pop(comment_index)
 
-    fhir_bundle = bundle.Bundle(scr_bundle)
+    try:
+        fhir_bundle = bundle.Bundle(scr_bundle)
+    except Exception as e:
+        msg = f"Failed to parse FHIR Bundle from GP Connect response: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     # index resources for resolution
     bundle_index = {}
