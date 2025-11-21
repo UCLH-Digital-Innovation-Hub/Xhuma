@@ -1,4 +1,4 @@
-name: CI - Build and Test
+name: CI - Build, Test, Scan
 
 on:
   push:
@@ -28,6 +28,55 @@ jobs:
       run: |
         echo "Building Docker image for testing..."
         docker build -f Dockerfile.test -t xhuma:test .
+
+    - name: Run Trivy container scan on built image
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: xhuma:test
+        format: 'sarif'
+        output: 'trivy-container-results.sarif'
+        exit-code: '0' # change to 1 if we want the workflow to exit
+        ignore-unfixed: true
+        vuln-type: 'os,library'
+        severity: 'CRITICAL,HIGH'
+
+    - name: Upload Trivy container scan SARIF results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-container-results.sarif'
+        category: 'trivy-container-scan'
+
+
+    - name: Run Trivy filesystem scan on source code
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'table'
+        exit-code: '0'
+        ignore-unfixed: true
+        severity: 'CRITICAL,HIGH'
+        vuln-type: 'os,library'
+
+
+    - name: Run Trivy config scan in IaC mode
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scanners: 'misconfig'
+        scan-ref: '.'        
+        format: 'sarif'
+        output: 'trivy-config-results.sarif'
+        exit-code: '0'
+        ignore-unfixed: true
+        severity: 'CRITICAL,HIGH'
+
+
+    - name: Upload Trivy config scan SARIF results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-config-results.sarif'
+        category: 'trivy-config-scan'
 
         
     - name: Run tests with Docker Compose
