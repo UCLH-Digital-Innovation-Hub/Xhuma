@@ -21,6 +21,9 @@ from jwcrypto import jwk
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .gpconnect import gpconnect
+from .observability import init_observability
+from .observability.logging_config import setup_logging
+from .observability.middleware import CorrelationIDMiddleware
 from .pds import pds
 from .redis_connect import redis_client
 from .relay import routes
@@ -38,6 +41,10 @@ async def lifespan(app: FastAPI):
     Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
     # --- Startup logic ---
+    # Initialize observability (logging and tracing)
+    setup_logging()
+    init_observability(app)
+    
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
 
@@ -93,6 +100,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 3) Correlation ID middleware for request tracing
+app.add_middleware(CorrelationIDMiddleware)
 
 # Include routers for different service components
 app.include_router(soap.router)
