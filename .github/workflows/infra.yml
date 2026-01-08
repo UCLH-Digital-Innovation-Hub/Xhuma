@@ -1,0 +1,64 @@
+name: Infrastructure
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'infra/**'
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - 'infra/**'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+  ARM_CLIENT_SECRET: "${{ secrets.AZURE_CLIENT_SECRET }}"
+  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+  TF_VAR_resource_group_name: "${{ secrets.RESOURCE_GROUP }}"
+  TF_VAR_api_key: "${{ secrets.API_KEY }}"
+  TF_VAR_jwt_key: "${{ secrets.JWTKEY }}" # Assumed name
+  TF_VAR_registry_id: "${{ secrets.REGISTRY_ID }}"
+  TF_VAR_docker_registry_password: "${{ secrets.CR_PAT }}" # Use a PAT or GITHUB_TOKEN
+  TF_VAR_docker_registry_username: "${{ github.actor }}"
+  # Construct names dynamically or use secrets
+  TF_VAR_app_service_name: "xhuma-app-${{ github.run_id }}" 
+  TF_VAR_redis_name: "xhuma-redis-${{ github.run_id }}"
+
+jobs:
+  terraform:
+    name: "Terraform"
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        run: terraform init
+        # Note: You should configure a remote backend here or in the tf files
+        # e.g. -backend-config="storage_account_name=..."
+
+      - name: Terraform Format
+        run: terraform fmt -check
+
+      - name: Terraform Plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -input=false
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve -input=false

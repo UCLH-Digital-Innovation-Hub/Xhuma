@@ -14,6 +14,11 @@ import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
+# Configure Azure Monitor OpenTelemetry if connection string is present
+if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    from azure.monitor.opentelemetry import configure_azure_monitor
+    configure_azure_monitor()
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
