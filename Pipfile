@@ -25,6 +25,7 @@ pytest = "*"
 xmlschema = "*"
 pre-commit = "*"
 pytest-asyncio = "*"
+flake8 = "*"
 
 [requires]
 python_version = "3.13"
