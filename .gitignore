@@ -144,3 +144,9 @@ keys/
 
 # scal evidence logs
 scal_logs/
+
+# AI Artifacts
+task.md
+implementation_plan.md
+walkthrough.md
+*.png

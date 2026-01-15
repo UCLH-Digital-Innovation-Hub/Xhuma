@@ -43,6 +43,28 @@ resource "azurerm_redis_cache" "redis" {
   }
 }
 
+resource "azurerm_postgresql_flexible_server" "postgres" {
+  name                   = var.postgres_server_name
+  resource_group_name    = data.azurerm_resource_group.rg.name
+  location               = data.azurerm_resource_group.rg.location
+  version                = "15"
+  administrator_login    = var.postgres_admin_username
+  administrator_login_password = var.postgres_admin_password
+  storage_mb             = 32768
+  sku_name               = "B_Standard_B1ms"
+  backup_retention_days  = 7
+  
+  # For simplified deployment, we allow public access (controlled by firewall rules)
+  # Ideally use VNET integration in production
+}
+
+resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_services" {
+  name             = "allow_azure_services"
+  server_id        = azurerm_postgresql_flexible_server.postgres.id
+  start_ip_address = "0.0.0.0"
+  end_ip_address   = "0.0.0.0" # This specific rule allows access from Azure services
+}
+
 resource "azurerm_linux_web_app" "app" {
   name                = var.app_service_name
   resource_group_name = data.azurerm_resource_group.rg.name
@@ -55,10 +77,7 @@ resource "azurerm_linux_web_app" "app" {
       docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[1] : "latest"
     }
     
-    # If using GHCR, we might not strictly need these if the image is public, 
-    # but for private GHCR entries:
     container_registry_use_managed_identity = false
-    
   }
 
   app_settings = {
@@ -75,11 +94,16 @@ resource "azurerm_linux_web_app" "app" {
     "REDIS_PORT"           = azurerm_redis_cache.redis.ssl_port
     "REDIS_PASSWORD"       = azurerm_redis_cache.redis.primary_access_key
     "REDIS_SSL"            = "true"
+
+    # Postgres Config
+    "POSTGRES_HOST"        = azurerm_postgresql_flexible_server.postgres.fqdn
+    "POSTGRES_USER"        = var.postgres_admin_username
+    "POSTGRES_PASSWORD"    = var.postgres_admin_password
+    "POSTGRES_DB"          = "xhuma"
+    # Port is 5432 by default
     
     # Observability
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.appinsights.connection_string
     "OTEL_SERVICE_NAME"                     = "xhuma"
-    # Additional Otel Vars will be set in main.py logic or here if using an agent.
-    # The Azure Monitor Distro typically auto-configures via the connection string.
   }
 }

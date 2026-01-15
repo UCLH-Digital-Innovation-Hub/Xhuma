@@ -37,6 +37,23 @@ variable "redis_capacity" {
   default     = 1
 }
 
+variable "postgres_server_name" {
+  description = "Name of the Postgres Flexible Server"
+  type        = string
+}
+
+variable "postgres_admin_username" {
+  description = "Postgres admin username"
+  type        = string
+  default     = "xhumaadmin"
+}
+
+variable "postgres_admin_password" {
+  description = "Postgres admin password"
+  type        = string
+  sensitive   = true
+}
+
 variable "api_key" {
   description = "API Key for Xhuma"
   type        = string
