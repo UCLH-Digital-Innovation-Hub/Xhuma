@@ -78,6 +78,10 @@ resource "azurerm_linux_web_app" "app" {
     }
     
     container_registry_use_managed_identity = false
+    
+    # Enable WebSockets for the Relay
+    websockets_enabled = true
+    use_32_bit_worker_process = true # Typically false for production but B1 is small
   }
 
   app_settings = {
@@ -94,6 +98,9 @@ resource "azurerm_linux_web_app" "app" {
     "REDIS_PORT"           = azurerm_redis_cache.redis.ssl_port
     "REDIS_PASSWORD"       = azurerm_redis_cache.redis.primary_access_key
     "REDIS_SSL"            = "true"
+
+    # Relay Configuration
+    "USE_RELAY"            = "1" # Enabled by default for this deployment
 
     # Postgres Config
     "POSTGRES_HOST"        = azurerm_postgresql_flexible_server.postgres.fqdn
