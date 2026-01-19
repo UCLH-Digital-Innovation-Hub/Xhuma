@@ -66,7 +66,7 @@ async def gpconnect(
     # LOG SAML ATTRS FOR TESTING ONLY
     with open("saml_attrs.json", "a") as f:
         json.dump(saml_attrs, f, indent=2)
-    pprint.pprint(saml_attrs)
+    # pprint.pprint(saml_attrs)
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
@@ -124,13 +124,21 @@ async def gpconnect(
 
     asid = None
     nhsmhsparty = None
-    for item in (
-        asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
-    ):
-        if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
-            asid = item.get("value")
-        elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
-            nhsmhsparty = item.get("value")
+    try:
+        for item in (
+            asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
+        ):
+            if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
+                asid = item.get("value")
+            elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+                nhsmhsparty = item.get("value")
+    except Exception as e:
+        msg = f"Unable to parse SDS trace response: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     if not asid or not nhsmhsparty:
         msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"

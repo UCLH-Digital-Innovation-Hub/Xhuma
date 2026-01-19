@@ -42,8 +42,6 @@ audit_dict = {
 }
 
 
-
-
 @pytest.mark.asyncio
 async def test_GPC_STR_TST_ALG_01():
     """Given the user wishes to view / import all current allergiesOR the system is set to only view / import all current allergies

@@ -41,6 +41,7 @@ audit_dict = {
     "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
 }
 
+
 @pytest.mark.asyncio
 async def test_GPC_STR_TST_INV_01():
     """Given I have made a request for investigations to a GP Connect service invalid Investigations Parameters/Part Parameters
@@ -55,6 +56,7 @@ async def test_GPC_STR_TST_INV_01():
             code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
+
 
 @pytest.mark.asyncio
 async def test_PC_STR_TST_INV_05():
@@ -95,11 +97,12 @@ async def test_GPC_STR_TST_INV_07():
             body = json.loads(result.body)
             assert "document_id" in body
 
+
 @pytest.mark.asyncio
 async def test_GPC_STR_TST_INV_09():
     """Given I have sent a valid request for investigations
     When the provider returns a success response including an operation outcome warning that investigations is not supported
-    Then I handle the response gracefully 
+    Then I handle the response gracefully
     And inform users appropriately according to my use case
     """
     nhsnos = ["9658218873"]

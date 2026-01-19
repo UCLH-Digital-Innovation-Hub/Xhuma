@@ -154,7 +154,7 @@ async def test_GPC_STR_TST_GEN_11():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
-            assert "document_id" in body
+            assert code == 404
 
 
 @pytest.mark.asyncio
@@ -204,6 +204,7 @@ async def test_GPC_STR_TST_GEN_14():
             body = json.loads(result.body)
             assert body["success"] is False
 
+
 @pytest.mark.asyncio
 async def test_GPC_STR_TST_GEN_15():
     """
@@ -236,6 +237,7 @@ async def test_GPC_STR_TST_GEN_16():
             body = json.loads(result.body)
             assert "document_id" in body
 
+
 @pytest.mark.asyncio
 async def test_GPC_STR_TST_GEN_17():
     """Given I have sent a valid message to GP Connect
@@ -248,6 +250,7 @@ async def test_GPC_STR_TST_GEN_17():
             code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
+
 
 @pytest.mark.asyncio
 async def test_GPC_STR_TST_GEN_18():
@@ -262,7 +265,6 @@ async def test_GPC_STR_TST_GEN_18():
             code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
-
 
 
 @pytest.mark.asyncio

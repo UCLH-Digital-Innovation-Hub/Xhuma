@@ -9,8 +9,8 @@ import pytest
 
 from app.gpconnect import gpconnect
 from app.pds.pds import lookup_patient, sds_trace
-
 from app.tests.log_context import capture_test_logs
+
 from .test_scal_alg import audit_dict
 
 

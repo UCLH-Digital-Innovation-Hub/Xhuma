@@ -73,4 +73,3 @@ async def test_GPC_STR_TST_MED_07():
             code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
-

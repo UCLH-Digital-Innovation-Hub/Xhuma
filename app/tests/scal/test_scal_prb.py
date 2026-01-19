@@ -102,4 +102,3 @@ async def test_GPC_STR_TST_PRB_08():
             code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
-
