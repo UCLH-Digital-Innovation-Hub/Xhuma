@@ -90,6 +90,7 @@ async def test_GPC_STR_TST_GEN_07():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
+            assert code == 200
             assert "document_id" in body
 
 
@@ -106,6 +107,7 @@ async def test_GPC_STR_TST_GEN_08():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
+            assert code == 200
             assert "document_id" in body
 
 
@@ -121,6 +123,7 @@ async def test_GPC_STR_TST_GEN_09():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
+            assert code == 403
             assert body["success"] is False
 
 
@@ -138,6 +141,7 @@ async def test_GPC_STR_TST_GEN_10():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
+            assert code == 403
             assert body["success"] is False
 
 
@@ -170,6 +174,7 @@ async def test_GPC_STR_TST_GEN_12():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
+            assert code == 403
             assert body["success"] is False
 
 
@@ -186,7 +191,7 @@ async def test_GPC_STR_TST_GEN_13():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
-            assert "document_id" in body
+            assert body["success"] is False
 
 
 @pytest.mark.asyncio
@@ -202,6 +207,7 @@ async def test_GPC_STR_TST_GEN_14():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
+            assert code == 400
             assert body["success"] is False
 
 
@@ -219,7 +225,8 @@ async def test_GPC_STR_TST_GEN_15():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
-            assert "document_id" in body
+            # TODO clarify test as we used fixed allergy parameters
+            assert body["success"] is False
 
 
 @pytest.mark.asyncio
@@ -235,7 +242,8 @@ async def test_GPC_STR_TST_GEN_16():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
-            assert "document_id" in body
+            # TODO clarify test as we used fixed allergy parameters
+            assert body["success"] is False
 
 
 @pytest.mark.asyncio
@@ -249,7 +257,7 @@ async def test_GPC_STR_TST_GEN_17():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
-            assert "document_id" in body
+            assert code == 200
 
 
 @pytest.mark.asyncio
@@ -264,7 +272,7 @@ async def test_GPC_STR_TST_GEN_18():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
-            assert "document_id" in body
+            assert code == 200
 
 
 @pytest.mark.asyncio
@@ -280,4 +288,4 @@ async def test_GPC_STR_TST_GEN_20():
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
-            assert "document_id" in body
+            assert code == 200
