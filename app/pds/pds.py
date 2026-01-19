@@ -134,7 +134,7 @@ if __name__ == "__main__":
     # print(patient.name[0].family)
     # print(patient.generalPractitioner[0].identifier.value)
 
-    ods = asyncio.run(sds_trace("RRV00"))
+    ods = asyncio.run(sds_trace("A82038"))
     pprint.pprint(ods)
     for i in ods["entry"]:
         pprint.pprint(i)
