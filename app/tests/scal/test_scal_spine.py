@@ -115,7 +115,25 @@ async def test_GPC_SPN_TST_03():
                 assert code == 200
 
 
-# GPC-SPN-TST-04 ciphers
+@pytest.mark.asyncio
+async def test_GPC_SPN_TST_04():
+    """Given I am using the default server
+    And I am performing a Foundations, Appointments, HTML GetCareRecord OR GetStructuredRecord interaction interaction
+    When I make a GPConnect request
+    Then I use a valid SSLCipherSuite = AESGCM+EECDH,AESGCM+EDH,AES256+EECDH,AES256+EDH
+    And the response status code should indicate success"""
+    nhsnos = [9658218873]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-SPN-TST-04", nhsno) as log_dir:
+
+            with open(os.path.join(log_dir, "GPC-SPN-TST-04.log"), "a") as f:
+                result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+                f.write(f"GP Connect response status code: {result.status_code}\n")
+                code = result.status_code
+                f.write(f"Response code: {code}\n")
+                assert code == 200
+
+
 # GPC-SPN-TST-05
 # not sending xml
 
@@ -155,6 +173,51 @@ async def test_GPC_SPN_TST_07():
         async with capture_test_logs("GPC-SPN-TST-07", nhsno) as log_dir:
 
             with open(os.path.join(log_dir, "GPC-SPN-TST-07.log"), "a") as f:
+                result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+                f.write(f"GP Connect response status code: {result.status_code}\n")
+                code = result.status_code
+                f.write(f"Response code: {code}\n")
+                assert code == 403
+
+
+@pytest.mark.asyncio
+async def test_GPC_SPN_TST_08():
+    """Given I am using the default server
+    And I am performing a Foundations, Appointments, HTML GetCareRecord or GetStructuredRecord interaction
+    And I author a GPConnect request for patient with NHS Number
+    And I make a valid request
+    When I receive a successful response
+    Then I shall add to the systems audit trail the interaction header data items including Ssp-TraceID, Ssp-From, Ssp - To, Ssp-Interaction ID details sent in the request
+    And I shall add to the systems audit trail the JWT data items including - User ID Name, Role and Organisation - Identity of authority (the person authorising the entry of or access to data Date and Time on which the interaction occurred - Details of the nature of the event and the identity of the associated data (e.g. message/audit event ID) of the event
+    """
+    nhsnos = [9658218873]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-SPN-TST-08", nhsno) as log_dir:
+
+            with open(os.path.join(log_dir, "GPC-SPN-TST-08.log"), "a") as f:
+                result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+                f.write(f"GP Connect response status code: {result.status_code}\n")
+                code = result.status_code
+                f.write(f"Response code: {code}\n")
+                assert code == 200
+
+
+@pytest.mark.asyncio
+async def test_GPC_SPN_TST_09():
+    """Given I am using the default server
+    And I am performing a Foundations, Appointments, HTML GetCareRecord or GetStructuredRecord interaction
+    And I author a GPConnect request for patient with NHS Number (NHS Number to be provided by NHS Digital)
+    And I make a valid request
+    When I receive an unsuccessful response.
+    Then I shall add to the systems audit trail the interaction header items including Ssp-TraceID, Ssp-From, Ssp - To, Ssp-Interaction ID details sent in the request
+    And I shall add to the systems audit trail the interaction header data items including Ssp-TraceID, Ssp-From, Ssp - To, Ssp-Interaction ID details sent in the requestAnd I shall add to the systems audit trail the JWT data items including - User ID Name, Role and Organisation - Identity of authority (the person authorising the entry of or access to data - Date and Time on which the interaction occurred - Details of the nature of the event and the identity of the associated data (e.g. message/audit event ID) of the event
+    And I shall add to the systems audit trail the Operation Outcome response details returned in the response
+    And I shall display the interaction-returned message"""
+    nhsnos = [9658219748]
+    for nhsno in nhsnos:
+        async with capture_test_logs("GPC-SPN-TST-09", nhsno) as log_dir:
+
+            with open(os.path.join(log_dir, "GPC-SPN-TST-09.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")
                 code = result.status_code

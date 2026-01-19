@@ -374,7 +374,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
             # if there is a note in the section add it as a div
 
-            if hasattr(list, "note"):
+            if hasattr(list, "note") and list.note is not None:
+                print("adding note")
                 comp["section"]["text"]["div"] = [
                     {"p": note.text} for note in list.note
                 ]

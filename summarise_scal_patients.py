@@ -1,25 +1,10 @@
 import asyncio
 import csv
+import json
 from typing import Any, Dict, List, Optional
 
 from app.pds.pds import lookup_patient
-
-NHS_NUMBERS = [
-    "9658218873",
-    "9658218903",
-    "9690937286",
-    "9690937294",
-    "9690937308",
-    "9690937375",
-    "9690938096",
-    "9690938118",
-    "9690938207",
-    "9690938533",
-    "9690938541",
-    "9690938576",
-    "9690938681",
-]
-
+from app.gpconnect import gpconnect
 
 NHS_NUMBERS = [
     "9658218873",
@@ -105,15 +90,63 @@ async def main():
             out_nhs = get_nhs_number(patient) or nhsno
             first, last = get_first_last(patient)
             dob = get_dob(patient)
+            # sex
+            sex = patient.get("gender", "")
 
-            rows.append([out_nhs, first, last, dob])
+            saml_attrs = {
+                "subject_id": "CONE, Stephen",
+                "organization": "UCLH - University College London Hospitals - TST",
+                "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+                "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+                "role": {
+                    "Role": {
+                        "@codeSystem": "2.16.840.1.113883.6.96",
+                        "@code": "224608005",
+                        "@codeSystemName": "SNOMED_CT",
+                        "@displayName": "Administrative healthcare staff",
+                        "@xmlns": "urn:hl7-org:v3",
+                        "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                        "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+                    }
+                },
+                "purpose_of_use": {
+                    "PurposeForUse": {
+                        "@xsi:type": "CE",
+                        "@code": "TREATMENT",
+                        "@codeSystem": "2.16.840.1.113883.3.18.7.1",
+                        "@codeSystemName": "nhin-purpose",
+                        "@displayName": "Treatment",
+                        "@xmlns": "urn:hl7-org:v3",
+                        "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                        "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+                    }
+                },
+                "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
+            }
+
+            result = await gpconnect(nhsno, saml_attrs=saml_attrs)
+            code = result.status_code
+            body = json.loads(result.body)
+            error_message = body.get("error", "")
+
+            rows.append([out_nhs, first, last, dob, sex, str(code), error_message])
 
         except Exception as e:
             rows.append([nhsno, "ERROR", str(e), ""])
 
     with open("patients.csv", "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["nhs_number", "first_name", "last_name", "dob"])
+        writer.writerow(
+            [
+                "nhs_number",
+                "first_name",
+                "last_name",
+                "dob",
+                "sex",
+                "GP_connect_status_code",
+                "error_message",
+            ]
+        )
         writer.writerows(rows)
 
 
