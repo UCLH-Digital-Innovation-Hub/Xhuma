@@ -3,8 +3,8 @@ import csv
 import json
 from typing import Any, Dict, List, Optional
 
-from app.pds.pds import lookup_patient
 from app.gpconnect import gpconnect
+from app.pds.pds import lookup_patient
 
 NHS_NUMBERS = [
     "9658218873",
