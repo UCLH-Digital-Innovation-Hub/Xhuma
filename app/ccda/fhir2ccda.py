@@ -111,9 +111,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     }
 
     # vital signs doesn't appear in the SCR therefore crate blank list to generate xml
-    vital_signs = fhirlist.List()
-    vital_signs.title = "Vital Signs"
-    lists.append(vital_signs)
+    # vital_signs = fhirlist.List()
+    # vital_signs.title = "Vital Signs"
+    # lists.append(vital_signs)s
 
     def create_section(list: fhirlist.List) -> dict:
         templates = {
@@ -289,7 +289,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                         "observation"
                                     ]["entryRelationship"]["observation"]["value"][
                                         "@displayName"
-                                    ],
+                                    ] if "entryRelationship" in entry_data["act"][
+                                        "entryRelationship"
+                                    ] else "",
                                 ]
                             )
                         )
@@ -371,6 +373,15 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "tbody": {"tr": rows},
                     }
                 }
+
+            # if there is a note in the section add it as a div
+
+            if hasattr(list, "note") and list.note is not None:
+                print("adding note")
+                comp["section"]["text"]["div"] = [
+                    {"p": note.text} for note in list.note
+                ]
+
             return comp
 
     bundle_components = [create_section(list) for list in lists]
