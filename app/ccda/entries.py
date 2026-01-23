@@ -339,28 +339,29 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> dict:
             },
         },
     }
-
-    observation["entryRelationship"] = {
-        "@typeCode": "MFST",
-        "@inversionInd": "true",
-        "observation": {
-            "@classCode": "OBS",
-            "@moodCode": "EVN",
-            "templateId": templateId("2.16.840.1.113883.10.20.22.4.9", "2014-06-09"),
-            "id": {"@root": uuid.uuid4()},
-            "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
-            "effectiveTime": {
-                "low": {"@value": date_helper(entry.assertedDate.isostring)}
+    # if there is a reaction, add manifestation as entryRelationship
+    if entry.reaction and entry.reaction[0].manifestation:
+        observation["entryRelationship"] = {
+            "@typeCode": "MFST",
+            "@inversionInd": "true",
+            "observation": {
+                "@classCode": "OBS",
+                "@moodCode": "EVN",
+                "templateId": templateId("2.16.840.1.113883.10.20.22.4.9", "2014-06-09"),
+                "id": {"@root": uuid.uuid4()},
+                "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
+                "effectiveTime": {
+                    "low": {"@value": date_helper(entry.assertedDate.isostring)}
+                },
+                "value": {
+                    "@xsi:type": "CD",
+                    "@code": entry.reaction[0].manifestation[0].coding[0].code,
+                    "@displayName": entry.reaction[0].manifestation[0].coding[0].display,
+                    "@codeSystemName": "SNOMED CT",
+                    "@codeSystem": "2.16.840.1.113883.6.96",
+                },
             },
-            "value": {
-                "@xsi:type": "CD",
-                "@code": entry.reaction[0].manifestation[0].coding[0].code,
-                "@displayName": entry.reaction[0].manifestation[0].coding[0].display,
-                "@codeSystemName": "SNOMED CT",
-                "@codeSystem": "2.16.840.1.113883.6.96",
-            },
-        },
-    }
+        }
 
     all["act"]["entryRelationship"]["observation"] = observation
 

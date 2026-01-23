@@ -289,7 +289,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                         "observation"
                                     ]["entryRelationship"]["observation"]["value"][
                                         "@displayName"
-                                    ],
+                                    ] if "entryRelationship" in entry_data["act"][
+                                        "entryRelationship"
+                                    ] else "",
                                 ]
                             )
                         )
