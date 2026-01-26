@@ -14,13 +14,18 @@ import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .gpconnect import gpconnect
 from .pds import pds
 from .redis_connect import redis_client
+from .relay import routes
+from .relay.hub import WebSocketHub
+from .settings import USE_RELAY
 from .soap import soap
 
 # Generate or retrieve registry ID from environment
@@ -59,9 +64,51 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# register soap error handler
+soap.register_handlers(app)
+
+# 1) Trusted hosts: allow local & your domain
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        "xhumademo.com",
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "*",
+    ],  # "*" ok for dev
+)
+
+# 2) CORS: allow local & your domain (Starlette applies CORS to WebSockets too)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://xhumademo.com",
+        "http://localhost",
+        "http://127.0.0.1",
+        "http://0.0.0.0",
+        "*",
+    ],  # "*" ok for dev
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Include routers for different service components
 app.include_router(soap.router)
 app.include_router(pds.router)
+
+# if using HSCN relay, set up WebSocket hub and routes
+if USE_RELAY:
+    # Initialize and store WebSocketHub in app state
+    app.state.relay_hub = WebSocketHub()
+    app.include_router(routes.router)
+
+    # alert that we're using relay
+    print("Using HSCN Relay")
+
+else:
+    print(f"{USE_RELAY} is not a valid setting for USE_RELAY, defaulting to no relay")
 
 
 # app.include_router(gpconnect.router)  # Currently disabled
@@ -96,7 +143,7 @@ async def root():
 
 
 @app.get("/demo/{nhsno}")
-async def demo(nhsno: int):
+async def demo(nhsno: int, request: Request):
     """
     Demo endpoint that retrieves and returns a CCDA document for a given NHS number.
 
@@ -136,8 +183,13 @@ async def demo(nhsno: int):
         },
         "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
     }
-    bundle_id = await gpconnect(nhsno, audit_dict)
-    return redis_client.get(bundle_id["document_id"])
+
+    bundle_id = await gpconnect(nhsno, audit_dict, request=request)
+    # decode jsonresponse
+
+    # gpcon_response = json.loads(bundle_id)  # validate json
+    # document_id = gpcon_response.get("document_id")
+    return bundle_id
 
 
 @app.get("/jwk")

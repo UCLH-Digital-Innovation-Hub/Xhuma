@@ -2,25 +2,16 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence
 
-from fhirclient.models import allergyintolerance, coding, condition, immunization
+from fhirclient.models import (allergyintolerance, coding, condition,
+                               immunization)
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationstatement, observation
 
-from .helpers import (
-    code_with_translations,
-    date_helper,
-    effective_time_helper,
-    organization_to_author,
-    readable_date,
-    templateId,
-)
-from .models.base import (
-    EntryRelationship,
-    Observation,
-    ResultObservation,
-    ResultsOrganizer,
-    SubstanceAdministration,
-)
+from .helpers import (code_with_translations, date_helper,
+                      effective_time_helper, organization_to_author,
+                      templateId)
+from .models.base import (EntryRelationship, Observation, ResultObservation,
+                          ResultsOrganizer, SubstanceAdministration)
 from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 Cell = str
@@ -74,19 +65,36 @@ def medication(
     # if dose quantiy is in dosage
     if entry.dosage[0].doseQuantity:
         # assumption that all structuered dosage will be snomed
+        # substance_administration.doseQuantity = {
+        #     "value": {
+        #         "@xsi:type": "PQ",
+        #         "@nullFlavor": "OTH",
+        #         "translation": {
+        #             "@value": entry.dosage[0].doseQuantity.value,
+        #             "@code": entry.dosage[0].doseQuantity.code,
+        #             "@codeSystemName": entry.dosage[0].doseQuantity.system,
+        #             "@codeSystem": "2.16.840.1.113883.6.96",
+        #             "originalText": entry.dosage[0].doseQuantity.unit,
+        #         },
+        #     },
+        # }
         substance_administration.doseQuantity = {
-            "value": {
-                "@xsi:type": "PQ",
-                "@nullFlavor": "OTH",
-                "translation": {
-                    "@value": entry.dosage[0].doseQuantity.value,
-                    "@code": entry.dosage[0].doseQuantity.code,
-                    "@codeSystemName": entry.dosage[0].doseQuantity.system,
-                    "@codeSystem": "2.16.840.1.113883.6.96",
-                    "originalText": entry.dosage[0].doseQuantity.unit,
-                },
-            },
+            "@xsi:type": "PQ",
+            "@value": entry.dosage[0].doseQuantity.value,
         }
+        if entry.dosage[0].doseQuantity.unit:
+            substance_administration.doseQuantity["@unit"] = entry.dosage[
+                0
+            ].doseQuantity.unit
+
+        # if there is a code add a translation
+        if entry.dosage[0].doseQuantity.code:
+            substance_administration.doseQuantity["translation"] = {
+                "@value": entry.dosage[0].doseQuantity.value,
+                "@code": entry.dosage[0].doseQuantity.code,
+                "@codeSystem": "2.16.840.1.113883.6.96",
+                "originalText": entry.dosage[0].doseQuantity.unit,
+            }
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
     if entry.dosage[0].timing:
         # check if medication is prn
@@ -399,28 +407,29 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             },
         },
     }
-
-    observation["entryRelationship"] = {
-        "@typeCode": "MFST",
-        "@inversionInd": "true",
-        "observation": {
-            "@classCode": "OBS",
-            "@moodCode": "EVN",
-            "templateId": templateId("2.16.840.1.113883.10.20.22.4.9", "2014-06-09"),
-            "id": {"@root": uuid.uuid4()},
-            "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
-            "effectiveTime": {
-                "low": {"@value": date_helper(entry.assertedDate.isostring)}
+    # if there is a reaction, add manifestation as entryRelationship
+    if entry.reaction and entry.reaction[0].manifestation:
+        observation["entryRelationship"] = {
+            "@typeCode": "MFST",
+            "@inversionInd": "true",
+            "observation": {
+                "@classCode": "OBS",
+                "@moodCode": "EVN",
+                "templateId": templateId("2.16.840.1.113883.10.20.22.4.9", "2014-06-09"),
+                "id": {"@root": uuid.uuid4()},
+                "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
+                "effectiveTime": {
+                    "low": {"@value": date_helper(entry.assertedDate.isostring)}
+                },
+                "value": {
+                    "@xsi:type": "CD",
+                    "@code": entry.reaction[0].manifestation[0].coding[0].code,
+                    "@displayName": entry.reaction[0].manifestation[0].coding[0].display,
+                    "@codeSystemName": "SNOMED CT",
+                    "@codeSystem": "2.16.840.1.113883.6.96",
+                },
             },
-            "value": {
-                "@xsi:type": "CD",
-                "@code": entry.reaction[0].manifestation[0].coding[0].code,
-                "@displayName": entry.reaction[0].manifestation[0].coding[0].display,
-                "@codeSystemName": "SNOMED CT",
-                "@codeSystem": "2.16.840.1.113883.6.96",
-            },
-        },
-    }
+        }
 
     all["act"]["entryRelationship"]["observation"] = observation
 

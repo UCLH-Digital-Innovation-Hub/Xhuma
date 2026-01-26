@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import os
 import pprint
@@ -6,6 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import xmltodict
+from fastapi import Request
 from httpx import AsyncClient
 
 from ..gpconnect import gpconnect
@@ -255,7 +257,10 @@ async def iti_55_error(message_id, query, error_text):
                 "@codeSystem": "2.16.840.1.113883.1.18",
             },
             "queryAck": {
-                "queryId": query["queryId"],
+                # todo: handle missing queryId
+                "queryId": (
+                    query["queryId"] if "queryId" in query else "can't find queryID"
+                ),
                 "queryResponseCode": {"@code": "AE"},
                 "statusCode": {"@code": "aborted"},
             },
@@ -397,7 +402,9 @@ async def iti_47_response(message_id, patient, ceid, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
-async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
+async def iti_38_response(
+    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: dict
+):
 
     body = {}
     body["AdhocQueryResponse"] = {
@@ -410,14 +417,23 @@ async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
 
     if docid is None:
         # no cached ccda
+        r = await gpconnect(nhsno, saml_attrs, request=request)
+        print("-" * 40)
+        print(r.body)
+        print("-" * 40)
         try:
-            r = await gpconnect(nhsno, saml_attrs)
+            r = await gpconnect(nhsno, saml_attrs, request=request)
+
+            print("-" * 40)
             logging.info(f"no cached ccda, used internal call for {nhsno}")
-            print(r)
-            docid = r["document_id"]
+            r = json.loads(r.body)
         except Exception as e:
             logging.error(f"Error: {e}")
             print(f"iti_38_error: {e}")
+            r = {
+                "success": False,
+                "error": f"Internal error retrieving structured record for NHS number {nhsno}. error: {e}",
+            }
             body["AdhocQueryResponse"][
                 "@status"
             ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
@@ -430,24 +446,31 @@ async def iti_38_response(nhsno: int, ceid, queryid: str, saml_attrs: dict):
                     "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 },
             }
-    if not r.get("success"):
-        logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
-        body["AdhocQueryResponse"][
-            "@status"
-        ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-        body["AdhocQueryResponse"]["RegistryErrorList"] = {
-            "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-            "RegistryError": {
-                "@errorCode": "XDSRegistryError",
-                "@codeContext": r.get("error", "Unknown error"),
-                "@location": "",
-                "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-            },
-        }
-    else:
-        docid = r["document_id"]
+
+        if not r.get("success"):
+            logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
+            body["AdhocQueryResponse"][
+                "@status"
+            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            body["AdhocQueryResponse"]["RegistryErrorList"] = {
+                "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                "RegistryError": {
+                    "@errorCode": "XDSRegistryError",
+                    "@codeContext": r.get("error", "Unknown error"),
+                    "@location": "",
+                    "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                },
+            }
+        else:
+            print(r)
+            docid = r["document_id"]
 
     if docid is not None:
+
+        # make sure docid is a string and not bytes
+        if isinstance(docid, bytes):
+            docid = docid.decode("utf-8")
+
         # add the ccda as registry object list
         # object_id = f"CCDA_{docid}"
         object_id = docid
@@ -596,6 +619,8 @@ async def iti_39_response(message_id: str, document_id: str, document):
     soap_response = create_envelope(
         create_header("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id), body
     )
+
+    print(f"ITI39 response: {soap_response}")
 
     # soap_response = create_envelope(
     #     create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", "test"), body

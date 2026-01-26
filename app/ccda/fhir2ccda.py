@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import json
 import pprint
+from typing import List
 
 import xmltodict
 from fhirclient.models import bundle
@@ -110,9 +111,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     }
 
     # vital signs doesn't appear in the SCR therefore crate blank list to generate xml
-    vital_signs = fhirlist.List()
-    vital_signs.title = "Vital Signs"
-    lists.append(vital_signs)
+    # vital_signs = fhirlist.List()
+    # vital_signs.title = "Vital Signs"
+    # lists.append(vital_signs)s
 
     def create_section(list: fhirlist.List) -> dict:
         templates = {
@@ -330,7 +331,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9690937472.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None

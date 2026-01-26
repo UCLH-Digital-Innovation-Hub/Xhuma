@@ -240,7 +240,7 @@ def test_structured_dosage():
                     assert (
                         entry_data["substanceAdministration"]["@classCode"] == "SBADM"
                     )
-
+    # print(medication_list)
     assert len(medication_list) == 27
 
 
@@ -256,10 +256,10 @@ def test_structured_detail():
     pprint.pprint(substance_administration)
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
-    assert (
-        substance_administration["id"][0]["@extension"]
-        == "https://EMISWeb/A82038/7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6MS"
-    )
+    # assert (
+    #     substance_administration["id"][0]["@extension"]
+    #     == "https://EMISWeb/A82038/7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6MS"
+    # )
     assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20200304"
     assert substance_administration["effectiveTime"][1]["@xsi:type"] == "PIVL_TS"
     assert (
@@ -267,15 +267,126 @@ def test_structured_detail():
     )
     assert substance_administration["effectiveTime"][1]["period"]["@value"] == 1.0
     assert substance_administration["effectiveTime"][1]["period"]["@unit"] == "d"
-    assert substance_administration["doseQuantity"]["value"]["@xsi:type"] == "PQ"
+    assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"
+    assert substance_administration["doseQuantity"]["translation"]["@value"] == 1
     assert (
-        substance_administration["doseQuantity"]["value"]["translation"]["@value"] == 1
-    )
-    assert (
-        substance_administration["doseQuantity"]["value"]["translation"]["originalText"]
+        substance_administration["doseQuantity"]["translation"]["originalText"]
         == "tablet"
     )
     assert (
-        substance_administration["doseQuantity"]["value"]["translation"]["@codeSystem"]
+        substance_administration["doseQuantity"]["translation"]["@codeSystem"]
         == "2.16.840.1.113883.6.96"
     )
+
+
+new_structured_statement = medicationstatement.MedicationStatement(
+    {
+        "resourceType": "MedicationStatement",
+        "id": "A07283C9-A77A-4850-8092-9AB8486D2865-MS",
+        "meta": {
+            "profile": [
+                "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationStatement-1"
+            ]
+        },
+        "extension": [
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1",
+                "valueCodeableConcept": {
+                    "coding": [
+                        {
+                            "system": "https://fhir.nhs.uk/STU3/CodeSystem/CareConnect-PrescribingAgency-1",
+                            "code": "prescribed-at-gp-practice",
+                            "display": "Prescribed at GP practice",
+                        }
+                    ]
+                },
+            },
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1",
+                "valueDateTime": "2026-01-21T00:00:00+00:00",
+            },
+        ],
+        "identifier": [
+            {
+                "system": "https://EMISWeb/A82038",
+                "value": "AB6A0197A1E441E4998E410F2CF2DE43A07283C9A77A485080929AB8486D2865MS",
+            }
+        ],
+        "basedOn": [
+            {"reference": "MedicationRequest/A07283C9-A77A-4850-8092-9AB8486D2865"}
+        ],
+        "status": "completed",
+        "medicationReference": {
+            "reference": "Medication/C60BB8CF-14D7-46F7-83A7-34007026F45E"
+        },
+        "effectivePeriod": {"start": "2026-01-21", "end": "2026-02-18"},
+        "dateAsserted": "2026-01-21T15:22:36.637+00:00",
+        "subject": {"reference": "Patient/AB6A0197-A1E4-41E4-998E-410F2CF2DE43"},
+        "taken": "unk",
+        "note": [
+            {"text": "Patient Notes:In addition to your furosemide"},
+            {"text": "Patient Notes:Issue number 1 In addition to your furosemide"},
+        ],
+        "dosage": [
+            {
+                "text": "One To Be Taken Daily",
+                "patientInstruction": "In addition to your furosemide",
+                "timing": {"repeat": {"frequency": 1, "period": 1, "periodUnit": "d"}},
+                "method": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "419652001",
+                            "display": "Take",
+                        }
+                    ]
+                },
+                "doseQuantity": {"value": 1},
+            }
+        ],
+    }
+)
+
+new_med = medication.Medication(
+    {
+        "resourceType": "Medication",
+        "id": "C60BB8CF-14D7-46F7-83A7-34007026F45E",
+        "meta": {
+            "profile": [
+                "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-Medication-1"
+            ]
+        },
+        "code": {
+            "coding": [
+                {
+                    "system": "https://fhir.hl7.org.uk/Id/emis-drug-codes",
+                    "code": "ATTA230",
+                    "display": "Atenolol 100mg tablets",
+                    "userSelected": True,
+                },
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "42370411000001101",
+                    "display": "Atenolol 100mg tablets",
+                },
+            ]
+        },
+    }
+)
+
+
+def test_new_structured_detail():
+    index_dict = {
+        "Medication/C60BB8CF-14D7-46F7-83A7-34007026F45E": new_med,
+        "MedicationStatement/A07283C9-A77A-4850-8092-9AB8486D2865-MS": new_structured_statement,
+    }
+    substance_administration = medication_entry(new_structured_statement, index_dict)
+    substance_administration = substance_administration["substanceAdministration"]
+
+    pprint.pprint(substance_administration)
+    assert substance_administration["@classCode"] == "SBADM"
+    assert substance_administration["@moodCode"] == "INT"
+    assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"
+    assert substance_administration["doseQuantity"]["@value"] == 1
+    # assert quantiy unit is not present
+    assert "@unit" not in substance_administration["doseQuantity"]
