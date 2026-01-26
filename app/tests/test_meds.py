@@ -231,7 +231,7 @@ def test_structured_dosage():
                     referenced_item = bundle_index[entry.item.reference]
                     # pprint.pprint(referenced_item.as_json())
 
-                    entry_data = medication_entry(
+                    entry_data, tablerow = medication_entry(
                         referenced_item,
                         bundle_index,
                     )
@@ -249,7 +249,8 @@ def test_structured_detail():
         "Medication/A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7": structured_med,
         "MedicationStatement/9": structured_med,
     }
-    substance_administration = medication_entry(sturctured_statement, index_dict)
+    substance_administration = medication_entry(structured_statement, index_dict)
+    substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
 
     pprint.pprint(substance_administration)

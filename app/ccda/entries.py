@@ -1,4 +1,6 @@
 import uuid
+from dataclasses import dataclass
+from typing import Any, Iterable, List, Optional, Sequence
 
 from fhirclient.models import allergyintolerance, coding, condition, immunization
 from fhirclient.models import medication as fhirmed
@@ -9,6 +11,7 @@ from .helpers import (
     date_helper,
     effective_time_helper,
     organization_to_author,
+    readable_date,
     templateId,
 )
 from .models.base import (
@@ -20,8 +23,19 @@ from .models.base import (
 )
 from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
+Cell = str
+Row = List[Cell]
 
-def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
+
+@dataclass(frozen=True)
+class EntryWithRow:
+    entry: Any  # C-CDA entry section
+    row: Optional[Row]  # row data for summary table in section
+
+
+def medication(
+    entry: medicationstatement.MedicationStatement, index: dict
+) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
@@ -211,7 +225,56 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 }
             )
         )
+    # find effective time entry with operator of low
 
+    low_time = [
+        et.value
+        for et in substance_administration.effectiveTime
+        if getattr(et, "operator", None) == "low"
+    ]
+    high_time = [
+        et.value
+        for et in substance_administration.effectiveTime
+        if getattr(et, "operator", None) == "high"
+    ]
+    med_name = (
+        substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
+    )
+
+    # check for prescriping agency and last issued date extensions
+    for ext in entry.extension:
+        # print(ext.url)
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
+        ):
+            prescribing_agency = ext.valueCodeableConcept.coding[0].display
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-LastIssuedDate-1"
+        ):
+            last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
+
+    entry_row = [
+        readable_date(low_time[0]) if low_time else "",
+        readable_date(high_time[0]) if high_time else "",
+        entry.status if entry.status else "unknown",
+        med_name,
+        substance_administration.entryRelationship[0].substanceAdministration.get(
+            "text", ""
+        ),
+        prescribing_agency if "prescribing_agency" in locals() else "",
+        last_issued_date if "last_issued_date" in locals() else "",
+    ]
+
+    return EntryWithRow(
+        entry={
+            "substanceAdministration": substance_administration.model_dump(
+                by_alias=True, exclude_none=True
+            )
+        },
+        row=entry_row,
+    )
     # print(substance_administration.entryRelationship)
     return {
         "substanceAdministration": substance_administration.model_dump(
@@ -220,7 +283,7 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
     }
 
 
-def problem(entry: condition.Condition) -> dict:
+def problem(entry: condition.Condition) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.3.html
     prob = {
         "act": {
@@ -275,10 +338,16 @@ def problem(entry: condition.Condition) -> dict:
 
     prob["act"]["entryRelationship"]["observation"] = observation
 
-    return prob
+    problem_row = [
+        readable_date(prob["act"]["effectiveTime"].get("low", {}).get("@value", "")),
+        prob["act"]["statusCode"].get("@code", ""),
+        observation["value"].get("@displayName", ""),
+    ]
+
+    return EntryWithRow(entry=prob, row=problem_row)
 
 
-def allergy(entry: allergyintolerance.AllergyIntolerance) -> dict:
+def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.30.html
     all = {
         "act": {
@@ -355,10 +424,18 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> dict:
 
     all["act"]["entryRelationship"]["observation"] = observation
 
-    return all
+    allergy_row = [
+        readable_date(all["act"]["effectiveTime"].get("low", {}).get("@value", "")),
+        all["act"]["statusCode"].get("@code", ""),
+        observation["participant"]["participantRole"]["playingEntity"]["code"][
+            "@displayName"
+        ],
+    ]
+
+    return EntryWithRow(entry=all, row=allergy_row)
 
 
-def immunization_entry(entry: immunization.Immunization, index: dict) -> dict:
+def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWithRow:
     # https://build.fhir.org/ig/HL7/CDA-ccda-2.2/StructureDefinition-2.16.840.1.113883.10.20.22.2.2.1.html
 
     immunization_entry = SubstanceAdministration(
@@ -382,7 +459,10 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> dict:
     if entry.route:
         immunization_entry.route = code_with_translations(entry.route.coding)
 
-    return immunization_entry.model_dump(by_alias=True, exclude_none=True)
+    # return immunization_entry.model_dump(by_alias=True, exclude_none=True)
+    return EntryWithRow(
+        entry=immunization_entry.model_dump(by_alias=True, exclude_none=True), row=None
+    )
 
 
 def result(entry, index: dict) -> dict:

@@ -319,9 +319,7 @@ if __name__ == "__main__":
     }
 
     # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(
-        gpconnect(9690937375, audit_dict, log_dir="app/logs/int_troubleshooting")
-    )
+    result = asyncio.run(gpconnect(9658218873, audit_dict))
     print(result.body.decode())
     print(result.status_code)
     assert "error" in result.body.decode()
