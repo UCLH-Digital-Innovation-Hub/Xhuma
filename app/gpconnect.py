@@ -30,6 +30,11 @@ router = APIRouter()
 
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
+    # Verify files exist before trying to load
+    for p in [cert_path, key_path, ca_path]:
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"NHS Certificate file not found: {p}")
+
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
     ssl_context.check_hostname = True
     ssl_context.verify_mode = ssl.CERT_REQUIRED
@@ -39,22 +44,25 @@ def create_nhs_ssl_context(cert_path, key_path, ca_path):
     return ssl_context
 
 
-ssl_context = create_nhs_ssl_context(
-    "keys/nhs_certs/client_cert.pem",
-    "keys/nhs_certs/client_key.pem",
-    "keys/nhs_certs/nhs_bundle.pem",
-)
+# Global client and ssl_context removed to prevent ImportErrors when keys are missing.
+# They were unused in the main logic (which uses _direct_http_call with its own context).
+
+# ssl_context = create_nhs_ssl_context(
+#     "keys/nhs_certs/client_cert.pem",
+#     "keys/nhs_certs/client_key.pem",
+#     "keys/nhs_certs/nhs_bundle.pem",
+# )
 
 logging.basicConfig(level=logging.DEBUG)
 httpx_logger = logging.getLogger("httpx")
 httpx_logger.setLevel(logging.DEBUG)
 
-client = httpx.AsyncClient(
-    cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
-    verify=ssl_context,  # This fixes the silent failures!
-    timeout=httpx.Timeout(30.0),
-    http2=False,
-)
+# client = httpx.AsyncClient(
+#     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
+#     verify=ssl_context,  # This fixes the silent failures!
+#     timeout=httpx.Timeout(30.0),
+#     http2=False,
+# )
 
 
 @router.get("/gpconnect/{nhsno}")
