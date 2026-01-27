@@ -19,7 +19,7 @@ from time import time
 import jwt
 from fhirclient.models import humanname, practitioner
 
-JWTKEY = os.getenv("JWTKEY")
+# JWTKEY = os.getenv("JWTKEY")  # Removed top-level access to allow mocking
 
 
 def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
@@ -50,9 +50,8 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
     }
 
     # Get private key from environment or file
-    if JWTKEY is not None:
-        private_key = JWTKEY
-    else:
+    private_key = os.getenv("JWTKEY")
+    if private_key is None:
         # Fallback to local file if it exists, otherwise raise clear error
         key_path = "keys/test-1.pem"
         if os.path.exists(key_path):
@@ -174,9 +173,8 @@ def create_jwt(
     #     json.dump(headers, f, indent=4)
     # headers = {"alg": "none", "typ": "JWT"}
 
-    if JWTKEY is not None:
-        private_key = JWTKEY
-    else:
+    private_key = os.getenv("JWTKEY")
+    if private_key is None:
         key_path = "keys/test-1.pem"
         if os.path.exists(key_path):
             with open(key_path, "r") as f:
