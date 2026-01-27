@@ -1,11 +1,12 @@
 import asyncio
 import datetime
 import json
+import os
 import pprint
 from typing import List
 
 import xmltodict
-from fhirclient.models import bundle
+from fhirclient.models import bundle, humanname
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
 
@@ -26,6 +27,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         for entry in bundle.entry
         if isinstance(entry.resource, patient.Patient)
     ]
+
     ccda = {}
     ccda["ClinicalDocument"] = {
         "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
@@ -52,6 +54,12 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # patient
     # TODO refine address parsing as may have multiple
 
+    # loop through names to find official name
+    for name in subject[0].name:
+        if name.use == "official":
+            official_name = name
+            break
+
     patient_dict = {
         "patientRole": {
             "id": {
@@ -61,26 +69,34 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "patient": {
                 "name": {
                     "@use": "L",
-                    "given": {"#text": " ".join(subject[0].name[0].given)},
-                    "family": {"#text": subject[0].name[0].family},
+                    "given": {"#text": " ".join(official_name.given)},
+                    "family": {"#text": official_name.family},
                 },
                 "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
             },
         }
     }
-    # "addr": {
-    #             "@use": "HP",
-    #             "streetAddressLine": [x for x in subject[0].address[0].line],
-    #             "city": {"#text": subject[0].address[0].city},
-    #             "postalCode": {"#text": subject[0].address[0].postalCode},
-    #         },
+
     if subject[0].address:
-        patient_dict["patientRole"]["patient"]["addr"] = {
+        patient_dict["patientRole"]["addr"] = {
             "@use": "HP",
             "streetAddressLine": [x for x in subject[0].address[0].line],
             "city": {"#text": subject[0].address[0].city},
             "postalCode": {"#text": subject[0].address[0].postalCode},
         }
+
+    gp_organization = subject[0].managingOrganization.reference
+    gp = index[gp_organization]
+
+    patient_dict["patientRole"]["providerOrganization"] = {
+        "id": {"@root": gp.identifier[0].system, "@extension": gp.identifier[0].value},
+        "name": {"#text": gp.name},
+        "addr": {
+            "streetAddressLine": [x for x in gp.address[0].line],
+            "city": {"#text": gp.address[0].city},
+            "postalCode": {"#text": gp.address[0].postalCode},
+        },
+    }
 
     ccda["ClinicalDocument"]["recordTarget"] = patient_dict
 
@@ -320,6 +336,14 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     bundle_components = [create_section(list) for list in lists]
     bundle_components = [x for x in bundle_components if x is not None]
+    caching_period = os.environ.get("CCDA_CACHING_PERIOD", "24 hours")
+    header_components = {
+        "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),
+        "title": "Important Information",
+        "text": f"This record contains information from the patients GP record. It was generated on {datetime.datetime.now().strftime('%Y-%m-%d')} and information added to the record in the last {caching_period} may be missing.",
+    }
+    bundle_components.insert(0, {"section": header_components})
+
     ccda["ClinicalDocument"]["component"] = {}
     ccda["ClinicalDocument"]["component"]["structuredBody"] = {}
     ccda["ClinicalDocument"]["component"]["structuredBody"][

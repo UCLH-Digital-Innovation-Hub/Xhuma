@@ -299,6 +299,12 @@ async def iti_47_response(message_id, patient, ceid, query):
     else:
         gender = "UNK"
 
+    # loop through names to find official name
+    for name in patient["name"]:
+        if name.use == "official":
+            official_name = name
+            break
+
     ids = []
     ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
     ids.append(create_id("1.2.840.114350.1.13.525.3.7.3.688884.100", ceid))
@@ -363,8 +369,8 @@ async def iti_47_response(message_id, patient, ceid, query):
                                 "@classCode": "PSN",
                                 "@determinerCode": "INSTANCE",
                                 "name": {
-                                    "given": {"#text": patient["name"][0]["given"][0]},
-                                    "family": {"#text": patient["name"][0]["family"]},
+                                    "given": {"#text": official_name["given"][0]},
+                                    "family": {"#text": official_name["family"]},
                                 },
                                 "administrativeGenderCode": {"@code": gender},
                                 # birthTime is ISO 8601 format

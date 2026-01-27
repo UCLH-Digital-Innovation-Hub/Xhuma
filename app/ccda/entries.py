@@ -9,7 +9,7 @@ from fhirclient.models import medicationstatement, observation
 
 from .helpers import (code_with_translations, date_helper,
                       effective_time_helper, organization_to_author,
-                      templateId, readable_date)
+                      readable_date, templateId)
 from .models.base import (EntryRelationship, Observation, ResultObservation,
                           ResultsOrganizer, SubstanceAdministration)
 from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
@@ -415,7 +415,9 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "observation": {
                 "@classCode": "OBS",
                 "@moodCode": "EVN",
-                "templateId": templateId("2.16.840.1.113883.10.20.22.4.9", "2014-06-09"),
+                "templateId": templateId(
+                    "2.16.840.1.113883.10.20.22.4.9", "2014-06-09"
+                ),
                 "id": {"@root": uuid.uuid4()},
                 "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
                 "effectiveTime": {
@@ -424,7 +426,10 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
                 "value": {
                     "@xsi:type": "CD",
                     "@code": entry.reaction[0].manifestation[0].coding[0].code,
-                    "@displayName": entry.reaction[0].manifestation[0].coding[0].display,
+                    "@displayName": entry.reaction[0]
+                    .manifestation[0]
+                    .coding[0]
+                    .display,
                     "@codeSystemName": "SNOMED CT",
                     "@codeSystem": "2.16.840.1.113883.6.96",
                 },
