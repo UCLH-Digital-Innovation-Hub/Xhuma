@@ -2,7 +2,7 @@ name: Infrastructure
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, infra/deployment-and-monitoring ]
     paths:
       - 'infra/**'
   pull_request:
@@ -62,5 +62,5 @@ jobs:
         run: terraform plan -input=false
 
       - name: Terraform Apply
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/infra/deployment-and-monitoring') && github.event_name == 'push'
         run: terraform apply -auto-approve -input=false
