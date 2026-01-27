@@ -48,7 +48,7 @@ jobs:
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
-          app-name: 'xhuma-app' # TODO: This needs to match the created resource name
+          app-name: 'xhuma-app-prod' # Matches the resource created by Terraform
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}'
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }} 
           # Alternatively use service principal login if configured

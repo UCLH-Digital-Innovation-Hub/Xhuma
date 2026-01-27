@@ -29,10 +29,10 @@ env:
   # Secrets for Postgres
   TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
   
-  # Construct names dynamically
-  TF_VAR_app_service_name: "xhuma-app-${{ github.run_id }}" 
-  TF_VAR_redis_name: "xhuma-redis-${{ github.run_id }}"
-  TF_VAR_postgres_server_name: "xhuma-psql-${{ github.run_id }}"
+  # Construct names dynamically (Using static names for persistence in Main environment)
+  TF_VAR_app_service_name: "xhuma-app-prod" 
+  TF_VAR_redis_name: "xhuma-redis-prod"
+  TF_VAR_postgres_server_name: "xhuma-psql-prod"
 
 jobs:
   terraform:
