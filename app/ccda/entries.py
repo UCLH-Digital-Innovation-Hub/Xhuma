@@ -9,7 +9,7 @@ from fhirclient.models import medicationstatement, observation
 
 from .helpers import (code_with_translations, date_helper,
                       effective_time_helper, organization_to_author,
-                      templateId)
+                      templateId, readable_date)
 from .models.base import (EntryRelationship, Observation, ResultObservation,
                           ResultsOrganizer, SubstanceAdministration)
 from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
@@ -259,7 +259,7 @@ def medication(
             prescribing_agency = ext.valueCodeableConcept.coding[0].display
         if (
             ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-LastIssuedDate-1"
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
         ):
             last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
 
