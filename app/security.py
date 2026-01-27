@@ -53,8 +53,18 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
     if JWTKEY is not None:
         private_key = JWTKEY
     else:
-        with open("keys/test-1.pem", "r") as f:
-            private_key = f.read()
+        # Fallback to local file if it exists, otherwise raise clear error
+        key_path = "keys/test-1.pem"
+        if os.path.exists(key_path):
+            with open(key_path, "r") as f:
+                private_key = f.read()
+        else:
+            # During tests/CI, we might not have keys.
+            # Warning: This will fail if code tries to sign a token!
+            private_key = None
+            
+    if private_key is None:
+         raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
 
     return jwt.encode(payload, key=private_key, algorithm="RS512", headers=headers)
 
@@ -167,8 +177,15 @@ def create_jwt(
     if JWTKEY is not None:
         private_key = JWTKEY
     else:
-        with open("keys/test-1.pem", "r") as f:
-            private_key = f.read()
+        key_path = "keys/test-1.pem"
+        if os.path.exists(key_path):
+            with open(key_path, "r") as f:
+                private_key = f.read()
+        else:
+            private_key = None
+            
+    if private_key is None:
+         raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
 
     return jwt.encode(payload, headers={"alg": "none", "typ": "JWT"}, key=None)
 

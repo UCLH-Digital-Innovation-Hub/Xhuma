@@ -22,7 +22,7 @@ env:
   ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
   TF_VAR_resource_group_name: "${{ secrets.RESOURCE_GROUP }}"
   TF_VAR_api_key: "${{ secrets.API_KEY }}"
-  TF_VAR_jwt_key: "${{ secrets.JWTKEY }}"
+  TF_VAR_jwt_key: "${{ secrets.JWT_KEY }}"
   TF_VAR_registry_id: "${{ secrets.REGISTRY_ID }}"
   TF_VAR_docker_registry_password: "${{ secrets.CR_PAT }}"
   TF_VAR_docker_registry_username: "${{ github.actor }}"
