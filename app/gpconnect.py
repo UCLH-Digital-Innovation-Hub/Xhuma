@@ -345,8 +345,8 @@ async def gpconnect(
 
     xop = base64_xml(xml_ccda)
     doc_uuid = str(uuid4())
-    redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
+    redis_client.setex(nhsno, timedelta(minutes=1), doc_uuid)
+    redis_client.setex(doc_uuid, timedelta(minutes=1), xop)
 
     with open(f"{nhsno}.xml", "w") as output:
         output.write(xmltodict.unparse(xml_ccda, pretty=True))
