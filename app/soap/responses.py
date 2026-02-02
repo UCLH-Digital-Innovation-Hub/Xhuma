@@ -12,6 +12,7 @@ from httpx import AsyncClient
 
 from ..gpconnect import gpconnect
 from ..redis_connect import redis_client
+from ..audit.models import SAMLAttributes
 
 # REGISTRY_ID = redis_client.get("registry")
 COMMUNITY_ID = os.getenv("COMMUNITY_ID", "2.16.840.1.113883.2.1.3.34.9001")
@@ -258,7 +259,9 @@ async def iti_55_error(message_id, query, error_text):
             },
             "queryAck": {
                 # todo: handle missing queryId
-                "queryId": query["queryId"] if "queryId" in query else "can't find queryID",
+                "queryId": (
+                    query["queryId"] if "queryId" in query else "can't find queryID"
+                ),
                 "queryResponseCode": {"@code": "AE"},
                 "statusCode": {"@code": "aborted"},
             },
@@ -401,7 +404,7 @@ async def iti_47_response(message_id, patient, ceid, query):
 
 
 async def iti_38_response(
-    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: dict
+    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes
 ):
 
     body = {}
@@ -416,18 +419,18 @@ async def iti_38_response(
     if docid is None:
         # no cached ccda
         r = await gpconnect(nhsno, saml_attrs, request=request)
-        print("-" * 40)
-        print(r.body)
-        print("-" * 40)
+        # print("-" * 40)
+        # print(r.body)
+        # print("-" * 40)
         try:
             r = await gpconnect(nhsno, saml_attrs, request=request)
 
-            print("-" * 40)
+            # print("-" * 40)
             logging.info(f"no cached ccda, used internal call for {nhsno}")
             r = json.loads(r.body)
         except Exception as e:
             logging.error(f"Error: {e}")
-            print(f"iti_38_error: {e}")
+            # print(f"iti_38_error: {e}")
             r = {
                 "success": False,
                 "error": f"Internal error retrieving structured record for NHS number {nhsno}. error: {e}",
@@ -460,7 +463,7 @@ async def iti_38_response(
                 },
             }
         else:
-            print(r)
+            # print(r)
             docid = r["document_id"]
 
     if docid is not None:

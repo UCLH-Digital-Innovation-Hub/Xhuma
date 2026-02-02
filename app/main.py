@@ -14,13 +14,19 @@ import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
+from opentelemetry import metrics
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .audit.models import _subject_ref_from_nhs_number
 from .gpconnect import gpconnect
+from .metrics.metrics import build_business_metrics
 from .pds import pds
 from .redis_connect import redis_client
 from .relay import routes
@@ -53,7 +59,29 @@ async def lifespan(app: FastAPI):
             with open("keys/jwk.json", "w") as f:
                 json.dump(jwk_json, f)
 
-    yield  # Application runs here
+    # Set up OpenTelemetry metrics
+    otlp_endpoint = os.getenv(
+        "OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"
+    )
+    metric_exporter = OTLPMetricExporter(
+        endpoint=otlp_endpoint.replace("http://", "").replace("https://", ""),
+        insecure=True,
+    )
+
+    reader = PeriodicExportingMetricReader(
+        exporter=metric_exporter,
+        export_interval_millis=int(os.getenv("OTEL_METRIC_EXPORT_INTERVAL_MS", "5000")),
+    )
+    meter_provider = MeterProvider(metric_readers=[reader])
+    metrics.set_meter_provider(meter_provider)
+
+    meter = metrics.get_meter("xhuma.business", "1.0.0")
+    app.state.metrics = build_business_metrics(meter)
+    try:
+        yield
+    finally:
+        # --- Shutdown logic ---
+        meter_provider.shutdown()
 
 
 # Initialize FastAPI application
@@ -206,3 +234,133 @@ async def get_jwk():
     with open("keys/jwk.json", "r") as jwk_file:
         key = json.load(jwk_file)
     return key
+
+
+# --- Dev-only audit viewer ---
+if os.getenv("ENV", "prod").lower() in ("dev", "local"):
+
+    @app.get("/_dev/audit", response_class=HTMLResponse)
+    async def dev_audit_form():
+        return HTMLResponse("""
+            <html>
+              <head>
+                <title>Dev Audit Viewer</title>
+                <style>
+                  body { font-family: sans-serif; margin: 2rem; }
+                  input { padding: 0.5rem; width: 22rem; }
+                  button { padding: 0.5rem 1rem; }
+                  table { border-collapse: collapse; margin-top: 1rem; width: 100%; }
+                  th, td { border: 1px solid #ddd; padding: 0.5rem; font-size: 0.9rem; }
+                  th { background: #f5f5f5; text-align: left; }
+                  .muted { color: #666; font-size: 0.9rem; }
+                </style>
+              </head>
+              <body>
+                <h2>Dev Audit Viewer</h2>
+                <p class="muted">Queries by <code>subject_ref</code> derived from NHS number (raw NHS number is not stored).</p>
+
+                <form method="post" action="/_dev/audit">
+                  <label>NHS number:</label><br/>
+                  <input name="nhs_number" placeholder="e.g. 9690937278" />
+                  <button type="submit">Search</button>
+                </form>
+              </body>
+            </html>
+            """)
+
+    @app.post("/_dev/audit", response_class=HTMLResponse)
+    async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
+        # Safety: dev only
+        secret = os.getenv("API_KEY")
+        if not secret:
+            return HTMLResponse(
+                "<h3>Missing AUDIT_SUBJECT_SECRET</h3>", status_code=500
+            )
+
+        try:
+            subject_ref = _subject_ref_from_nhs_number(nhs_number, secret)
+        except ValueError as e:
+            return HTMLResponse(
+                f"<h3>Invalid NHS number</h3><p>{e}</p>", status_code=400
+            )
+
+        pg = getattr(request.app.state, "pg", None)
+        if pg is None:
+            return HTMLResponse(
+                "<h3>Postgres pool not configured</h3>", status_code=500
+            )
+
+        # Keep the fields minimal and safe for display
+        sql = """
+        SELECT
+          event_time,
+          sequence,
+          action,
+          outcome,
+          error_code,
+          user_name,
+          user_role_name,
+          organisation,
+          request_id,
+          trace_id,
+          document_id,
+          message_id
+        FROM audit_event
+        WHERE subject_ref = $1
+        ORDER BY sequence DESC
+        LIMIT 500;
+        """
+
+        async with pg.acquire() as conn:
+            rows = await conn.fetch(sql, subject_ref)
+
+        def esc(s: str) -> str:
+            return (
+                (s or "")
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+                .replace("'", "&#39;")
+            )
+
+        # Render
+        out = []
+        out.append(
+            "<html><head><title>Dev Audit Results</title></head><body style='font-family:sans-serif;margin:2rem;'>"
+        )
+        out.append("<a href='/_dev/audit'>← back</a>")
+        out.append("<h2>Audit results</h2>")
+        out.append(f"<p class='muted'>subject_ref: <code>{esc(subject_ref)}</code></p>")
+
+        out.append(f"<p>{len(rows)} row(s) returned (max 500).</p>")
+
+        out.append("<table>")
+        out.append(
+            "<tr>"
+            "<th>Time (UTC)</th><th>Seq</th><th>Action</th><th>Outcome</th><th>Error</th>"
+            "<th>User</th><th>Role</th><th>Org</th>"
+            "<th>Request ID</th><th>Trace ID</th><th>Doc ID</th><th>Msg ID</th>"
+            "</tr>"
+        )
+
+        for r in rows:
+            out.append(
+                "<tr>"
+                f"<td>{esc(str(r['event_time']))}</td>"
+                f"<td>{esc(str(r['sequence']))}</td>"
+                f"<td>{esc(r['action'])}</td>"
+                f"<td>{esc(r['outcome'])}</td>"
+                f"<td>{esc(r['error_code'] or '')}</td>"
+                f"<td>{esc(r['user_name'] or '')}</td>"
+                f"<td>{esc(r['user_role_name'] or '')}</td>"
+                f"<td>{esc(r['organisation'] or '')}</td>"
+                f"<td>{esc(r['request_id'] or '')}</td>"
+                f"<td>{esc(r['trace_id'] or '')}</td>"
+                f"<td>{esc(r['document_id'] or '')}</td>"
+                f"<td>{esc(r['message_id'] or '')}</td>"
+                "</tr>"
+            )
+
+        out.append("</table></body></html>")
+        return HTMLResponse("".join(out))

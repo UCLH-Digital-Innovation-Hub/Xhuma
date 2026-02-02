@@ -13,6 +13,8 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
+from app.metrics.metric_utils import classify_error, now
+
 from .ccda.convert_mime import base64_xml, convert_mime
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
@@ -20,6 +22,7 @@ from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import RELAY_TIMEOUT, USE_RELAY
+from .audit.models import SAMLAttributes
 
 router = APIRouter()
 
@@ -59,27 +62,35 @@ client = httpx.AsyncClient(
 
 @router.get("/gpconnect/{nhsno}")
 async def gpconnect(
-    nhsno: int, saml_attrs: dict, log_dir: str = None, request: Request = None
+    nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
 ) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
-    # LOG SAML ATTRS FOR TESTING ONLY
-    with open("saml_attrs.json", "a") as f:
-        json.dump(saml_attrs, f, indent=2)
-    pprint.pprint(saml_attrs)
+    # Access metrics from app state
+    m = request.app.state.metrics
+
+    # pprint.pprint(saml_attrs)
+
     # 1) Validate NHS number
+    t = now()
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
-        logging.error(msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
+        m.gpconnect_failures_total.add(
+            1, {"stage": "validation", "error_type": "invalid_nhs_number"}
+        )
         return JSONResponse(status_code=400, content={"success": False, "error": msg})
+    m.stage_duration_seconds.record(now() - t, {"stage": "validation"})
 
     # 2) PDS lookup (consider caching in future)
+    t = now()
     try:
         pds_search = await lookup_patient(nhsno)
+        m.pds_lookup_total.add(1, {"result": "success"})
     except Exception as e:
+        m.pds_lookup_total.add(1, {"result": "failure"})
+        m.gpconnect_failures_total.add(
+            1, {"stage": "pds_lookup", "error_type": classify_error(e)}
+        )
         msg = f"PDS lookup failed: {e}"
         logging.exception(msg)
         if log_dir:

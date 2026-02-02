@@ -56,6 +56,15 @@ services:
       POSTGRES_HOST: postgres
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /code/app
+        - action: sync+restart
+          path: ./otel-collector-config.yaml
+          target: /etc/otel-collector-config.yaml
+
     volumes:
       - ./app:/code/app
       - ./keys:/code/keys:ro
