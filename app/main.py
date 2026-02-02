@@ -33,6 +33,7 @@ from .relay import routes
 from .relay.hub import WebSocketHub
 from .settings import USE_RELAY
 from .soap import soap
+from .db import open_pool
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
@@ -44,6 +45,8 @@ async def lifespan(app: FastAPI):
     Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
     # --- Startup logic ---
+    # Initialize Postgres connection pool
+    app.state.pg = await open_pool()
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
 
@@ -82,6 +85,7 @@ async def lifespan(app: FastAPI):
     finally:
         # --- Shutdown logic ---
         meter_provider.shutdown()
+        await app.state.pg.close()
 
 
 # Initialize FastAPI application

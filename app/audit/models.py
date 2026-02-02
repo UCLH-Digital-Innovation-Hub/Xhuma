@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional
-from uuid import UUID
+import uuid
 
 from pydantic import BaseModel, Field, computed_field, field_validator
 
@@ -44,12 +44,6 @@ class AuditOutcome(str, Enum):
 # ---- Sub-models ----
 
 
-class RoleProfile(BaseModel):
-    code: Optional[str]
-    display: Optional[str]
-    code_system: Optional[str]
-    code_system_name: Optional[str]
-
 
 class SAMLAttributes(BaseModel):
     subject_id: Optional[str]
@@ -75,7 +69,7 @@ class OrganisationRef(BaseModel):
 class UserIdentity(BaseModel):
     user_id: Optional[str]
     name: Optional[str]
-    role_profile: Optional[RoleProfile]
+    role_profile: Optional[CD]
     organisation: Optional[OrganisationRef]
     urp_id: Optional[str]
     purpose_of_use: Optional[Dict[str, Any]]  # keep structured
@@ -93,7 +87,7 @@ class DeviceInfo(BaseModel):
 
 
 class EventDataRefs(BaseModel):
-    subject_ref: Optional[str]
+    # subject_ref: Optional[str]
     message_id: Optional[str]
     document_id: Optional[str]
 
@@ -119,7 +113,7 @@ class AuditEventDetail(BaseModel):
 
 class AuditEvent(BaseModel):
     # Sequence + identity
-    audit_id: UUID
+    audit_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     sequence: int
 
     # subject
@@ -129,7 +123,7 @@ class AuditEvent(BaseModel):
     event_time: datetime
 
     # System identity
-    service_name: str
+    # service_name: str
     organisation: str
 
     # Correlation
@@ -138,11 +132,7 @@ class AuditEvent(BaseModel):
 
     # SAML attributes
     saml: SAMLAttributes
-
-    # Identities
-    user: UserIdentity
-    authority: Optional[AuthorityIdentity]
-
+    
     # Event
     event: AuditEventDetail
 
