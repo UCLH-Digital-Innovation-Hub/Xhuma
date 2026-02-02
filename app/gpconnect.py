@@ -15,6 +15,9 @@ from fhirclient.models import bundle
 
 from app.metrics.metric_utils import classify_error, now
 
+from .audit.build import build_audit_event
+from .audit.models import AuditOutcome, SAMLAttributes
+from .audit.store import insert_audit_event
 from .ccda.convert_mime import base64_xml, convert_mime
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
@@ -22,7 +25,6 @@ from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import RELAY_TIMEOUT, USE_RELAY
-from .audit.models import SAMLAttributes
 
 router = APIRouter()
 
@@ -66,32 +68,46 @@ async def gpconnect(
 ) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
-    # Access metrics from app state
-    m = request.app.state.metrics
-
-    # pprint.pprint(saml_attrs)
-
     # 1) Validate NHS number
-    t = now()
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
-        m.gpconnect_failures_total.add(
-            1, {"stage": "validation", "error_type": "invalid_nhs_number"}
+        ev = await build_audit_event(
+            request=request,
+            pg_pool=request.app.state.pg,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="validate_nhs_number",
+            outcome=AuditOutcome.fail,
+            error_code="400",
         )
+        await insert_audit_event(request.app.state.pg, ev)
         return JSONResponse(status_code=400, content={"success": False, "error": msg})
-    m.stage_duration_seconds.record(now() - t, {"stage": "validation"})
 
     # 2) PDS lookup (consider caching in future)
     t = now()
     try:
         pds_search = await lookup_patient(nhsno)
-        m.pds_lookup_total.add(1, {"result": "success"})
-    except Exception as e:
-        m.pds_lookup_total.add(1, {"result": "failure"})
-        m.gpconnect_failures_total.add(
-            1, {"stage": "pds_lookup", "error_type": classify_error(e)}
+        ev = await build_audit_event(
+            request=request,
+            pg_pool=request.app.state.pg,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="pds_lookup",
+            outcome=AuditOutcome.ok,
         )
-        msg = f"PDS lookup failed: {e}"
+        await insert_audit_event(request.app.state.pg, ev)
+    except Exception as e:
+        ev = await build_audit_event(
+            request=request,
+            pg_pool=request.app.state.pg,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="pds_lookup",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
+        await insert_audit_event(request.app.state.pg, ev)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:

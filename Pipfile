@@ -25,6 +25,7 @@ opentelemetry-instrumentation-logging = "*"
 asyncpg = "*"
 sqlalchemy = "*"
 grpcio = "*"
+python-multipart = "*"
 
 [dev-packages]
 black = "*"

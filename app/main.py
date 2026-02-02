@@ -25,6 +25,7 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .audit.models import _subject_ref_from_nhs_number
+from .db import open_pool
 from .gpconnect import gpconnect
 from .metrics.metrics import build_business_metrics
 from .pds import pds
@@ -33,7 +34,6 @@ from .relay import routes
 from .relay.hub import WebSocketHub
 from .settings import USE_RELAY
 from .soap import soap
-from .db import open_pool
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
     # --- Startup logic ---
     # Initialize Postgres connection pool
     app.state.pg = await open_pool()
+
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
 
@@ -245,7 +246,8 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
 
     @app.get("/_dev/audit", response_class=HTMLResponse)
     async def dev_audit_form():
-        return HTMLResponse("""
+        return HTMLResponse(
+            """
             <html>
               <head>
                 <title>Dev Audit Viewer</title>
@@ -270,7 +272,8 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
                 </form>
               </body>
             </html>
-            """)
+            """
+        )
 
     @app.post("/_dev/audit", response_class=HTMLResponse)
     async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
@@ -297,26 +300,24 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
         # Keep the fields minimal and safe for display
         sql = """
         SELECT
-          event_time,
-          sequence,
-          action,
-          outcome,
-          error_code,
-          user_name,
-          user_role_name,
-          organisation,
-          request_id,
-          trace_id,
-          document_id,
-          message_id
+        event_time,
+        sequence,
+        action,
+        outcome,
+        error_code,
+        user_id,
+        user_role_name,
+        user_org_name,
+        organisation,
+        request_id,
+        trace_id,
+        document_id,
+        message_id
         FROM audit_event
         WHERE subject_ref = $1
         ORDER BY sequence DESC
         LIMIT 500;
         """
-
-        async with pg.acquire() as conn:
-            rows = await conn.fetch(sql, subject_ref)
 
         def esc(s: str) -> str:
             return (
@@ -326,6 +327,15 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
                 .replace(">", "&gt;")
                 .replace('"', "&quot;")
                 .replace("'", "&#39;")
+            )
+
+        try:
+            async with pg.acquire() as conn:
+                rows = await conn.fetch(sql, subject_ref)
+        except Exception as e:
+            return HTMLResponse(
+                f"<h3>Query failed</h3><pre>{esc(repr(e))}</pre>",
+                status_code=500,
             )
 
         # Render
@@ -356,7 +366,7 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
                 f"<td>{esc(r['action'])}</td>"
                 f"<td>{esc(r['outcome'])}</td>"
                 f"<td>{esc(r['error_code'] or '')}</td>"
-                f"<td>{esc(r['user_name'] or '')}</td>"
+                f"<td>{esc(r['user_id'] or '')}</td>"
                 f"<td>{esc(r['user_role_name'] or '')}</td>"
                 f"<td>{esc(r['organisation'] or '')}</td>"
                 f"<td>{esc(r['request_id'] or '')}</td>"
