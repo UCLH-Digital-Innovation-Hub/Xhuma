@@ -1931,6 +1931,7 @@
                 "sha256:fa160448684b4e94d80416c0fa4aac48967a969efe22931448d853ada8baf926",
                 "sha256:fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0"
             ],
+            "markers": "python_version >= '3.8'",
             "version": "==6.0.3"
         },
         "tomli": {
