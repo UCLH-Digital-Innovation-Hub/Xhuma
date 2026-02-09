@@ -26,6 +26,8 @@ asyncpg = "*"
 sqlalchemy = "*"
 grpcio = "*"
 python-multipart = "*"
+sqlmodel = "*"
+alembic = "*"
 
 [dev-packages]
 black = "*"

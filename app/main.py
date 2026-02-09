@@ -25,9 +25,8 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .audit.models import _subject_ref_from_nhs_number
-from .db import open_pool
+from .db import make_engine, make_sessionmaker
 from .gpconnect import gpconnect
-from .metrics.metrics import build_business_metrics
 from .pds import pds
 from .redis_connect import redis_client
 from .relay import routes
@@ -46,7 +45,11 @@ async def lifespan(app: FastAPI):
     """
     # --- Startup logic ---
     # Initialize Postgres connection pool
-    app.state.pg = await open_pool()
+    engine = make_engine()
+    SessionLocal = make_sessionmaker(engine)
+    
+    app.state.engine = engine
+    app.state.SessionLocal = SessionLocal
 
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
@@ -79,14 +82,14 @@ async def lifespan(app: FastAPI):
     meter_provider = MeterProvider(metric_readers=[reader])
     metrics.set_meter_provider(meter_provider)
 
-    meter = metrics.get_meter("xhuma.business", "1.0.0")
-    app.state.metrics = build_business_metrics(meter)
+    # meter = metrics.get_meter("xhuma.business", "1.0.0")
+    # app.state.metrics = build_business_metrics(meter)
     try:
         yield
     finally:
         # --- Shutdown logic ---
-        meter_provider.shutdown()
-        await app.state.pg.close()
+        # meter_provider.shutdown()
+        await engine.dispose()
 
 
 # Initialize FastAPI application

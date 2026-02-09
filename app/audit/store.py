@@ -1,36 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .db_models import AuditEventRow
 from .models import AuditEvent
-
-# 21 columns -> 21 placeholders ($1..$21)
-INSERT_SQL = """
-INSERT INTO audit_event (
-  audit_id, sequence, event_time,
-  organisation,
-  request_id, trace_id,
-  user_id,
-  user_role_code, user_role_name,
-  user_org_name, user_org_id, urp_id,
-  action, outcome, error_code,
-  subject_ref, message_id, document_id,
-  client_ip, user_agent,
-  detail
-)
-VALUES (
-  $1,$2,$3,
-  $4,
-  $5,$6,
-  $7,
-  $8,$9,
-  $10,$11,$12,
-  $13,$14,$15,
-  $16,$17,$18,
-  $19,$20,
-  $21
-)
-"""
 
 
 def _role_code(evt: AuditEvent) -> Optional[str]:
@@ -42,37 +17,37 @@ def _role_name(evt: AuditEvent) -> Optional[str]:
     rp = evt.role_profile or {}
     return rp.get("@displayName") or rp.get("displayName") or rp.get("display")
 
-# def _purpose(evt: AuditEvent) -> Optional[str]:
-#     rp = evt.saml.purpose_of_use or {}
-#     return rp.get("@displayName") or rp.get("displayName") or rp.get("display")
+
+def _purpose_of_use_name(evt: AuditEvent) -> Optional[str]:
+    pou = evt.purpose_of_use or {}
+    return pou.get("@displayName") or pou.get("displayName") or pou.get("display")
 
 
-async def insert_audit_event(pg: Any, evt: AuditEvent) -> None:
-    """
-    Persist an AuditEvent into Postgres using an asyncpg-style pool.
-    """
-    async with pg.acquire() as conn:
-        await conn.execute(
-            INSERT_SQL,
-            evt.audit_id,                         # $1
-            evt.sequence,                         # $2
-            evt.event_time,                       # $3
-            evt.organisation,                     # $4 
-            evt.request_id,                       # $5
-            evt.trace_id,                         # $6
-            evt.user_id,                          # $7 
-            _role_code(evt),                      # $8
-            _role_name(evt),                      # $9
-            evt.saml.organization,                # $10
-            evt.saml.organization_id,             # $11
-            evt.saml.purpose_of_use.displayName,  # $12 purpose of use
-            evt.event.action,                     # $13
-            evt.event.outcome.value,              # $14
-            evt.event.error_code,                 # $15
-            evt.subject_ref,                      # $16 (computed HMAC pseudonym)
-            evt.event.data_refs.message_id,       # $17
-            evt.event.data_refs.document_id,      # $18
-            evt.device.ip if evt.device else None,                # $19
-            evt.device.user_agent if evt.device else None,        # $20
-            evt.event.detail,                     # $21 (dict -> json/jsonb)
-        )
+async def insert_audit_event(session: AsyncSession, evt: AuditEvent) -> None:
+    if not evt.subject_ref:
+        raise ValueError("AuditEvent.subject_ref is None (missing API_KEY or nhs number).")
+
+    row = AuditEventRow(
+        audit_id=evt.audit_id,
+        sequence=evt.sequence,
+        event_time=evt.event_time,
+        organisation=evt.organisation,
+        request_id=evt.request_id,
+        trace_id=evt.trace_id,
+        user_id=evt.user_id,
+        user_role_code=_role_code(evt),
+        user_role_name=_role_name(evt),
+        user_org_name=evt.saml.organization,
+        user_org_id=evt.saml.organization_id,
+        purpose_of_use=_purpose_of_use_name(evt),
+        action=evt.event.action,
+        outcome=evt.event.outcome.value,
+        error_code=evt.event.error_code,
+        subject_ref=evt.subject_ref,
+        message_id=evt.event.data_refs.message_id,
+        document_id=evt.event.data_refs.document_id,
+        client_ip=evt.device.ip if evt.device else None,
+        user_agent=evt.device.user_agent if evt.device else None,
+        detail=evt.event.detail,
+    )
+    session.add(row)

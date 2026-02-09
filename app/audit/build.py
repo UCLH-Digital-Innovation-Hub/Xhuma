@@ -4,6 +4,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import Request
 from opentelemetry import trace
@@ -39,7 +40,7 @@ def _trace_id() -> Optional[str]:
 async def build_audit_event(
     *,
     request: Request,
-    pg_pool,
+    session: AsyncSession,
     saml: SAMLAttributes,
     nhs_number: str,
     action: str,
@@ -59,7 +60,7 @@ async def build_audit_event(
     - SAML model describes the *user/session*.
     - Patient/subject identity is passed separately as subject_ref.
     """
-    seq = await next_audit_sequence(pg_pool)
+    seq = await next_audit_sequence(session)
 
     evt = AuditEvent(
         # audit_id=uuid.uuid4(),

@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
-from app.metrics.metric_utils import classify_error, now
+# from app.metrics.metric_utils import classify_error, now
 
 from .audit.build import build_audit_event
 from .audit.models import AuditOutcome, SAMLAttributes
@@ -32,6 +32,20 @@ router = APIRouter()
 #     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
+
+# audit event with shared session
+async def _attempt_audit(request: Request, ev) -> None:
+    """Attempt to write an audit event, but don't fail the main request if it fails."""
+    SessionLocal = getattr(request.app.state, "SessionLocal", None)
+    if not SessionLocal:
+        logging.warning("No SessionLocal found in app state; skipping audit event")
+        return
+    try:
+        async with SessionLocal() as session:
+            await insert_audit_event(session, ev)
+            await session.commit()
+    except Exception as e:
+        logging.error(f"Failed to write audit event: {e}")
 
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
@@ -80,11 +94,11 @@ async def gpconnect(
             outcome=AuditOutcome.fail,
             error_code="400",
         )
-        await insert_audit_event(request.app.state.pg, ev)
+        await _attempt_audit(request, ev)
         return JSONResponse(status_code=400, content={"success": False, "error": msg})
 
     # 2) PDS lookup (consider caching in future)
-    t = now()
+    # t = now()
     try:
         pds_search = await lookup_patient(nhsno)
         ev = await build_audit_event(
@@ -95,7 +109,7 @@ async def gpconnect(
             action="pds_lookup",
             outcome=AuditOutcome.ok,
         )
-        await insert_audit_event(request.app.state.pg, ev)
+        await _attempt_audit(request, ev)
     except Exception as e:
         ev = await build_audit_event(
             request=request,
@@ -107,7 +121,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
-        await insert_audit_event(request.app.state.pg, ev)
+        await _attempt_audit(request, ev)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
