@@ -13,6 +13,7 @@ class AuditEventRow(SQLModel, table=True):
     """
     Flattened and DB-friendly; built from Pydantic AuditEvent.
     """
+
     __tablename__ = "audit_event"
 
     audit_id: UUID = Field(primary_key=True)

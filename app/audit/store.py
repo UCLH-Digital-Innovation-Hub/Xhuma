@@ -25,7 +25,9 @@ def _purpose_of_use_name(evt: AuditEvent) -> Optional[str]:
 
 async def insert_audit_event(session: AsyncSession, evt: AuditEvent) -> None:
     if not evt.subject_ref:
-        raise ValueError("AuditEvent.subject_ref is None (missing API_KEY or nhs number).")
+        raise ValueError(
+            "AuditEvent.subject_ref is None (missing API_KEY or nhs number)."
+        )
 
     row = AuditEventRow(
         audit_id=evt.audit_id,

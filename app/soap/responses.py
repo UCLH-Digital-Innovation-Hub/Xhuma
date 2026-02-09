@@ -10,9 +10,9 @@ import xmltodict
 from fastapi import Request
 from httpx import AsyncClient
 
+from ..audit.models import SAMLAttributes
 from ..gpconnect import gpconnect
 from ..redis_connect import redis_client
-from ..audit.models import SAMLAttributes
 
 # REGISTRY_ID = redis_client.get("registry")
 COMMUNITY_ID = os.getenv("COMMUNITY_ID", "2.16.840.1.113883.2.1.3.34.9001")

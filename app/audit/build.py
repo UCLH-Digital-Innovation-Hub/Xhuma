@@ -4,10 +4,12 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import Request
 from opentelemetry import trace
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.audit.sequence import next_audit_sequence
 
 from .models import (
     AuditEvent,
@@ -16,9 +18,8 @@ from .models import (
     AuthorityIdentity,
     DeviceInfo,
     EventDataRefs,
+    SAMLAttributes,
 )
-from .models import SAMLAttributes
-from app.audit.sequence import next_audit_sequence
 
 
 def _utcnow() -> datetime:
@@ -26,7 +27,9 @@ def _utcnow() -> datetime:
 
 
 def _client_ip(request: Request) -> Optional[str]:
-    return request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
+    return request.headers.get("x-forwarded-for") or (
+        request.client.host if request.client else None
+    )
 
 
 def _trace_id() -> Optional[str]:

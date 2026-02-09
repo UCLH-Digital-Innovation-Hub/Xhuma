@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 BUNDLE_DIR = FIXTURE_DIR / "bundles"

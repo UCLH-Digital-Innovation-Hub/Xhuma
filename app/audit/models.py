@@ -2,10 +2,10 @@ import base64
 import hashlib
 import hmac
 import os
+import uuid
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional
-import uuid
 
 from pydantic import BaseModel, Field, computed_field, field_validator
 
@@ -42,7 +42,6 @@ class AuditOutcome(str, Enum):
 
 
 # ---- Sub-models ----
-
 
 
 class SAMLAttributes(BaseModel):
@@ -132,7 +131,7 @@ class AuditEvent(BaseModel):
 
     # SAML attributes
     saml: SAMLAttributes
-    
+
     # Event
     event: AuditEventDetail
 

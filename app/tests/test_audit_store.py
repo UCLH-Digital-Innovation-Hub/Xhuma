@@ -1,17 +1,18 @@
 import json
-from unittest.mock import AsyncMock
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
-# Adjust imports to match your code
-from app.audit.models import AuditEvent, SAMLAttributes, AuditOutcome
 from app.audit.build import build_audit_event
+
+# Adjust imports to match your code
+from app.audit.models import AuditEvent, AuditOutcome, SAMLAttributes
 from app.audit.store import (
     insert_audit_event,
 )
-from .configure_tests import fake_pg_pool
 
+from .configure_tests import fake_pg_pool
 
 
 @pytest.mark.asyncio
@@ -81,4 +82,3 @@ async def test_insert_audit_event_writes_expected_fields(fake_pg_pool):
 
     # assert row_id == 1
     # assert insert_conn.fetchrow.await_count == 1
-

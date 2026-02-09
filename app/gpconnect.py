@@ -13,8 +13,6 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
-# from app.metrics.metric_utils import classify_error, now
-
 from .audit.build import build_audit_event
 from .audit.models import AuditOutcome, SAMLAttributes
 from .audit.store import insert_audit_event
@@ -26,12 +24,16 @@ from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import RELAY_TIMEOUT, USE_RELAY
 
+# from app.metrics.metric_utils import classify_error, now
+
+
 router = APIRouter()
 
 # client = httpx.AsyncClient(
 #     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
+
 
 # audit event with shared session
 async def _attempt_audit(request: Request, ev) -> None:

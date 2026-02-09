@@ -18,6 +18,7 @@ from time import time
 
 import jwt
 from fhirclient.models import humanname, practitioner
+
 from .audit.models import SAMLAttributes
 
 JWTKEY = os.getenv("JWTKEY")
@@ -143,7 +144,9 @@ def create_jwt(
             ],
         },
     }
-    payload["requesting_practitioner"]["identifier"].append(audit.role.model_dump(by_alias=True))
+    payload["requesting_practitioner"]["identifier"].append(
+        audit.role.model_dump(by_alias=True)
+    )
 
     # print("JWT PAYLOAD")
     # print(payload)
