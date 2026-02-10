@@ -1,123 +1,101 @@
 import uuid
 from datetime import datetime, timezone
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import Mock
 
 import pytest
+import xmltodict
 
+from app.audit.audit import process_saml_attributes
+from app.audit.db_models import AuditEventRow
 from app.audit.models import (
     AuditEvent,
     AuditEventDetail,
     AuditOutcome,
     DeviceInfo,
     EventDataRefs,
-    SAMLAttributes,
 )
-from app.audit.store import INSERT_SQL, insert_audit_event
+from app.audit.store import insert_audit_event
+
+xml39 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9690937278^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
 
 
-class _AcquireCM:
-    """Async context manager returned by pg.acquire()."""
+def saml_from_xml(xml: str):
+    # Ensure Attribute is always a list (your code requires a list)
+    parsed = xmltodict.parse(xml, force_list=("Attribute",))
 
-    def __init__(self, conn):
-        self._conn = conn
+    stmt = parsed.get("AttributeStatement")
+    if stmt is None:
+        # fallback if xmltodict wraps differently
+        stmt = next(iter(parsed.values()))
 
-    async def __aenter__(self):
-        return self._conn
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
+    return process_saml_attributes(stmt)
 
 
 @pytest.mark.asyncio
-async def test_insert_audit_event_executes_expected_sql_and_args(monkeypatch):
-    # Make subject_ref deterministic/present (AuditEvent.subject_ref uses env var API_KEY)
+async def test_insert_audit_event_adds_expected_row(monkeypatch):
     monkeypatch.setenv("API_KEY", "unit-test-secret")
 
-    # --- Fake PG pool/conn ---
-    conn = AsyncMock()
-    pg = SimpleNamespace(acquire=lambda: _AcquireCM(conn))
+    session = Mock()
+    session.add = Mock()
 
-    # --- Build a minimal but fully-populated event ---
+    saml = saml_from_xml(xml39)
+
     evt = AuditEvent(
-        audit_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
         sequence=42,
         subject_nhs_number="9690937278",
         event_time=datetime(2026, 2, 2, 12, 0, 0, tzinfo=timezone.utc),
         organisation="RRV00",
         request_id="req-123",
         trace_id="trace-abc",
-        saml=SAMLAttributes(
-            subject_id="CONE, Stephen",
-            organization="UCLH - University College London Hospitals - TST",
-            organization_id="urn:oid:1.2.3",
-            home_community_id="urn:oid:1.2.3",
-            role={
-                "@xsi:type": "CD",
-                "@code": "224608005",
-                "@codeSystemName": "http://snomed.info/sct",
-                "@displayName": "Administrative healthcare staff",
-            },
-            purpose_of_use={
-                "@xsi:type": "CD",
-                "@code": "TREATMENT",
-                "@codeSystemName": "LOINC",
-                "@displayName": "Treatment",
-            },
-            resource_id="9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
-        ),
+        saml=saml,
         device=DeviceInfo(ip="127.0.0.1", user_agent="pytest", host="testserver"),
         event=AuditEventDetail(
             action="gpc.getstructuredrecord",
             outcome=AuditOutcome.ok,
             error_code=None,
-            data_refs=EventDataRefs(
-                message_id="msg-1",
-                document_id="doc-1",
-            ),
+            data_refs=EventDataRefs(message_id="msg-1", document_id="doc-1"),
             detail={"k": "v"},
         ),
     )
 
-    # Sanity check: computed subject_ref exists and is pseudonymous
     assert evt.subject_ref is not None
     assert evt.subject_ref.startswith("v1:")
     assert "9690937278" not in evt.subject_ref
 
-    # --- Act ---
-    await insert_audit_event(pg, evt)
+    await insert_audit_event(session, evt)
 
-    # --- Assert: one execute with correct SQL + ordered args ---
-    assert conn.execute.await_count == 1
-    call = conn.execute.await_args
-    sql = call.args[0]
-    args = call.args[1:]
+    session.add.assert_called_once()
+    (row,) = session.add.call_args.args
+    assert isinstance(row, AuditEventRow)
 
-    assert sql.strip() == INSERT_SQL.strip()
+    assert row.audit_id == evt.audit_id
+    assert row.sequence == evt.sequence
+    assert row.event_time == evt.event_time
+    assert row.organisation == evt.organisation
 
-    # Expected mapping (in the exact order of INSERT_SQL placeholders)
-    expected = (
-        evt.audit_id,  # $1
-        evt.sequence,  # $2
-        evt.event_time,  # $3
-        evt.organisation,  # $4
-        evt.request_id,  # $5
-        evt.trace_id,  # $6
-        evt.user_id,  # $7 (computed from saml.subject_id)
-        evt.role_profile.get("@code"),  # $8
-        evt.role_profile.get("@displayName"),  # $9
-        evt.saml.organization,  # $10
-        evt.saml.organization_id,  # $11
-        evt.saml.purpose_of_use.displayName,  # $12 (urp_id) - not modeled currently
-        evt.event.action,  # $13
-        evt.event.outcome.value,  # $14
-        evt.event.error_code,  # $15
-        evt.subject_ref,  # $16 (computed pseudonymous subject ref)
-        evt.event.data_refs.message_id,  # $17
-        evt.event.data_refs.document_id,  # $18
-        evt.device.ip,  # $19
-        evt.device.user_agent,  # $20
-        evt.event.detail,  # $21
+    assert row.request_id == evt.request_id
+    assert row.trace_id == evt.trace_id
+
+    assert row.user_id == evt.user_id
+    assert row.user_role_code == (evt.saml.role.code if evt.saml.role else None)
+    assert row.user_role_name == (evt.saml.role.displayName if evt.saml.role else None)
+    assert row.user_org_name == evt.saml.organization
+    assert row.user_org_id == evt.saml.organization_id
+
+    assert row.purpose_of_use == (
+        evt.saml.purpose_of_use.displayName if evt.saml.purpose_of_use else None
     )
 
-    assert args == expected
+    assert row.action == evt.event.action
+    assert row.outcome == evt.event.outcome.value
+    assert row.error_code == evt.event.error_code
+
+    assert row.subject_ref == evt.subject_ref
+
+    assert row.message_id == evt.event.data_refs.message_id
+    assert row.document_id == evt.event.data_refs.document_id
+
+    assert row.client_ip == evt.device.ip
+    assert row.user_agent == evt.device.user_agent
+
+    assert row.detail == evt.event.detail
