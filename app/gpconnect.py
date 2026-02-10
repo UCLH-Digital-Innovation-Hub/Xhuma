@@ -158,6 +158,14 @@ async def gpconnect(
 
     if security_code != "U":
         msg = "Patient is not unrestricted, access to GP Connect is not permitted"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="check_restriction",
+            outcome=AuditOutcome.fail,
+            error_code="403",
+        )
         logging.error(f"{nhsno} is restricted")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -169,6 +177,15 @@ async def gpconnect(
         gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
     except Exception as e:
         msg = f"Unable to read GP ODS from PDS response: {e}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="resolve_gp_ods",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -177,8 +194,24 @@ async def gpconnect(
 
     try:
         asid_trace = await sds_trace(gp_ods)
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="sds_trace",
+            outcome=AuditOutcome.ok,
+        )
     except Exception as e:
         msg = f"SDS trace failed: {e}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="sds_trace",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -197,6 +230,15 @@ async def gpconnect(
 
     if not asid or not nhsmhsparty:
         msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="resolve_asid_partykey",
+            outcome=AuditOutcome.fail,
+            error_code="500",
+            detail={"message": msg},
+        )
         logging.error(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -206,8 +248,24 @@ async def gpconnect(
     # 5) Endpoint lookup
     try:
         endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="fhir_endpoint_trace",
+            outcome=AuditOutcome.ok,
+        )
     except Exception as e:
         msg = f"SDS endpoint trace failed: {e}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="fhir_endpoint_trace",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -216,6 +274,15 @@ async def gpconnect(
 
     if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
         msg = f"Unable to find FHIR endpoint for ODS code {gp_ods}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="fhir_endpoint_trace",
+            outcome=AuditOutcome.fail,
+            error_code="500",
+            detail={"message": msg},
+        )
         logging.error(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -321,7 +388,6 @@ async def gpconnect(
             url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             resp = await _direct_http_call(url, headers, body)
 
-        # (your existing logging)
         if log_dir:
             with open(
                 os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
@@ -331,6 +397,15 @@ async def gpconnect(
 
     except Exception as e:
         msg = f"Transport error: {e}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="gpconnect_request",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -355,6 +430,15 @@ async def gpconnect(
     # 8) Non-200 handling
     if resp.status_code != 200:
         msg = f"Error from GP Connect endpoint {resp.status_code}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="gpconnect_request",
+            outcome=AuditOutcome.fail,
+            error_code=str(resp.status_code),
+            detail={"response_text": resp.text},
+        )
         logging.error(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -362,6 +446,15 @@ async def gpconnect(
         return JSONResponse(
             status_code=resp.status_code, content={"success": False, "error": msg}
         )
+
+    # audit successful response
+    await _attempt_audit(
+        request=request,
+        nhs_number=str(nhsno),
+        saml=saml_attrs,
+        action="gpconnect_request",
+        outcome=AuditOutcome.ok,
+    )
 
     # 9) Convert to CCDA, store in Redis, return JSONResponse
     scr_bundle = json.loads(resp.text)
