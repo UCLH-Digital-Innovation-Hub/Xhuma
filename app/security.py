@@ -144,9 +144,19 @@ def create_jwt(
             ],
         },
     }
-    payload["requesting_practitioner"]["identifier"].append(
-        audit.role.model_dump(by_alias=True)
-    )
+
+    # audit_role = audit.role.model_dump(by_alias=True)
+    # audit_role.pop("@xsi:type", None)  # Remove XML type info for JWT payload
+    # audit_role.pop("nullFlavor", None)  # Remove null flavor if present
+
+    audit_role = {
+        "system": audit.role.codeSystemName,
+        "value": audit.role.code,
+    }
+
+    # print("Adding role to JWT payload:", audit_role)
+
+    payload["requesting_practitioner"]["identifier"].append(audit_role)
 
     # print("JWT PAYLOAD")
     # print(payload)
