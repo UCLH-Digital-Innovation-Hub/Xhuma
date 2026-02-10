@@ -295,7 +295,7 @@ async def gpconnect(
     token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
     headers = {
         "Ssp-TraceID": str(uuid4()),
-        "Ssp-From": "200000002574",
+        "Ssp-From": "200000002574",  # TODO this should be dynamic as each client endpoint will have own SSID
         "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
@@ -343,8 +343,8 @@ async def gpconnect(
             http2=False,
         ) as session:
             r = await session.post(url, json=body, headers=headers)
-            print(f"Direct HTTP call response status: {r.status_code}")
-            print(f"Direct HTTP call response text: {r.text}")
+            # print(f"Direct HTTP call response status: {r.status_code}")
+            # print(f"Direct HTTP call response text: {r.text}")
             return r  # return a real httpx.Response
 
     async def _relay_call(url: str, headers: dict, body: dict) -> httpx.Response:
@@ -399,6 +399,7 @@ async def gpconnect(
         msg = f"Transport error: {e}"
         await _attempt_audit(
             request=request,
+            request_id=headers.get("Ssp-TraceID"),
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="gpconnect_request",
@@ -419,19 +420,12 @@ async def gpconnect(
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    except Exception as e:
-        msg = f"Unexpected error during request: {e}"
-        print("❌", msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
-        return JSONResponse(status_code=502, content={"success": False, "error": msg})
-
     # 8) Non-200 handling
     if resp.status_code != 200:
         msg = f"Error from GP Connect endpoint {resp.status_code}"
         await _attempt_audit(
             request=request,
+            request_id=headers.get("Ssp-TraceID"),
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="gpconnect_request",
@@ -450,6 +444,7 @@ async def gpconnect(
     # audit successful response
     await _attempt_audit(
         request=request,
+        request_id=headers.get("Ssp-TraceID"),
         nhs_number=str(nhsno),
         saml=saml_attrs,
         action="gpconnect_request",
@@ -493,11 +488,23 @@ async def gpconnect(
 
     xop = base64_xml(xml_ccda)
     doc_uuid = str(uuid4())
+
     redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
     redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
 
-    with open(f"{nhsno}.xml", "w") as output:
-        output.write(xmltodict.unparse(xml_ccda, pretty=True))
+    # only write the xml if dev
+    if os.getenv("ENV", "prod").lower() in ("dev", "local"):
+        with open(f"{nhsno}.xml", "w") as output:
+            output.write(xmltodict.unparse(xml_ccda, pretty=True))
+
+    await _attempt_audit(
+        request=request,
+        nhs_number=str(nhsno),
+        saml=saml_attrs,
+        action="store_ccda",
+        outcome=AuditOutcome.ok,
+        document_id=doc_uuid,
+    )
 
     return JSONResponse(
         status_code=200, content={"success": True, "document_id": doc_uuid}
