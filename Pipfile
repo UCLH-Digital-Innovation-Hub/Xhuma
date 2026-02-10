@@ -28,6 +28,7 @@ grpcio = "*"
 python-multipart = "*"
 sqlmodel = "*"
 alembic = "*"
+psycopg = {extras = ["binary"], version = "*"}
 
 [dev-packages]
 black = "*"

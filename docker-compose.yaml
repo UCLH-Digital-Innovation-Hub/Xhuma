@@ -68,6 +68,9 @@ services:
     volumes:
       - ./app:/code/app
       - ./keys:/code/keys:ro
+      - ./alembic:/code/alembic
+      - ./alembic.ini:/code/alembic.ini
+
     networks:
       - xhuma-net
     command: ["python","-m","uvicorn","app.main:app","--host","0.0.0.0","--port","${PORT:-80}"]
