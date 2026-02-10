@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import Column
+from sqlalchemy import Column, DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -19,7 +19,9 @@ class AuditEventRow(SQLModel, table=True):
     audit_id: UUID = Field(primary_key=True)
     sequence: int = Field(index=True)
 
-    event_time: datetime = Field(index=True)
+    event_time: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), index=True),
+    )
 
     organisation: Optional[str] = Field(default=None, index=True)
 

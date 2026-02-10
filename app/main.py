@@ -22,9 +22,13 @@ from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from sqlmodel import select
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .audit.models import _subject_ref_from_nhs_number
+from app.ccda.entries import result
+
+from .audit.db_models import AuditEventRow
+from .audit.models import SAMLAttributes, _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
 from .gpconnect import gpconnect
 from .pds import pds
@@ -189,36 +193,32 @@ async def demo(nhsno: int, request: Request):
     Returns:
         bytes: MIME encoded CCDA document retrieved from Redis cache.
     """
-    audit_dict = {
-        "subject_id": "CONE, Stephen",
-        "organization": "UCLH - University College London Hospitals - TST",
-        "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        "role": {
-            "Role": {
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "@code": "224608005",
-                "@codeSystemName": "SNOMED_CT",
-                "@displayName": "Administrative healthcare staff",
-                "@xmlns": "urn:hl7-org:v3",
-                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-            }
+    audit_dict = SAMLAttributes(
+        subject_id="CONE, Stephen",
+        organization="UCLH - University College London Hospitals - TST",
+        organization_id="urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+        home_community_id="urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
+        role={
+            "@codeSystem": "2.16.840.1.113883.6.96",
+            "@code": "224608005",
+            "@codeSystemName": "SNOMED_CT",
+            "@displayName": "Administrative healthcare staff",
+            "@xmlns": "urn:hl7-org:v3",
+            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
         },
-        "purpose_of_use": {
-            "PurposeForUse": {
-                "@xsi:type": "CE",
-                "@code": "TREATMENT",
-                "@codeSystem": "2.16.840.1.113883.3.18.7.1",
-                "@codeSystemName": "nhin-purpose",
-                "@displayName": "Treatment",
-                "@xmlns": "urn:hl7-org:v3",
-                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-            },
+        purpose_of_use={
+            "@xsi:type": "CE",
+            "@code": "TREATMENT",
+            "@codeSystem": "2.16.840.1.113883.3.18.7.1",
+            "@codeSystemName": "nhin-purpose",
+            "@displayName": "Treatment",
+            "@xmlns": "urn:hl7-org:v3",
+            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
         },
-        "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
-    }
+        resource_id="9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
+    )
 
     bundle_id = await gpconnect(nhsno, audit_dict, request=request)
     # decode jsonresponse
@@ -278,47 +278,35 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
 
     @app.post("/_dev/audit", response_class=HTMLResponse)
     async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
-        # Safety: dev only
+        # --- safety: dev only ---
         secret = os.getenv("API_KEY")
         if not secret:
             return HTMLResponse(
-                "<h3>Missing AUDIT_SUBJECT_SECRET</h3>", status_code=500
+                "<h3>Missing API_KEY</h3>",
+                status_code=500,
             )
 
         try:
             subject_ref = _subject_ref_from_nhs_number(nhs_number, secret)
         except ValueError as e:
             return HTMLResponse(
-                f"<h3>Invalid NHS number</h3><p>{e}</p>", status_code=400
+                f"<h3>Invalid NHS number</h3><p>{e}</p>",
+                status_code=400,
             )
 
-        pg = getattr(request.app.state, "pg", None)
-        if pg is None:
+        SessionLocal = getattr(request.app.state, "SessionLocal", None)
+        if SessionLocal is None:
             return HTMLResponse(
-                "<h3>Postgres pool not configured</h3>", status_code=500
+                "<h3>Database session not configured</h3>",
+                status_code=500,
             )
 
-        # Keep the fields minimal and safe for display
-        sql = """
-        SELECT
-        event_time,
-        sequence,
-        action,
-        outcome,
-        error_code,
-        user_id,
-        user_role_name,
-        user_org_name,
-        organisation,
-        request_id,
-        trace_id,
-        document_id,
-        message_id
-        FROM audit_event
-        WHERE subject_ref = $1
-        ORDER BY sequence DESC
-        LIMIT 500;
-        """
+        stmt = (
+            select(AuditEventRow)
+            .where(AuditEventRow.subject_ref == subject_ref)
+            .order_by(AuditEventRow.sequence.desc())
+            .limit(500)
+        )
 
         def esc(s: str) -> str:
             return (
@@ -331,23 +319,24 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
             )
 
         try:
-            async with pg.acquire() as conn:
-                rows = await conn.fetch(sql, subject_ref)
+            async with SessionLocal() as session:  # type: AsyncSession
+                result = await session.execute(stmt)
+                rows = result.scalars().all()
         except Exception as e:
             return HTMLResponse(
                 f"<h3>Query failed</h3><pre>{esc(repr(e))}</pre>",
                 status_code=500,
             )
 
-        # Render
-        out = []
+        # --- render ---
+        out: list[str] = []
         out.append(
-            "<html><head><title>Dev Audit Results</title></head><body style='font-family:sans-serif;margin:2rem;'>"
+            "<html><head><title>Dev Audit Results</title></head>"
+            "<body style='font-family:sans-serif;margin:2rem;'>"
         )
         out.append("<a href='/_dev/audit'>← back</a>")
         out.append("<h2>Audit results</h2>")
         out.append(f"<p class='muted'>subject_ref: <code>{esc(subject_ref)}</code></p>")
-
         out.append(f"<p>{len(rows)} row(s) returned (max 500).</p>")
 
         out.append("<table>")
@@ -355,25 +344,26 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
             "<tr>"
             "<th>Time (UTC)</th><th>Seq</th><th>Action</th><th>Outcome</th><th>Error</th>"
             "<th>User</th><th>Role</th><th>Org</th>"
-            "<th>Request ID</th><th>Trace ID</th><th>Doc ID</th><th>Msg ID</th>"
+            "<th>Request ID</th><th>Trace ID</th>"
+            "<th>Doc ID</th><th>Msg ID</th>"
             "</tr>"
         )
 
         for r in rows:
             out.append(
                 "<tr>"
-                f"<td>{esc(str(r['event_time']))}</td>"
-                f"<td>{esc(str(r['sequence']))}</td>"
-                f"<td>{esc(r['action'])}</td>"
-                f"<td>{esc(r['outcome'])}</td>"
-                f"<td>{esc(r['error_code'] or '')}</td>"
-                f"<td>{esc(r['user_id'] or '')}</td>"
-                f"<td>{esc(r['user_role_name'] or '')}</td>"
-                f"<td>{esc(r['organisation'] or '')}</td>"
-                f"<td>{esc(r['request_id'] or '')}</td>"
-                f"<td>{esc(r['trace_id'] or '')}</td>"
-                f"<td>{esc(r['document_id'] or '')}</td>"
-                f"<td>{esc(r['message_id'] or '')}</td>"
+                f"<td>{esc(str(r.event_time))}</td>"
+                f"<td>{esc(str(r.sequence))}</td>"
+                f"<td>{esc(r.action)}</td>"
+                f"<td>{esc(r.outcome)}</td>"
+                f"<td>{esc(r.error_code or '')}</td>"
+                f"<td>{esc(r.user_id or '')}</td>"
+                f"<td>{esc(r.user_role_name or '')}</td>"
+                f"<td>{esc(r.organisation or '')}</td>"
+                f"<td>{esc(r.request_id or '')}</td>"
+                f"<td>{esc(r.trace_id or '')}</td>"
+                f"<td>{esc(r.document_id or '')}</td>"
+                f"<td>{esc(r.message_id or '')}</td>"
                 "</tr>"
             )
 

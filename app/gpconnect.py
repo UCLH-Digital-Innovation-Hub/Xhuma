@@ -36,14 +36,40 @@ router = APIRouter()
 
 
 # audit event with shared session
-async def _attempt_audit(request: Request, ev) -> None:
+async def _attempt_audit(
+    request: Request,
+    *,
+    nhs_number: str,
+    saml: SAMLAttributes,
+    action: str,
+    outcome: AuditOutcome,
+    error_code: str | None = None,
+    detail: dict | None = None,
+    message_id: str | None = None,
+    document_id: str | None = None,
+    request_id: str | None = None,
+) -> None:
     """Attempt to write an audit event, but don't fail the main request if it fails."""
     SessionLocal = getattr(request.app.state, "SessionLocal", None)
     if not SessionLocal:
         logging.warning("No SessionLocal found in app state; skipping audit event")
         return
+
     try:
         async with SessionLocal() as session:
+            ev = await build_audit_event(
+                request=request,
+                session=session,
+                nhs_number=str(nhs_number),
+                saml=saml,
+                action=action,
+                outcome=outcome,
+                error_code=error_code,
+                detail=detail,
+                message_id=message_id,
+                document_id=document_id,
+                request_id=request_id,
+            )
             await insert_audit_event(session, ev)
             await session.commit()
     except Exception as e:
@@ -87,35 +113,30 @@ async def gpconnect(
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
-        ev = await build_audit_event(
+        await _attempt_audit(
             request=request,
-            pg_pool=request.app.state.pg,
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="validate_nhs_number",
             outcome=AuditOutcome.fail,
             error_code="400",
         )
-        await _attempt_audit(request, ev)
         return JSONResponse(status_code=400, content={"success": False, "error": msg})
 
     # 2) PDS lookup (consider caching in future)
     # t = now()
     try:
         pds_search = await lookup_patient(nhsno)
-        ev = await build_audit_event(
+        await _attempt_audit(
             request=request,
-            pg_pool=request.app.state.pg,
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="pds_lookup",
             outcome=AuditOutcome.ok,
         )
-        await _attempt_audit(request, ev)
     except Exception as e:
-        ev = await build_audit_event(
+        await _attempt_audit(
             request=request,
-            pg_pool=request.app.state.pg,
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="pds_lookup",
@@ -123,7 +144,6 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
-        await _attempt_audit(request, ev)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
