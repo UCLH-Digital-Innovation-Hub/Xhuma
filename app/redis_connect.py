@@ -21,16 +21,15 @@ import time
 from functools import wraps
 from typing import Any, Dict, Optional, Union
 
+import redis
 from redis.connection import ConnectionPool
 from redis.exceptions import ConnectionError, RedisError
-
-import redis
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Redis connection configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
@@ -80,7 +79,7 @@ class RedisClient:
             host=REDIS_HOST,
             port=REDIS_PORT,
             db=REDIS_DB,
-            password=REDIS_PASSWORD,
+            # password=REDIS_PASSWORD,
             max_connections=POOL_MAX_CONNECTIONS,
             socket_timeout=SOCKET_TIMEOUT,
             socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
@@ -143,9 +142,9 @@ class RedisClient:
                 "total_keys": total_keys,
                 "memory_used": memory_used,
                 "memory_limit": total_memory,
-                "memory_usage_percent": (memory_used / total_memory * 100)
-                if total_memory
-                else 0,
+                "memory_usage_percent": (
+                    (memory_used / total_memory * 100) if total_memory else 0
+                ),
                 "connected_clients": info.get("connected_clients", 0),
                 "hit_rate": info.get("keyspace_hits", 0)
                 / (info.get("keyspace_hits", 0) + info.get("keyspace_misses", 1)),
@@ -172,6 +171,7 @@ redis_client = RedisClient()
 
 # Export the redis_connect instance for use in other modules
 redis_connect = redis_client
+
 
 def get_cached_data(key: str) -> Optional[bytes]:
     """Retrieve cached data for a given key."""

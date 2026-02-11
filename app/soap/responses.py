@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 import os
 import pprint
@@ -6,6 +7,7 @@ import uuid
 from datetime import datetime, timedelta
 
 import xmltodict
+from fastapi import Request
 from httpx import AsyncClient
 
 from ..gpconnect import gpconnect
@@ -203,6 +205,73 @@ async def iti_55_response(message_id, patient, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
+async def iti_55_error(message_id, query, error_text):
+    """ITI55 error response message generator
+
+    Args:
+        message_id (_type_): _description_
+        query (_type_): _description_
+        error_text (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
+
+    body = {
+        "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+    }
+
+    body["PRPA_IN201306UV02"] = {
+        "@xmlns": "urn:hl7-org:v3",
+        "@ITSVersion": "XML_1.0",
+        "id": {"@root": str(uuid.uuid4())},
+        "creationTime": {"@value": int(datetime.now().timestamp())},
+        "interactionId": {
+            "@root": "2.16.840.1.113883.1.18",
+            "@extension": "PRPA_IN201306UV02",
+        },
+        "processingCode": {"@code": "T"},
+        "processingModeCode": {"@code": "T"},
+        "acceptAckCode": {"@code": "NE"},
+        "receiver": {
+            "@typeCode": "RCV",
+            "device": {"@classCode": "DEV", "@determinerCode": "INSTANCE"},
+        },
+        "sender": {
+            "@typeCode": "SND",
+            "device": {"@classCode": "DEV", "@determinerCode": "INSTANCE"},
+        },
+        "acknowledgement": {
+            "typeCode": {"@code": "AE"},
+            "targetMessage": {"id": {"@root": message_id}},
+            "acknowledgementDetail": {
+                "@text": error_text,
+            },
+        },
+        "controlActProcess": {
+            "@classCode": "CACT",
+            "@moodCode": "EVN",
+            "code": {
+                "@code": "PRPA_TE201306UV02",
+                "@codeSystem": "2.16.840.1.113883.1.18",
+            },
+            "queryAck": {
+                # todo: handle missing queryId
+                "queryId": query["queryId"] if "queryId" in query else "can't find queryID",
+                "queryResponseCode": {"@code": "AE"},
+                "statusCode": {"@code": "aborted"},
+            },
+            "queryByParameter": query,
+        },
+    }
+    header = create_header(
+        "urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery", message_id
+    )
+
+    return xmltodict.unparse(create_envelope(header, body), pretty=True)
+
+
 async def iti_47_response(message_id, patient, ceid, query):
     """ITI47 response message generator
 
@@ -331,7 +400,9 @@ async def iti_47_response(message_id, patient, ceid, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
-async def iti_38_response(nhsno: int, ceid, queryid: str):
+async def iti_38_response(
+    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: dict
+):
 
     body = {}
     body["AdhocQueryResponse"] = {
@@ -344,14 +415,23 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
 
     if docid is None:
         # no cached ccda
+        r = await gpconnect(nhsno, saml_attrs, request=request)
+        print("-" * 40)
+        print(r.body)
+        print("-" * 40)
         try:
-            r = await gpconnect(nhsno)
-            logging.info(f"used internal call for {nhsno}")
-            print(r)
-            docid = r["document_id"]
+            r = await gpconnect(nhsno, saml_attrs, request=request)
+
+            print("-" * 40)
+            logging.info(f"no cached ccda, used internal call for {nhsno}")
+            r = json.loads(r.body)
         except Exception as e:
             logging.error(f"Error: {e}")
             print(f"iti_38_error: {e}")
+            r = {
+                "success": False,
+                "error": f"Internal error retrieving structured record for NHS number {nhsno}. error: {e}",
+            }
             body["AdhocQueryResponse"][
                 "@status"
             ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
@@ -365,7 +445,30 @@ async def iti_38_response(nhsno: int, ceid, queryid: str):
                 },
             }
 
+        if not r.get("success"):
+            logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
+            body["AdhocQueryResponse"][
+                "@status"
+            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            body["AdhocQueryResponse"]["RegistryErrorList"] = {
+                "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                "RegistryError": {
+                    "@errorCode": "XDSRegistryError",
+                    "@codeContext": r.get("error", "Unknown error"),
+                    "@location": "",
+                    "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
+                },
+            }
+        else:
+            print(r)
+            docid = r["document_id"]
+
     if docid is not None:
+
+        # make sure docid is a string and not bytes
+        if isinstance(docid, bytes):
+            docid = docid.decode("utf-8")
+
         # add the ccda as registry object list
         # object_id = f"CCDA_{docid}"
         object_id = docid
@@ -515,11 +618,14 @@ async def iti_39_response(message_id: str, document_id: str, document):
         create_header("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id), body
     )
 
+    print(f"ITI39 response: {soap_response}")
+
     # soap_response = create_envelope(
     #     create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", "test"), body
     # )
 
     # Verify that all values are serializable
+    # TODO DELETE THIS?
     def ensure_serializable(data):
         if isinstance(data, bytes):
             return data.decode("utf-8")  # Decode bytes to string
@@ -532,7 +638,7 @@ async def iti_39_response(message_id: str, document_id: str, document):
 
     soap_response = ensure_serializable(soap_response)
 
-    pprint.pprint(soap_response)
+    # pprint.pprint(soap_response)
     # print(type(soap_response))
 
     # with open(f"{document_id}.xml", "w") as output:
