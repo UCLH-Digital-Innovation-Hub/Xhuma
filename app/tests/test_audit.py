@@ -12,7 +12,7 @@ def test_saml_iti39():
     for atribute in saml_header["AttributeStatement"]["Attribute"]:
         print(atribute["@Name"])
         print(atribute["AttributeValue"])
-    saml_attributes = process_saml_attributes(saml_header)
+    saml_attributes = process_saml_attributes(saml_header["AttributeStatement"])
     assert saml_attributes["subject_id"] == "CONE, Stephen"
     assert (
         saml_attributes["organization"]
@@ -46,7 +46,7 @@ def test_saml_iti39():
 
 def test_saml_iti38():
     saml_header = xmltodict.parse(xml38)
-    saml_attributes = process_saml_attributes(saml_header)
+    saml_attributes = process_saml_attributes(saml_header["AttributeStatement"])
     assert saml_attributes["subject_id"] == "CONE, Stephen"
     assert (
         saml_attributes["organization"]
