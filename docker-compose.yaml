@@ -32,33 +32,96 @@ services:
     networks:
       - xhuma-net
 
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-xhuma}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # ✅ Optional: remove this once Alembic owns schema changes
+      # - ./app/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB -h 127.0.0.1"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks:
+      - xhuma-net
+
+  migrate:
+    build: .
+    container_name: xhuma-migrate
+    env_file:
+      - .env
+    environment:
+      API_KEY: ${API_KEY}
+      POSTGRES_DB: ${POSTGRES_DB:-xhuma}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # If you mount alembic locally in xhuma, do same here for consistency in dev:
+    volumes:
+      - ./app:/code/app
+      - ./alembic:/code/alembic
+      - ./alembic.ini:/code/alembic.ini
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    networks:
+      - xhuma-net
+
   xhuma:
     build: .
     ports:
       - "${GPCON_PORT:-80}:80"
     env_file:
-      - .env  
-    depends_on:
-      - redis
-      - otel-collector
-      - postgres
-      - tempo
+      - .env
     environment:
       API_KEY: ${API_KEY}
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
       OTEL_PYTHON_METER_PROVIDER: "sdk_meter_provider"
       OTEL_PYTHON_TRACER_PROVIDER: "sdk_tracer_provider"
       OTEL_SERVICE_NAME: "xhuma"
-      PORT: "${GPCON_PORT:-80}" 
+      PORT: "${GPCON_PORT:-80}"
       POSTGRES_DB: ${POSTGRES_DB:-xhuma}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on:
+      redis:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+      tempo:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /code/app
+        - action: sync+restart
+          path: ./otel-collector-config.yaml
+          target: /etc/otel-collector-config.yaml
     volumes:
       - ./app:/code/app
       - ./keys:/code/keys:ro
+      - ./alembic:/code/alembic
+      - ./alembic.ini:/code/alembic.ini
     networks:
       - xhuma-net
     command: ["python","-m","uvicorn","app.main:app","--host","0.0.0.0","--port","${PORT:-80}"]
@@ -88,8 +151,10 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     depends_on:
-      - prometheus
-      - tempo
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
     networks:
       - xhuma-net
 
@@ -103,22 +168,10 @@ services:
       - "4316:4318"   # OTLP http receiver (changed port to avoid conflict)
       - "8890:8890"   # Metrics endpoint
     depends_on:
-      - prometheus
-      - tempo
-    networks:
-      - xhuma-net
-
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-xhuma}
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./app/migrations:/docker-entrypoint-initdb.d
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
     networks:
       - xhuma-net
 
