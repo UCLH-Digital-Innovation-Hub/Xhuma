@@ -224,6 +224,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "Start Date",
                         "End Date",
                         "Status",
+                        "Prescription Type",
                         "Medication",
                         "Instructions",
                         "Prescribing Agency",

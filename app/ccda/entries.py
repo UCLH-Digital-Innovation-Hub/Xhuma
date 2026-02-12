@@ -2,16 +2,25 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence
 
-from fhirclient.models import (allergyintolerance, coding, condition,
-                               immunization)
+from fhirclient.models import allergyintolerance, coding, condition, immunization
 from fhirclient.models import medication as fhirmed
-from fhirclient.models import medicationstatement, observation
+from fhirclient.models import medicationrequest, medicationstatement, observation
 
-from .helpers import (code_with_translations, date_helper,
-                      effective_time_helper, organization_to_author,
-                      readable_date, templateId)
-from .models.base import (EntryRelationship, Observation, ResultObservation,
-                          ResultsOrganizer, SubstanceAdministration)
+from .helpers import (
+    code_with_translations,
+    date_helper,
+    effective_time_helper,
+    organization_to_author,
+    readable_date,
+    templateId,
+)
+from .models.base import (
+    EntryRelationship,
+    Observation,
+    ResultObservation,
+    ResultsOrganizer,
+    SubstanceAdministration,
+)
 from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 Cell = str
@@ -30,6 +39,9 @@ def medication(
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
+    based_on_request: medicationrequest.MedicationRequest = index[
+        entry.basedOn[0].reference
+    ]
     # request = index[entry.basedOn[0].reference]
     # dosage_instructions = request.dosageInstruction
     # for dose in dosage_instructions:
@@ -263,10 +275,19 @@ def medication(
         ):
             last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
 
+    # look for prescrtion type in medication request
+    for ext in based_on_request.extension:
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
+        ):
+            prescription_type = ext.valueCodeableConcept.coding[0].display
+
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
         readable_date(high_time[0]) if high_time else "",
         entry.status if entry.status else "unknown",
+        prescription_type if "prescription_type" in locals() else "",
         med_name,
         substance_administration.entryRelationship[0].substanceAdministration.get(
             "text", ""

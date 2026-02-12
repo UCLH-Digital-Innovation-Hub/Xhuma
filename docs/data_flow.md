@@ -37,7 +37,7 @@ flowchart TD
     C -->|Query| D[Grafana]
     D -->|Alert| E[Alert Manager]
     E -->|Notification| F[Alert Channels]
-    
+
     G[System Metrics] -->|Resource Usage| B
     H[Redis Metrics] -->|Cache Stats| B
     I[Request Metrics] -->|Latency/Errors| B
@@ -49,7 +49,7 @@ flowchart TD
     A[Application Logs] -->|JSON Format| B[Logstash]
     B -->|Process| C[Elasticsearch]
     C -->|Query| D[Kibana]
-    
+
     E[System Logs] -->|Structured| B
     F[Access Logs] -->|Parse| B
     G[Error Logs] -->|Enrich| B
@@ -62,7 +62,7 @@ flowchart TD
     B -->|Collect Spans| C[Trace Processing]
     C -->|Store| D[Trace Storage]
     D -->|Query| E[Trace Analysis]
-    
+
     F[Service Calls] -->|Add Spans| B
     G[Database Ops] -->|Add Spans| B
     H[Cache Ops] -->|Add Spans| B
@@ -136,7 +136,7 @@ flowchart TD
     B -->|No| D[Fetch Fresh Data]
     D -->|Store| E[Cache Storage]
     E -->|Return| F[Response]
-    
+
     G[TTL Monitor] -->|Expire| H[Cache Cleanup]
     I[Memory Monitor] -->|Evict| H
 ```

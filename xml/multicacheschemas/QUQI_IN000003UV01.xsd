@@ -6,7 +6,7 @@
    <xs:annotation>
       <xs:documentation>Source Information
      Rendered by: RoseTree 4.2.7
-     Rendered on: 
+     Rendered on:
 This document was rendered into XML using software provided to HL7 by Beeler Consulting LLC.
  PubDB to MIF Transform: $RCSfile: PubDbXmlToMIF.xsl,v $ $Revision: 1.11 $ $Date: 2007/10/19 05:55:13 $
   Fix names transform: $Id: FixMifNames.xsl,v 1.8 2007/03/20 02:48:49 wbeeler Exp $
