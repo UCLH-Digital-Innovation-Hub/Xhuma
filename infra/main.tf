@@ -77,12 +77,20 @@ resource "azurerm_linux_web_app" "app" {
       docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[1] : "latest"
     }
     
+    
     container_registry_use_managed_identity = false
+    
+    # Run migrations on startup
+    app_command_line = "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 80"
     
     # Enable WebSockets for the Relay
     websockets_enabled = true
     use_32_bit_worker_process = true # Typically false for production but B1 is small
   }
+
+  # Enable mTLS: Optional allows public endpoints/health checks while passing the cert to the app
+  client_cert_enabled = true
+  client_cert_mode    = "Optional"
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
@@ -112,5 +120,15 @@ resource "azurerm_linux_web_app" "app" {
     # Observability
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.appinsights.connection_string
     "OTEL_SERVICE_NAME"                     = "xhuma"
+    "OTEL_METRIC_EXPORT_INTERVAL_MS"        = var.otel_metric_export_interval_ms
+
+    # Business Logic
+    "ORG_CODE"             = var.org_code
+    "ENV"                  = var.env
+
+    # Security
+    "CORS_ORIGINS"         = var.cors_origins
+    "ALLOWED_HOSTS"        = var.allowed_hosts
+    "REQUIRE_MTLS"         = var.require_mtls
   }
 }

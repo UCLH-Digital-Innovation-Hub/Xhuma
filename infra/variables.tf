@@ -93,3 +93,39 @@ variable "docker_registry_password" {
   type        = string
   sensitive   = true
 }
+
+variable "org_code" {
+  description = "Organization Code"
+  type        = string
+  default     = "RRV00"
+}
+
+variable "env" {
+  description = "Environment Name"
+  type        = string
+  default     = "prod"
+}
+
+variable "otel_metric_export_interval_ms" {
+  description = "OpenTelemetry Metric Export Interval (ms)"
+  type        = string
+  default     = "5000"
+}
+
+variable "cors_origins" {
+  description = "Comma separated list of allowed CORS origins"
+  type        = string
+  default     = "*" # Default to * for dev, override in prod
+}
+
+variable "allowed_hosts" {
+  description = "Comma separated list of allowed hosts"
+  type        = string
+  default     = "*" # Default to * for dev, override in prod
+}
+
+variable "require_mtls" {
+  description = "Enforce mTLS validation in the application"
+  type        = string
+  default     = "false"
+}

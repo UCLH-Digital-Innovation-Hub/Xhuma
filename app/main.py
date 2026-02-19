@@ -112,32 +112,31 @@ app = FastAPI(
 # register soap error handler
 soap.register_handlers(app)
 
-# 1) Trusted hosts: allow local & your domain
+from app.middleware.mtls import MTLSMiddleware
+
+# 1) Trusted hosts
+allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "*")
+allowed_hosts = [h.strip() for h in allowed_hosts_str.split(",")]
+
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=[
-        "xhumademo.com",
-        "localhost",
-        "127.0.0.1",
-        "0.0.0.0",
-        "*",
-    ],  # "*" ok for dev
+    allowed_hosts=allowed_hosts,
 )
 
-# 2) CORS: allow local & your domain (Starlette applies CORS to WebSockets too)
+# 2) CORS
+cors_origins_str = os.getenv("CORS_ORIGINS", "*")
+allow_origins = [o.strip() for o in cors_origins_str.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://xhumademo.com",
-        "http://localhost",
-        "http://127.0.0.1",
-        "http://0.0.0.0",
-        "*",
-    ],  # "*" ok for dev
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 3) mTLS Middleware
+app.add_middleware(MTLSMiddleware)
 
 # Include routers for different service components
 app.include_router(soap.router)
