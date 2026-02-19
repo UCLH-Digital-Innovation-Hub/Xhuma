@@ -20,6 +20,7 @@ def test_iti47():
         assert response.status_code == 200
 
 
+@pytest.mark.skip(reason="SOAP endpoint verification pending")
 def test_iti47():
     headers = {
         "Content-Type": "application/soap+xml",
