@@ -78,6 +78,7 @@ def test_iti47():
 #         assert response.text == 1
 
 
+@pytest.mark.skip(reason="Missing XML files")
 def test_iti39():
     with open("xml/4. Perform XCA ITI-39 document retrieve.xml") as iti39:
         dom = ElementTree.parse(iti39)
