@@ -38,6 +38,7 @@ isort = "*"
 pytest = "*"
 xmlschema = "*"
 pytest-asyncio = "*"
+pytest-benchmark = "*"
 flake8 = "*"
 pre-commit = "*"
 
