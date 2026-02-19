@@ -49,8 +49,9 @@ async def _attempt_audit(
     document_id: str | None = None,
     request_id: str | None = None,
 ) -> None:
-    """Attempt to write an audit event, but don't fail the main request if it fails."""
-    SessionLocal = getattr(request.app.state, "SessionLocal", None)
+    SessionLocal = None
+    if request and hasattr(request, "app"):
+        SessionLocal = getattr(request.app.state, "SessionLocal", None)
     if not SessionLocal:
         logging.warning("No SessionLocal found in app state; skipping audit event")
         return

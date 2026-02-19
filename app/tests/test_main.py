@@ -8,5 +8,5 @@ client = TestClient(app)
 
 
 def test_GPconnect():
-    response = client.get("/gpconnnect/9690937286")
+    response = client.get("/gpconnect/9690937286")
     assert response.status_code == 200

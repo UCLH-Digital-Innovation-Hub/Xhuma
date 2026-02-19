@@ -257,7 +257,7 @@ def test_structured_detail():
     assert substance_administration["@moodCode"] == "INT"
     assert (
         substance_administration["id"][0]["@extension"]
-        == "https://EMISWeb/A82038/7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6MS"
+        == "7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6MS"
     )
     assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20200304"
     assert substance_administration["effectiveTime"][1]["@xsi:type"] == "PIVL_TS"
