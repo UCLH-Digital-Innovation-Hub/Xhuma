@@ -150,3 +150,13 @@ task.md
 implementation_plan.md
 walkthrough.md
 *.png
+
+# OS / Workspace
+.DS_Store
+.vscode/
+.idea/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup

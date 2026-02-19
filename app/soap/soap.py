@@ -26,13 +26,19 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
+from ..audit.audit import process_saml_attributes
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
-from .audit import process_saml_attributes
-from .responses import (create_envelope, create_header, iti_38_response,
-                        iti_39_response, iti_47_response, iti_55_error,
-                        iti_55_response)
+from .responses import (
+    create_envelope,
+    create_header,
+    iti_38_response,
+    iti_39_response,
+    iti_47_response,
+    iti_55_error,
+    iti_55_response,
+)
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -320,8 +326,6 @@ async def iti38(request: Request):
             # envelope["Header"]["Security"]["AttributeStatement"]
         )
 
-        print(f"SAML Attributes: {saml_attrs}")
-
         soap_body = envelope["Body"]
         slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
         query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
@@ -338,8 +342,8 @@ async def iti38(request: Request):
             try:
                 pattern = r"[0-9]{10}"
                 poss_nhs = re.search(pattern, patient_id).group(0)
-                print(f"Possible NHS number: {poss_nhs}")
-                print(validateNHSnumber(poss_nhs))
+                # print(f"Possible NHS number: {poss_nhs}")
+                # print(validateNHSnumber(poss_nhs))
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
                     data = await iti_38_response(

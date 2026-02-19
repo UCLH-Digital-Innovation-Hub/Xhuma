@@ -26,7 +26,7 @@ exporters:
     namespace: "xhuma"
     const_labels:
       label1: value1
-    
+
   logging:
     loglevel: debug
 
@@ -45,7 +45,7 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch, resource]
       exporters: [prometheus, logging]
-    
+
     traces:
       receivers: [otlp]
       processors: [batch, resource]
