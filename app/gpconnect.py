@@ -338,7 +338,16 @@ async def gpconnect(
         except Exception:
             pass
 
-    xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+    try:
+        xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+    except Exception as e:
+        msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+
     if log_dir:
         with open(os.path.join(log_dir, f"{nhsno}.xml"), "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
@@ -391,7 +400,7 @@ if __name__ == "__main__":
     }
 
     # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(gpconnect(9658218873, audit_dict))
+    result = asyncio.run(gpconnect(9692140466, audit_dict))
     print(result.body.decode())
     print(result.status_code)
     # assert "error" in result.body.decode()

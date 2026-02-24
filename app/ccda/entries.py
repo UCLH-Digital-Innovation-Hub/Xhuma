@@ -151,10 +151,17 @@ def medication(
 
         else:
             # frequency is the occurrence per period. C-CDA has a single period between doses hence division
-            dose_period = (
-                entry.dosage[0].timing.repeat.period
-                / entry.dosage[0].timing.repeat.frequency
-            )
+
+            # check frequency has period and frequency
+            repeat = entry.dosage[0].timing.repeat
+            period = getattr(repeat, "period", None)
+            frequency = getattr(repeat, "frequency", None)
+            if period and frequency:
+
+                dose_period = (
+                    entry.dosage[0].timing.repeat.period
+                    / entry.dosage[0].timing.repeat.frequency
+                )
         # print(f"dose period: {dose_period}")
 
         # https://hl7.org/fhir/R4/valueset-event-timing.html
@@ -202,21 +209,24 @@ def medication(
         #                 )
         #             )
         # else:
-        substance_administration.effectiveTime.append(
-            PIVL_TS(
-                **{
-                    "@xsi:type": "PIVL_TS",
-                    "@operator": "A",
-                    "@institutionSpecified": (
-                        "true" if entry.dosage[0].timing.repeat.frequency else None
-                    ),
-                    "period": {
-                        "@value": dose_period,
-                        "@unit": entry.dosage[0].timing.repeat.periodUnit,
-                    },
-                }
-            )
+        pivl = PIVL_TS(
+            **{
+                "@xsi:type": "PIVL_TS",
+                "@operator": "A",
+                "@institutionSpecified": (
+                    "true" if entry.dosage[0].timing.repeat.frequency else None
+                ),
+            }
         )
+
+        # if there is a dose period in locals, add it to pivl
+        if "dose_period" in locals() and dose_period:
+            pivl.period = {
+                "@value": dose_period,
+                "@unit": entry.dosage[0].timing.repeat.periodUnit,
+            }
+
+        substance_administration.effectiveTime.append(pivl)
     #   check if route is in dosage
     if entry.dosage[0].method:
         substance_administration.routeCode = code_with_translations(
