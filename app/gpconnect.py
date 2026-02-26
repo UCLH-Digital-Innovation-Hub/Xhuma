@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
+from .audit.audit import process_saml_attributes
 from .audit.build import build_audit_event
 from .audit.models import AuditOutcome, SAMLAttributes
 from .audit.store import insert_audit_event
@@ -50,6 +51,10 @@ async def _attempt_audit(
     request_id: str | None = None,
 ) -> None:
     """Attempt to write an audit event, but don't fail the main request if it fails."""
+    if not request or not hasattr(request, "app"):
+        logging.warning("No request or app found; skipping audit event")
+        return
+
     SessionLocal = getattr(request.app.state, "SessionLocal", None)
     if not SessionLocal:
         logging.warning("No SessionLocal found in app state; skipping audit event")
@@ -530,39 +535,11 @@ async def gpconnect(
 if __name__ == "__main__":
     import asyncio
 
-    audit_dict = {
-        "subject_id": "CONE, Stephen",
-        "organization": "UCLH - University College London Hospitals - TST",
-        "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        "role": {
-            "Role": {
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "@code": "224608005",
-                "@codeSystemName": "SNOMED_CT",
-                "@displayName": "Administrative healthcare staff",
-                "@xmlns": "urn:hl7-org:v3",
-                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-            }
-        },
-        "purpose_of_use": {
-            "PurposeForUse": {
-                "@xsi:type": "CE",
-                "@code": "TREATMENT",
-                "@codeSystem": "2.16.840.1.113883.3.18.7.1",
-                "@codeSystemName": "nhin-purpose",
-                "@displayName": "Treatment",
-                "@xmlns": "urn:hl7-org:v3",
-                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-            },
-        },
-        "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
-    }
+    xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9690937278^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
+    saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 
     # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(gpconnect(9692140466, audit_dict))
+    result = asyncio.run(gpconnect(9692140466, saml))
     print(result.body.decode())
     print(result.status_code)
     # assert "error" in result.body.decode()
