@@ -30,7 +30,6 @@ from ..audit.audit import process_saml_attributes
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
-from .audit import process_saml_attributes
 from .responses import (
     create_envelope,
     create_header,
