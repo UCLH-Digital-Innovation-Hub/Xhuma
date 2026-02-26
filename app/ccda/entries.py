@@ -462,9 +462,9 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     allergy_row = [
         readable_date(all["act"]["effectiveTime"].get("low", {}).get("@value", "")),
         all["act"]["statusCode"].get("@code", ""),
-        observation["participant"]["participantRole"]["playingEntity"]["code"][
-            "@displayName"
-        ],
+        observation["participant"]["participantRole"]["playingEntity"][
+            "code"
+        ].displayName,
     ]
 
     return EntryWithRow(entry=all, row=allergy_row)
