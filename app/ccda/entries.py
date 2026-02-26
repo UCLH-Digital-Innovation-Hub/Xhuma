@@ -6,6 +6,7 @@ from fhirclient.models import allergyintolerance, coding, condition, immunizatio
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationrequest, medicationstatement, observation
 
+from ..redis_connect import snomed_client
 from .helpers import (
     code_with_translations,
     date_helper,
@@ -271,6 +272,18 @@ def medication(
     med_name = (
         substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
     )
+
+    # check if snomed code is in cache and if so add to med name
+    snomed_code = (
+        substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
+    )
+    print(f"Looking up SNOMED code {snomed_code} in cache")
+    cached_snomed = snomed_client.get(snomed_code)
+    if cached_snomed:
+        print(f"Found SNOMED code {snomed_code} in cache")
+        med_name += f" ({cached_snomed.decode('utf-8')})"
+    else:
+        print(f"SNOMED code {snomed_code} not found in cache")
 
     # check for prescriping agency and last issued date extensions
     for ext in entry.extension:
