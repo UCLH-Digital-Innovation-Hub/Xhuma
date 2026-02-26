@@ -220,13 +220,21 @@ async def gpconnect(
 
     asid = None
     nhsmhsparty = None
-    for item in (
-        asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
-    ):
-        if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
-            asid = item.get("value")
-        elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
-            nhsmhsparty = item.get("value")
+    try:
+        for item in (
+            asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
+        ):
+            if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
+                asid = item.get("value")
+            elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+                nhsmhsparty = item.get("value")
+    except Exception as e:
+        msg = f"Unable to parse SDS trace response: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     if not asid or not nhsmhsparty:
         msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"
@@ -481,16 +489,24 @@ async def gpconnect(
         except Exception:
             pass
 
-    xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+    try:
+        xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+    except Exception as e:
+        msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+
     if log_dir:
         with open(os.path.join(log_dir, f"{nhsno}.xml"), "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     xop = base64_xml(xml_ccda)
     doc_uuid = str(uuid4())
-
-    redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
+    redis_client.setex(nhsno, timedelta(minutes=1), doc_uuid)
+    redis_client.setex(doc_uuid, timedelta(minutes=1), xop)
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
@@ -546,12 +562,10 @@ if __name__ == "__main__":
     }
 
     # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(
-        gpconnect(9690937375, audit_dict, log_dir="app/logs/int_troubleshooting")
-    )
+    result = asyncio.run(gpconnect(9692140466, audit_dict))
     print(result.body.decode())
     print(result.status_code)
-    assert "error" in result.body.decode()
-    body = json.loads(result.body)
-    assert body["success"] is False
+    # assert "error" in result.body.decode()
+    # body = json.loads(result.body)
+    # assert body["success"] is False
     # assert result["resourceType"] == "Patient"

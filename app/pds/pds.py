@@ -128,13 +128,14 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
 
 if __name__ == "__main__":
 
-    # patient = asyncio.run(lookup_patient(9690937278))
+    patient = asyncio.run(lookup_patient(9999999999))
+    pprint.pprint(patient)
 
     # print(patient.gender)
     # print(patient.name[0].family)
     # print(patient.generalPractitioner[0].identifier.value)
 
-    ods = asyncio.run(sds_trace("RRV00"))
+    ods = asyncio.run(sds_trace("A82038"))
     pprint.pprint(ods)
     for i in ods["entry"]:
         pprint.pprint(i)
