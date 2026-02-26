@@ -314,7 +314,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 comp["section"]["entry"] = []
                 rows = []
                 references = [index[entry.item.reference] for entry in list.entry]
-                print(f"processing entries for {list.title}")
+                # print(f"processing entries for {list.title}")
                 # print(section_setup[list.title]["section_headers"])
                 headers = create_headers(list.title)
 

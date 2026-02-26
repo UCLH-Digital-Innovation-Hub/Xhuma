@@ -227,6 +227,7 @@ def medication(
             }
 
         substance_administration.effectiveTime.append(pivl)
+
     #   check if route is in dosage
     if entry.dosage[0].method:
         substance_administration.routeCode = code_with_translations(
@@ -314,12 +315,6 @@ def medication(
         },
         row=entry_row,
     )
-    # print(substance_administration.entryRelationship)
-    return {
-        "substanceAdministration": substance_administration.model_dump(
-            by_alias=True, exclude_none=True
-        )
-    }
 
 
 def problem(entry: condition.Condition) -> EntryWithRow:
@@ -335,7 +330,7 @@ def problem(entry: condition.Condition) -> EntryWithRow:
         "2.16.840.1.113883.10.20.22.4.3", "2015-08-01"
     )
     prob["act"]["id"] = {"@root": uuid.uuid4()}
-    prob["act"]["code"] = {"@code": "CONC", "@codesystem": "2.16.840.1.113883.5.6"}
+    prob["act"]["code"] = {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"}
 
     prob["act"]["statusCode"] = {"@code": entry.clinicalStatus}
     prob["act"]["effectiveTime"] = {
@@ -429,12 +424,7 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "@classCode": "MANU",
             "playingEntity": {
                 "@classCode": "MMAT",
-                "code": {
-                    "@code": entry.code.coding[0].code,
-                    "@displayName": entry.code.coding[0].display,
-                    "@codeSystemName": "SNOMED CT",
-                    "@codeSystem": "2.16.840.1.113883.6.96",
-                },
+                "code": code_with_translations(entry.code.coding),
             },
         },
     }
