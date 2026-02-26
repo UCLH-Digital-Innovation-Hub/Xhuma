@@ -19,6 +19,8 @@ from time import time
 import jwt
 from fhirclient.models import humanname, practitioner
 
+from .audit.models import SAMLAttributes
+
 JWTKEY = os.getenv("JWTKEY")
 
 
@@ -60,7 +62,7 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
 
 
 def create_jwt(
-    audit: dict,
+    audit: SAMLAttributes,
     audience: str = "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/documents/fhir",
 ) -> str:
     """
@@ -83,10 +85,10 @@ def create_jwt(
 
     """
     created_time = int(time())
-    family, given = audit["subject_id"].split(", ")
+    family, given = audit.subject_id.split(", ")
     payload = {
         "iss": "http://int.apis.ptl.api.platform.nhs.uk/Device/EA2027FD-B486-4033-B48C-E87222F6FA1C",
-        "sub": audit["subject_id"],
+        "sub": audit.subject_id,
         "aud": audience,
         "iat": created_time,
         "exp": created_time + 300,
@@ -112,14 +114,14 @@ def create_jwt(
                 },
                 {
                     "system": "2.16.840.1.113883.2.1.4",
-                    "value": audit["organization_id"],
+                    "value": audit.organization_id,
                 },
             ],
-            "name": audit["organization"],
+            "name": audit.organization,
         },
         "requesting_practitioner": {
             "resourceType": "Practitioner",
-            "id": audit["subject_id"],
+            "id": audit.subject_id,
             "identifier": [
                 {
                     "system": "https://fhir.nhs.uk/Id/sds-user-id",
@@ -130,23 +132,32 @@ def create_jwt(
                     "value": "UNK",  # As per NHS spec when not using NHS smartcard
                 },
                 {
-                    "system": audit["organization"],
-                    "value": audit["subject_id"],
-                },
-                {
-                    "system": audit["role"]["Role"]["@codeSystem"],
-                    "value": audit["role"]["Role"]["@code"],
+                    "system": audit.organization,
+                    "value": audit.subject_id,
                 },
             ],
             "name": [
                 {
                     "family": family,
                     "given": [given],
-                    "prefix": ["Dr"],
                 }
             ],
         },
     }
+
+    # audit_role = audit.role.model_dump(by_alias=True)
+    # audit_role.pop("@xsi:type", None)  # Remove XML type info for JWT payload
+    # audit_role.pop("nullFlavor", None)  # Remove null flavor if present
+
+    audit_role = {
+        "system": audit.role.codeSystemName,
+        "value": audit.role.code,
+    }
+
+    # print("Adding role to JWT payload:", audit_role)
+
+    payload["requesting_practitioner"]["identifier"].append(audit_role)
+
     # print("JWT PAYLOAD")
     # print(payload)
     # write payload to file for debugging
