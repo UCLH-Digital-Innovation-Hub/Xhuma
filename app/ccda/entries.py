@@ -281,7 +281,6 @@ def medication(
     cached_snomed = snomed_client.get(snomed_code)
     if cached_snomed:
         print(f"Found SNOMED code {snomed_code} in cache")
-        med_name += f" ({cached_snomed.decode('utf-8')})"
     else:
         print(f"SNOMED code {snomed_code} not found in cache")
 
