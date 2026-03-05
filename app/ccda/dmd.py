@@ -97,9 +97,8 @@ async def get_dmd_concept(concept_id: int, properties: list = None):
 
 
 async def dmd_lookup(concept_id: int) -> DMDConcept:
-    properties = ["VPI", "ROUTECD"]
+    properties = ["VPI", "ROUTECD", "parent"]
     dmd = await get_dmd_concept(concept_id, properties=properties)
-
     display_name = [
         prop["valueString"] for prop in dmd["parameter"] if prop["name"] == "display"
     ]
@@ -128,18 +127,32 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
                     ):
                         return part
 
+    # check if there is a parent property
+    parents = await get_property("parent", dmd)
+    if len(parents) == 2:
+        # if there is AMP and code
+        value_codes = [parent["part"][1]["valueCode"] for parent in parents]
+        if "AMP" in value_codes:
+            # pop the AMP parent as we don't want to process it
+            amp_index = value_codes.index("AMP")
+            value_codes.pop(amp_index)
+
+            # check remaining parent is an int
+            if len(value_codes) == 1 and value_codes[0].isdigit():
+                dmd = await get_dmd_concept(int(value_codes[0]), properties=properties)
+
     vpi_properties = await get_property("VPI", dmd)
     logging.info(f"Found {len(vpi_properties)} VPI properties for concept {concept_id}")
     if len(vpi_properties) == 1:
         # single ingrediant so process
-        pprint.pprint(vpi_properties[0])
+        # pprint.pprint(vpi_properties[0])
         dose_value_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_VAL")
         dose_value = None
         for subpart in dose_value_part["part"]:
             if subpart["name"] == "valueDecimal":
                 dose_value = subpart["valueDecimal"]
         dose_unit_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_UOMCD")
-        print(dose_unit_part)
+        # print(dose_unit_part)
         dose_unit_code = None
         for subpart in dose_unit_part["part"]:
             if subpart["name"] == "valueCoding":
@@ -197,10 +210,10 @@ if __name__ == "__main__":
         # token = await get_terminology_token()
         # print(f"Access Token: {token}")
 
-        concept_id = 320030001  # Replace with a valid SNOMED concept ID
+        concept_id = 3177711000001108  # Replace with a valid SNOMED concept ID
         properties = ["*"]  # Fetch all properties
-        full_properties = await get_dmd_concept(concept_id, properties=properties)
-        pprint.pprint(full_properties)
+        # full_properties = await get_dmd_concept(concept_id, properties=properties)
+        # pprint.pprint(full_properties)
         concept_term = await dmd_lookup(concept_id)
         pprint.pprint(concept_term)
         print(concept_term.vpi.value)
