@@ -131,7 +131,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # vital_signs.title = "Vital Signs"
     # lists.append(vital_signs)s
 
-    def create_section(list: fhirlist.List) -> dict:
+    async def create_section(list: fhirlist.List) -> dict:
         templates = {
             "Allergies and adverse reactions": {
                 "displayName": "Allergies, adverse reactions, alerts",
@@ -209,6 +209,12 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "Investigations and results": ["Date", "Type", "Result"],
             }
 
+            async def parse_medications(references):
+                # run lookups concurrently (much faster than awaiting in a loop)
+                return await asyncio.gather(
+                    *(medication(entry, index) for entry in references)
+                )
+
             section_setup = {
                 "Allergies and adverse reactions": {
                     "section_headers": [
@@ -230,7 +236,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "Prescribing Agency",
                         "Last Issued Date",
                     ],
-                    "parser": lambda list: [medication(entry, index) for entry in list],
+                    "parser": parse_medications,
                 },
                 "Problems": {
                     "section_headers": ["Date", "Status", "Condition"],
@@ -318,7 +324,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 # print(section_setup[list.title]["section_headers"])
                 headers = create_headers(list.title)
 
-                items = section_setup[list.title]["parser"](references)
+                # items = section_setup[list.title]["parser"](references)
+                parser = section_setup[list.title]["parser"]
+                items = parser(references)
+                if asyncio.iscoroutine(items):  # or: inspect.isawaitable(items)
+                    items = await items
                 entries = [i.entry for i in items]
                 rows = [i.row for i in items if i.row is not None]
                 table_rows = [create_row(row) for row in rows]
@@ -335,7 +345,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
             return comp
 
-    bundle_components = [create_section(list) for list in lists]
+    bundle_components = [await create_section(list) for list in lists]
     bundle_components = [x for x in bundle_components if x is not None]
     caching_period = os.environ.get("CCDA_CACHING_PERIOD", "24 hours")
     header_components = {
@@ -356,7 +366,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9692140466.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None

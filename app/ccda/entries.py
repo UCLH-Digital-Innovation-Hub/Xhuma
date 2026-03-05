@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence
@@ -7,6 +9,7 @@ from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationrequest, medicationstatement, observation
 
 from ..redis_connect import snomed_client
+from .dmd import dmd_lookup
 from .helpers import (
     code_with_translations,
     date_helper,
@@ -34,7 +37,7 @@ class EntryWithRow:
     row: Optional[Row]  # row data for summary table in section
 
 
-def medication(
+async def medication(
     entry: medicationstatement.MedicationStatement, index: dict
 ) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
@@ -277,12 +280,31 @@ def medication(
     snomed_code = (
         substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
     )
-    print(f"Looking up SNOMED code {snomed_code} in cache")
-    cached_snomed = snomed_client.get(snomed_code)
-    if cached_snomed:
-        print(f"Found SNOMED code {snomed_code} in cache")
-    else:
-        print(f"SNOMED code {snomed_code} not found in cache")
+    print(substance_administration.doseQuantity)
+    try:
+        dmd_data = await dmd_lookup(int(snomed_code))
+        # print(f"DMD lookup successful for SNOMED code {snomed_code}: {dmd_data}")
+        if dmd_data.vpi and substance_administration.doseQuantity:
+            processed_dose = (
+                dmd_data.vpi.value * substance_administration.doseQuantity["@value"]
+            )
+            substance_administration.doseQuantity = PQ(
+                value=processed_dose, unit=dmd_data.vpi.unit
+            )
+            # append line to entry relationshoip text
+            warning_text = f" \n **Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup by Xhuma**"
+            # print(warning_text)
+            for entry_rel in substance_administration.entryRelationship:
+                if entry_rel.substanceAdministration:
+                    if entry_rel.substanceAdministration.get("text"):
+                        entry_rel.substanceAdministration["text"] += warning_text
+                    else:
+                        entry_rel.substanceAdministration["text"] = warning_text
+
+    except Exception as e:
+        logging.error(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
+        print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
+        pass
 
     # check for prescriping agency and last issued date extensions
     for ext in entry.extension:
