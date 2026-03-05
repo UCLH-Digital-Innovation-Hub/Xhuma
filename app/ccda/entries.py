@@ -288,9 +288,9 @@ async def medication(
             processed_dose = (
                 dmd_data.vpi.value * substance_administration.doseQuantity["@value"]
             )
-            substance_administration.doseQuantity = PQ(
-                value=processed_dose, unit=dmd_data.vpi.unit
-            )
+            substance_administration.doseQuantity["@value"] = processed_dose
+            substance_administration.doseQuantity["@unit"] = dmd_data.vpi.unit
+            print(f"processed thing is {substance_administration.doseQuantity}")
             # append line to entry relationshoip text
             warning_text = f" \n **Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup by Xhuma**"
             # print(warning_text)
