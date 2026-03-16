@@ -61,7 +61,18 @@ jobs:
 
       - name: Terraform Apply
         if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/infra/deployment-and-monitoring') && github.event_name == 'push'
-        run: terraform apply -auto-approve -input=false
+        run: |
+          set +e
+          terraform apply -auto-approve -input=false > tf_apply.log 2>&1
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Terraform apply failed with exit code $EXIT_CODE"
+            echo "### Terraform Apply Error Log" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 100 tf_apply.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit $EXIT_CODE
+          fi
 
       - name: Upload Terraform Logs
         if: always()
