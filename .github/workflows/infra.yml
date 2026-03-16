@@ -50,18 +50,18 @@ jobs:
         uses: hashicorp/setup-terraform@v2
 
       - name: Terraform Init
-        run: terraform init > tf_init.log 2>&1
+        run: terraform init
 
       - name: Terraform Format
-        run: terraform fmt -check > tf_fmt.log 2>&1
+        run: terraform fmt -check
 
       - name: Terraform Plan
         if: github.event_name == 'pull_request'
-        run: terraform plan -input=false > tf_plan.log 2>&1
+        run: terraform plan -input=false
 
       - name: Terraform Apply
         if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/infra/deployment-and-monitoring') && github.event_name == 'push'
-        run: terraform apply -auto-approve -input=false -no-color > tf_apply.log 2>&1
+        run: terraform apply -auto-approve -input=false
 
       - name: Upload Terraform Logs
         if: always()
