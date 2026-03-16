@@ -282,7 +282,7 @@ async def medication(
     )
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
-    if substance_administration.doseQuantity:
+    if substance_administration.doseQuantity.get("@unit"):
         if substance_administration.doseQuantity["@unit"].lower() in gp_units:
             # we only process doses for tablets or capsules.
 
