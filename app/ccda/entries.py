@@ -287,8 +287,10 @@ async def medication(
         if substance_administration.doseQuantity
         else ""
     )
+
     if substance_administration.doseQuantity:
-        if unit in gp_units:
+        blank_unit = not substance_administration.doseQuantity.get("@unit")
+        if unit in gp_units or blank_unit:
             # we only process doses for tablets or capsules.
 
             try:

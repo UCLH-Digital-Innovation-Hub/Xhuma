@@ -205,15 +205,11 @@ if __name__ == "__main__":
         # token = await get_terminology_token()
         # print(f"Access Token: {token}")
 
-        concept_id = 42109411000001106  # Replace with a valid SNOMED concept ID
+        concept_id = 42355011000001102  # Replace with a valid SNOMED concept ID
         properties = ["*"]  # Fetch all properties
         # full_properties = await get_dmd_concept(concept_id, properties=properties)
         # pprint.pprint(full_properties)
         concept_term = await dmd_lookup(concept_id)
-        pprint.pprint(concept_term)
-
-        concept_id = 514941000000109  # Replace with a valid SNOMED concept ID
-        concept_term = await get_dmd_concept(concept_id, properties=properties)
         pprint.pprint(concept_term)
 
     asyncio.run(main())
