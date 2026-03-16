@@ -280,31 +280,62 @@ async def medication(
     snomed_code = (
         substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
     )
-    print(substance_administration.doseQuantity)
-    try:
-        dmd_data = await dmd_lookup(int(snomed_code))
-        # print(f"DMD lookup successful for SNOMED code {snomed_code}: {dmd_data}")
-        if dmd_data.vpi and substance_administration.doseQuantity:
-            processed_dose = (
-                dmd_data.vpi.value * substance_administration.doseQuantity["@value"]
-            )
-            substance_administration.doseQuantity["@value"] = processed_dose
-            substance_administration.doseQuantity["@unit"] = dmd_data.vpi.unit
-            print(f"processed thing is {substance_administration.doseQuantity}")
-            # append line to entry relationshoip text
-            warning_text = f" \n **Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup by Xhuma**"
-            # print(warning_text)
-            for entry_rel in substance_administration.entryRelationship:
-                if entry_rel.substanceAdministration:
-                    if entry_rel.substanceAdministration.get("text"):
-                        entry_rel.substanceAdministration["text"] += warning_text
-                    else:
-                        entry_rel.substanceAdministration["text"] = warning_text
+    # print(substance_administration.doseQuantity)
+    gp_units = ["tablet", "capsule"]
+    if substance_administration.doseQuantity["@unit"].lower() in gp_units:
+        # we only process doses for tablets or capsules.
 
-    except Exception as e:
-        logging.error(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
-        print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
-        pass
+        try:
+            dmd_data = await dmd_lookup(int(snomed_code))
+            # print(f"DMD lookup successful for SNOMED code {snomed_code}: {dmd_data}")
+            if dmd_data.vpi and substance_administration.doseQuantity:
+                processed_dose = (
+                    dmd_data.vpi.value * substance_administration.doseQuantity["@value"]
+                )
+                substance_administration.doseQuantity["@value"] = processed_dose
+                substance_administration.doseQuantity["@unit"] = dmd_data.vpi.unit
+                # append line to entry relationshoip text
+                warning_text = f" \n **Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup by Xhuma**"
+                # print(warning_text)
+                for entry_rel in substance_administration.entryRelationship:
+                    if entry_rel.substanceAdministration:
+                        if entry_rel.substanceAdministration.get("text"):
+                            entry_rel.substanceAdministration["text"] += warning_text
+                        else:
+                            entry_rel.substanceAdministration["text"] = warning_text
+
+            if substance_administration.routeCode:
+                if substance_administration.routeCode["displayName"] == "Take":
+                    # take often used with capsules. replace with dmd route.
+                    if dmd_data.route:
+                        substance_administration.routeCode["displayName"] = (
+                            dmd_data.route.displayName
+                        )
+                        substance_administration.routeCode["code"] = dmd_data.route.code
+                        substance_administration.routeCode["codeSystem"] = (
+                            dmd_data.route.codeSystem
+                        )
+                        substance_administration.routeCode["codeSystemName"] = (
+                            dmd_data.route.codeSystemName
+                        )
+
+        except Exception as e:
+            logging.error(
+                f"Error looking up DMD data for SNOMED code {snomed_code}: {e}"
+            )
+            print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
+            pass
+
+    if (
+        "- unit of product usage"
+        in substance_administration.doseQuantity["@unit"].lower()
+    ):
+        # strip overly verbose snomed unit description to just unit
+        substance_administration.doseQuantity["@unit"] = (
+            substance_administration.doseQuantity["@unit"]
+            .replace("- unit of product usage", "")
+            .strip()
+        )
 
     # check for prescriping agency and last issued date extensions
     for ext in entry.extension:

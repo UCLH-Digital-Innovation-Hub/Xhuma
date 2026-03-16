@@ -5,6 +5,7 @@ import pprint
 import httpx
 
 from ..redis_connect import snomed_client
+from .models.datatypes import CD
 from .models.dmd import DMDConcept
 from .models.dmd import VPIProperty as VPI
 
@@ -87,12 +88,6 @@ async def get_dmd_concept(concept_id: int, properties: list = None):
 
         concept_data = response.json()
 
-        # find vpi property
-        # Cache the result for future use
-        # snomed_client.setex(
-        #     f"snomed:{concept_id}", 360, concept_data
-        # )  # Cache for 1 hour
-
         return concept_data
 
 
@@ -145,14 +140,12 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
     logging.info(f"Found {len(vpi_properties)} VPI properties for concept {concept_id}")
     if len(vpi_properties) == 1:
         # single ingrediant so process
-        # pprint.pprint(vpi_properties[0])
         dose_value_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_VAL")
         dose_value = None
         for subpart in dose_value_part["part"]:
             if subpart["name"] == "valueDecimal":
                 dose_value = subpart["valueDecimal"]
         dose_unit_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_UOMCD")
-        # print(dose_unit_part)
         dose_unit_code = None
         for subpart in dose_unit_part["part"]:
             if subpart["name"] == "valueCoding":
@@ -160,11 +153,9 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
         if dose_unit_code:
             # lookup the unit code in SNOMED to get the display name
             unit_concept = await get_dmd_concept(dose_unit_code)
-            # print(unit_concept)
             unit_display_parameter = [
                 parm for parm in unit_concept["parameter"] if parm["name"] == "display"
             ]
-            # print(unit_display_parameter)
             unit_display = (
                 unit_display_parameter[0]["valueString"]
                 if unit_display_parameter
@@ -175,20 +166,20 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
 
     # look for routeCD property
     route_properties = await get_property("ROUTECD", dmd)
-    logging.info(
-        f"Found {len(route_properties)} ROUTECD properties for concept {concept_id}"
-    )
+    # logging.info(
+    #     f"Found {len(route_properties)} ROUTECD properties for concept {concept_id}"
+    # )
     # pprint.pprint(route_properties)
     if len(route_properties) == 1:
         route_code = None
         for subpart in route_properties[0]["part"]:
-            print(subpart)
             if subpart["name"] == "value":
                 route_code = subpart["valueCoding"]["code"]
         if route_code:
-            print(f"Found route code: {route_code}")
             # lookup the route code in SNOMED to get the display name
             route_concept = await get_dmd_concept(route_code)
+            # print(f"Route concept for code {route_code}:")
+            # pprint.pprint(route_concept)
             route_display_parameter = [
                 parm for parm in route_concept["parameter"] if parm["name"] == "display"
             ]
@@ -197,7 +188,11 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
                 if route_display_parameter
                 else None
             )
-            processed_dmd.route = route_display
+            processed_dmd.route = CD(
+                code=route_code,
+                displayName=route_display,
+                codeSystemName="https://dmd.nhs.uk",  # Assuming the code system is DMD, OID will be snomed as dmd is subset
+            )
 
     return processed_dmd
 
@@ -210,13 +205,15 @@ if __name__ == "__main__":
         # token = await get_terminology_token()
         # print(f"Access Token: {token}")
 
-        concept_id = 3177711000001108  # Replace with a valid SNOMED concept ID
+        concept_id = 42109411000001106  # Replace with a valid SNOMED concept ID
         properties = ["*"]  # Fetch all properties
         # full_properties = await get_dmd_concept(concept_id, properties=properties)
         # pprint.pprint(full_properties)
         concept_term = await dmd_lookup(concept_id)
         pprint.pprint(concept_term)
-        print(concept_term.vpi.value)
-        print(concept_term.vpi.unit)
+
+        concept_id = 514941000000109  # Replace with a valid SNOMED concept ID
+        concept_term = await get_dmd_concept(concept_id, properties=properties)
+        pprint.pprint(concept_term)
 
     asyncio.run(main())
