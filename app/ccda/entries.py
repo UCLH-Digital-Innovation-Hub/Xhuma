@@ -282,8 +282,13 @@ async def medication(
     )
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
-    if substance_administration.doseQuantity.get("@unit"):
-        if substance_administration.doseQuantity["@unit"].lower() in gp_units:
+    unit = (
+        substance_administration.doseQuantity.get("@unit", "").lower()
+        if substance_administration.doseQuantity
+        else ""
+    )
+    if substance_administration.doseQuantity:
+        if unit in gp_units:
             # we only process doses for tablets or capsules.
 
             try:
@@ -332,10 +337,7 @@ async def medication(
                 print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
                 pass
 
-        if (
-            "- unit of product usage"
-            in substance_administration.doseQuantity["@unit"].lower()
-        ):
+        if "- unit of product usage" in unit:
             # strip overly verbose snomed unit description to just unit
             substance_administration.doseQuantity["@unit"] = (
                 substance_administration.doseQuantity["@unit"]
