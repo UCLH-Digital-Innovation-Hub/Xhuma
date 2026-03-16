@@ -205,7 +205,7 @@ if __name__ == "__main__":
         # token = await get_terminology_token()
         # print(f"Access Token: {token}")
 
-        concept_id = 42355011000001102  # Replace with a valid SNOMED concept ID
+        concept_id = 38893711000001104  # Replace with a valid SNOMED concept ID
         properties = ["*"]  # Fetch all properties
         # full_properties = await get_dmd_concept(concept_id, properties=properties)
         # pprint.pprint(full_properties)

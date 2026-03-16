@@ -316,19 +316,19 @@ async def medication(
                                 entry_rel.substanceAdministration["text"] = warning_text
 
                 if substance_administration.routeCode:
-                    if substance_administration.routeCode["displayName"] == "Take":
+                    if substance_administration.routeCode.displayName == "Take":
                         # take often used with capsules. replace with dmd route.
                         if dmd_data.route:
-                            substance_administration.routeCode["displayName"] = (
+                            substance_administration.routeCode.displayName = (
                                 dmd_data.route.displayName
                             )
-                            substance_administration.routeCode["code"] = (
+                            substance_administration.routeCode.code = (
                                 dmd_data.route.code
                             )
-                            substance_administration.routeCode["codeSystem"] = (
+                            substance_administration.routeCode.codeSystem = (
                                 dmd_data.route.codeSystem
                             )
-                            substance_administration.routeCode["codeSystemName"] = (
+                            substance_administration.routeCode.codeSystemName = (
                                 dmd_data.route.codeSystemName
                             )
 
