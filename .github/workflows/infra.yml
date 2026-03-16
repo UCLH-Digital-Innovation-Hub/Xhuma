@@ -65,11 +65,21 @@ jobs:
           TF_LOG: TRACE
         run: |
           set +e
-          terraform apply -auto-approve -input=false > tf_apply.log 2>&1
+          # Run terraform and save output
+          terraform apply -auto-approve -input=false > output.txt 2>&1
           EXIT_CODE=$?
-          echo "Terraform apply exited with $EXIT_CODE"
-          cat tf_apply.log
-          exit $EXIT_CODE
+          
+          # Print the full output so it shows in the step logs
+          cat output.txt
+          
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Terraform exited with code $EXIT_CODE"
+            echo "### Terraform Apply Error Log" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 100 output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit $EXIT_CODE
+          fi
 
       - name: Upload Terraform Logs
         if: always()
