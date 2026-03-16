@@ -45,15 +45,15 @@ resource "azurerm_redis_cache" "redis" {
 }
 
 resource "azurerm_postgresql_flexible_server" "postgres" {
-  name                = var.postgres_server_name
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
-  version             = "15"
-  administrator_login = var.postgres_admin_username
+  name                   = var.postgres_server_name
+  resource_group_name    = azurerm_resource_group.rg.name
+  location               = azurerm_resource_group.rg.location
+  version                = "15"
+  administrator_login    = var.postgres_admin_username
   administrator_password = var.postgres_admin_password
-  storage_mb            = 32768
-  sku_name              = "B_Standard_B1ms"
-  backup_retention_days = 7
+  storage_mb             = 32768
+  sku_name               = "B_Standard_B1ms"
+  backup_retention_days  = 7
 
   # For simplified deployment, we allow public access (controlled by firewall rules)
   # Ideally use VNET integration in production
@@ -87,7 +87,7 @@ resource "azurerm_linux_web_app" "app" {
     # Enable WebSockets for the Relay
     # Enable WebSockets for the Relay
     websockets_enabled = true
-    use_32_bit_worker = true # Typically false for production but B1 is small
+    use_32_bit_worker  = true # Typically false for production but B1 is small
   }
 
   # Enable mTLS: Optional allows public endpoints/health checks while passing the cert to the app
