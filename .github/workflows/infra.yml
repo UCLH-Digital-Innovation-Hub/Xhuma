@@ -61,8 +61,6 @@ jobs:
 
       - name: Terraform Apply
         if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/infra/deployment-and-monitoring') && github.event_name == 'push'
-        env:
-          TF_LOG: TRACE
         run: |
           set +e
           # Run terraform and save output
