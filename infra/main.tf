@@ -85,13 +85,14 @@ resource "azurerm_linux_web_app" "app" {
     app_command_line = "alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 80"
 
     # Enable WebSockets for the Relay
-    websockets_enabled        = true
-    use_32_bit_worker_process = true # Typically false for production but B1 is small
+    # Enable WebSockets for the Relay
+    websockets_enabled = true
+    use_32_bit_worker = true # Typically false for production but B1 is small
   }
 
   # Enable mTLS: Optional allows public endpoints/health checks while passing the cert to the app
-  client_cert_enabled = true
-  client_cert_mode    = "Optional"
+  client_certificate_enabled = true
+  client_certificate_mode    = "Optional"
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
