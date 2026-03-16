@@ -3,8 +3,6 @@ name: Infrastructure
 on:
   push:
     branches: [ main, infra/deployment-and-monitoring ]
-    paths:
-      - 'infra/**'
   pull_request:
     branches: [ main, dev ]
     paths:
