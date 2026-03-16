@@ -28,14 +28,14 @@ resource "azurerm_application_insights" "appinsights" {
 }
 
 resource "azurerm_redis_cache" "redis" {
-  name                = var.redis_name
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  capacity            = var.redis_capacity
-  family              = var.redis_family
-  sku_name            = var.redis_sku_name
+  name                 = var.redis_name
+  location             = azurerm_resource_group.rg.location
+  resource_group_name  = azurerm_resource_group.rg.name
+  capacity             = var.redis_capacity
+  family               = var.redis_family
+  sku_name             = var.redis_sku_name
   non_ssl_port_enabled = false
-  minimum_tls_version = "1.2"
+  minimum_tls_version  = "1.2"
 
   redis_configuration {
     maxmemory_reserved = 2
