@@ -1,36 +1,35 @@
-resource "azurerm_resource_group" "rg" {
-  name     = var.resource_group_name
-  location = var.location
+data "azurerm_resource_group" "rg" {
+  name = var.resource_group_name
 }
 
 resource "azurerm_service_plan" "plan" {
   name                = "${var.app_service_name}-plan"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
   os_type             = "Linux"
   sku_name            = "B1" # Can be scaled up to S1 or P1v2 as needed
 }
 
 resource "azurerm_log_analytics_workspace" "law" {
   name                = "${var.app_service_name}-law"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
 }
 
 resource "azurerm_application_insights" "appinsights" {
   name                = "${var.app_service_name}-ai"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
   workspace_id        = azurerm_log_analytics_workspace.law.id
   application_type    = "web"
 }
 
 resource "azurerm_redis_cache" "redis" {
   name                 = var.redis_name
-  location             = azurerm_resource_group.rg.location
-  resource_group_name  = azurerm_resource_group.rg.name
+  location             = data.azurerm_resource_group.rg.location
+  resource_group_name  = data.azurerm_resource_group.rg.name
   capacity             = var.redis_capacity
   family               = var.redis_family
   sku_name             = var.redis_sku_name
@@ -46,8 +45,8 @@ resource "azurerm_redis_cache" "redis" {
 
 resource "azurerm_postgresql_flexible_server" "postgres" {
   name                   = var.postgres_server_name
-  resource_group_name    = azurerm_resource_group.rg.name
-  location               = azurerm_resource_group.rg.location
+  resource_group_name    = data.azurerm_resource_group.rg.name
+  location               = data.azurerm_resource_group.rg.location
   version                = "15"
   administrator_login    = var.postgres_admin_username
   administrator_password = var.postgres_admin_password
@@ -68,8 +67,8 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_service
 
 resource "azurerm_linux_web_app" "app" {
   name                = var.app_service_name
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
+  location            = data.azurerm_resource_group.rg.location
   service_plan_id     = azurerm_service_plan.plan.id
 
   site_config {
