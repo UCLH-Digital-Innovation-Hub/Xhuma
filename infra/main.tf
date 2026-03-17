@@ -73,7 +73,7 @@ resource "azurerm_linux_web_app" "app" {
 
   site_config {
     application_stack {
-      docker_image     = split(":", var.docker_image)[0]
+      docker_image     = lower(split(":", var.docker_image)[0])
       docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[1] : "latest"
     }
 
