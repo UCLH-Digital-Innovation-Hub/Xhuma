@@ -326,8 +326,9 @@ async def medication(
                                 dmd_data.route.code
                             )
                             substance_administration.routeCode.codeSystem = (
-                                dmd_data.route.codeSystem
+                                "2.16.840.1.113883.3.26.1.1"
                             )
+
                             substance_administration.routeCode.codeSystemName = (
                                 dmd_data.route.codeSystemName
                             )
