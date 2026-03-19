@@ -63,17 +63,24 @@ async def lifespan(app: FastAPI):
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
 
-    # Handle JWK generation/verification
-    if not os.path.isfile("keys/jwk.json"):
-        # Generate new JWK from private key
+    # Handle JWK generation/verification securely entirely in-memory
+    jwt_key = os.getenv("JWTKEY")
+    app.state.jwk_json = {}
+
+    if jwt_key:
+        try:
+            # Reformat env var newlines safely and convert to JWK
+            private_pem = jwt_key.replace("\\n", "\n").encode("utf-8")
+            public_jwk = jwk.JWK.from_pem(private_pem)
+            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+        except Exception as e:
+            print(f"Warning: Failed to load JWTKEY from environment: {e}")
+    elif os.path.isfile("keys/test-1.pem"):
+        # Local development fallback
         with open("keys/test-1.pem", "rb") as pemfile:
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
-            jwk_json = public_jwk.export_public(as_dict=True)
-
-            # Save generated JWK
-            with open("keys/jwk.json", "w") as f:
-                json.dump(jwk_json, f)
+            app.state.jwk_json = public_jwk.export_public(as_dict=True)
 
     # Set up OpenTelemetry metrics
     otlp_endpoint = os.getenv(
@@ -233,7 +240,7 @@ async def demo(nhsno: int, request: Request):
 
 
 @app.get("/jwk")
-async def get_jwk():
+async def get_jwk(request: Request):
     """
     Public endpoint that provides access to the service's JSON Web Key.
 
@@ -243,9 +250,9 @@ async def get_jwk():
     Returns:
         dict: JSON Web Key in dictionary format.
     """
-    with open("keys/jwk.json", "r") as jwk_file:
-        key = json.load(jwk_file)
-    return key
+    if hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
+        return request.app.state.jwk_json
+    return {"error": "JWK not configured on this server"}
 
 
 # --- Dev-only audit viewer ---
