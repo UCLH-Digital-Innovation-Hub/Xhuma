@@ -43,6 +43,14 @@ resource "azurerm_redis_cache" "redis" {
   }
 }
 
+resource "azurerm_redis_firewall_rule" "allow_azure_services" {
+  name                = "AllowAzureServices"
+  redis_cache_name    = azurerm_redis_cache.redis.name
+  resource_group_name = data.azurerm_resource_group.rg.name
+  start_ip            = "0.0.0.0"
+  end_ip              = "0.0.0.0"
+}
+
 resource "azurerm_postgresql_flexible_server" "postgres" {
   name                   = var.postgres_server_name
   resource_group_name    = data.azurerm_resource_group.rg.name
