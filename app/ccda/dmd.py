@@ -153,7 +153,7 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
         if dose_unit_code:
             # lookup the unit code in SNOMED to get the display name
             unit_concept = await get_dmd_concept(dose_unit_code)
-            pprint.pprint(unit_concept)
+            # pprint.pprint(unit_concept)
             unit_display_parameter = [
                 parm for parm in unit_concept["parameter"] if parm["name"] == "display"
             ]
@@ -180,7 +180,7 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
             # lookup the route code in SNOMED to get the display name
             route_concept = await get_dmd_concept(route_code)
             # print(f"Route concept for code {route_code}:")
-            pprint.pprint(route_concept)
+            # pprint.pprint(route_concept)
             route_display_parameter = [
                 parm for parm in route_concept["parameter"] if parm["name"] == "display"
             ]

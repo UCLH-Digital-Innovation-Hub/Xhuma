@@ -25,7 +25,7 @@ from .models.base import (
     ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
+from .models.datatypes import CD, EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 Cell = str
 Row = List[Cell]
@@ -260,6 +260,22 @@ async def medication(
                 }
             )
         )
+        if dose.patientInstruction:
+            instruction_entry = EntryRelationship()
+            instruction_entry.act = {
+                "@classCode": "ACT",
+                "@moodCode": "INT",
+                "templateId": templateId(
+                    root="2.16.840.1.113883.10.20.22.4.200", extension="2014-06-09"
+                ),
+                "code": {
+                    "@code": "422037009",
+                    "@codeSystem": "2.16.840.1.113883.6.96",
+                    "@codeSystemName": "http://snomed.info/sct",
+                },
+                "text": dose.patientInstruction,
+            }
+            substance_administration.entryRelationship.append(instruction_entry)
     # find effective time entry with operator of low
 
     low_time = [
@@ -369,16 +385,18 @@ async def medication(
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
         ):
             prescription_type = ext.valueCodeableConcept.coding[0].display
-
+    patient_instructions = (
+        f"<br><b>Patient Instructions:</b>{entry.dosage[0].patientInstruction}"
+        if entry.dosage[0].patientInstruction
+        else ""
+    )
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
         readable_date(high_time[0]) if high_time else "",
         entry.status if entry.status else "unknown",
         prescription_type if "prescription_type" in locals() else "",
         med_name,
-        substance_administration.entryRelationship[0].substanceAdministration.get(
-            "text", ""
-        ),
+        f"{entry.dosage[0].text} {patient_instructions}",
         prescribing_agency if "prescribing_agency" in locals() else "",
         last_issued_date if "last_issued_date" in locals() else "",
     ]
@@ -500,7 +518,9 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "@classCode": "MANU",
             "playingEntity": {
                 "@classCode": "MMAT",
-                "code": code_with_translations(entry.code.coding),
+                "code": code_with_translations(entry.code.coding).model_dump(
+                    by_alias=True, exclude_none=True
+                ),
             },
         },
     }
@@ -538,9 +558,9 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     allergy_row = [
         readable_date(all["act"]["effectiveTime"].get("low", {}).get("@value", "")),
         all["act"]["statusCode"].get("@code", ""),
-        observation["participant"]["participantRole"]["playingEntity"][
-            "code"
-        ].displayName,
+        observation["participant"]["participantRole"]["playingEntity"]["code"][
+            "@displayName"
+        ],
     ]
 
     return EntryWithRow(entry=all, row=allergy_row)

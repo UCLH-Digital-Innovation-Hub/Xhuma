@@ -332,6 +332,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 entries = [i.entry for i in items]
                 rows = [i.row for i in items if i.row is not None]
                 table_rows = [create_row(row) for row in rows]
+                # if mediations sort rows by status then name of medication
+                if list.title == "Medications and medical devices":
+                    table_rows.sort(key=lambda x: (x["td"][2], x["td"][4]))
                 comp["section"]["entry"] = entries
                 comp["section"]["text"] = {
                     "table": {"thead": headers, "tbody": {"tr": table_rows}}
@@ -366,7 +369,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9692140466.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9692136744.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None
