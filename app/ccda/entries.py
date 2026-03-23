@@ -360,12 +360,15 @@ async def medication(
                             substance_administration.routeCode.code = (
                                 dmd_data.route.code
                             )
-                            substance_administration.routeCode.codeSystem = (
-                                "2.16.840.1.113883.3.26.1.1"
-                            )
 
                             substance_administration.routeCode.codeSystemName = (
                                 dmd_data.route.codeSystemName
+                            )
+                            route_translation = CD()
+                            route_translation["@code"] = dmd_data.route.code
+                            route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
+                            substance_administration.routeCode.translation = (
+                                route_translation
                             )
 
             except Exception as e:
