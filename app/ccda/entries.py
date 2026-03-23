@@ -312,16 +312,35 @@ async def medication(
             try:
                 dmd_data = await dmd_lookup(int(snomed_code))
                 # print(f"DMD lookup successful for SNOMED code {snomed_code}: {dmd_data}")
-                if dmd_data.vpi and substance_administration.doseQuantity:
-                    processed_dose = (
-                        dmd_data.vpi.value
-                        * substance_administration.doseQuantity["@value"]
-                    )
-                    substance_administration.doseQuantity["@value"] = processed_dose
-                    substance_administration.doseQuantity["@unit"] = dmd_data.vpi.unit
-                    # append line to entry relationshoip text
-                    warning_text = f" \n **Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup by Xhuma**"
-                    # print(warning_text)
+                # only process dose if a single dosage instruction
+                print(f"length of dosage instructions: {len(entry.dosage)}")
+                if len(entry.dosage) == 1:
+
+                    if dmd_data.vpi and substance_administration.doseQuantity:
+                        processed_dose = (
+                            dmd_data.vpi.value
+                            * substance_administration.doseQuantity["@value"]
+                        )
+                        substance_administration.doseQuantity["@value"] = processed_dose
+                        substance_administration.doseQuantity["@unit"] = (
+                            dmd_data.vpi.unit
+                        )
+                        # append line to entry relationshoip text
+                        warning_text = f" \n **Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup by Xhuma**"
+                        # print(warning_text)
+                        for entry_rel in substance_administration.entryRelationship:
+                            if entry_rel.substanceAdministration:
+                                if entry_rel.substanceAdministration.get("text"):
+                                    entry_rel.substanceAdministration[
+                                        "text"
+                                    ] += warning_text
+                                else:
+                                    entry_rel.substanceAdministration["text"] = (
+                                        warning_text
+                                    )
+                elif len(entry.dosage) > 1:
+                    # multiple dosage instrutions so add warning to medication name instead of processing dose
+                    warning_text = f" \n **Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
                     for entry_rel in substance_administration.entryRelationship:
                         if entry_rel.substanceAdministration:
                             if entry_rel.substanceAdministration.get("text"):
@@ -385,18 +404,39 @@ async def medication(
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
         ):
             prescription_type = ext.valueCodeableConcept.coding[0].display
+
+    patient_instr_list = [
+        dosage.patientInstruction
+        for dosage in entry.dosage
+        if dosage.patientInstruction
+    ]
+    text_instr_list = [dosage.text for dosage in entry.dosage if dosage.text]
+
+    def add_numbering(instruction_list):
+        if len(instruction_list) > 1:
+            for i, instruction in enumerate(instruction_list):
+                new_instruction = f"{i+1}. {instruction}"
+                instruction_list[i] = new_instruction
+        return instruction_list
+
+    patient_instr_list = add_numbering(patient_instr_list)
+    text_instr_list = add_numbering(text_instr_list)
     patient_instructions = (
-        f"<br><b>Patient Instructions:</b>{entry.dosage[0].patientInstruction}"
-        if entry.dosage[0].patientInstruction
+        " \n Patient Instructions: " + "; ".join(patient_instr_list)
+        if patient_instr_list
         else ""
     )
+    text_instructions = (
+        " Instructions: " + "; ".join(text_instr_list) if text_instr_list else ""
+    )
+
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
         readable_date(high_time[0]) if high_time else "",
         entry.status if entry.status else "unknown",
         prescription_type if "prescription_type" in locals() else "",
         med_name,
-        f"{entry.dosage[0].text} {patient_instructions}",
+        f"{text_instructions} {patient_instructions}",
         prescribing_agency if "prescribing_agency" in locals() else "",
         last_issued_date if "last_issued_date" in locals() else "",
     ]

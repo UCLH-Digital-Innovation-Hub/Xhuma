@@ -369,7 +369,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9692136744.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9692140466.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None
