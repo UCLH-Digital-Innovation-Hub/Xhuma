@@ -82,6 +82,9 @@ Mapping doses still presents a number of risks. Many medications have several in
 | Drug with multiple routes   | Only map routes with single approved route        |
 | Drug prescribed as AMP rather than VMP   | Check if AMP, is so then map parent        |
 | Only medications with unitless quantity to be mapped   | Only map doses if unit "tablet", "capsule" or None       |
+| More then one dosage instruction  | Stop if len(dosage) == >1      |
+
+
 
 ### Final Flow
 
@@ -91,7 +94,9 @@ flowchart TD
     D@{shape: diamond, label: "property of parent?"} --YES-->A2(AMP -> lookup VMP parent)
     A2 ---> A3(Parse DMD)
     D@{shape: diamond, label: "property of parent?"} -- No -->A3(Parse DMD)
-    A3 --> E@{shape: diamond, label: "single VPI?"}
+    A3 --> H@{shape: diamond, label: "Multiple dosage?"}
+    H@{shape: diamond, label: "Multiple dosage?"} -- NO --> E@{shape: diamond, label: "single VPI?"}
+    H@{shape: diamond, label: "Multiple dosage?"} -- YES --> G@{ shape:  framed-circle, label: "Stop" }
     A3 --> F@{shape: diamond, label: "single Route?"}
     subgraph Ingredient
     E@{shape: diamond, label: "single VPI?"} --Yes--> A4(Parse VPI)
