@@ -93,8 +93,12 @@ class ResultObservation(Observation):
             )
         ]
     )
+    interpretationCode: Optional[CE] = None
+    methodCode: Optional[CE] = None
+    targetSiteCode: Optional[CD] = None
+    author: Optional[AuthorParticipation] = None
     referenceRange: Optional[Dict] = None
-    value: Optional[PQ] = None  # PQ is used for numeric values
+    value: Optional[Dict] = None  # PQ is used for numeric values
 
 
 class InstructionObservation(Observation):

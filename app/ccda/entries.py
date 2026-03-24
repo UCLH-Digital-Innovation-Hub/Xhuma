@@ -1,3 +1,4 @@
+import json
 import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence
@@ -502,76 +503,114 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
 
 def result(entry, index: dict) -> dict:
     """
-    Entry for results section. Entries are defined by lists that contain the related type has-member indicating results groups
+    Entry for results section.
     """
+    if not entry.resource_type == "DiagnosticReport":
+        print(
+            f"Skipping non-diagnostic report entry with resource type: {entry.resource_type}"
+        )
+        return None
+    # collect all category codes with system of hl7
+    lab_codes = ["PAT", "BG", "CH", "HM", "IMM", "LAB", "SR", "TX", "VR"]
+    print(json.dumps(entry.category, default=str))
+    category_codes = [
+        code.code
+        for code in entry.category.coding
+        if code.system == "http://hl7.org/fhir/v2/0074"
+    ]
+    if not any(code in lab_codes for code in category_codes):
+        print(f"Skipping non-lab result with category codes: {category_codes}")
+        return None
 
-    # check if entry is group
-    if hasattr(entry, "related") and entry.related:
-        organizer = ResultsOrganizer()
-        organizer.code = code_with_translations(entry.code.coding)
-        organizer.statusCode = {"@code": entry.status}
-        performer = index.get(entry.performer[0].reference)
-        organizer.author = organization_to_author(performer)
-        organizer.id = [
-            {
-                "@root": ident.system,
-                "@extension": ident.value,
-            }
-            for ident in entry.identifier
-        ]
-        effective_time = entry.issued
-        components = []
-        for related in entry.related:
-            print(f"Related: {related.type} - {related.target.reference}")
-            if related.type == "has-member":
-                related_resource = index.get(related.target.reference)
-                comp = ResultObservation(
-                    id=[{"@root": related_resource.id}],
-                    code=code_with_translations(related_resource.code.coding),
-                    status={"@code": related_resource.status},
-                    # effectiveDateTime=IVL_TS(value=entry.issued.isostring),
-                    value=PQ(
-                        **{
-                            "@value": related_resource.valueQuantity.value,
-                            "@unit": related_resource.valueQuantity.unit,
-                        }
-                    ),
+    organizer = ResultsOrganizer()
+    organizer.code = code_with_translations(entry.code.coding)
+    organizer.statusCode = {"@code": entry.status}
+    # performer = index.get(entry.performer[0].reference)
+    # organizer.author = organization_to_author(performer)
+    organizer.id = [
+        {
+            "@root": ident.system,
+            "@extension": ident.value,
+        }
+        for ident in entry.identifier
+    ]
+    components = []
+    print(
+        f"Processing DiagnosticReport with ID: {entry.id}, code: {organizer.code}, status: {organizer.statusCode}"
+    )
+    print(len(entry.result) if entry.result else "No results found in DiagnosticReport")
+    for result in entry.result:
+        result_resource = index.get(result.reference)
+        # check if result resource is observation
+        if isinstance(result_resource, observation.Observation):
+            comp = ResultObservation(
+                id=[
+                    {
+                        "@root": ident.system,
+                        "@extension": ident.value,
+                    }
+                    for ident in result_resource.identifier
+                ],
+                code=code_with_translations(result_resource.code.coding),
+                status={"@code": result_resource.status},
+                effectiveDateTime=IVL_TS(
+                    value=result_resource.effectiveDateTime.isostring
+                ),
+            )
+            if result_resource.comment:
+                comp.text = result_resource.comment
+            if result_resource.valueString:
+                comp.value = {"@value": result_resource.valueString}
+            elif result_resource.valueQuantity:
+                print(
+                    f"Result value quantity: {result_resource.valueQuantity.value} {result_resource.valueQuantity.unit}"
                 )
-                if (
-                    hasattr(related_resource, "interpretation")
-                    and related_resource.interpretation
-                ):
-                    comp.interpretationCode = code_with_translations(
-                        related_resource.interpretation.coding
-                    )
-
-                if related_resource.referenceRange:
-                    comp.referenceRange = {"observationRange": []}
-                    for range in related_resource.referenceRange:
-                        if range.text:
-                            comp.referenceRange["observationRange"].append(
-                                {"text": range.text}
-                            )
-                        if range.low:
-                            comp.referenceRange["observationRange"].append(
-                                {
-                                    "value": {
-                                        "@xsi:type": "IVL_PQ",
-                                        "low": {
-                                            "@value": range.low.value,
-                                            "@unit": related_resource.valueQuantity.unit,
-                                        },
-                                        "high": {
-                                            "@value": range.high.value,
-                                            "@unit": related_resource.valueQuantity.unit,
-                                        },
-                                    }
+                comp.value = {
+                    "@xsi:type": "PQ",
+                    "@value": result_resource.valueQuantity.value,
+                    "@unit": result_resource.valueQuantity.unit,
+                }
+            if result_resource.referenceRange:
+                comp.referenceRange = {"observationRange": []}
+                for range in result_resource.referenceRange:
+                    if range.text:
+                        comp.referenceRange["observationRange"].append(
+                            {"text": range.text}
+                        )
+                    if range.low:
+                        comp.referenceRange["observationRange"].append(
+                            {
+                                "value": {
+                                    "@xsi:type": "IVL_PQ",
+                                    "low": {
+                                        "@value": range.low.value,
+                                        "@unit": result_resource.valueQuantity.unit,
+                                    },
                                 }
-                            )
-                components.append(comp)
-
+                            }
+                        )
+                    if range.high:
+                        comp.referenceRange["observationRange"].append(
+                            {
+                                "value": {
+                                    "@xsi:type": "IVL_PQ",
+                                    "high": {
+                                        "@value": range.high.value,
+                                        "@unit": result_resource.valueQuantity.unit,
+                                    },
+                                }
+                            }
+                        )
+            if (
+                hasattr(result_resource, "interpretation")
+                and result_resource.interpretation
+            ):
+                comp.interpretationCode = code_with_translations(
+                    result_resource.interpretation.coding
+                )
+            components.append(comp)
         organizer.component = components
         # print(organizer.model_dump(by_alias=True, exclude_none=True))
 
         # only return groups for now
-        return organizer.model_dump(by_alias=True, exclude_none=True)
+    return organizer.model_dump(by_alias=True, exclude_none=True)

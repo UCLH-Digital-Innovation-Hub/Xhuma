@@ -6,7 +6,7 @@ from fhirclient.models import list as fhirlist
 
 from app.ccda.entries import result as result_entry
 
-with open("app/tests/fixtures/bundles/pathologyexample.json") as f:
+with open("app/tests/fixtures/bundles/9692136744.json") as f:
     # with open("app/tests/fixtures/bundles/9690937286.json") as f:
     results_bundle = json.load(f)
 
@@ -35,7 +35,7 @@ for l in lists:
     print(f"List ID: {l.id}, Title: {l.title}, Status: {l.status}")
 
 # only have investigations for now
-lists = [l for l in lists if l.code and l.title == "Investigations and Results"]
+lists = [l for l in lists if l.code and l.title == "Investigations and results"]
 
 for l in lists:
     print(f"List: {l.title}")
@@ -82,9 +82,9 @@ for l in lists:
             print("  - No resource found")
 
 for l in lists:
+    print(f"List: {l.title}")
     for entry in l.entry:
         resource = bundle_index.get(entry.item.reference)
-        for r in resource.result:
-            result_resource = bundle_index.get(r.reference)
-            # pprint.pprint(result_resource.as_json())
-            pprint.pprint(result_entry(result_resource, bundle_index))
+        # print(resource)
+        print(resource.resource_type)
+        pprint.pprint(result_entry(resource, bundle_index))
