@@ -46,6 +46,19 @@ async def medication(
     based_on_request: medicationrequest.MedicationRequest = index[
         entry.basedOn[0].reference
     ]
+    misc_notes = based_on_request.note if based_on_request.note else []
+    misc_notes += entry.note if entry.note else []
+    # append entry text if snomed code is 196421000000109
+    for code in referenced_med.code.coding:
+        if code.code == "196421000000109":
+            misc_notes.append(
+                f"Transfer degraded medication text: {referenced_med.code.text}"
+            )
+
+    for i, note in enumerate(misc_notes):
+        if hasattr(note, "text"):
+            # replace note with just the text
+            misc_notes[i] = note.text
     # request = index[entry.basedOn[0].reference]
     # dosage_instructions = request.dosageInstruction
     # for dose in dosage_instructions:
@@ -434,6 +447,9 @@ async def medication(
     text_instructions = (
         " Instructions: " + "; ".join(text_instr_list) if text_instr_list else ""
     )
+    misc_notes_text = [f"{note} \n " for note in misc_notes if note]
+    # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
+    # print(f"Misc notes text: {''.join(misc_notes_text)}")
 
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
@@ -442,6 +458,7 @@ async def medication(
         prescription_type if "prescription_type" in locals() else "",
         med_name,
         f"{text_instructions} {patient_instructions}",
+        "".join(misc_notes_text),
         prescribing_agency if "prescribing_agency" in locals() else "",
         last_issued_date if "last_issued_date" in locals() else "",
     ]
