@@ -22,7 +22,7 @@ from .models.base import (
     ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
+from .models.datatypes import CD, EIVL_TS, II, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 Cell = str
 Row = List[Cell]
@@ -535,10 +535,6 @@ def result(entry, index: dict) -> dict:
         for ident in entry.identifier
     ]
     components = []
-    print(
-        f"Processing DiagnosticReport with ID: {entry.id}, code: {organizer.code}, status: {organizer.statusCode}"
-    )
-    print(len(entry.result) if entry.result else "No results found in DiagnosticReport")
     for result in entry.result:
         result_resource = index.get(result.reference)
         # check if result resource is observation
@@ -562,14 +558,42 @@ def result(entry, index: dict) -> dict:
             if result_resource.valueString:
                 comp.value = {"@value": result_resource.valueString}
             elif result_resource.valueQuantity:
-                print(
-                    f"Result value quantity: {result_resource.valueQuantity.value} {result_resource.valueQuantity.unit}"
-                )
-                comp.value = {
-                    "@xsi:type": "PQ",
-                    "@value": result_resource.valueQuantity.value,
-                    "@unit": result_resource.valueQuantity.unit,
-                }
+                if result_resource.valueQuantity.comparator:
+                    # comparator means IVL_PQ
+                    comp.value = {
+                        "@xsi:type": "IVL_PQ",
+                    }
+                    if "<" in result_resource.valueQuantity.comparator:
+                        comp.value["high"] = {
+                            "@value": result_resource.valueQuantity.value,
+                            "@unit": result_resource.valueQuantity.unit,
+                        }
+                        if "=" in result_resource.valueQuantity.comparator:
+                            comp.value["high"]["@inclusive"] = "true"
+
+                        # lower bound for physical measurement is 0
+                        comp.value["low"] = {
+                            "@value": 0,
+                            "@unit": result_resource.valueQuantity.unit,
+                            "@inclusive": "true",
+                        }
+
+                    elif ">" in result_resource.valueQuantity.comparator:
+                        comp.value["low"] = {
+                            "@value": result_resource.valueQuantity.value,
+                            "@unit": result_resource.valueQuantity.unit,
+                        }
+                        if "=" in result_resource.valueQuantity.comparator:
+                            comp.value["low"]["inclusive"] = "true"
+
+                        # high bound for greater than physical measurement is infinity
+                        comp.value["high"] = {"@nullFlavor": "PINF"}
+                else:
+                    comp.value = {
+                        "@xsi:type": "PQ",
+                        "@value": result_resource.valueQuantity.value,
+                        "@unit": result_resource.valueQuantity.unit,
+                    }
             if result_resource.referenceRange:
                 comp.referenceRange = {"observationRange": []}
                 for range in result_resource.referenceRange:
@@ -609,6 +633,17 @@ def result(entry, index: dict) -> dict:
                     result_resource.interpretation.coding
                 )
             components.append(comp)
+        # add a category observation to enable happy together labs
+        comp = ResultObservation()
+        comp.templateId.append(II(**{"@root": "1.2.840.114350.1.72.3.4"}))
+        comp.code = CD(
+            **{
+                "@code": "16",
+                "@codeSystem": "1.2.840.114350.1.72.1.5007",
+                "@codeSystemName": "Epic.Result.Type",
+            }
+        )
+        components.append(comp)
         organizer.component = components
         # print(organizer.model_dump(by_alias=True, exclude_none=True))
 
