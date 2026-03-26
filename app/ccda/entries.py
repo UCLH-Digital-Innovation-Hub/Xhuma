@@ -341,27 +341,29 @@ async def medication(
                         # append line to entry relationshoip text
                         warning_text = f" \n **Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup by Xhuma**"
                         # print(warning_text)
-                        for entry_rel in substance_administration.entryRelationship:
-                            if entry_rel.substanceAdministration:
-                                if entry_rel.substanceAdministration.get("text"):
-                                    entry_rel.substanceAdministration[
-                                        "text"
-                                    ] += warning_text
-                                else:
-                                    entry_rel.substanceAdministration["text"] = (
-                                        warning_text
-                                    )
+                        misc_notes.append(warning_text)
+                        # for entry_rel in substance_administration.entryRelationship:
+                        #     if entry_rel.substanceAdministration:
+                        #         if entry_rel.substanceAdministration.get("text"):
+                        #             entry_rel.substanceAdministration[
+                        #                 "text"
+                        #             ] += warning_text
+                        #         else:
+                        #             entry_rel.substanceAdministration["text"] = (
+                        #                 warning_text
+                        #             )
                 elif len(entry.dosage) > 1:
                     # multiple dosage instrutions so add warning to medication name instead of processing dose
                     warning_text = f" \n **Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
-                    for entry_rel in substance_administration.entryRelationship:
-                        if entry_rel.substanceAdministration:
-                            if entry_rel.substanceAdministration.get("text"):
-                                entry_rel.substanceAdministration[
-                                    "text"
-                                ] += warning_text
-                            else:
-                                entry_rel.substanceAdministration["text"] = warning_text
+                    misc_notes.append(warning_text)
+                    # for entry_rel in substance_administration.entryRelationship:
+                    #     if entry_rel.substanceAdministration:
+                    #         if entry_rel.substanceAdministration.get("text"):
+                    #             entry_rel.substanceAdministration[
+                    #                 "text"
+                    #     ] += warning_text
+                    # else:
+                    #     entry_rel.substanceAdministration["text"] = warning_text
 
                 if substance_administration.routeCode:
                     if substance_administration.routeCode.displayName == "Take":
@@ -427,18 +429,21 @@ async def medication(
             ext.url
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
         ):
-            print("Medication repeat information extension found")
+            # print("Medication repeat information extension found")
             repeats_allowed = None
             repeats_issued = None
             for i in ext.extension:
                 if i.url == "numberOfRepeatPrescriptionsAllowed":
                     repeats_allowed = i.valuePositiveInt
-                    print(repeats_allowed)
+                    # print(repeats_allowed)
                 elif i.url == "numberOfRepeatPrescriptionsIssued":
                     repeats_issued = i.valueUnsignedInt
-                    print(f"Repeats Issued:{repeats_issued}")
+                    # print(f"Repeats Issued:{repeats_issued}")
             if repeats_allowed is not None and repeats_issued is not None:
                 remaining_repeats = repeats_allowed - repeats_issued
+                misc_notes.append(
+                    f" \n Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                )
 
     patient_instr_list = [
         dosage.patientInstruction
@@ -464,7 +469,10 @@ async def medication(
     text_instructions = (
         " Instructions: " + "; ".join(text_instr_list) if text_instr_list else ""
     )
+    # make misc notes a set to avoid duplicates
+    misc_notes = list(set(misc_notes))
     misc_notes_text = [f"{note} \n " for note in misc_notes if note]
+
     # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
     # print(f"Misc notes text: {''.join(misc_notes_text)}")
     comment_activity = EntryRelationship()
