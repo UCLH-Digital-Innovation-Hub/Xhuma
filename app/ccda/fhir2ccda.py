@@ -47,6 +47,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         "@codeSystem": "2.16.840.1.113883.6.1",
     }
 
+    # document level effective time, use local time
+    ccda["ClinicalDocument"]["effectiveTime"] = {
+        "@value": datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    }
+
     ccda["ClinicalDocument"]["title"] = {
         "#text": "GP Connect: Access Record Structured"
     }
