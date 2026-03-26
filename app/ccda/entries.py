@@ -268,7 +268,7 @@ async def medication(
                             "@code": "76662-6",
                             "@codeSystem": "2.16.840.1.113883.6.1",
                         },
-                        "text": dose.text,
+                        "text": {"@xsi:type": "ED", "xmlText": dose.text},
                     },
                 }
             )
@@ -402,6 +402,7 @@ async def medication(
             )
 
     # check for prescriping agency and last issued date extensions
+    remaining_repeats = None
     for ext in entry.extension:
         # print(ext.url)
         if (
@@ -414,7 +415,17 @@ async def medication(
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
         ):
             last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
-
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
+        ):
+            for i in ext.extension:
+                if i.url == "numberOfRepeatsAllowed":
+                    repeats_allowed = i.valuePositiveInt
+                elif i.url == "numberOfRepeatsIssued":
+                    repeats_issued = i.valueUnsignedInt
+            if repeats_allowed and repeats_issued is not None:
+                remaining_repeats = repeats_allowed - repeats_issued
     # look for prescrtion type in medication request
     for ext in based_on_request.extension:
         if (
@@ -450,6 +461,37 @@ async def medication(
     misc_notes_text = [f"{note} \n " for note in misc_notes if note]
     # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
     # print(f"Misc notes text: {''.join(misc_notes_text)}")
+    comment_activity = EntryRelationship()
+    comment_activity.act = {
+        "code": {
+            "@code": "48767-8",
+        },
+        "text": {"@xsi:type": "ED", "xmlText": "".join(misc_notes_text)},
+    }
+    substance_administration.entryRelationship.append(comment_activity)
+
+    # add dispensing    request
+    if based_on_request.dispenseRequest:
+        supply_order = EntryRelationship(**{"@typeCode": "REFR"})
+        supply_order.substanceAdministration = {
+            "@moodCode": "EVN",
+        }
+        if based_on_request.dispenseRequest.validityPeriod.end:
+            supply_order.substanceAdministration["effectiveTime"] = (
+                {
+                    "high": {
+                        "@value": date_helper(
+                            based_on_request.dispenseRequest.validityPeriod.end.isostring
+                        )
+                    }
+                },
+            )
+
+        if remaining_repeats is not None:
+            supply_order.substanceAdministration.repeatNumber = {
+                "@value": remaining_repeats
+            }
+        substance_administration.entryRelationship.append(supply_order)
 
     entry_row = [
         readable_date(low_time[0]) if low_time else "",

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Dict, List, Optional, Union
 from uuid import uuid4
 
@@ -133,16 +135,6 @@ class InstructionObservation(Observation):
     # }
 
 
-class EntryRelationship(BaseModel, extra=Extra.allow):
-    # act: EntryRelationshipAct
-    typeCode: str = Field(alias="@typeCode", default="SUBJ")
-    inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
-    sequenceNumber: Optional[int] = None
-    act: Optional[Act] = None
-    observation: Optional[Observation] = None
-    # accept any type of object
-
-
 class SubstanceAdministration(BaseModel):
     """
     Representation of CDA model object Substance Administration. Only contain relevant attributes.
@@ -171,7 +163,7 @@ class SubstanceAdministration(BaseModel):
     routeCode: Optional[CE] = None
     doseQuantity: Optional[IVL_PQ] = None
     rateQuantity: Optional[IVL_PQ] = None
-    entryRelationship: List[EntryRelationship] = Field(default_factory=list)
+    entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
     # TODO flesh out precondition model
     precondition: Optional[Dict] = None
 
@@ -198,6 +190,17 @@ class SubstanceAdministration(BaseModel):
             time_list.insert(0, sxcm)
         return time_list
         # print(time_list)
+
+
+class EntryRelationship(BaseModel, extra=Extra.allow):
+    # act: EntryRelationshipAct
+    typeCode: str = Field(alias="@typeCode", default="SUBJ")
+    inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
+    sequenceNumber: Optional[int] = None
+    act: Optional[Act] = None
+    observation: Optional[Observation] = None
+    substanceAdministration: Optional["SubstanceAdministration"] = None
+    # accept any type of object
 
 
 class Entry(BaseModel):
@@ -277,3 +280,8 @@ class ResultsSection(Section):
     title: Optional[str] = "Results"
     text: Optional[str] = None
     entry: Optional[List[ResultsOrganizer]] = Field(default_factory=list)
+
+
+Observation.model_rebuild()
+SubstanceAdministration.model_rebuild()
+EntryRelationship.model_rebuild()

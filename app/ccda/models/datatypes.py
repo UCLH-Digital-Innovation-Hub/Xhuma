@@ -57,6 +57,7 @@ class ED(BIN):
     integrityCheckAlgorithm: Optional[str] = None  # enum SHA1 or SHA256
     language: Optional[str] = None
     mediaType: Optional[str] = None
+    xmlText: Optional[str] = None
 
 
 class QTY(ANY):
