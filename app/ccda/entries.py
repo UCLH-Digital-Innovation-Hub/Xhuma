@@ -375,9 +375,9 @@ async def medication(
                             substance_administration.routeCode.code = (
                                 dmd_data.route.code
                             )
-                            substance_administration.routeCode.codeSystem = (
-                                "2.16.840.1.113883.3.26.1.1"
-                            )
+                            # substance_administration.routeCode.codeSystem = (
+                            #     "2.16.840.1.113883.3.26.1.1"
+                            # )
                             substance_administration.routeCode.codeSystemName = (
                                 dmd_data.route.codeSystemName
                             )
@@ -471,6 +471,8 @@ async def medication(
     )
     # make misc notes a set to avoid duplicates
     misc_notes = list(set(misc_notes))
+    misc_notes.append("@TODAYDATE@")
+
     misc_notes_text = [f"{note} \n " for note in misc_notes if note]
 
     # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
@@ -480,7 +482,8 @@ async def medication(
         "code": {
             "@code": "48767-8",
         },
-        "text": {"@xsi:type": "ED", "xmlText": "".join(misc_notes_text)},
+        # "text": {"@xsi:type": "ED", "xmlText": "".join(misc_notes_text)},
+        "text": {"@xsi:type": "ED", "xmlText": {"p": misc_notes_text}},
     }
     substance_administration.entryRelationship.append(comment_activity)
 
