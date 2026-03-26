@@ -419,6 +419,7 @@ async def medication(
             ext.url
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
         ):
+            print("Medication repeat information extension found")
             for i in ext.extension:
                 if i.url == "numberOfRepeatsAllowed":
                     repeats_allowed = i.valuePositiveInt
