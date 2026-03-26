@@ -25,7 +25,7 @@ from .models.base import (
     ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import CD, EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
+from .models.datatypes import CD, EIVL_TS, IVL_INT, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 Cell = str
 Row = List[Cell]
@@ -415,18 +415,7 @@ async def medication(
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
         ):
             last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
-        ):
-            print("Medication repeat information extension found")
-            for i in ext.extension:
-                if i.url == "numberOfRepeatsAllowed":
-                    repeats_allowed = i.valuePositiveInt
-                elif i.url == "numberOfRepeatsIssued":
-                    repeats_issued = i.valueUnsignedInt
-            if repeats_allowed and repeats_issued is not None:
-                remaining_repeats = repeats_allowed - repeats_issued
+
     # look for prescrtion type in medication request
     for ext in based_on_request.extension:
         if (
@@ -434,6 +423,22 @@ async def medication(
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
         ):
             prescription_type = ext.valueCodeableConcept.coding[0].display
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
+        ):
+            print("Medication repeat information extension found")
+            repeats_allowed = None
+            repeats_issued = None
+            for i in ext.extension:
+                if i.url == "numberOfRepeatPrescriptionsAllowed":
+                    repeats_allowed = i.valuePositiveInt
+                    print(repeats_allowed)
+                elif i.url == "numberOfRepeatPrescriptionsIssued":
+                    repeats_issued = i.valueUnsignedInt
+                    print(f"Repeats Issued:{repeats_issued}")
+            if repeats_allowed is not None and repeats_issued is not None:
+                remaining_repeats = repeats_allowed - repeats_issued
 
     patient_instr_list = [
         dosage.patientInstruction
@@ -474,24 +479,35 @@ async def medication(
     # add dispensing    request
     if based_on_request.dispenseRequest:
         supply_order = EntryRelationship(**{"@typeCode": "REFR"})
-        supply_order.substanceAdministration = {
-            "@moodCode": "EVN",
-        }
+        # supply_order.substanceAdministration = {
+        #     "@moodCode": "EVN",
+        # }
+        supply_order.substanceAdministration = SubstanceAdministration()
+        supply_order.substanceAdministration.moodCode = "EVN"
         if based_on_request.dispenseRequest.validityPeriod.end:
-            supply_order.substanceAdministration["effectiveTime"] = (
-                {
-                    "high": {
+            supply_order.substanceAdministration.effectiveTime = [
+                IVL_TS(
+                    high={
                         "@value": date_helper(
                             based_on_request.dispenseRequest.validityPeriod.end.isostring
                         )
                     }
-                },
-            )
+                )
+            ]
+            # supply_order.substanceAdministration["effectiveTime"] = (
+            #     {
+            #         "high": {
+            #             "@value": date_helper(
+            #                 based_on_request.dispenseRequest.validityPeriod.end.isostring
+            #             )
+            #         }
+            #     },
+            # )
 
         if remaining_repeats is not None:
-            supply_order.substanceAdministration.repeatNumber = {
-                "@value": remaining_repeats
-            }
+            supply_order.substanceAdministration.repeatNumber = IVL_INT(
+                value=remaining_repeats
+            )
         substance_administration.entryRelationship.append(supply_order)
 
     entry_row = [

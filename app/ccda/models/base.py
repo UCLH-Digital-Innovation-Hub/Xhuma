@@ -15,6 +15,7 @@ from .datatypes import (
     ED,
     EIVL_TS,
     II,
+    IVL_INT,
     IVL_PQ,
     IVL_TS,
     PIVL_TS,
@@ -164,6 +165,7 @@ class SubstanceAdministration(BaseModel):
     doseQuantity: Optional[IVL_PQ] = None
     rateQuantity: Optional[IVL_PQ] = None
     entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
+    repeatNumber: Optional[IVL_INT] = None
     # TODO flesh out precondition model
     precondition: Optional[Dict] = None
 

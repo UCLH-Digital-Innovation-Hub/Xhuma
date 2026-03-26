@@ -252,6 +252,22 @@ class IVL_TS(IVXB_TS):
     }
 
 
+class IVL_INT(ANY):
+    resource_type: str = Field(
+        "IVL_INT", description="Interval of integers.", alias="@xsi:type"
+    )
+    nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)
+    value: Optional[int] = Field(alias="@value", default=None)
+    operator: Optional[str] = Field(alias="@operator", default=None)
+    low: Optional[int] = None
+    center: Optional[int] = None
+    width: Optional[int] = None
+    high: Optional[int] = None
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
 class PIVL_TS(SXCM_TS):
     resource_type: str = Field("PIVL_TS", description="", alias="@xsi:type")
     phase: Optional[IVL_TS] = None
