@@ -68,7 +68,7 @@ An HSCN-connected agent (such as a third-party HSCN connection provider via Azur
 ```mermaid
 flowchart TD
     subgraph Client [Epic Trust Environment]
-        A[Epic EHR System (SOAP)]
+        A["Epic EHR System (SOAP)"]
     end
 
     subgraph AzureAppService [Xhuma Azure Environment]

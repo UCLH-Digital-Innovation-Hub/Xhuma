@@ -1,6 +1,5 @@
 from urllib import response
 from xml.etree import ElementTree
-import pytest
 
 from fastapi.testclient import TestClient
 
@@ -9,7 +8,6 @@ from app.main import app
 client = TestClient(app)
 
 
-@pytest.mark.skip(reason="Missing XML files")
 def test_iti47():
     with open("xml/pdqRequest.xml") as iti47:
         dom = ElementTree.parse(iti47)
@@ -21,7 +19,6 @@ def test_iti47():
         assert response.status_code == 200
 
 
-@pytest.mark.skip(reason="SOAP endpoint verification pending")
 def test_iti47():
     headers = {
         "Content-Type": "application/soap+xml",
@@ -80,7 +77,6 @@ def test_iti47():
 #         assert response.text == 1
 
 
-@pytest.mark.skip(reason="Missing XML files")
 def test_iti39():
     with open("xml/4. Perform XCA ITI-39 document retrieve.xml") as iti39:
         dom = ElementTree.parse(iti39)
