@@ -48,6 +48,16 @@ async def medication(
     ]
     misc_notes = based_on_request.note if based_on_request.note else []
     misc_notes += entry.note if entry.note else []
+    # check if any of the notes are container in another one preceeded by "Prescriber Notes:
+    # if so delete the contained note"
+    misc_notes = [
+        note
+        for note in misc_notes
+        if not any(
+            note.text in other_note.text and note != other_note
+            for other_note in misc_notes
+        )
+    ]
     # append entry text if snomed code is 196421000000109
     for code in referenced_med.code.coding:
         if code.code == "196421000000109":
@@ -324,9 +334,7 @@ async def medication(
 
             try:
                 dmd_data = await dmd_lookup(int(snomed_code))
-                # print(f"DMD lookup successful for SNOMED code {snomed_code}: {dmd_data}")
                 # only process dose if a single dosage instruction
-                print(f"length of dosage instructions: {len(entry.dosage)}")
                 if len(entry.dosage) == 1:
 
                     if dmd_data.vpi and substance_administration.doseQuantity:
@@ -338,32 +346,14 @@ async def medication(
                         substance_administration.doseQuantity["@unit"] = (
                             dmd_data.vpi.unit
                         )
-                        # append line to entry relationshoip text
-                        warning_text = f" \n **Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup by Xhuma**"
+                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup"
                         # print(warning_text)
                         misc_notes.append(warning_text)
-                        # for entry_rel in substance_administration.entryRelationship:
-                        #     if entry_rel.substanceAdministration:
-                        #         if entry_rel.substanceAdministration.get("text"):
-                        #             entry_rel.substanceAdministration[
-                        #                 "text"
-                        #             ] += warning_text
-                        #         else:
-                        #             entry_rel.substanceAdministration["text"] = (
-                        #                 warning_text
-                        #             )
+
                 elif len(entry.dosage) > 1:
                     # multiple dosage instrutions so add warning to medication name instead of processing dose
-                    warning_text = f" \n **Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
+                    warning_text = f"Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
                     misc_notes.append(warning_text)
-                    # for entry_rel in substance_administration.entryRelationship:
-                    #     if entry_rel.substanceAdministration:
-                    #         if entry_rel.substanceAdministration.get("text"):
-                    #             entry_rel.substanceAdministration[
-                    #                 "text"
-                    #     ] += warning_text
-                    # else:
-                    #     entry_rel.substanceAdministration["text"] = warning_text
 
                 if substance_administration.routeCode:
                     if substance_administration.routeCode.displayName == "Take":
@@ -445,7 +435,7 @@ async def medication(
             if repeats_allowed is not None and repeats_issued is not None:
                 remaining_repeats = repeats_allowed - repeats_issued
                 misc_notes.append(
-                    f" \n Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                    f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
                 )
 
     patient_instr_list = [
@@ -485,17 +475,13 @@ async def medication(
         "code": {
             "@code": "48767-8",
         },
-        # "text": {"@xsi:type": "ED", "xmlText": "".join(misc_notes_text)},
-        "text": {"@xsi:type": "ED", "xmlText": {"content": misc_notes_text}},
+        "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
     }
     substance_administration.entryRelationship.append(comment_activity)
 
     # add dispensing    request
     if based_on_request.dispenseRequest:
         supply_order = EntryRelationship(**{"@typeCode": "REFR"})
-        # supply_order.substanceAdministration = {
-        #     "@moodCode": "EVN",
-        # }
         supply_order.substanceAdministration = SubstanceAdministration()
         supply_order.substanceAdministration.moodCode = "EVN"
         if based_on_request.dispenseRequest.validityPeriod.end:
@@ -508,15 +494,6 @@ async def medication(
                     }
                 )
             ]
-            # supply_order.substanceAdministration["effectiveTime"] = (
-            #     {
-            #         "high": {
-            #             "@value": date_helper(
-            #                 based_on_request.dispenseRequest.validityPeriod.end.isostring
-            #             )
-            #         }
-            #     },
-            # )
 
         if remaining_repeats is not None:
             supply_order.substanceAdministration.repeatNumber = IVL_INT(
@@ -531,7 +508,7 @@ async def medication(
         prescription_type if "prescription_type" in locals() else "",
         med_name,
         f"{text_instructions} {patient_instructions}",
-        "".join(misc_notes_text),
+        {"content": misc_notes_text},
         prescribing_agency if "prescribing_agency" in locals() else "",
         last_issued_date if "last_issued_date" in locals() else "",
     ]

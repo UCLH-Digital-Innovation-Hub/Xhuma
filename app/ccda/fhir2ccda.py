@@ -280,9 +280,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 Returns:
                     dict: _description_
                 """
-                row = []
-                for data in entry_data:
-                    row.append({data})
+                # row = []
+                # for data in entry_data:
+                #     row.append({data})
                 return {"td": entry_data}
 
             # if list has attribute empty reason
