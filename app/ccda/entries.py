@@ -479,7 +479,7 @@ async def medication(
     }
     substance_administration.entryRelationship.append(comment_activity)
 
-    # add dispensing    request
+    # add dispensing  request
     if based_on_request.dispenseRequest:
         supply_order = EntryRelationship(**{"@typeCode": "REFR"})
         supply_order.substanceAdministration = SubstanceAdministration()
@@ -508,7 +508,7 @@ async def medication(
         prescription_type if "prescription_type" in locals() else "",
         med_name,
         f"{text_instructions} {patient_instructions}",
-        {"content": misc_notes_text},
+        {"BR": misc_notes_text},
         prescribing_agency if "prescribing_agency" in locals() else "",
         last_issued_date if "last_issued_date" in locals() else "",
     ]
