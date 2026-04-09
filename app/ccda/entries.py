@@ -11,6 +11,7 @@ from fhirclient.models import medicationrequest, medicationstatement, observatio
 from ..redis_connect import snomed_client
 from .dmd import dmd_lookup
 from .helpers import (
+    clean_number,
     code_with_translations,
     date_helper,
     effective_time_helper,
@@ -278,7 +279,8 @@ async def medication(
                             "@code": "76662-6",
                             "@codeSystem": "2.16.840.1.113883.6.1",
                         },
-                        "text": {"@xsi:type": "ED", "xmlText": dose.text},
+                        # "text": {"@xsi:type": "ED", "xmlText": dose.text},
+                        "text": dose.text,
                     },
                 }
             )
@@ -342,6 +344,10 @@ async def medication(
                             dmd_data.vpi.value
                             * substance_administration.doseQuantity["@value"]
                         )
+
+                        # clean number to remove trailing .0 if whole number
+                        processed_dose = clean_number(processed_dose)
+
                         substance_administration.doseQuantity["@value"] = processed_dose
                         substance_administration.doseQuantity["@unit"] = (
                             dmd_data.vpi.unit
