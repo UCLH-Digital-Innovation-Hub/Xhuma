@@ -401,4 +401,6 @@ if __name__ == "__main__":
     ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))
     # pprint.pprint(ccda)
     with open("output.xml", "w") as output:
-        output.write(xmltodict.unparse(ccda, pretty=True))
+        xml = xmltodict.unparse(ccda, pretty=True)
+        xml = xml.replace("&lt;br /&gt;", "<br/>").replace("&lt;br&gt;", "<br/>")
+        output.write(xml)

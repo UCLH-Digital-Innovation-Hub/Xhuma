@@ -437,6 +437,14 @@ async def medication(
                 misc_notes.append(
                     f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
                 )
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatusReason-1"
+        ):
+            for i in ext.extension:
+                if i.url == "statusReason":
+                    status_reason = i.valueCodeableConcept.text
+                    misc_notes.append(f"Medication status reason: {status_reason}")
 
     patient_instr_list = [
         dosage.patientInstruction
@@ -455,18 +463,18 @@ async def medication(
     patient_instr_list = add_numbering(patient_instr_list)
     text_instr_list = add_numbering(text_instr_list)
     patient_instructions = (
-        " \n Patient Instructions: " + "; ".join(patient_instr_list)
+        "Patient Instructions: " + "<br />".join(patient_instr_list)
         if patient_instr_list
         else ""
     )
     text_instructions = (
-        " Instructions: " + "; ".join(text_instr_list) if text_instr_list else ""
+        " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
     )
     # make misc notes a set to avoid duplicates
     misc_notes = list(set(misc_notes))
     # misc_notes.append("@TODAYDATE@")
 
-    misc_notes_text = [f"{note} \n " for note in misc_notes if note]
+    misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
 
     # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
     # print(f"Misc notes text: {''.join(misc_notes_text)}")
@@ -507,7 +515,7 @@ async def medication(
         entry.status if entry.status else "unknown",
         prescription_type if "prescription_type" in locals() else "",
         med_name,
-        f"{text_instructions} {patient_instructions}",
+        f"{text_instructions}<br />{patient_instructions}",
         {"BR": misc_notes_text},
         prescribing_agency if "prescribing_agency" in locals() else "",
         last_issued_date if "last_issued_date" in locals() else "",
