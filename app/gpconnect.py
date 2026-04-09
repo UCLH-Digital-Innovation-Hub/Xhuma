@@ -496,10 +496,6 @@ async def gpconnect(
 
     try:
         xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
-        # preserve <br /> tags
-        xml_ccda = xml_ccda.replace("&lt;br /&gt;", "<br/>").replace(
-            "&lt;br&gt;", "<br/>"
-        )
 
     except Exception as e:
         msg = f"Failed to convert FHIR Bundle to CCDA: {e}"

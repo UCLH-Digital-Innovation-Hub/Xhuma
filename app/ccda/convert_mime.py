@@ -38,6 +38,8 @@ def base64_xml(ccda: dict):
     """
 
     ccda_xml = xmltodict.unparse(ccda, pretty=True)
+    # preserve <br /> tags
+    ccda_xml = ccda_xml.replace("&lt;br /&gt;", "<br/>").replace("&lt;br&gt;", "<br/>")
 
     # base63 encode the xml
     ccda_64 = base64.b64encode(ccda_xml.encode("utf-8")).decode("utf-8")
