@@ -87,7 +87,7 @@ C4Container
     Rel(api, audit_db, "Write config & audit events", "TCP")
     Rel(api, monitor, "Write metrics", "HTTPS")
     
-    Rel(cicd, app_subnet, "Deploy Image Pull", "HTTPS")
+    Rel(cicd, api, "Deploy Image Pull", "HTTPS")
 ```
 
 ### Component Diagram
@@ -164,7 +164,7 @@ flowchart TD
     Xhuma -->|PDS/SDS lookups, GP Connect retrieval| NHSE
     NHSE -->|Demographics / FHIR Bundle| Xhuma
     
-    Xhuma -->|Demographics / C-CDA & HTML\n(Safe failure)| Epic
+    Xhuma -->|"Demographics / C-CDA & HTML (Safe failure)"| Epic
     
     Xhuma -->|audit log, metrics| Mon
     Admin -->|view logs only| Mon
@@ -203,8 +203,8 @@ flowchart TD
     P10(("10. Write audit/metrics"))
     P11(("11. Handle errors safely\n(No misleading success)"))
 
-    Clinician -->|Manual reconciliation intervention\nwhen mapping is incomplete| Epic
-    Clinician -->|Human confirmation of identity| Epic
+    Clinician -->|"Manual reconciliation intervention (when mapping is incomplete)"| Epic
+    Clinician -->|"Human confirmation of identity"| Epic
     
     Epic -->|Initiate Discovery| P1
     P1 -->P2
@@ -223,7 +223,7 @@ flowchart TD
     P6 -->P7
     P7 -->|FHIR Bundle + Warnings| P8
     P8 -->|C-CDA, HTML| P9
-    P9 -->|C-CDA, HTML\n(Read-only summary + source structured data)| Epic
+    P9 -->|"C-CDA, HTML (Read-only summary + source structured data)"| Epic
     
     P1 -.->|error| P11
     P4 -.->|error| P11
