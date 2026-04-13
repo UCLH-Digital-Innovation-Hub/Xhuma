@@ -128,12 +128,6 @@ class InstructionObservation(Observation):
             "@code": "completed",
         }
     )
-    # value: Optional[CD]  = {
-    #     "@code": "422037009",
-    #     "@codeSystem": "2.16.840.1.113883.6.96",
-    #     "@displayName": "Provider medication administration instructions",
-    #     "@codeSystemName": "SNOMED CT",
-    # }
 
 
 class SubstanceAdministration(BaseModel):
@@ -155,7 +149,7 @@ class SubstanceAdministration(BaseModel):
     #         }
     #     )
     # )
-    text: Optional[ED] = None
+    text: Optional[Union[str, ED]] = None
     statusCode: Optional[CS] = None
     effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
         default_factory=list

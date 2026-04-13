@@ -42,6 +42,7 @@ class TEL(URL):
     )
     usablePeriod: Optional[List[SXCM_TS]] = None
     use: Optional[List[str]] = None
+    value: Optional[str] = Field(alias="@value", default=None)
 
 
 class ED(BIN):
