@@ -27,11 +27,11 @@ C4Context
         System_Ext(nhse_api, "NHSE APIs (PDS, SDS, GP Connect)", "Target NHS services (External risk owner)")
     }
 
-    Rel(clinician, epic, "Queries, confirms identity, reconciles data", "UI")
-    Rel(epic, xhuma, "1. Patient Discovery (ITI-55)\n2. Document Query/Retrieve", "mTLS / SOAP")
-    Rel(xhuma, nhse_api, "1. PDS/SDS Lookups\n2. GP Connect Retrieval", "mTLS+JWT / OAuth / API Key")
-    Rel(xhuma, monitor, "Sends audit logs, metrics", "Internal")
-    Rel(xhuma, epic, "Returns Demographics / C-CDA & HTML (Safe failure / Partial data preserved)", "SOAP")
+    Rel_D(clinician, epic, "Queries, confirms identity", "UI")
+    Rel_D(epic, xhuma, "1. ITI-55 Discovery<br>2. Document Query", "mTLS / SOAP")
+    Rel_D(xhuma, nhse_api, "1. PDS/SDS Lookups<br>2. GP Connect Retrieval", "mTLS+JWT / OAuth")
+    Rel_R(xhuma, monitor, "Sends audit logs", "Internal")
+    Rel_U(xhuma, epic, "Returns Demographics / C-CDA", "SOAP")
 ```
 
 ### Container Diagram
@@ -69,25 +69,25 @@ C4Container
         }
     }
 
-    Rel(epic, api, "ITI-55 & Document Queries", "mTLS / Public Internet")
-    Rel(api, epic, "Demographics, C-CDA, HTML", "mTLS / Public Internet")
+    Rel_D(epic, api, "Queries", "mTLS")
+    Rel_U(api, epic, "Responses", "mTLS")
     
-    Rel(api, pds_handler, "Initiates Discovery", "Internal")
-    Rel(api, retrieve_handler, "Initiates Retrieval", "Internal")
+    Rel_D(api, pds_handler, "Discovery", "Internal")
+    Rel_D(api, retrieve_handler, "Retrieval", "Internal")
     
-    Rel(pds_handler, nhse_api, "PDS Lookup", "Public Internet")
-    Rel(retrieve_handler, nhse_api, "SDS Routing", "Public Internet")
-    Rel(retrieve_handler, hscn_relay, "GP Connect Request", "WebSocket")
-    Rel(hscn_relay, nhse_api, "GP Connect Queries", "HSCN")
+    Rel_D(pds_handler, nhse_api, "PDS Lookup", "Internet")
+    Rel_R(retrieve_handler, nhse_api, "SDS Routing", "Internet")
+    Rel_D(retrieve_handler, hscn_relay, "GP Connect Req", "WebSocket")
+    Rel_D(hscn_relay, nhse_api, "GP Connect", "HSCN")
     
-    Rel(retrieve_handler, transform, "Passes FHIR Bundle", "Internal")
-    Rel(transform, api, "Returns C-CDA & HTML", "Internal")
+    Rel_R(retrieve_handler, transform, "Passes FHIR", "Internal")
+    Rel_U(transform, api, "Returns C-CDA", "Internal")
     
-    Rel(api, cache, "Read/Write transient data", "TCP")
-    Rel(api, audit_db, "Write config & audit events", "TCP")
-    Rel(api, monitor, "Write metrics", "HTTPS")
+    Rel_L(api, cache, "Transient data", "TCP")
+    Rel_L(api, audit_db, "Audit events", "TCP")
+    Rel_R(api, monitor, "Metrics", "HTTPS")
     
-    Rel(cicd, api, "Deploy Image Pull", "HTTPS")
+    Rel_R(cicd, api, "Deploy Image", "HTTPS")
 ```
 
 ### Component Diagram
@@ -112,32 +112,32 @@ C4Component
         Component(audit_writer, "Audit/Event Writer", "Python", "Audit trail required")
     }
 
-    Rel(epic, inbound, "SOAP Request (Discovery / Retrieve)")
-    Rel(inbound, err_handler, "Validation/Schema Failure")
+    Rel_D(epic, inbound, "SOAP Request")
+    Rel_R(inbound, err_handler, "Validation Failure")
     
-    Rel(inbound, cache, "Idempotency check")
-    Rel(inbound, pds_client, "Discovery Request (ITI-55)")
-    Rel(inbound, sds_client, "Routing Request")
-    Rel(inbound, gpc_client, "Document Retrieve")
+    Rel_L(inbound, cache, "Idempotency check")
+    Rel_D(inbound, pds_client, "Discovery Request")
+    Rel_D(inbound, sds_client, "Routing Request")
+    Rel_D(inbound, gpc_client, "Document Retrieve")
     
-    Rel(pds_client, nhse, "Query PDS")
-    Rel(sds_client, nhse, "Query SDS")
-    Rel(gpc_client, nhse, "Query GP Connect")
+    Rel_D(pds_client, nhse, "Query PDS")
+    Rel_D(sds_client, nhse, "Query SDS")
+    Rel_D(gpc_client, nhse, "Query GP Connect")
     
-    Rel(gpc_client, resp_val, "Raw FHIR Bundle")
-    Rel(pds_client, inbound, "Demographics")
+    Rel_D(gpc_client, resp_val, "Raw FHIR Bundle")
+    Rel_U(pds_client, inbound, "Demographics")
     
-    Rel(resp_val, err_handler, "Fatal Validation Error")
-    Rel(resp_val, ccda_build, "FHIR Bundle (with warnings)")
-    Rel(ccda_build, html_build, "C-CDA")
+    Rel_R(resp_val, err_handler, "Fatal Error")
+    Rel_D(resp_val, ccda_build, "FHIR (warnings)")
+    Rel_D(ccda_build, html_build, "C-CDA")
     
-    Rel(html_build, inbound, "Return (C-CDA, HTML)")
-    Rel(inbound, epic, "Return Success to Epic")
-    Rel(err_handler, epic, "Return safe failure response")
+    Rel_U(html_build, inbound, "Return C-CDA, HTML")
+    Rel_U(inbound, epic, "Return Success")
+    Rel_U(err_handler, epic, "Return Failure")
     
-    Rel(inbound, audit_writer, "Log attempt")
-    Rel(err_handler, audit_writer, "Log failures")
-    Rel(audit_writer, audit_db, "Write audit events")
+    Rel_R(inbound, audit_writer, "Log attempt")
+    Rel_D(err_handler, audit_writer, "Log failures")
+    Rel_R(audit_writer, audit_db, "Write events")
 ```
 
 ### Data Flow Diagrams
