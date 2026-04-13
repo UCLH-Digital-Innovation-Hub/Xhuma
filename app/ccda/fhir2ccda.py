@@ -364,6 +364,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 # if there are no entries
                 # Initialize empty table with appropriate headers based on section
                 comp["section"]["text"] = {
+                    "paragraph": {"@styleCode": "flagData"},
                     "table": {
                         "thead": create_headers(list.title),
                         "tbody": {
@@ -374,7 +375,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                                 }
                             }
                         },
-                    }
+                    },
                 }
             else:
 
