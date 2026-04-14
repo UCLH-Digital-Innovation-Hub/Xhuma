@@ -415,8 +415,9 @@ async def medication(
                 .strip()
             )
 
-    # check for prescriping agency and last issued date extensions
+    # check for prescribing agency and last issued date extensions
     remaining_repeats = None
+    prescription_information = []
     for ext in entry.extension:
         # print(ext.url)
         if (
@@ -424,13 +425,15 @@ async def medication(
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
         ):
             prescribing_agency = ext.valueCodeableConcept.coding[0].display
+            prescription_information.append(prescribing_agency)
         if (
             ext.url
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
         ):
             last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
+            prescription_information.append(f"Last issued date: {last_issued_date}")
 
-    # look for prescrtion type in medication request
+    # look for prescription type in medication request
     for ext in based_on_request.extension:
         if (
             ext.url
@@ -453,8 +456,11 @@ async def medication(
                     # print(f"Repeats Issued:{repeats_issued}")
             if repeats_allowed is not None and repeats_issued is not None:
                 remaining_repeats = repeats_allowed - repeats_issued
-                misc_notes.append(
-                    f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                # misc_notes.append(
+                #     f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                # )
+                prescription_information.append(
+                    f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
                 )
         if (
             ext.url
@@ -464,6 +470,30 @@ async def medication(
                 if i.url == "statusReason":
                     status_reason = i.valueCodeableConcept.text
                     misc_notes.append(f"Medication status reason: {status_reason}")
+
+    # process issued quantity from based_on_request
+    if based_on_request.dispenseRequest and based_on_request.dispenseRequest.quantity:
+        quantity = based_on_request.dispenseRequest.quantity
+        unit = None
+        if quantity.unit:
+            unit = quantity.unit
+        # else look for dose quanity extension
+        elif quantity.extension:
+            for ext in quantity.extension:
+                if (
+                    ext.url
+                    == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationQuantityText-1"
+                ):
+                    unit = ext.valueString
+        issued_quantity = f"Issued quantity: {quantity.value} {unit}"
+        # misc_notes.append(issued_quantity)
+        prescription_information.append(issued_quantity)
+
+    # add br tags to prescription information with a join
+    prescription_information = (
+        "<br />".join(prescription_information) if prescription_information else ""
+    )
+    # prescription_information = [f"{info} <br />" for info in prescription_information]
 
     patient_instr_list = [
         dosage.patientInstruction
@@ -528,6 +558,17 @@ async def medication(
             )
         substance_administration.entryRelationship.append(supply_order)
 
+    # entry_row = [
+    #     readable_date(low_time[0]) if low_time else "",
+    #     readable_date(high_time[0]) if high_time else "",
+    #     entry.status if entry.status else "unknown",
+    #     prescription_type if "prescription_type" in locals() else "",
+    #     med_name,
+    #     f"{text_instructions}<br />{patient_instructions}",
+    #     {"BR": misc_notes_text},
+    #     prescribing_agency if "prescribing_agency" in locals() else "",
+    #     last_issued_date if "last_issued_date" in locals() else "",
+    # ]
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
         readable_date(high_time[0]) if high_time else "",
@@ -536,8 +577,7 @@ async def medication(
         med_name,
         f"{text_instructions}<br />{patient_instructions}",
         {"BR": misc_notes_text},
-        prescribing_agency if "prescribing_agency" in locals() else "",
-        last_issued_date if "last_issued_date" in locals() else "",
+        prescription_information,
     ]
 
     return EntryWithRow(

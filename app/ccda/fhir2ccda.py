@@ -280,8 +280,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "Medication",
                         "Instructions",
                         "Misc Notes",
-                        "Prescribing Agency",
-                        "Last Issued Date",
+                        "Prescription Information",
                     ],
                     "parser": parse_medications,
                 },
@@ -294,8 +293,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "Medication",
                         "Instructions",
                         "Misc Notes",
-                        "Prescribing Agency",
-                        "Last Issued Date",
+                        "Prescription Information",
                     ],
                     "parser": parse_medications,
                 },
@@ -470,6 +468,12 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 active_section = await create_section(
                     clone_list(list_obj, "Active Medications", active)
                 )
+
+                # delete the third column for acute medications as we don't have status for active medications and it is always active
+                for entry in active_section["section"]["text"]["table"]["tbody"]["tr"]:
+                    del entry["td"][2]
+                # delete the third columf ro the header too
+                del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
 
                 past_section = await create_section(
                     clone_list(list_obj, "Past Medications", past)
