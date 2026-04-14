@@ -263,28 +263,41 @@ async def medication(
         )
 
     for dose in entry.dosage:
-        substance_administration.entryRelationship.append(
-            EntryRelationship(
-                **{
-                    "sequenceNumber": (
-                        entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
-                    ),
-                    "@typeCode": "COMP",
-                    "@inversionInd": True,
-                    "substanceAdministration": {
-                        "@classCode": "SBADM",
-                        "@moodCode": "EVN",
-                        "templateId": [{"@root": "2.16.840.1.113883.10.20.22.4.147"}],
-                        "code": {
-                            "@code": "76662-6",
-                            "@codeSystem": "2.16.840.1.113883.6.1",
-                        },
-                        # "text": {"@xsi:type": "ED", "xmlText": dose.text},
-                        "text": dose.text,
-                    },
-                }
-            )
+        dosage_entry = EntryRelationship(**{"@typeCode": "COMP", "@inversionInd": True})
+        dosage_entry.substanceAdministration = SubstanceAdministration(
+            moodCode="EVN",
+            typeCode="COMP",
+            templateId=templateId(
+                root="2.16.840.1.113883.10.20.22.4.147",
+                extension="2014-06-09",
+            ),
+            code=CD(
+                code="76662-6",
+                codeSystem="2.16.840.1.113883.6.1",
+                displayName="Dosage instructions",
+            ),
+            text=dose.text,
         )
+        # substance_administration.entryRelationship.append(
+        #     EntryRelationship(
+        #         **{
+        #             "sequenceNumber": (
+        #                 entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
+        #             ),
+        #             "@typeCode": "COMP",
+        #             "@inversionInd": True,
+        #             "substanceAdministration": {
+        #                 "@classCode": "SBADM",
+        #                 "@moodCode": "EVN",
+        #                 "templateId": [{"@root": "2.16.840.1.113883.10.20.22.4.147"}],
+        #                 "code": CD(code="76662-6", codeSystem="2.16.840.1.113883.6.1", displayName="Dosage instructions"),
+        #                 # "text": {"@xsi:type": "ED", "xmlText": dose.text},
+        #                 "text": dose.text,
+        #             },
+        #         }
+        #     )
+        # )
+        substance_administration.entryRelationship.append(dosage_entry)
         if dose.patientInstruction:
             instruction_entry = EntryRelationship()
             instruction_entry.act = {
@@ -352,7 +365,7 @@ async def medication(
                         substance_administration.doseQuantity["@unit"] = (
                             dmd_data.vpi.unit
                         )
-                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DMD lookup"
+                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DM+D lookup"
                         # print(warning_text)
                         misc_notes.append(warning_text)
 

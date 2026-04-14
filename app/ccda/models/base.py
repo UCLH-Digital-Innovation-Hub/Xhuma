@@ -149,6 +149,7 @@ class SubstanceAdministration(BaseModel):
     #         }
     #     )
     # )
+    code: Optional[CD] = None
     text: Optional[Union[str, ED]] = None
     statusCode: Optional[CS] = None
     effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
