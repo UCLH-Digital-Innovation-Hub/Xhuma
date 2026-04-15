@@ -1,5 +1,8 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 BUNDLE_DIR = FIXTURE_DIR / "bundles"
@@ -21,3 +24,20 @@ def load_bundle(nhsno):
 def load_pds(nhsno):
     with open(PDS_DIR / f"{nhsno}.json") as f:
         return json.load(f)
+
+
+@pytest.fixture
+def fake_pg_pool():
+    # Connection returned by the context manager
+    conn = AsyncMock()
+
+    # The async context manager returned by pool.acquire()
+    acquire_cm = MagicMock()
+    acquire_cm.__aenter__ = AsyncMock(return_value=conn)
+    acquire_cm.__aexit__ = AsyncMock(return_value=None)
+
+    # Pool whose acquire() returns the CM *synchronously*
+    pool = MagicMock()
+    pool.acquire.return_value = acquire_cm
+
+    return pool, conn

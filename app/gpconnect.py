@@ -13,6 +13,10 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
+from .audit.audit import process_saml_attributes
+from .audit.build import build_audit_event
+from .audit.models import AuditOutcome, SAMLAttributes
+from .audit.store import insert_audit_event
 from .ccda.convert_mime import base64_xml, convert_mime
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
@@ -21,12 +25,60 @@ from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import RELAY_TIMEOUT, USE_RELAY
 
+# from app.metrics.metric_utils import classify_error, now
+
+
 router = APIRouter()
 
 # client = httpx.AsyncClient(
 #     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
+
+
+# audit event with shared session
+async def _attempt_audit(
+    request: Request,
+    *,
+    nhs_number: str,
+    saml: SAMLAttributes,
+    action: str,
+    outcome: AuditOutcome,
+    error_code: str | None = None,
+    detail: dict | None = None,
+    message_id: str | None = None,
+    document_id: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    """Attempt to write an audit event, but don't fail the main request if it fails."""
+    if not request or not hasattr(request, "app"):
+        logging.warning("No request or app found; skipping audit event")
+        return
+
+    SessionLocal = getattr(request.app.state, "SessionLocal", None)
+    if not SessionLocal:
+        logging.warning("No SessionLocal found in app state; skipping audit event")
+        return
+
+    try:
+        async with SessionLocal() as session:
+            ev = await build_audit_event(
+                request=request,
+                session=session,
+                nhs_number=str(nhs_number),
+                saml=saml,
+                action=action,
+                outcome=outcome,
+                error_code=error_code,
+                detail=detail,
+                message_id=message_id,
+                document_id=document_id,
+                request_id=request_id,
+            )
+            await insert_audit_event(session, ev)
+            await session.commit()
+    except Exception as e:
+        logging.error(f"Failed to write audit event: {e}")
 
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
@@ -59,28 +111,44 @@ client = httpx.AsyncClient(
 
 @router.get("/gpconnect/{nhsno}")
 async def gpconnect(
-    nhsno: int, saml_attrs: dict, log_dir: str = None, request: Request = None
+    nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
 ) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
 
-    # LOG SAML ATTRS FOR TESTING ONLY
-    with open("saml_attrs.json", "a") as f:
-        json.dump(saml_attrs, f, indent=2)
-    pprint.pprint(saml_attrs)
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
-        logging.error(msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="validate_nhs_number",
+            outcome=AuditOutcome.fail,
+            error_code="400",
+        )
         return JSONResponse(status_code=400, content={"success": False, "error": msg})
 
     # 2) PDS lookup (consider caching in future)
+    # t = now()
     try:
         pds_search = await lookup_patient(nhsno)
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="pds_lookup",
+            outcome=AuditOutcome.ok,
+        )
     except Exception as e:
-        msg = f"PDS lookup failed: {e}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="pds_lookup",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -95,6 +163,14 @@ async def gpconnect(
 
     if security_code != "U":
         msg = "Patient is not unrestricted, access to GP Connect is not permitted"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="check_restriction",
+            outcome=AuditOutcome.fail,
+            error_code="403",
+        )
         logging.error(f"{nhsno} is restricted")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -106,6 +182,15 @@ async def gpconnect(
         gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
     except Exception as e:
         msg = f"Unable to read GP ODS from PDS response: {e}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="resolve_gp_ods",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -114,8 +199,24 @@ async def gpconnect(
 
     try:
         asid_trace = await sds_trace(gp_ods)
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="sds_trace",
+            outcome=AuditOutcome.ok,
+        )
     except Exception as e:
         msg = f"SDS trace failed: {e}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="sds_trace",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -124,16 +225,33 @@ async def gpconnect(
 
     asid = None
     nhsmhsparty = None
-    for item in (
-        asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
-    ):
-        if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
-            asid = item.get("value")
-        elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
-            nhsmhsparty = item.get("value")
+    try:
+        for item in (
+            asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
+        ):
+            if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
+                asid = item.get("value")
+            elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+                nhsmhsparty = item.get("value")
+    except Exception as e:
+        msg = f"Unable to parse SDS trace response: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     if not asid or not nhsmhsparty:
         msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="resolve_asid_partykey",
+            outcome=AuditOutcome.fail,
+            error_code="500",
+            detail={"message": msg},
+        )
         logging.error(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -143,8 +261,24 @@ async def gpconnect(
     # 5) Endpoint lookup
     try:
         endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="fhir_endpoint_trace",
+            outcome=AuditOutcome.ok,
+        )
     except Exception as e:
         msg = f"SDS endpoint trace failed: {e}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="fhir_endpoint_trace",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -153,6 +287,15 @@ async def gpconnect(
 
     if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
         msg = f"Unable to find FHIR endpoint for ODS code {gp_ods}"
+        await _attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="fhir_endpoint_trace",
+            outcome=AuditOutcome.fail,
+            error_code="500",
+            detail={"message": msg},
+        )
         logging.error(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -165,7 +308,7 @@ async def gpconnect(
     token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
     headers = {
         "Ssp-TraceID": str(uuid4()),
-        "Ssp-From": "200000002574",
+        "Ssp-From": "200000002574",  # TODO this should be dynamic as each client endpoint will have own SSID
         "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
@@ -213,8 +356,8 @@ async def gpconnect(
             http2=False,
         ) as session:
             r = await session.post(url, json=body, headers=headers)
-            print(f"Direct HTTP call response status: {r.status_code}")
-            print(f"Direct HTTP call response text: {r.text}")
+            # print(f"Direct HTTP call response status: {r.status_code}")
+            # print(f"Direct HTTP call response text: {r.text}")
             return r  # return a real httpx.Response
 
     async def _relay_call(url: str, headers: dict, body: dict) -> httpx.Response:
@@ -258,7 +401,6 @@ async def gpconnect(
             url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             resp = await _direct_http_call(url, headers, body)
 
-        # (your existing logging)
         if log_dir:
             with open(
                 os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
@@ -268,6 +410,16 @@ async def gpconnect(
 
     except Exception as e:
         msg = f"Transport error: {e}"
+        await _attempt_audit(
+            request=request,
+            request_id=headers.get("Ssp-TraceID"),
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="gpconnect_request",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -281,17 +433,19 @@ async def gpconnect(
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    except Exception as e:
-        msg = f"Unexpected error during request: {e}"
-        print("❌", msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
-        return JSONResponse(status_code=502, content={"success": False, "error": msg})
-
     # 8) Non-200 handling
     if resp.status_code != 200:
         msg = f"Error from GP Connect endpoint {resp.status_code}"
+        await _attempt_audit(
+            request=request,
+            request_id=headers.get("Ssp-TraceID"),
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="gpconnect_request",
+            outcome=AuditOutcome.fail,
+            error_code=str(resp.status_code),
+            detail={"response_text": resp.text},
+        )
         logging.error(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -299,6 +453,16 @@ async def gpconnect(
         return JSONResponse(
             status_code=resp.status_code, content={"success": False, "error": msg}
         )
+
+    # audit successful response
+    await _attempt_audit(
+        request=request,
+        request_id=headers.get("Ssp-TraceID"),
+        nhs_number=str(nhsno),
+        saml=saml_attrs,
+        action="gpconnect_request",
+        outcome=AuditOutcome.ok,
+    )
 
     # 9) Convert to CCDA, store in Redis, return JSONResponse
     scr_bundle = json.loads(resp.text)
@@ -330,18 +494,38 @@ async def gpconnect(
         except Exception:
             pass
 
-    xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+    try:
+        xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+    except Exception as e:
+        msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
+        logging.exception(msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+
     if log_dir:
         with open(os.path.join(log_dir, f"{nhsno}.xml"), "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     xop = base64_xml(xml_ccda)
     doc_uuid = str(uuid4())
-    redis_client.setex(nhsno, timedelta(minutes=60), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=60), xop)
+    redis_client.setex(nhsno, timedelta(minutes=1), doc_uuid)
+    redis_client.setex(doc_uuid, timedelta(minutes=1), xop)
 
-    with open(f"{nhsno}.xml", "w") as output:
-        output.write(xmltodict.unparse(xml_ccda, pretty=True))
+    # only write the xml if dev
+    if os.getenv("ENV", "prod").lower() in ("dev", "local"):
+        with open(f"{nhsno}.xml", "w") as output:
+            output.write(xmltodict.unparse(xml_ccda, pretty=True))
+
+    await _attempt_audit(
+        request=request,
+        nhs_number=str(nhsno),
+        saml=saml_attrs,
+        action="store_ccda",
+        outcome=AuditOutcome.ok,
+        document_id=doc_uuid,
+    )
 
     return JSONResponse(
         status_code=200, content={"success": True, "document_id": doc_uuid}
@@ -351,44 +535,14 @@ async def gpconnect(
 if __name__ == "__main__":
     import asyncio
 
-    audit_dict = {
-        "subject_id": "CONE, Stephen",
-        "organization": "UCLH - University College London Hospitals - TST",
-        "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        "role": {
-            "Role": {
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "@code": "224608005",
-                "@codeSystemName": "SNOMED_CT",
-                "@displayName": "Administrative healthcare staff",
-                "@xmlns": "urn:hl7-org:v3",
-                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-            }
-        },
-        "purpose_of_use": {
-            "PurposeForUse": {
-                "@xsi:type": "CE",
-                "@code": "TREATMENT",
-                "@codeSystem": "2.16.840.1.113883.3.18.7.1",
-                "@codeSystemName": "nhin-purpose",
-                "@displayName": "Treatment",
-                "@xmlns": "urn:hl7-org:v3",
-                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-            },
-        },
-        "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
-    }
+    xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9690937278^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
+    saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 
     # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(
-        gpconnect(9690937375, audit_dict, log_dir="app/logs/int_troubleshooting")
-    )
+    result = asyncio.run(gpconnect(9692140466, saml))
     print(result.body.decode())
     print(result.status_code)
-    assert "error" in result.body.decode()
-    body = json.loads(result.body)
-    assert body["success"] is False
+    # assert "error" in result.body.decode()
+    # body = json.loads(result.body)
+    # assert body["success"] is False
     # assert result["resourceType"] == "Patient"

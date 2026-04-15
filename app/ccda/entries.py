@@ -1,22 +1,47 @@
 import uuid
+from dataclasses import dataclass
+from typing import Any, Iterable, List, Optional, Sequence
 
-from fhirclient.models import (allergyintolerance, coding, condition,
-                               immunization)
+from fhirclient.models import allergyintolerance, coding, condition, immunization
 from fhirclient.models import medication as fhirmed
-from fhirclient.models import medicationstatement, observation
+from fhirclient.models import medicationrequest, medicationstatement, observation
 
-from .helpers import (code_with_translations, date_helper,
-                      effective_time_helper, organization_to_author,
-                      templateId)
-from .models.base import (EntryRelationship, Observation, ResultObservation,
-                          ResultsOrganizer, SubstanceAdministration)
+from .helpers import (
+    code_with_translations,
+    date_helper,
+    effective_time_helper,
+    organization_to_author,
+    readable_date,
+    templateId,
+)
+from .models.base import (
+    EntryRelationship,
+    Observation,
+    ResultObservation,
+    ResultsOrganizer,
+    SubstanceAdministration,
+)
 from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
+Cell = str
+Row = List[Cell]
 
-def medication(entry: medicationstatement.MedicationStatement, index: dict) -> dict:
+
+@dataclass(frozen=True)
+class EntryWithRow:
+    entry: Any  # C-CDA entry section
+    row: Optional[Row]  # row data for summary table in section
+
+
+def medication(
+    entry: medicationstatement.MedicationStatement, index: dict
+) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
+    based_on_request: medicationrequest.MedicationRequest = index[
+        entry.basedOn[0].reference
+    ]
     # request = index[entry.basedOn[0].reference]
     # dosage_instructions = request.dosageInstruction
     # for dose in dosage_instructions:
@@ -52,19 +77,36 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
     # if dose quantiy is in dosage
     if entry.dosage[0].doseQuantity:
         # assumption that all structuered dosage will be snomed
+        # substance_administration.doseQuantity = {
+        #     "value": {
+        #         "@xsi:type": "PQ",
+        #         "@nullFlavor": "OTH",
+        #         "translation": {
+        #             "@value": entry.dosage[0].doseQuantity.value,
+        #             "@code": entry.dosage[0].doseQuantity.code,
+        #             "@codeSystemName": entry.dosage[0].doseQuantity.system,
+        #             "@codeSystem": "2.16.840.1.113883.6.96",
+        #             "originalText": entry.dosage[0].doseQuantity.unit,
+        #         },
+        #     },
+        # }
         substance_administration.doseQuantity = {
-            "value": {
-                "@xsi:type": "PQ",
-                "@nullFlavor": "OTH",
-                "translation": {
-                    "@value": entry.dosage[0].doseQuantity.value,
-                    "@code": entry.dosage[0].doseQuantity.code,
-                    "@codeSystemName": entry.dosage[0].doseQuantity.system,
-                    "@codeSystem": "2.16.840.1.113883.6.96",
-                    "originalText": entry.dosage[0].doseQuantity.unit,
-                },
-            },
+            "@xsi:type": "PQ",
+            "@value": entry.dosage[0].doseQuantity.value,
         }
+        if entry.dosage[0].doseQuantity.unit:
+            substance_administration.doseQuantity["@unit"] = entry.dosage[
+                0
+            ].doseQuantity.unit
+
+        # if there is a code add a translation
+        if entry.dosage[0].doseQuantity.code:
+            substance_administration.doseQuantity["translation"] = {
+                "@value": entry.dosage[0].doseQuantity.value,
+                "@code": entry.dosage[0].doseQuantity.code,
+                "@codeSystem": "2.16.840.1.113883.6.96",
+                "originalText": entry.dosage[0].doseQuantity.unit,
+            }
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
     if entry.dosage[0].timing:
         # check if medication is prn
@@ -109,10 +151,17 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
 
         else:
             # frequency is the occurrence per period. C-CDA has a single period between doses hence division
-            dose_period = (
-                entry.dosage[0].timing.repeat.period
-                / entry.dosage[0].timing.repeat.frequency
-            )
+
+            # check frequency has period and frequency
+            repeat = entry.dosage[0].timing.repeat
+            period = getattr(repeat, "period", None)
+            frequency = getattr(repeat, "frequency", None)
+            if period and frequency:
+
+                dose_period = (
+                    entry.dosage[0].timing.repeat.period
+                    / entry.dosage[0].timing.repeat.frequency
+                )
         # print(f"dose period: {dose_period}")
 
         # https://hl7.org/fhir/R4/valueset-event-timing.html
@@ -160,21 +209,25 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
         #                 )
         #             )
         # else:
-        substance_administration.effectiveTime.append(
-            PIVL_TS(
-                **{
-                    "@xsi:type": "PIVL_TS",
-                    "@operator": "A",
-                    "@institutionSpecified": (
-                        "true" if entry.dosage[0].timing.repeat.frequency else None
-                    ),
-                    "period": {
-                        "@value": dose_period,
-                        "@unit": entry.dosage[0].timing.repeat.periodUnit,
-                    },
-                }
-            )
+        pivl = PIVL_TS(
+            **{
+                "@xsi:type": "PIVL_TS",
+                "@operator": "A",
+                "@institutionSpecified": (
+                    "true" if entry.dosage[0].timing.repeat.frequency else None
+                ),
+            }
         )
+
+        # if there is a dose period in locals, add it to pivl
+        if "dose_period" in locals() and dose_period:
+            pivl.period = {
+                "@value": dose_period,
+                "@unit": entry.dosage[0].timing.repeat.periodUnit,
+            }
+
+        substance_administration.effectiveTime.append(pivl)
+
     #   check if route is in dosage
     if entry.dosage[0].method:
         substance_administration.routeCode = code_with_translations(
@@ -203,16 +256,68 @@ def medication(entry: medicationstatement.MedicationStatement, index: dict) -> d
                 }
             )
         )
+    # find effective time entry with operator of low
 
-    # print(substance_administration.entryRelationship)
-    return {
-        "substanceAdministration": substance_administration.model_dump(
-            by_alias=True, exclude_none=True
-        )
-    }
+    low_time = [
+        et.value
+        for et in substance_administration.effectiveTime
+        if getattr(et, "operator", None) == "low"
+    ]
+    high_time = [
+        et.value
+        for et in substance_administration.effectiveTime
+        if getattr(et, "operator", None) == "high"
+    ]
+    med_name = (
+        substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
+    )
+
+    # check for prescriping agency and last issued date extensions
+    for ext in entry.extension:
+        # print(ext.url)
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
+        ):
+            prescribing_agency = ext.valueCodeableConcept.coding[0].display
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
+        ):
+            last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
+
+    # look for prescrtion type in medication request
+    for ext in based_on_request.extension:
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
+        ):
+            prescription_type = ext.valueCodeableConcept.coding[0].display
+
+    entry_row = [
+        readable_date(low_time[0]) if low_time else "",
+        readable_date(high_time[0]) if high_time else "",
+        entry.status if entry.status else "unknown",
+        prescription_type if "prescription_type" in locals() else "",
+        med_name,
+        substance_administration.entryRelationship[0].substanceAdministration.get(
+            "text", ""
+        ),
+        prescribing_agency if "prescribing_agency" in locals() else "",
+        last_issued_date if "last_issued_date" in locals() else "",
+    ]
+
+    return EntryWithRow(
+        entry={
+            "substanceAdministration": substance_administration.model_dump(
+                by_alias=True, exclude_none=True
+            )
+        },
+        row=entry_row,
+    )
 
 
-def problem(entry: condition.Condition) -> dict:
+def problem(entry: condition.Condition) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.3.html
     prob = {
         "act": {
@@ -225,7 +330,7 @@ def problem(entry: condition.Condition) -> dict:
         "2.16.840.1.113883.10.20.22.4.3", "2015-08-01"
     )
     prob["act"]["id"] = {"@root": uuid.uuid4()}
-    prob["act"]["code"] = {"@code": "CONC", "@codesystem": "2.16.840.1.113883.5.6"}
+    prob["act"]["code"] = {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"}
 
     prob["act"]["statusCode"] = {"@code": entry.clinicalStatus}
     prob["act"]["effectiveTime"] = {
@@ -267,10 +372,16 @@ def problem(entry: condition.Condition) -> dict:
 
     prob["act"]["entryRelationship"]["observation"] = observation
 
-    return prob
+    problem_row = [
+        readable_date(prob["act"]["effectiveTime"].get("low", {}).get("@value", "")),
+        prob["act"]["statusCode"].get("@code", ""),
+        observation["value"].get("@displayName", ""),
+    ]
+
+    return EntryWithRow(entry=prob, row=problem_row)
 
 
-def allergy(entry: allergyintolerance.AllergyIntolerance) -> dict:
+def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.30.html
     all = {
         "act": {
@@ -313,44 +424,53 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> dict:
             "@classCode": "MANU",
             "playingEntity": {
                 "@classCode": "MMAT",
-                "code": {
-                    "@code": entry.code.coding[0].code,
-                    "@displayName": entry.code.coding[0].display,
+                "code": code_with_translations(entry.code.coding),
+            },
+        },
+    }
+    # if there is a reaction, add manifestation as entryRelationship
+    if entry.reaction and entry.reaction[0].manifestation:
+        observation["entryRelationship"] = {
+            "@typeCode": "MFST",
+            "@inversionInd": "true",
+            "observation": {
+                "@classCode": "OBS",
+                "@moodCode": "EVN",
+                "templateId": templateId(
+                    "2.16.840.1.113883.10.20.22.4.9", "2014-06-09"
+                ),
+                "id": {"@root": uuid.uuid4()},
+                "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
+                "effectiveTime": {
+                    "low": {"@value": date_helper(entry.assertedDate.isostring)}
+                },
+                "value": {
+                    "@xsi:type": "CD",
+                    "@code": entry.reaction[0].manifestation[0].coding[0].code,
+                    "@displayName": entry.reaction[0]
+                    .manifestation[0]
+                    .coding[0]
+                    .display,
                     "@codeSystemName": "SNOMED CT",
                     "@codeSystem": "2.16.840.1.113883.6.96",
                 },
             },
-        },
-    }
-
-    observation["entryRelationship"] = {
-        "@typeCode": "MFST",
-        "@inversionInd": "true",
-        "observation": {
-            "@classCode": "OBS",
-            "@moodCode": "EVN",
-            "templateId": templateId("2.16.840.1.113883.10.20.22.4.9", "2014-06-09"),
-            "id": {"@root": uuid.uuid4()},
-            "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
-            "effectiveTime": {
-                "low": {"@value": date_helper(entry.assertedDate.isostring)}
-            },
-            "value": {
-                "@xsi:type": "CD",
-                "@code": entry.reaction[0].manifestation[0].coding[0].code,
-                "@displayName": entry.reaction[0].manifestation[0].coding[0].display,
-                "@codeSystemName": "SNOMED CT",
-                "@codeSystem": "2.16.840.1.113883.6.96",
-            },
-        },
-    }
+        }
 
     all["act"]["entryRelationship"]["observation"] = observation
 
-    return all
+    allergy_row = [
+        readable_date(all["act"]["effectiveTime"].get("low", {}).get("@value", "")),
+        all["act"]["statusCode"].get("@code", ""),
+        observation["participant"]["participantRole"]["playingEntity"][
+            "code"
+        ].displayName,
+    ]
+
+    return EntryWithRow(entry=all, row=allergy_row)
 
 
-def immunization_entry(entry: immunization.Immunization, index: dict) -> dict:
+def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWithRow:
     # https://build.fhir.org/ig/HL7/CDA-ccda-2.2/StructureDefinition-2.16.840.1.113883.10.20.22.2.2.1.html
 
     immunization_entry = SubstanceAdministration(
@@ -374,7 +494,10 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> dict:
     if entry.route:
         immunization_entry.route = code_with_translations(entry.route.coding)
 
-    return immunization_entry.model_dump(by_alias=True, exclude_none=True)
+    # return immunization_entry.model_dump(by_alias=True, exclude_none=True)
+    return EntryWithRow(
+        entry=immunization_entry.model_dump(by_alias=True, exclude_none=True), row=None
+    )
 
 
 def result(entry, index: dict) -> dict:

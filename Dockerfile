@@ -13,7 +13,11 @@ COPY Pipfile /code/Pipfile
 COPY Pipfile.lock /code/Pipfile.lock
 
 RUN pipenv install --system --deploy
-
+# Copy APP code
 COPY app /code/app
+
+# copy alembic files for migrations
+COPY alembic.ini /code/alembic.ini
+COPY alembic /code/alembic
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
