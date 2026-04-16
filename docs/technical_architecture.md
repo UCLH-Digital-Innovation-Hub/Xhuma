@@ -3,6 +3,309 @@
 ## System Overview
 Xhuma is a stateless middleware service designed to facilitate the conversion of GP Connect structured records into CCDA (Consolidated Clinical Document Architecture) format. The service acts as an intermediary between Electronic Health Record (EHR) systems and NHS APIs, providing seamless integration and data transformation capabilities.
 
+## Architecture Diagrams
+
+*(Note: The following diagrams align Xhuma's system model to clinical workflows and DTAC/DCB0160 assurance expectations, explicitly highlighting Epic as the system of record and Xhuma as stateless middleware.)*
+
+### System Context
+```mermaid
+C4Context
+    title C4 Context Diagram - Xhuma Middleware
+    
+    Person(clinician, "UCLH Clinicians", "End user via Epic, handles identity confirmation & reconciliation")
+    
+    Enterprise_Boundary(epic_bnd, "Epic Supplier Boundary") {
+        System_Ext(epic, "Epic Care Everywhere", "EHR providing UI, remembers patient link, reconciliation owner (External risk owner)")
+    }
+
+    Enterprise_Boundary(uclh, "System Boundary (UCLH)") {
+        System(xhuma, "Xhuma", "Stateless middleware orchestrating discovery, retrieval, transforming to C-CDA/HTML")
+        System(monitor, "UCLH Logging & Monitoring", "Audit trail / observability layer")
+    }
+
+    Enterprise_Boundary(nhse_bnd, "NHSE Boundary") {
+        System_Ext(nhse_api, "NHSE APIs (PDS, SDS, GP Connect)", "Target NHS services (External risk owner)")
+    }
+
+    Rel_D(clinician, epic, "Queries, confirms identity", "UI")
+    Rel_D(epic, xhuma, "1. ITI-55 Discovery<br>2. Document Query", "mTLS / SOAP")
+    Rel_D(xhuma, nhse_api, "1. PDS/SDS Lookups<br>2. GP Connect Retrieval", "mTLS+JWT / OAuth")
+    Rel_R(xhuma, monitor, "Sends audit logs", "Internal")
+    Rel_U(xhuma, epic, "Returns Demographics / C-CDA", "SOAP")
+```
+
+### Container Diagram
+```mermaid
+C4Container
+    title C4 Container Diagram - Xhuma
+    
+    System_Ext(epic, "Epic Care Everywhere", "Reconciliation owner, stores patient linkage")
+    System_Ext(nhse_api, "NHSE APIs", "PDS, SDS, GP Connect")
+
+    System_Boundary(uclh_boundary, "System boundary (Xhuma/UCLH)") {
+        
+        Boundary(cicd_zone, "Engineering/Supporting System") {
+            Container(cicd, "CI/CD Pipeline", "GitHub Actions & GHCR", "Config management / CI/CD controlled change")
+        }
+
+        Boundary(app_subnet, "App Service Zone (Stateless)") {
+            Container(api, "Inbound IHE/SOAP Layer", "FastAPI / Docker", "Handles ITI-55 discovery & document query")
+            Container(pds_handler, "Patient Discovery Handler", "Python", "PDS Lookup Orchestration")
+            Container(retrieve_handler, "Document Retrieval Handler", "Python", "SDS routing & GP Connect Retrieval")
+            Container(transform, "Transformation Engine", "Python", "FHIR to C-CDA & HTML mapping")
+        }
+        
+        Boundary(db_subnet, "Protected Database Zone") {
+            ContainerDb(audit_db, "Audit & Logging Component", "PostgreSQL", "Stores config & audit logs (Audit trail required)")
+            ContainerDb(cache, "Transient Cache", "Redis", "Transient caching only (no durable linkage)")
+        }
+        
+        Boundary(monitor_zone, "Observability Zone") {
+            Container(monitor, "Logging Component", "Azure App Insights", "Metrics/traces (Audit trail required)")
+        }
+        
+        Boundary(hscn_zone, "HSCN Boundary") {
+            Container(hscn_relay, "HSCN Relay Agent", "WebSocket Tunnel", "Azure Private Link for HSCN integration")
+        }
+    }
+
+    Rel_D(epic, api, "Queries", "mTLS")
+    Rel_U(api, epic, "Responses", "mTLS")
+    
+    Rel_D(api, pds_handler, "Discovery", "Internal")
+    Rel_D(api, retrieve_handler, "Retrieval", "Internal")
+    
+    Rel_D(pds_handler, nhse_api, "PDS Lookup", "Internet")
+    Rel_R(retrieve_handler, nhse_api, "SDS Routing", "Internet")
+    Rel_D(retrieve_handler, hscn_relay, "GP Connect Req", "WebSocket")
+    Rel_D(hscn_relay, nhse_api, "GP Connect", "HSCN")
+    
+    Rel_R(retrieve_handler, transform, "Passes FHIR", "Internal")
+    Rel_U(transform, api, "Returns C-CDA", "Internal")
+    
+    Rel_L(api, cache, "Transient data", "TCP")
+    Rel_L(api, audit_db, "Audit events", "TCP")
+    Rel_R(api, monitor, "Metrics", "HTTPS")
+    
+    Rel_R(cicd, api, "Deploy Image", "HTTPS")
+```
+
+### Component Diagram
+```mermaid
+C4Component
+    title C4 Component Diagram - Xhuma Application Layer
+    
+    Container_Ext(epic, "Epic Care Everywhere", "External dependency")
+    Container_Ext(nhse, "NHSE APIs", "External dependency")
+    ContainerDb_Ext(audit_db, "Audit Database", "PostgreSQL")
+    ContainerDb_Ext(cache, "Transient Cache", "Redis (Transient only)")
+    
+    Container_Boundary(app_boundary, "System boundary (Stateless)") {
+        Component(inbound, "Inbound IHE/SOAP Handler", "Python", "Receives SOAP requests")
+        Component(pds_client, "Patient Discovery / PDS Client", "Python", "Handles PDS lookup")
+        Component(sds_client, "SDS Lookup / Routing", "Python", "Handles SDS lookup")
+        Component(gpc_client, "GP Connect Retrieval Client", "Python", "Retrieves FHIR bundle")
+        Component(resp_val, "Response Validation", "Python", "Validates payload (Partial data/warnings preserved)")
+        Component(ccda_build, "C-CDA Builder", "Python", "Builds C-CDA from FHIR Bundle")
+        Component(html_build, "HTML Summary Handler", "Python", "Generates HTML summary")
+        Component(err_handler, "Error/Fault Handler", "Python", "Safe failure / no misleading success")
+        Component(audit_writer, "Audit/Event Writer", "Python", "Audit trail required")
+    }
+
+    Rel_D(epic, inbound, "SOAP Request")
+    Rel_R(inbound, err_handler, "Validation Failure")
+    
+    Rel_L(inbound, cache, "Idempotency check")
+    Rel_D(inbound, pds_client, "Discovery Request")
+    Rel_D(inbound, sds_client, "Routing Request")
+    Rel_D(inbound, gpc_client, "Document Retrieve")
+    
+    Rel_D(pds_client, nhse, "Query PDS")
+    Rel_D(sds_client, nhse, "Query SDS")
+    Rel_D(gpc_client, nhse, "Query GP Connect")
+    
+    Rel_D(gpc_client, resp_val, "Raw FHIR Bundle")
+    Rel_U(pds_client, inbound, "Demographics")
+    
+    Rel_R(resp_val, err_handler, "Fatal Error")
+    Rel_D(resp_val, ccda_build, "FHIR (warnings)")
+    Rel_D(ccda_build, html_build, "C-CDA")
+    
+    Rel_U(html_build, inbound, "Return C-CDA, HTML")
+    Rel_U(inbound, epic, "Return Success")
+    Rel_U(err_handler, epic, "Return Failure")
+    
+    Rel_R(inbound, audit_writer, "Log attempt")
+    Rel_D(err_handler, audit_writer, "Log failures")
+    Rel_R(audit_writer, audit_db, "Write events")
+```
+
+### Data Flow Diagrams
+
+#### DFD Level 0 (Context)
+```mermaid
+flowchart TD
+    %% DFD Level 0
+    Epic["Epic Care Everywhere\n(External dependency, remembers linkage)"]
+    NHSE["NHSE APIs\n(External dependency, risk owner)"]
+    Mon["UCLH Monitoring/Audit Store\n(Audit trail required)"]
+    Admin["UCLH Admins"]
+    Clinician["UCLH Clinicians"]
+    
+    Xhuma(("Xhuma\n(Stateless System boundary)"))
+    
+    Clinician -->|Requests Outside Record via Epic| Epic
+    Clinician -->|Explicitly confirms identity| Epic
+    Clinician -->|Manually reconciles| Epic
+    
+    Epic -->|1. Patient Discovery request| Xhuma
+    Epic -->|2. Document Query/Retrieve| Xhuma
+    
+    Xhuma -->|PDS/SDS lookups, GP Connect retrieval| NHSE
+    NHSE -->|Demographics / FHIR Bundle| Xhuma
+    
+    Xhuma -->|"Demographics / C-CDA & HTML (Safe failure)"| Epic
+    
+    Xhuma -->|audit log, metrics| Mon
+    Admin -->|view logs only| Mon
+```
+
+#### DFD Level 1 (Detailed)
+```mermaid
+flowchart TD
+    %% DFD Level 1 (Detailed View)
+    classDef datastore fill:#ff9,stroke:#333;
+    
+    %% External Entities
+    Clinician["Clinician"]
+    Epic["Epic EHR\n(Stores patient link permanently)"]
+    NHSE["NHSE APIs\n(PDS, SDS, GP Connect)"]
+    Mon["UCLH Monitoring"]
+
+    %% Data Stores
+    StoreAudit[("Audit log store")]:::datastore
+    StoreCache[("Transient Cache\n(Redis - transient only)")]:::datastore
+    
+    %% Discovery Scope
+    P1(("1. Receive patient\ndiscovery request"))
+    P2(("2. Perform PDS lookup"))
+    P3(("3. Return demographics for\nhuman confirmation"))
+    
+    %% Retrieve Scope
+    P4(("4. Receive document\nquery/retrieve request"))
+    P5(("5. Perform SDS lookup/routing"))
+    P6(("6. Retrieve GP Connect\nstructured data"))
+    P7(("7. Validate response,\npreserve warnings"))
+    P8(("8. Transform to C-CDA &\ngenerate HTML summary"))
+    P9(("9. Return content"))
+    
+    %% Common Scope
+    P10(("10. Write audit/metrics"))
+    P11(("11. Handle errors safely\n(No misleading success)"))
+
+    Clinician -->|"Manual reconciliation intervention (when mapping is incomplete)"| Epic
+    Clinician -->|"Human confirmation of identity"| Epic
+    
+    Epic -->|Initiate Discovery| P1
+    P1 -->P2
+    P2 -->|PDS Query| NHSE
+    NHSE -->|PDS Match| P2
+    P2 -->P3
+    P3 -->|Demographics| Epic
+    
+    Epic -->|Initiate Retrieval| P4
+    P4 -->P5
+    P5 -->|SDS Query| NHSE
+    NHSE -->|Routing Info| P5
+    P5 -->P6
+    P6 -->|GP Connect Query| NHSE
+    NHSE -->|FHIR Bundle| P6
+    P6 -->P7
+    P7 -->|FHIR Bundle + Warnings| P8
+    P8 -->|C-CDA, HTML| P9
+    P9 -->|"C-CDA, HTML (Read-only summary + source structured data)"| Epic
+    
+    P1 -.->|error| P11
+    P4 -.->|error| P11
+    P6 -.->|API error| P11
+    P7 -.->|validation error| P11
+    P11 -->|safe failure response| Epic
+    P11 -->|alert/log| P10
+    
+    P1 -->|audit log| P10
+    P9 -->|audit log| P10
+    P10 -->|log| StoreAudit
+    P10 -->|metric| Mon
+    
+    P2 <-->|lookups| StoreCache
+    P5 <-->|endpoints| StoreCache
+```
+
+### Clinician Journey / Workflow Sequence
+```mermaid
+sequenceDiagram
+    title Clinician Journey - Xhuma Orchestration Flow
+    actor C as Clinician
+    participant E as Epic Care Everywhere
+    participant X as Xhuma (Stateless)
+    participant NHSE as NHSE APIs (PDS, SDS, GP Connect)
+    
+    %% Phase 1: Identity Discovery & Confirmation
+    note over C, NHSE: Phase 1: Patient Discovery & Identity Confirmation
+    C->>E: Opens "Request Outside Record"
+    C->>E: Selects GP Connect & Searches
+    E->>X: ITI-55 Patient Discovery Request
+    X->>NHSE: PDS Lookup (Demographics)
+    NHSE-->>X: PDS Response (Demographics)
+    X-->>E: ITI-55 Response (Patient Match info)
+    E->>C: Presents PDS security check (Name, DOB, NHS No, Address)
+    C->>E: Explicitly confirms "Yes - Correct Patient"
+    
+    %% State Note
+    note over E: Epic permanently remembers patient link
+    note over X: Xhuma remains stateless (link not stored)
+    
+    %% Phase 2: Document Query & Retrieve
+    note over C, NHSE: Phase 2: Document Query & Retrieval
+    C->>E: Clicks "View Outside Chart"
+    E->>X: Document Query/Retrieve (Confirmed Identity)
+    X->>NHSE: SDS Lookup & Routing
+    NHSE-->>X: Endpoint Details
+    X->>NHSE: Request Continuity of Care Document
+    NHSE-->>X: FHIR Bundle (Structured Data)
+    
+    %% Transformation & Validation
+    note over X: Xhuma validates response & preserves warnings
+    note over X: Xhuma transforms FHIR into C-CDA + HTML Summary
+    X-->>E: Returns C-CDA & HTML Summary
+    
+    %% Display & Reconciliation
+    note over C, E: Phase 3: Display & Reconciliation
+    E->>C: Displays outside chart (Read-only, provenance visible)
+    C->>E: Initiates reconciliation into UCLH chart
+    
+    alt Medication Map Cleanly
+        C->>E: Accepts standard mapping (Medication, Dose, Route, Frequency)
+    else Irregular Instruction / Incomplete Map
+        note over C, E: e.g., "Take two on first day, one hereafter"
+        C->>E: Manually completes or corrects irregular details
+        C->>E: Accepts corrected mapping into local record
+    end
+```
+
+### Delta Summary & Assumptions
+
+**Changes from previous version:**
+- **Epic Ownership & Statelessness**: Shifted diagram labels and structures to identify Epic explicitly as the ultimate EHR UI, reconciling owner, and keeper of the patient link. Xhuma is now rigorously documented as a stateless orchestrator with cache used only for transient optimization.
+- **Workflow Separation**: Separated the single unified interactions into two distinct paths: Patient Discovery (ITI-55) & Identity Confirmation, followed by Document Query & Retrieval.
+- **Clinician Intervention visibility**: Updated the DFD Level 0/1 and Context diagram to show clinicians directly interacting with Epic with explicit human confirmation steps and manual reconciliation steps.
+- **Observability Stack Constraint**: Pared down monitoring boxes to explicitly respect the network architecture document baseline (eliminating extrapolated components).
+- **New Sequence Diagram**: Added a "Clinician Journey" sequence diagram delineating the explicit step-by-step clicks from PDS confirmation down to the reconciliation of dirty vs. clean medication texts.
+
+**Assumptions / TBDs:**
+- **TBD-01**: Identity/Auth beyond core mTLS for incoming Epic requests and clinician tracing.
+- **TBD-02**: Exact granularity of UCLH telemetry observability access controls (e.g., who accesses dashboards) and role-based access logic for the Postgres audit tables.
+
 ## Core Components
 
 ### 1. API Layer (FastAPI)

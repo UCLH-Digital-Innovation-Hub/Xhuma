@@ -17,7 +17,7 @@ from app.security import pds_jwt
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
 INT_BASE_PATH = "https://int.api.service.nhs.uk/"
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("API_KEY", "TEST_KEY")
 
 router = fastapi.APIRouter(prefix="/pds")
 
