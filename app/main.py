@@ -75,12 +75,15 @@ async def lifespan(app: FastAPI):
             app.state.jwk_json = public_jwk.export_public(as_dict=True)
         except Exception as e:
             print(f"Warning: Failed to load JWTKEY from environment: {e}")
-    elif os.path.isfile("keys/test-1.pem"):
+    elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
         # Local development fallback
+        print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
         with open("keys/test-1.pem", "rb") as pemfile:
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
             app.state.jwk_json = public_jwk.export_public(as_dict=True)
+    else:
+        print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
 
     # Set up OpenTelemetry metrics
     otlp_endpoint = os.getenv(

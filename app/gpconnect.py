@@ -105,9 +105,9 @@ def create_nhs_ssl_context(cert_path, key_path, ca_path):
 #     "keys/nhs_certs/nhs_bundle.pem",
 # )
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 httpx_logger = logging.getLogger("httpx")
-httpx_logger.setLevel(logging.DEBUG)
+httpx_logger.setLevel(logging.WARNING)
 
 # client = httpx.AsyncClient(
 #     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
@@ -414,7 +414,7 @@ async def gpconnect(
                 os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
             ) as f:
                 f.write(resp.text)
-        logging.info(resp.text)
+        logging.info(f"GP Connect request successful with status {resp.status_code}")
 
     except Exception as e:
         msg = f"Transport error: {e}"
