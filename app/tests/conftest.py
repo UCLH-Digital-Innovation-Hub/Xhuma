@@ -1,4 +1,3 @@
-
 import os
 import pytest
 from unittest import mock
@@ -32,6 +31,7 @@ gw2tVSdM4D7Ahm2MjTvApejf3aYA2IokGqiXEpoMCc/wXHdIel7zZu0tR9xFFY7F
 luzizX9WR7+cvOZ9rPAqNRrWZmtCGnKG7WvuYCBlLVw8LdhrlOGxQBWqYw7/qld8
 q/edqwBdaJXwGJsjBL/Epd2o
 -----END PRIVATE KEY-----"""
+
 
 @pytest.fixture(autouse=True)
 def mock_settings(monkeypatch):
