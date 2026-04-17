@@ -270,8 +270,7 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
 
     @app.get("/_dev/audit", response_class=HTMLResponse)
     async def dev_audit_form():
-        return HTMLResponse(
-            """
+        return HTMLResponse("""
             <html>
               <head>
                 <title>Dev Audit Viewer</title>
@@ -296,8 +295,7 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
                 </form>
               </body>
             </html>
-            """
-        )
+            """)
 
     @app.post("/_dev/audit", response_class=HTMLResponse)
     async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
