@@ -115,7 +115,7 @@ structured_med = medication.Medication(
         },
     }
 )
-sturctured_statement = medicationstatement.MedicationStatement(
+structured_statement = medicationstatement.MedicationStatement(
     {
         "resourceType": "MedicationStatement",
         "id": "2E352BA6-8F87-479B-BC80-41494027F2E6-MS",

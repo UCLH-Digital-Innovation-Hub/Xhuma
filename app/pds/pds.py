@@ -136,9 +136,9 @@ if __name__ == "__main__":
     # print(patient.generalPractitioner[0].identifier.value)
 
     # ods = asyncio.run(sds_trace("A82038"))
-    pprint.pprint(ods)
-    for i in ods["entry"]:
-        pprint.pprint(i)
+    # pprint.pprint(ods)
+    # for i in ods["entry"]:
+    #     pprint.pprint(i)
 
     # try self lookup
     prefix = "https://fhir.nhs.uk/Id/"

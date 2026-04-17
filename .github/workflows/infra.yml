@@ -2,9 +2,9 @@ name: Infrastructure
 
 on:
   push:
-    branches: [ main, infra/deployment-and-monitoring ]
+    branches: [ int, main ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ int, main ]
     paths:
       - 'infra/**'
   workflow_dispatch:
@@ -61,7 +61,7 @@ jobs:
         run: terraform plan -input=false
 
       - name: Terraform Apply
-        if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/infra/deployment-and-monitoring') && github.event_name == 'push'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/int')
         run: |
           set +e
           # Run terraform and save output

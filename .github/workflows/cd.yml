@@ -2,7 +2,7 @@ name: CD
 
 on:
   push:
-    branches: [ main, infra/deployment-and-monitoring ]
+    branches: [ int, main ]
   workflow_dispatch:
 
 env:
