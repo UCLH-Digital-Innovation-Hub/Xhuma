@@ -365,7 +365,7 @@ async def medication(
                         substance_administration.doseQuantity["@unit"] = (
                             dmd_data.vpi.unit
                         )
-                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via DM+D lookup"
+                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
                         # print(warning_text)
                         misc_notes.append(warning_text)
 
