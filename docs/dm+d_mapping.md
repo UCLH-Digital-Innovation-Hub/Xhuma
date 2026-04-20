@@ -1,4 +1,4 @@
-# DM+D Mapping overview
+# dm+d Mapping overview
 
 ## Overview
 
@@ -51,23 +51,23 @@ One potential solution would be to use regular expressions to identify the dose 
  ```
 However at the scale of the entire UK drug catalogue and taking into account the various medications that are mixtures then any expression would rapidly become unwieldy and introduce significant risk into the process
 
-### DM+D
+### dm+d
 The Dictionary of Medicines and Devices is an assured dictionary or medicines and devices that are used within the NHS. It allows for mapping of drugs from virtual medicinal products to their base ingredients as well as provides additional information such as their appropriate chapter in the BNF, controlled drug status and other information such as tariff information.
 
-Importantly DM+D also includes the specific quantity of drug and unit in an assured way as well of a list of approved routes.
+Importantly dm+d also includes the specific quantity of drug and unit in an assured way as well of a list of approved routes.
 
-There are two ways of consuming DM+D. Data is released weekly via the TRUD service which is free to sign up to, [Mark Wardle](https://github.com/wardle/dmd) has written an excellent microservice that simplifies integration. Additionally the [NHS Terminology Server](https://digital.nhs.uk/services/terminology-server) is a platinum level service that allows for real time queries of DM+D as well as SNOMED.
+There are two ways of consuming dm+d. Data is released weekly via the TRUD service which is free to sign up to, [Mark Wardle](https://github.com/wardle/dmd) has written an excellent microservice that simplifies integration. Additionally the [NHS Terminology Server](https://digital.nhs.uk/services/terminology-server) is a platinum level service that allows for real time queries of dm+d as well as SNOMED.
 
-Xhuma uses the Terminology server for DM+D queries
+Xhuma uses the Terminology server for dm+d queries
 
 ### Basic flow
 
 ```mermaid
 flowchart TD
-    id4(SNOMED code in FHiR medication) --> id1(DM+D API Lookup)
-    id1(DM+D API Lookup) --> A@{ shape: diamond, label: "Ingredient?"}
+    id4(SNOMED code in FHiR medication) --> id1(dm+d API Lookup)
+    id1(dm+d API Lookup) --> A@{ shape: diamond, label: "Ingredient?"}
     A@{ shape: diamond, label: "Ingredient?"} -- yes --> id2(Map Ingredient quantity)
-    id1(DM+D API Lookup)--> B@{ shape: diamond, label: "Route?"}
+    id1(dm+d API Lookup)--> B@{ shape: diamond, label: "Route?"}
     B@{ shape: diamond, label: "Route?"} --yes --> id3(Map Route)
 
 ```
@@ -103,7 +103,7 @@ flowchart TD
     A4 <--> A5("get_dmd_concept(STRNT_NMRTR_UOMCD)")
     A4 --> A6(Dose and Unit)
     end
-    A6 --> A7(DM+D Pydantic model)
+    A6 --> A7(dm+d Pydantic model)
     subgraph Route
     F@{shape: diamond, label: "single Route?"} --Yes--> B4(Parse Route)
 
