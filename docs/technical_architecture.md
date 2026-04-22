@@ -57,8 +57,8 @@ flowchart TD
         PDS["Patient Discovery\n[Container]"]:::container
         Ret["Document Retrieval\n[Container]"]:::container
         Trans["Transformation Engine\n[Container]"]:::container
-        Audit[(Audit & Logging DB\n[Database])]:::db
-        Cache[(Transient Cache\n[Database])]:::db
+        Audit[("Audit & Logging DB\n[Database]")]:::db
+        Cache[("Transient Cache\n[Database]")]:::db
         Mon["Logging Component\n[Container]\nApp Insights"]:::container
         Relay["HSCN Relay Agent\n[Container]"]:::container
     end
@@ -97,8 +97,8 @@ flowchart TD
     %% External
     Epic["Epic Care\n[System]"]:::ext_system
     NHSE["NHSE APIs\n[System]"]:::ext_system
-    AuditDB[(Audit DB)]:::db
-    Cache[(Cache)]:::db
+    AuditDB[("Audit DB")]:::db
+    Cache[("Cache")]:::db
 
     subgraph AppBoundary[Application Layer]
         Inbound["Inbound SOAP Handler\n[Component]"]:::comp
