@@ -9,121 +9,136 @@ Xhuma is a stateless middleware service designed to facilitate the conversion of
 
 ### System Context
 ```mermaid
-C4Context
-    title C4 Context Diagram - Xhuma Middleware
-    
-    Person(clinician, "UCLH Clinicians", "End user via Epic, handles identity confirmation & reconciliation")
-    
-    System_Ext(epic, "Epic Care Everywhere", "EHR providing UI, remembers patient link, reconciliation owner")
+flowchart TD
+    classDef person fill:#08427b,color:#fff,stroke:#052e56,stroke-width:2px;
+    classDef system fill:#1168bd,color:#fff,stroke:#0b4884,stroke-width:2px;
+    classDef ext_system fill:#999,color:#fff,stroke:#666,stroke-width:2px;
+    classDef boundary fill:none,color:#fff,stroke:#444,stroke-width:2px,stroke-dasharray: 5 5;
 
-    Enterprise_Boundary(uclh, "System Boundary (UCLH)") {
-        System(xhuma, "Xhuma", "Stateless middleware orchestrating discovery, retrieval, transforming to C-CDA/HTML")
-        System(monitor, "UCLH Logging & Monitoring", "Audit trail / observability layer")
-    }
-
-    System_Ext(nhse_api, "NHSE APIs (PDS, SDS, GP Connect)", "Target NHS services")
-
-    Rel(clinician, epic, "Queries, confirms identity", "UI")
-    Rel(epic, xhuma, "1. ITI-55 Discovery<br>2. Document Query", "mTLS / SOAP")
-    Rel(xhuma, epic, "Returns Demographics / C-CDA", "SOAP")
+    %% Elements
+    Clinician(("UCLH Clinicians\n[Person]")):::person
     
-    Rel(xhuma, nhse_api, "1. PDS/SDS Lookups<br>2. GP Connect Retrieval", "mTLS+JWT / OAuth")
-    Rel(xhuma, monitor, "Sends audit logs", "Internal")
+    Epic["Epic Care Everywhere\n[External System]"]:::ext_system
+
+    subgraph UCLHBoundary[System Boundary UCLH]
+        Xhuma["Xhuma\n[System]\nStateless middleware"]:::system
+        Monitor["UCLH Logging & Monitoring\n[System]\nAudit trail layer"]:::system
+    end
+
+    NHSE["NHSE APIs\n[External System]\nPDS, SDS, GP Connect"]:::ext_system
+
+    %% Relationships
+    Clinician -->|Queries, confirms identity| Epic
+    Epic -->|"1. ITI-55 Discovery<br>2. Document Query"| Xhuma
+    Xhuma -->|"Returns Demographics / C-CDA"| Epic
+    Xhuma -->|"1. PDS/SDS Lookups<br>2. GP Connect Retrieval"| NHSE
+    Xhuma -->|"Sends audit logs"| Monitor
+    
+    class UCLHBoundary boundary;
 ```
 
 ### Container Diagram
 ```mermaid
-C4Container
-    title C4 Container Diagram - Xhuma
-    
-    System_Ext(epic, "Epic Care Everywhere", "Reconciliation owner, stores patient linkage")
-    System_Ext(nhse_api, "NHSE APIs", "PDS, SDS, GP Connect")
+flowchart TD
+    classDef system fill:#1168bd,color:#fff,stroke:#0b4884,stroke-width:2px;
+    classDef ext_system fill:#999,color:#fff,stroke:#666,stroke-width:2px;
+    classDef container fill:#438dd5,color:#fff,stroke:#2e6295,stroke-width:2px;
+    classDef db fill:#438dd5,color:#fff,stroke:#2e6295,stroke-width:2px;
+    classDef boundary fill:none,color:#fff,stroke:#444,stroke-width:2px,stroke-dasharray: 5 5;
 
-    System_Boundary(uclh_boundary, "System boundary (Xhuma/UCLH)") {
-        
-        Container(cicd, "CI/CD Pipeline", "GitHub Actions & GHCR", "Config management / CI/CD controlled change")
-        
-        Container(api, "Inbound IHE/SOAP Layer", "FastAPI / Docker", "Handles ITI-55 discovery & document query")
-        Container(pds_handler, "Patient Discovery Handler", "Python", "PDS Lookup Orchestration")
-        Container(retrieve_handler, "Document Retrieval Handler", "Python", "SDS routing & GP Connect Retrieval")
-        Container(transform, "Transformation Engine", "Python", "FHIR to C-CDA & HTML mapping")
-        
-        ContainerDb(audit_db, "Audit & Logging Component", "PostgreSQL", "Stores config & audit logs (Audit trail required)")
-        ContainerDb(cache, "Transient Cache", "Redis", "Transient caching only")
-        
-        Container(monitor, "Logging Component", "Azure App Insights", "Metrics/traces (Audit trail required)")
-        
-        Container(hscn_relay, "HSCN Relay Agent", "WebSocket Tunnel", "Azure Private Link for HSCN integration")
-    }
+    %% External Systems
+    Epic["Epic Care Everywhere\n[External System]"]:::ext_system
+    NHSE["NHSE APIs (PDS, SDS, GPC)\n[External System]"]:::ext_system
 
-    Rel(epic, api, "Queries", "mTLS")
-    Rel(api, epic, "Responses", "mTLS")
+    %% UCLH Boundary
+    subgraph UCLHBoundary[System Boundary - Xhuma / UCLH]
+        CICD["CI/CD Pipeline\n[Container]\nGitHub Actions"]:::container
+        API["Inbound IHE/SOAP Layer\n[Container]\nFastAPI"]:::container
+        PDS["Patient Discovery\n[Container]"]:::container
+        Ret["Document Retrieval\n[Container]"]:::container
+        Trans["Transformation Engine\n[Container]"]:::container
+        Audit[(Audit & Logging DB\n[Database])]:::db
+        Cache[(Transient Cache\n[Database])]:::db
+        Mon["Logging Component\n[Container]\nApp Insights"]:::container
+        Relay["HSCN Relay Agent\n[Container]"]:::container
+    end
+    class UCLHBoundary boundary;
+
+    %% Relationships
+    CICD -->|Deploy Image| API
     
-    Rel(api, pds_handler, "Discovery", "Internal")
-    Rel(api, retrieve_handler, "Retrieval", "Internal")
+    Epic -->|Queries| API
+    API -->|Responses| Epic
     
-    Rel(pds_handler, nhse_api, "PDS Lookup", "Internet")
-    Rel(retrieve_handler, nhse_api, "SDS Routing", "Internet")
-    Rel(retrieve_handler, hscn_relay, "GP Connect Req", "WebSocket")
-    Rel(hscn_relay, nhse_api, "GP Connect", "HSCN")
+    API -->|Discovery| PDS
+    API -->|Retrieval| Ret
     
-    Rel(retrieve_handler, transform, "Passes FHIR", "Internal")
-    Rel(transform, api, "Returns C-CDA", "Internal")
+    PDS -->|PDS Lookup| NHSE
+    Ret -->|SDS Routing| NHSE
+    Ret -->|GP Connect Req| Relay
+    Relay -->|GP Connect| NHSE
     
-    Rel(api, cache, "Transient data", "TCP")
-    Rel(api, audit_db, "Audit events", "TCP")
-    Rel(api, monitor, "Metrics", "HTTPS")
+    Ret -->|Passes FHIR| Trans
+    Trans -->|Returns C-CDA| API
     
-    Rel(cicd, api, "Deploy Image", "HTTPS")
+    API -->|Transient data| Cache
+    API -->|Audit events| Audit
+    API -->|Metrics| Mon
 ```
 
 ### Component Diagram
 ```mermaid
-C4Component
-    title C4 Component Diagram - Xhuma Application Layer
-    
-    Container_Ext(epic, "Epic Care Everywhere", "External dependency")
-    Container_Ext(nhse, "NHSE APIs", "External dependency")
-    ContainerDb_Ext(audit_db, "Audit Database", "PostgreSQL")
-    ContainerDb_Ext(cache, "Transient Cache", "Redis")
-    
-    Container_Boundary(app_boundary, "System boundary (Stateless)") {
-        Component(inbound, "Inbound IHE/SOAP Handler", "Python", "Receives SOAP requests")
-        Component(pds_client, "Patient Discovery / PDS Client", "Python", "Handles PDS lookup")
-        Component(sds_client, "SDS Lookup / Routing", "Python", "Handles SDS lookup")
-        Component(gpc_client, "GP Connect Retrieval Client", "Python", "Retrieves FHIR bundle")
-        Component(resp_val, "Response Validation", "Python", "Validates payload (Partial data/warnings preserved)")
-        Component(ccda_build, "C-CDA Builder", "Python", "Builds C-CDA from FHIR Bundle")
-        Component(html_build, "HTML Summary Handler", "Python", "Generates HTML summary")
-        Component(err_handler, "Error/Fault Handler", "Python", "Safe failure / no misleading success")
-        Component(audit_writer, "Audit/Event Writer", "Python", "Audit trail required")
-    }
+flowchart TD
+    classDef ext_system fill:#999,color:#fff,stroke:#666,stroke-width:2px;
+    classDef comp fill:#85bbf0,color:#000,stroke:#5b82a8,stroke-width:2px;
+    classDef db fill:#438dd5,color:#fff,stroke:#2e6295,stroke-width:2px;
+    classDef boundary fill:none,color:#fff,stroke:#444,stroke-width:2px,stroke-dasharray: 5 5;
 
-    Rel(epic, inbound, "SOAP Request")
-    Rel(inbound, epic, "Return Success")
-    Rel(err_handler, epic, "Return Failure")
+    %% External
+    Epic["Epic Care\n[System]"]:::ext_system
+    NHSE["NHSE APIs\n[System]"]:::ext_system
+    AuditDB[(Audit DB)]:::db
+    Cache[(Cache)]:::db
+
+    subgraph AppBoundary[Application Layer]
+        Inbound["Inbound SOAP Handler\n[Component]"]:::comp
+        PDSClient["PDS Client\n[Component]"]:::comp
+        SDSClient["SDS Routing\n[Component]"]:::comp
+        GPCClient["GPC Retrieval\n[Component]"]:::comp
+        RespVal["Response Validator\n[Component]"]:::comp
+        CCDA["C-CDA Builder\n[Component]"]:::comp
+        HTML["HTML Summary\n[Component]"]:::comp
+        Err["Error Handler\n[Component]"]:::comp
+        AuditW["Audit Writer\n[Component]"]:::comp
+    end
+    class AppBoundary boundary;
+
+    %% Relationships
+    Epic -->|SOAP Request| Inbound
+    Inbound -->|Return Success| Epic
+    Err -->|Return Failure| Epic
     
-    Rel(inbound, err_handler, "Validation Failure")
-    Rel(inbound, cache, "Idempotency check")
-    Rel(inbound, pds_client, "Discovery Request")
-    Rel(inbound, sds_client, "Routing Request")
-    Rel(inbound, gpc_client, "Document Retrieve")
+    Inbound -->|Validation Failure| Err
+    Inbound -->|Idempotency check| Cache
+    Inbound -->|ITI-55 Request| PDSClient
+    Inbound -->|Routing Req| SDSClient
+    Inbound -->|Doc Retrieve| GPCClient
     
-    Rel(pds_client, nhse, "Query PDS")
-    Rel(sds_client, nhse, "Query SDS")
-    Rel(gpc_client, nhse, "Query GP Connect")
+    PDSClient -->|Query PDS| NHSE
+    SDSClient -->|Query SDS| NHSE
+    GPCClient -->|Query GPC| NHSE
     
-    Rel(gpc_client, resp_val, "Raw FHIR Bundle")
-    Rel(pds_client, inbound, "Demographics")
+    GPCClient -->|Raw FHIR| RespVal
+    PDSClient -->|Demographics| Inbound
     
-    Rel(resp_val, err_handler, "Fatal Error")
-    Rel(resp_val, ccda_build, "FHIR (warnings)")
-    Rel(ccda_build, html_build, "C-CDA")
-    Rel(html_build, inbound, "Return C-CDA, HTML")
+    RespVal -->|Fatal Error| Err
+    RespVal -->|FHIR + warnings| CCDA
+    CCDA -->|C-CDA| HTML
+    HTML -->|Return C-CDA, HTML| Inbound
     
-    Rel(inbound, audit_writer, "Log attempt")
-    Rel(err_handler, audit_writer, "Log failures")
-    Rel(audit_writer, audit_db, "Write events")
+    Inbound -->|Log attempt| AuditW
+    Err -->|Log failures| AuditW
+    AuditW -->|Write events| AuditDB
 ```
 
 ### Data Flow Diagrams
