@@ -14,24 +14,21 @@ C4Context
     
     Person(clinician, "UCLH Clinicians", "End user via Epic, handles identity confirmation & reconciliation")
     
-    Enterprise_Boundary(epic_bnd, "Epic Supplier Boundary") {
-        System_Ext(epic, "Epic Care Everywhere", "EHR providing UI, remembers patient link, reconciliation owner (External risk owner)")
-    }
+    System_Ext(epic, "Epic Care Everywhere", "EHR providing UI, remembers patient link, reconciliation owner")
 
     Enterprise_Boundary(uclh, "System Boundary (UCLH)") {
         System(xhuma, "Xhuma", "Stateless middleware orchestrating discovery, retrieval, transforming to C-CDA/HTML")
         System(monitor, "UCLH Logging & Monitoring", "Audit trail / observability layer")
     }
 
-    Enterprise_Boundary(nhse_bnd, "NHSE Boundary") {
-        System_Ext(nhse_api, "NHSE APIs (PDS, SDS, GP Connect)", "Target NHS services (External risk owner)")
-    }
+    System_Ext(nhse_api, "NHSE APIs (PDS, SDS, GP Connect)", "Target NHS services")
 
-    Rel_D(clinician, epic, "Queries, confirms identity", "UI")
-    Rel_D(epic, xhuma, "1. ITI-55 Discovery<br>2. Document Query", "mTLS / SOAP")
-    Rel_D(xhuma, nhse_api, "1. PDS/SDS Lookups<br>2. GP Connect Retrieval", "mTLS+JWT / OAuth")
-    Rel_R(xhuma, monitor, "Sends audit logs", "Internal")
-    Rel_U(xhuma, epic, "Returns Demographics / C-CDA", "SOAP")
+    Rel(clinician, epic, "Queries, confirms identity", "UI")
+    Rel(epic, xhuma, "1. ITI-55 Discovery<br>2. Document Query", "mTLS / SOAP")
+    Rel(xhuma, epic, "Returns Demographics / C-CDA", "SOAP")
+    
+    Rel(xhuma, nhse_api, "1. PDS/SDS Lookups<br>2. GP Connect Retrieval", "mTLS+JWT / OAuth")
+    Rel(xhuma, monitor, "Sends audit logs", "Internal")
 ```
 
 ### Container Diagram
@@ -44,50 +41,40 @@ C4Container
 
     System_Boundary(uclh_boundary, "System boundary (Xhuma/UCLH)") {
         
-        Boundary(cicd_zone, "Engineering/Supporting System") {
-            Container(cicd, "CI/CD Pipeline", "GitHub Actions & GHCR", "Config management / CI/CD controlled change")
-        }
-
-        Boundary(app_subnet, "App Service Zone (Stateless)") {
-            Container(api, "Inbound IHE/SOAP Layer", "FastAPI / Docker", "Handles ITI-55 discovery & document query")
-            Container(pds_handler, "Patient Discovery Handler", "Python", "PDS Lookup Orchestration")
-            Container(retrieve_handler, "Document Retrieval Handler", "Python", "SDS routing & GP Connect Retrieval")
-            Container(transform, "Transformation Engine", "Python", "FHIR to C-CDA & HTML mapping")
-        }
+        Container(cicd, "CI/CD Pipeline", "GitHub Actions & GHCR", "Config management / CI/CD controlled change")
         
-        Boundary(db_subnet, "Protected Database Zone") {
-            ContainerDb(audit_db, "Audit & Logging Component", "PostgreSQL", "Stores config & audit logs (Audit trail required)")
-            ContainerDb(cache, "Transient Cache", "Redis", "Transient caching only (no durable linkage)")
-        }
+        Container(api, "Inbound IHE/SOAP Layer", "FastAPI / Docker", "Handles ITI-55 discovery & document query")
+        Container(pds_handler, "Patient Discovery Handler", "Python", "PDS Lookup Orchestration")
+        Container(retrieve_handler, "Document Retrieval Handler", "Python", "SDS routing & GP Connect Retrieval")
+        Container(transform, "Transformation Engine", "Python", "FHIR to C-CDA & HTML mapping")
         
-        Boundary(monitor_zone, "Observability Zone") {
-            Container(monitor, "Logging Component", "Azure App Insights", "Metrics/traces (Audit trail required)")
-        }
+        ContainerDb(audit_db, "Audit & Logging Component", "PostgreSQL", "Stores config & audit logs (Audit trail required)")
+        ContainerDb(cache, "Transient Cache", "Redis", "Transient caching only")
         
-        Boundary(hscn_zone, "HSCN Boundary") {
-            Container(hscn_relay, "HSCN Relay Agent", "WebSocket Tunnel", "Azure Private Link for HSCN integration")
-        }
+        Container(monitor, "Logging Component", "Azure App Insights", "Metrics/traces (Audit trail required)")
+        
+        Container(hscn_relay, "HSCN Relay Agent", "WebSocket Tunnel", "Azure Private Link for HSCN integration")
     }
 
-    Rel_D(epic, api, "Queries", "mTLS")
-    Rel_U(api, epic, "Responses", "mTLS")
+    Rel(epic, api, "Queries", "mTLS")
+    Rel(api, epic, "Responses", "mTLS")
     
-    Rel_D(api, pds_handler, "Discovery", "Internal")
-    Rel_D(api, retrieve_handler, "Retrieval", "Internal")
+    Rel(api, pds_handler, "Discovery", "Internal")
+    Rel(api, retrieve_handler, "Retrieval", "Internal")
     
-    Rel_D(pds_handler, nhse_api, "PDS Lookup", "Internet")
-    Rel_R(retrieve_handler, nhse_api, "SDS Routing", "Internet")
-    Rel_D(retrieve_handler, hscn_relay, "GP Connect Req", "WebSocket")
-    Rel_D(hscn_relay, nhse_api, "GP Connect", "HSCN")
+    Rel(pds_handler, nhse_api, "PDS Lookup", "Internet")
+    Rel(retrieve_handler, nhse_api, "SDS Routing", "Internet")
+    Rel(retrieve_handler, hscn_relay, "GP Connect Req", "WebSocket")
+    Rel(hscn_relay, nhse_api, "GP Connect", "HSCN")
     
-    Rel_R(retrieve_handler, transform, "Passes FHIR", "Internal")
-    Rel_U(transform, api, "Returns C-CDA", "Internal")
+    Rel(retrieve_handler, transform, "Passes FHIR", "Internal")
+    Rel(transform, api, "Returns C-CDA", "Internal")
     
-    Rel_L(api, cache, "Transient data", "TCP")
-    Rel_L(api, audit_db, "Audit events", "TCP")
-    Rel_R(api, monitor, "Metrics", "HTTPS")
+    Rel(api, cache, "Transient data", "TCP")
+    Rel(api, audit_db, "Audit events", "TCP")
+    Rel(api, monitor, "Metrics", "HTTPS")
     
-    Rel_R(cicd, api, "Deploy Image", "HTTPS")
+    Rel(cicd, api, "Deploy Image", "HTTPS")
 ```
 
 ### Component Diagram
@@ -98,7 +85,7 @@ C4Component
     Container_Ext(epic, "Epic Care Everywhere", "External dependency")
     Container_Ext(nhse, "NHSE APIs", "External dependency")
     ContainerDb_Ext(audit_db, "Audit Database", "PostgreSQL")
-    ContainerDb_Ext(cache, "Transient Cache", "Redis (Transient only)")
+    ContainerDb_Ext(cache, "Transient Cache", "Redis")
     
     Container_Boundary(app_boundary, "System boundary (Stateless)") {
         Component(inbound, "Inbound IHE/SOAP Handler", "Python", "Receives SOAP requests")
@@ -112,32 +99,31 @@ C4Component
         Component(audit_writer, "Audit/Event Writer", "Python", "Audit trail required")
     }
 
-    Rel_D(epic, inbound, "SOAP Request")
-    Rel_R(inbound, err_handler, "Validation Failure")
+    Rel(epic, inbound, "SOAP Request")
+    Rel(inbound, epic, "Return Success")
+    Rel(err_handler, epic, "Return Failure")
     
-    Rel_L(inbound, cache, "Idempotency check")
-    Rel_D(inbound, pds_client, "Discovery Request")
-    Rel_D(inbound, sds_client, "Routing Request")
-    Rel_D(inbound, gpc_client, "Document Retrieve")
+    Rel(inbound, err_handler, "Validation Failure")
+    Rel(inbound, cache, "Idempotency check")
+    Rel(inbound, pds_client, "Discovery Request")
+    Rel(inbound, sds_client, "Routing Request")
+    Rel(inbound, gpc_client, "Document Retrieve")
     
-    Rel_D(pds_client, nhse, "Query PDS")
-    Rel_D(sds_client, nhse, "Query SDS")
-    Rel_D(gpc_client, nhse, "Query GP Connect")
+    Rel(pds_client, nhse, "Query PDS")
+    Rel(sds_client, nhse, "Query SDS")
+    Rel(gpc_client, nhse, "Query GP Connect")
     
-    Rel_D(gpc_client, resp_val, "Raw FHIR Bundle")
-    Rel_U(pds_client, inbound, "Demographics")
+    Rel(gpc_client, resp_val, "Raw FHIR Bundle")
+    Rel(pds_client, inbound, "Demographics")
     
-    Rel_R(resp_val, err_handler, "Fatal Error")
-    Rel_D(resp_val, ccda_build, "FHIR (warnings)")
-    Rel_D(ccda_build, html_build, "C-CDA")
+    Rel(resp_val, err_handler, "Fatal Error")
+    Rel(resp_val, ccda_build, "FHIR (warnings)")
+    Rel(ccda_build, html_build, "C-CDA")
+    Rel(html_build, inbound, "Return C-CDA, HTML")
     
-    Rel_U(html_build, inbound, "Return C-CDA, HTML")
-    Rel_U(inbound, epic, "Return Success")
-    Rel_U(err_handler, epic, "Return Failure")
-    
-    Rel_R(inbound, audit_writer, "Log attempt")
-    Rel_D(err_handler, audit_writer, "Log failures")
-    Rel_R(audit_writer, audit_db, "Write events")
+    Rel(inbound, audit_writer, "Log attempt")
+    Rel(err_handler, audit_writer, "Log failures")
+    Rel(audit_writer, audit_db, "Write events")
 ```
 
 ### Data Flow Diagrams
