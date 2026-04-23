@@ -42,6 +42,7 @@ class TEL(URL):
     )
     usablePeriod: Optional[List[SXCM_TS]] = None
     use: Optional[List[str]] = None
+    value: Optional[str] = Field(alias="@value", default=None)
 
 
 class ED(BIN):
@@ -57,6 +58,7 @@ class ED(BIN):
     integrityCheckAlgorithm: Optional[str] = None  # enum SHA1 or SHA256
     language: Optional[str] = None
     mediaType: Optional[str] = None
+    xmlText: Optional[str] = None
 
 
 class QTY(ANY):
@@ -91,6 +93,7 @@ class II(ANY):
 
 CODE_SYSTEM_NAMES = {
     "http://snomed.info/sct": "2.16.840.1.113883.6.96",
+    "https://dmd.nhs.uk": "2.16.840.1.113883.6.96",
     "LOINC": "2.16.840.1.113883.6.1",
     "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
     "https://fhir.hl7.org.uk/Id/resipuk-gemscript-drug-codes": "2.16.840.1.113883.2.1.6.15",
@@ -245,6 +248,22 @@ class IVL_TS(IVXB_TS):
     center: Optional[TS] = None
     width: Optional[PQ] = None
     high: Optional[IVXB_TS] = None
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
+class IVL_INT(ANY):
+    resource_type: str = Field(
+        "IVL_INT", description="Interval of integers.", alias="@xsi:type"
+    )
+    nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)
+    value: Optional[int] = Field(alias="@value", default=None)
+    operator: Optional[str] = Field(alias="@operator", default=None)
+    low: Optional[int] = None
+    center: Optional[int] = None
+    width: Optional[int] = None
+    high: Optional[int] = None
     model_config = {
         "populate_by_name": True,
     }

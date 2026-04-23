@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence
@@ -6,7 +8,10 @@ from fhirclient.models import allergyintolerance, coding, condition, immunizatio
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationrequest, medicationstatement, observation
 
+from ..redis_connect import snomed_client
+from .dmd import dmd_lookup
 from .helpers import (
+    clean_number,
     code_with_translations,
     date_helper,
     effective_time_helper,
@@ -21,7 +26,7 @@ from .models.base import (
     ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import EIVL_TS, IVL_PQ, IVL_TS, PIVL_TS, PQ
+from .models.datatypes import CD, EIVL_TS, IVL_INT, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 Cell = str
 Row = List[Cell]
@@ -33,7 +38,7 @@ class EntryWithRow:
     row: Optional[Row]  # row data for summary table in section
 
 
-def medication(
+async def medication(
     entry: medicationstatement.MedicationStatement, index: dict
 ) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
@@ -42,6 +47,29 @@ def medication(
     based_on_request: medicationrequest.MedicationRequest = index[
         entry.basedOn[0].reference
     ]
+    misc_notes = based_on_request.note if based_on_request.note else []
+    misc_notes += entry.note if entry.note else []
+    # check if any of the notes are container in another one preceeded by "Prescriber Notes:
+    # if so delete the contained note"
+    misc_notes = [
+        note
+        for note in misc_notes
+        if not any(
+            note.text in other_note.text and note != other_note
+            for other_note in misc_notes
+        )
+    ]
+    # append entry text if snomed code is 196421000000109
+    for code in referenced_med.code.coding:
+        if code.code == "196421000000109":
+            misc_notes.append(
+                f"Transfer degraded medication text: {referenced_med.code.text}"
+            )
+
+    for i, note in enumerate(misc_notes):
+        if hasattr(note, "text"):
+            # replace note with just the text
+            misc_notes[i] = note.text
     # request = index[entry.basedOn[0].reference]
     # dosage_instructions = request.dosageInstruction
     # for dose in dosage_instructions:
@@ -235,27 +263,57 @@ def medication(
         )
 
     for dose in entry.dosage:
-        substance_administration.entryRelationship.append(
-            EntryRelationship(
-                **{
-                    "sequenceNumber": (
-                        entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
-                    ),
-                    "@typeCode": "COMP",
-                    "@inversionInd": True,
-                    "substanceAdministration": {
-                        "@classCode": "SBADM",
-                        "@moodCode": "EVN",
-                        "templateId": [{"@root": "2.16.840.1.113883.10.20.22.4.147"}],
-                        "code": {
-                            "@code": "76662-6",
-                            "@codeSystem": "2.16.840.1.113883.6.1",
-                        },
-                        "text": dose.text,
-                    },
-                }
-            )
+        dosage_entry = EntryRelationship(**{"@typeCode": "COMP", "@inversionInd": True})
+        dosage_entry.substanceAdministration = SubstanceAdministration(
+            moodCode="EVN",
+            typeCode="COMP",
+            templateId=templateId(
+                root="2.16.840.1.113883.10.20.22.4.147",
+                extension="2014-06-09",
+            ),
+            code=CD(
+                code="76662-6",
+                codeSystem="2.16.840.1.113883.6.1",
+                displayName="Dosage instructions",
+            ),
+            text=dose.text,
         )
+        # substance_administration.entryRelationship.append(
+        #     EntryRelationship(
+        #         **{
+        #             "sequenceNumber": (
+        #                 entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
+        #             ),
+        #             "@typeCode": "COMP",
+        #             "@inversionInd": True,
+        #             "substanceAdministration": {
+        #                 "@classCode": "SBADM",
+        #                 "@moodCode": "EVN",
+        #                 "templateId": [{"@root": "2.16.840.1.113883.10.20.22.4.147"}],
+        #                 "code": CD(code="76662-6", codeSystem="2.16.840.1.113883.6.1", displayName="Dosage instructions"),
+        #                 # "text": {"@xsi:type": "ED", "xmlText": dose.text},
+        #                 "text": dose.text,
+        #             },
+        #         }
+        #     )
+        # )
+        substance_administration.entryRelationship.append(dosage_entry)
+        if dose.patientInstruction:
+            instruction_entry = EntryRelationship()
+            instruction_entry.act = {
+                "@classCode": "ACT",
+                "@moodCode": "INT",
+                "templateId": templateId(
+                    root="2.16.840.1.113883.10.20.22.4.200", extension="2014-06-09"
+                ),
+                "code": {
+                    "@code": "422037009",
+                    "@codeSystem": "2.16.840.1.113883.6.96",
+                    "@codeSystemName": "http://snomed.info/sct",
+                },
+                "text": dose.patientInstruction,
+            }
+            substance_administration.entryRelationship.append(instruction_entry)
     # find effective time entry with operator of low
 
     low_time = [
@@ -272,7 +330,94 @@ def medication(
         substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
     )
 
-    # check for prescriping agency and last issued date extensions
+    # check if snomed code is in cache and if so add to med name
+    snomed_code = (
+        substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
+    )
+    # print(substance_administration.doseQuantity)
+    gp_units = ["tablet", "capsule"]
+    unit = (
+        substance_administration.doseQuantity.get("@unit", "").lower()
+        if substance_administration.doseQuantity
+        else ""
+    )
+
+    if substance_administration.doseQuantity:
+        blank_unit = not substance_administration.doseQuantity.get("@unit")
+        if unit in gp_units or blank_unit:
+            # we only process doses for tablets or capsules.
+
+            try:
+                dmd_data = await dmd_lookup(int(snomed_code))
+                # only process dose if a single dosage instruction
+                if len(entry.dosage) == 1:
+
+                    if dmd_data.vpi and substance_administration.doseQuantity:
+                        processed_dose = (
+                            dmd_data.vpi.value
+                            * substance_administration.doseQuantity["@value"]
+                        )
+
+                        # clean number to remove trailing .0 if whole number
+                        processed_dose = clean_number(processed_dose)
+
+                        substance_administration.doseQuantity["@value"] = processed_dose
+                        substance_administration.doseQuantity["@unit"] = (
+                            dmd_data.vpi.unit
+                        )
+                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
+                        # print(warning_text)
+                        misc_notes.append(warning_text)
+
+                elif len(entry.dosage) > 1:
+                    # multiple dosage instrutions so add warning to medication name instead of processing dose
+                    warning_text = f"Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
+                    misc_notes.append(warning_text)
+
+                if substance_administration.routeCode:
+                    if substance_administration.routeCode.displayName == "Take":
+                        # take often used with capsules. replace with dmd route.
+                        if dmd_data.route:
+                            substance_administration.routeCode.displayName = (
+                                dmd_data.route.displayName
+                            )
+                            substance_administration.routeCode.code = (
+                                dmd_data.route.code
+                            )
+                            substance_administration.routeCode.codeSystem = (
+                                "2.16.840.1.113883.6.96"
+                            )
+                            # substance_administration.routeCode.codeSystem = (
+                            #     "2.16.840.1.113883.3.26.1.1"
+                            # )
+                            substance_administration.routeCode.codeSystemName = (
+                                dmd_data.route.codeSystemName
+                            )
+                            # route_translation = CD()
+                            # route_translation["@code"] = dmd_data.route.code
+                            # route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
+                            # substance_administration.routeCode.translation = (
+                            #     route_translation
+                            # )
+
+            except Exception as e:
+                logging.error(
+                    f"Error looking up DMD data for SNOMED code {snomed_code}: {e}"
+                )
+                print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
+                pass
+
+        if "- unit of product usage" in unit:
+            # strip overly verbose snomed unit description to just unit
+            substance_administration.doseQuantity["@unit"] = (
+                substance_administration.doseQuantity["@unit"]
+                .replace("- unit of product usage", "")
+                .strip()
+            )
+
+    # check for prescribing agency and last issued date extensions
+    remaining_repeats = None
+    prescription_information = []
     for ext in entry.extension:
         # print(ext.url)
         if (
@@ -280,31 +425,158 @@ def medication(
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
         ):
             prescribing_agency = ext.valueCodeableConcept.coding[0].display
+            prescription_information.append(prescribing_agency)
         if (
             ext.url
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
         ):
             last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
+            prescription_information.append(f"Last issued date: {last_issued_date}")
 
-    # look for prescrtion type in medication request
+    # look for prescription type in medication request
     for ext in based_on_request.extension:
         if (
             ext.url
             == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
         ):
             prescription_type = ext.valueCodeableConcept.coding[0].display
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
+        ):
+            # print("Medication repeat information extension found")
+            repeats_allowed = None
+            repeats_issued = None
+            for i in ext.extension:
+                if i.url == "numberOfRepeatPrescriptionsAllowed":
+                    repeats_allowed = i.valuePositiveInt
+                    # print(repeats_allowed)
+                elif i.url == "numberOfRepeatPrescriptionsIssued":
+                    repeats_issued = i.valueUnsignedInt
+                    # print(f"Repeats Issued:{repeats_issued}")
+            if repeats_allowed is not None and repeats_issued is not None:
+                remaining_repeats = repeats_allowed - repeats_issued
+                # misc_notes.append(
+                #     f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                # )
+                prescription_information.append(
+                    f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                )
+        if (
+            ext.url
+            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatusReason-1"
+        ):
+            for i in ext.extension:
+                if i.url == "statusReason":
+                    status_reason = i.valueCodeableConcept.text
+                    misc_notes.append(f"Medication status reason: {status_reason}")
 
+    # process issued quantity from based_on_request
+    if based_on_request.dispenseRequest and based_on_request.dispenseRequest.quantity:
+        quantity = based_on_request.dispenseRequest.quantity
+        unit = None
+        if quantity.unit:
+            unit = quantity.unit
+        # else look for dose quanity extension
+        elif quantity.extension:
+            for ext in quantity.extension:
+                if (
+                    ext.url
+                    == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationQuantityText-1"
+                ):
+                    unit = ext.valueString
+        issued_quantity = f"Issued quantity: {quantity.value} {unit}"
+        # misc_notes.append(issued_quantity)
+        prescription_information.append(issued_quantity)
+
+    # add br tags to prescription information with a join
+    prescription_information = (
+        "<br />".join(prescription_information) if prescription_information else ""
+    )
+    # prescription_information = [f"{info} <br />" for info in prescription_information]
+
+    patient_instr_list = [
+        dosage.patientInstruction
+        for dosage in entry.dosage
+        if dosage.patientInstruction
+    ]
+    text_instr_list = [dosage.text for dosage in entry.dosage if dosage.text]
+
+    def add_numbering(instruction_list):
+        if len(instruction_list) > 1:
+            for i, instruction in enumerate(instruction_list):
+                new_instruction = f"{i+1}. {instruction}"
+                instruction_list[i] = new_instruction
+        return instruction_list
+
+    patient_instr_list = add_numbering(patient_instr_list)
+    text_instr_list = add_numbering(text_instr_list)
+    patient_instructions = (
+        "Patient Instructions: " + "<br />".join(patient_instr_list)
+        if patient_instr_list
+        else ""
+    )
+    text_instructions = (
+        " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
+    )
+    # make misc notes a set to avoid duplicates
+    misc_notes = list(set(misc_notes))
+
+    misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
+
+    # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
+    # print(f"Misc notes text: {''.join(misc_notes_text)}")
+    comment_activity = EntryRelationship()
+    comment_activity.act = {
+        "code": {
+            "@code": "48767-8",
+        },
+        "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
+    }
+    substance_administration.entryRelationship.append(comment_activity)
+
+    # add dispensing  request
+    if based_on_request.dispenseRequest:
+        supply_order = EntryRelationship(**{"@typeCode": "REFR"})
+        supply_order.substanceAdministration = SubstanceAdministration()
+        supply_order.substanceAdministration.moodCode = "EVN"
+        if based_on_request.dispenseRequest.validityPeriod.end:
+            supply_order.substanceAdministration.effectiveTime = [
+                IVL_TS(
+                    high={
+                        "@value": date_helper(
+                            based_on_request.dispenseRequest.validityPeriod.end.isostring
+                        )
+                    }
+                )
+            ]
+
+        if remaining_repeats is not None:
+            supply_order.substanceAdministration.repeatNumber = IVL_INT(
+                value=remaining_repeats
+            )
+        substance_administration.entryRelationship.append(supply_order)
+
+    # entry_row = [
+    #     readable_date(low_time[0]) if low_time else "",
+    #     readable_date(high_time[0]) if high_time else "",
+    #     entry.status if entry.status else "unknown",
+    #     prescription_type if "prescription_type" in locals() else "",
+    #     med_name,
+    #     f"{text_instructions}<br />{patient_instructions}",
+    #     {"BR": misc_notes_text},
+    #     prescribing_agency if "prescribing_agency" in locals() else "",
+    #     last_issued_date if "last_issued_date" in locals() else "",
+    # ]
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
         readable_date(high_time[0]) if high_time else "",
         entry.status if entry.status else "unknown",
         prescription_type if "prescription_type" in locals() else "",
         med_name,
-        substance_administration.entryRelationship[0].substanceAdministration.get(
-            "text", ""
-        ),
-        prescribing_agency if "prescribing_agency" in locals() else "",
-        last_issued_date if "last_issued_date" in locals() else "",
+        f"{text_instructions}<br />{patient_instructions}",
+        {"BR": misc_notes_text},
+        prescription_information,
     ]
 
     return EntryWithRow(
@@ -424,7 +696,9 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "@classCode": "MANU",
             "playingEntity": {
                 "@classCode": "MMAT",
-                "code": code_with_translations(entry.code.coding),
+                "code": code_with_translations(entry.code.coding).model_dump(
+                    by_alias=True, exclude_none=True
+                ),
             },
         },
     }
@@ -462,9 +736,9 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     allergy_row = [
         readable_date(all["act"]["effectiveTime"].get("low", {}).get("@value", "")),
         all["act"]["statusCode"].get("@code", ""),
-        observation["participant"]["participantRole"]["playingEntity"][
-            "code"
-        ].displayName,
+        observation["participant"]["participantRole"]["playingEntity"]["code"][
+            "@displayName"
+        ],
     ]
 
     return EntryWithRow(entry=all, row=allergy_row)
