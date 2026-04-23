@@ -86,6 +86,6 @@ async def test_gpconnect_with_nhs_data(
     mock_base64_xml.return_value = "mocked_base64_doc"
 
     # Run the test
-    result = await gpconnect(nhsno)
+    result = await gpconnect(nhsno, saml_attrs={})
     assert "document_id" in result
     # mock_lookup_patient.assert_called_once_with(nhsno)
