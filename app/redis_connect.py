@@ -78,8 +78,8 @@ class RedisClient:
         self._pool = ConnectionPool(
             host=REDIS_HOST,
             port=REDIS_PORT,
-            db=db,
-            # password=REDIS_PASSWORD,
+            db=REDIS_DB,
+            password=REDIS_PASSWORD,
             max_connections=POOL_MAX_CONNECTIONS,
             socket_timeout=SOCKET_TIMEOUT,
             socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,

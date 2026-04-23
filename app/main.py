@@ -16,6 +16,12 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI, Form, Request, Response
+# Configure Azure Monitor OpenTelemetry if connection string is present
+if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    from azure.monitor.opentelemetry import configure_azure_monitor
+
+    configure_azure_monitor()
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
@@ -59,17 +65,33 @@ async def lifespan(app: FastAPI):
     # Store registry ID in Redis with 24 hour expiry
     redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
 
-    # Handle JWK generation/verification
-    if not os.path.isfile("keys/jwk.json"):
-        # Generate new JWK from private key
+    # Handle JWK generation/verification securely entirely in-memory
+    jwt_key = os.getenv("JWTKEY")
+    app.state.jwk_json = {}
+
+    if jwt_key:
+        try:
+            # Reformat env var newlines safely and convert to JWK
+            private_pem = jwt_key.replace("\\n", "\n").encode("utf-8")
+            public_jwk = jwk.JWK.from_pem(private_pem)
+            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+        except Exception as e:
+            print(f"Warning: Failed to load JWTKEY from environment: {e}")
+    elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile(
+        "keys/test-1.pem"
+    ):
+        # Local development fallback
+        print(
+            "Warning: Falling back to local keys/test-1.pem key. Not for use in production."
+        )
         with open("keys/test-1.pem", "rb") as pemfile:
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
-            jwk_json = public_jwk.export_public(as_dict=True)
-
-            # Save generated JWK
-            with open("keys/jwk.json", "w") as f:
-                json.dump(jwk_json, f)
+            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+    else:
+        print(
+            "Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error."
+        )
 
     # Set up OpenTelemetry metrics
     otlp_endpoint = os.getenv(
@@ -108,32 +130,31 @@ app = FastAPI(
 # register soap error handler
 soap.register_handlers(app)
 
-# 1) Trusted hosts: allow local & your domain
+from app.middleware.mtls import MTLSMiddleware
+
+# 1) Trusted hosts
+allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "*")
+allowed_hosts = [h.strip() for h in allowed_hosts_str.split(",")]
+
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=[
-        "xhumademo.com",
-        "localhost",
-        "127.0.0.1",
-        "0.0.0.0",
-        "*",
-    ],  # "*" ok for dev
+    allowed_hosts=allowed_hosts,
 )
 
-# 2) CORS: allow local & your domain (Starlette applies CORS to WebSockets too)
+# 2) CORS
+cors_origins_str = os.getenv("CORS_ORIGINS", "*")
+allow_origins = [o.strip() for o in cors_origins_str.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://xhumademo.com",
-        "http://localhost",
-        "http://127.0.0.1",
-        "http://0.0.0.0",
-        "*",
-    ],  # "*" ok for dev
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 3) mTLS Middleware
+app.add_middleware(MTLSMiddleware)
 
 # Include routers for different service components
 app.include_router(soap.router)
@@ -236,7 +257,7 @@ async def demo(nhsno: int, request: Request):
 
 
 @app.get("/jwk")
-async def get_jwk():
+async def get_jwk(request: Request):
     """
     Public endpoint that provides access to the service's JSON Web Key.
 
@@ -246,9 +267,9 @@ async def get_jwk():
     Returns:
         dict: JSON Web Key in dictionary format.
     """
-    with open("keys/jwk.json", "r") as jwk_file:
-        key = json.load(jwk_file)
-    return key
+    if hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
+        return request.app.state.jwk_json
+    return {"error": "JWK not configured on this server"}
 
 
 # --- Dev-only audit viewer ---
