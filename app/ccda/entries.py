@@ -521,7 +521,6 @@ async def medication(
     )
     # make misc notes a set to avoid duplicates
     misc_notes = list(set(misc_notes))
-    # misc_notes.append("@TODAYDATE@")
 
     misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
 

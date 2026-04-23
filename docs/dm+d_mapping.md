@@ -115,3 +115,36 @@ flowchart TD
     B6 --> A7
 
 ```
+
+### Integration into C-CDA Medicines section
+With a valid pydantic model it is then possible to use this to enhance the medicines data sent as part of the C-CDA.
+
+```mermaid
+flowchart TD
+Z[fhir medicationStatement]
+A@{shape: diamond, label: doseQuantity?}
+B@{shape: diamond, label: "unit == tablet, capsule or blank?"}
+C@{shape: diamond, label: "len(dosage) == 1"}
+D("dmd_lookup(SNOMED_CODE)")
+E@{shape:diamond, label: "route == take?"}
+
+Z --> A
+A -- Yes --> B -- Yes --> D
+D --> C
+D --> E
+
+subgraph Dose
+C -- Yes --> G(dose = VPI quantity * tablet/capsule number)
+C -- No --> K(warn user of multiple dose instructions)
+G --> H(remove trailing zeros)
+H --> I(map VPI unit)
+I --> J(add warning to alert user to automated mapping)
+end
+
+subgraph Route
+E -- Yes --> F(Replace substance administration routeCode with coded route from dm+d)
+end
+
+```
+
+The workflow is robust to edge cases whilst allowing for more informative mapping for the majority of oral medications that otherwise are difficult to easily consolidate into secondary care systems.
