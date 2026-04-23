@@ -113,5 +113,43 @@ flowchart TD
     E@{shape: diamond, label: "single VPI?"} -- No -->  G@{ shape:  framed-circle, label: "Stop" }
     F@{shape: diamond, label: "single Route?"} -- No -->  G@{ shape: dbl-circ, label:"Stop"}
     B6 --> A7
+    
+```
 
+### Route Mapping Logic (Detailed Explanation)
+
+When Xhuma processes a FHIR medication request from GP systems, the specified route of administration is often generic. Commonly, prescriptions for tablets or capsules will simply specify a generic instruction like "Take".
+
+The script logic within `entries.py` intercepts this to improve clinical accuracy for downstream secondary care charts through an automated dm+d route mapping process:
+
+1. **Check Initial FHIR Route**: Xhuma first extracts the provided `dosage.method` from the FHIR payload.
+2. **Identify Generic Routes**: If the specified route is explicitly listed using the generic display name `"Take"`, the middleware flags it for potential upgrading.
+3. **dm+d Dictionary Lookup**: Xhuma retrieves the overarching SNOMED CT code for the medication and queries the NHS Terminology Server for its formal dm+d profile (`dmd_data`).
+4. **Overwriting with Specificity**: If the terminology server strictly defines an authorized `route` for that medicinal product (for example, *Oral route*, *Sublingual route*, etc.), Xhuma securely **replaces** the generic "Take" string. It automatically populates both the human-readable route name and its precise SNOMED numerical code into the outgoing C-CDA payload.
+5. **Safe Fallback**: If the medication has multiple valid routes assigned to it, or if the terminology server lacks a specific route map, Xhuma safely abandons the translation attempt. The original text from the GP is preserved exactly as-is to ensure no misleading clinical assumptions are passed into the final chart reconciliation.
+
+#### Example Scenario (Patient: John Doe)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor GP as GP System
+    participant X as Xhuma Middleware
+    participant D as dm+d Terminology Server
+    actor UCLH as UCLH Electronic Health Record
+
+    note over GP, UCLH: Example Patient: John Doe (Prescribed Paracetamol)
+    
+    GP->>X: Sends FHIR:<br/> "Paracetamol 500mg tablets"<br/>Route: "Take" (Generic)
+    
+    note over X: Xhuma detects "Take"<br/>Flags for translation
+    
+    X->>D: Lookup SNOMED code for<br/>"Paracetamol 500mg tablets"
+    D-->>X: Found VMP profile!<br/>Authorized Route: "Oral Route" (SNOMED 26643006)
+    
+    note over X: Xhuma deletes "Take"<br/>Injects "Oral Route"
+    
+    X->>UCLH: Sends C-CDA:<br/>"Paracetamol 500mg, 2 tabs QDS, ORAL ROUTE"
+    
+    note over UCLH: Patient John Doe's chart now explicitly <br/>shows "Oral" for maximum clinical safety.
 ```
