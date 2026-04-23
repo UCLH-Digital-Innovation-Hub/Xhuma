@@ -32,6 +32,21 @@ services:
     networks:
       - xhuma-net
 
+  redis-cron:
+  image: alpine:3.20
+  depends_on:
+    - redis
+  environment:
+    - REDIS_PASSWORD=${REDIS_PASSWORD}
+  command: >
+    /bin/sh -c "
+    apk add --no-cache redis &&
+    echo '0 5 * * 1 redis-cli -h redis -a $$REDIS_PASSWORD -n 2 FLUSHDB' > /etc/crontabs/root &&
+    crond -f -l 2
+    "
+  networks:
+    - xhuma-net
+
   postgres:
     image: postgres:15
     environment:
@@ -68,7 +83,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # If you mount alembic locally in xhuma, do same here for consistency in dev:
     volumes:
       - ./app:/code/app
       - ./alembic:/code/alembic
@@ -111,9 +125,6 @@ services:
         condition: service_completed_successfully
     develop:
       watch:
-        - action: sync
-          path: ./app
-          target: /code/app
         - action: sync+restart
           path: ./otel-collector-config.yaml
           target: /etc/otel-collector-config.yaml
@@ -124,7 +135,7 @@ services:
       - ./alembic.ini:/code/alembic.ini
     networks:
       - xhuma-net
-    command: ["python","-m","uvicorn","app.main:app","--host","0.0.0.0","--port","${PORT:-80}"]
+    command: ["python","-m","uvicorn","app.main:app","--host","0.0.0.0","--port","${PORT:-80}", "--reload"]
 
   prometheus:
     image: prom/prometheus:v2.45.0

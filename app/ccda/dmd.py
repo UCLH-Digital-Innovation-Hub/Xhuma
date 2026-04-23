@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import pprint
@@ -48,12 +49,22 @@ async def get_terminology_token():
         return token_data["access_token"]
 
 
-async def get_dmd_concept(concept_id: int, properties: list = None):
+def dmd_cache_key(concept_id: int, properties: list = None) -> str:
+    """Generate a cache key for a DMD concept based on its ID and requested properties."""
+    if properties:
+        properties_key = ",".join(sorted(properties))
+        return f"snomed:{concept_id}:properties:{properties_key}"
+    return f"snomed:{concept_id}"
+
+
+async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
     # Check if the concept is in the cache
-    cached_concept = snomed_client.get(f"snomed:{concept_id}")
+    cache_key = dmd_cache_key(concept_id, properties)
+    cached_concept = snomed_client.get(cache_key)
     if cached_concept:
         logging.info(f"Cache hit for SNOMED concept {concept_id}")
-        return cached_concept.decode("utf-8")
+        # cached concept is stored as json string, decode it before returning
+        return json.loads(cached_concept.decode("utf-8"))
 
     logging.info(f"Cache miss for SNOMED concept {concept_id}. Fetching from DMD API.")
     # If not in cache, fetch from DMD API
@@ -87,6 +98,9 @@ async def get_dmd_concept(concept_id: int, properties: list = None):
             response.raise_for_status()
 
         concept_data = response.json()
+        # cache the concept data for 1 week
+        snomed_client.setex(cache_key, 7 * 24 * 3600, json.dumps(concept_data))
+        # print(f"Cached DMD concept {concept_id} with properties {properties} under key {cache_key}")
 
         return concept_data
 
@@ -94,6 +108,14 @@ async def get_dmd_concept(concept_id: int, properties: list = None):
 async def dmd_lookup(concept_id: int) -> DMDConcept:
     properties = ["VPI", "ROUTECD", "parent"]
     dmd = await get_dmd_concept(concept_id, properties=properties)
+    # make sure dmd is a dict
+    if not isinstance(dmd, dict):
+        logging.error(
+            f"Unexpected DMD concept data format for concept {concept_id}: {dmd}"
+        )
+        dmd = json.loads(dmd)
+
+    print(type(dmd))
     display_name = [
         prop["valueString"] for prop in dmd["parameter"] if prop["name"] == "display"
     ]
@@ -153,7 +175,8 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
         if dose_unit_code:
             # lookup the unit code in SNOMED to get the display name
             unit_concept = await get_dmd_concept(dose_unit_code)
-            # pprint.pprint(unit_concept)
+            pprint.pprint(unit_concept)
+            print(type(unit_concept))
             unit_display_parameter = [
                 parm for parm in unit_concept["parameter"] if parm["name"] == "display"
             ]
