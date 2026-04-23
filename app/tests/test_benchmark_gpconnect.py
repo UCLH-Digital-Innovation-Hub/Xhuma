@@ -42,7 +42,7 @@ async def test_gpconnect_with_nhs_data(
 
     # Run the test
     async def run_gpconnect():
-        result = await gpconnect(nhsno)
+        result = await gpconnect(nhsno, saml_attrs={})
         assert "document_id" in result
         mock_lookup_patient.assert_called_once_with(nhsno)
 

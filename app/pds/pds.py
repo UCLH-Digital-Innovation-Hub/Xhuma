@@ -17,7 +17,7 @@ from app.security import pds_jwt
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
 INT_BASE_PATH = "https://int.api.service.nhs.uk/"
-API_KEY = os.getenv("API_KEY")
+API_KEY = os.getenv("API_KEY", "TEST_KEY")
 
 router = fastapi.APIRouter(prefix="/pds")
 
@@ -136,9 +136,9 @@ if __name__ == "__main__":
     # print(patient.generalPractitioner[0].identifier.value)
 
     # ods = asyncio.run(sds_trace("A82038"))
-    pprint.pprint(ods)
-    for i in ods["entry"]:
-        pprint.pprint(i)
+    # pprint.pprint(ods)
+    # for i in ods["entry"]:
+    #     pprint.pprint(i)
 
     # try self lookup
     prefix = "https://fhir.nhs.uk/Id/"

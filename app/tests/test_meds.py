@@ -115,7 +115,7 @@ structured_med = medication.Medication(
         },
     }
 )
-sturctured_statement = medicationstatement.MedicationStatement(
+structured_statement = medicationstatement.MedicationStatement(
     {
         "resourceType": "MedicationStatement",
         "id": "2E352BA6-8F87-479B-BC80-41494027F2E6-MS",
@@ -256,10 +256,10 @@ def test_structured_detail():
     pprint.pprint(substance_administration)
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
-    # assert (
-    #     substance_administration["id"][0]["@extension"]
-    #     == "https://EMISWeb/A82038/7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6MS"
-    # )
+    assert (
+        substance_administration["id"][0]["@extension"]
+        == "7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6MS"
+    )
     assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20200304"
     assert substance_administration["effectiveTime"][1]["@xsi:type"] == "PIVL_TS"
     assert (
