@@ -418,58 +418,60 @@ async def medication(
     # check for prescribing agency and last issued date extensions
     remaining_repeats = None
     prescription_information = []
-    for ext in entry.extension:
-        # print(ext.url)
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
-        ):
-            prescribing_agency = ext.valueCodeableConcept.coding[0].display
-            prescription_information.append(prescribing_agency)
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
-        ):
-            last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
-            prescription_information.append(f"Last issued date: {last_issued_date}")
+    if entry.extension:
+        for ext in entry.extension:
+            # print(ext.url)
+            if (
+                ext.url
+                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
+            ):
+                prescribing_agency = ext.valueCodeableConcept.coding[0].display
+                prescription_information.append(prescribing_agency)
+            if (
+                ext.url
+                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
+            ):
+                last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
+                prescription_information.append(f"Last issued date: {last_issued_date}")
 
     # look for prescription type in medication request
-    for ext in based_on_request.extension:
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
-        ):
-            prescription_type = ext.valueCodeableConcept.coding[0].display
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
-        ):
-            # print("Medication repeat information extension found")
-            repeats_allowed = None
-            repeats_issued = None
-            for i in ext.extension:
-                if i.url == "numberOfRepeatPrescriptionsAllowed":
-                    repeats_allowed = i.valuePositiveInt
-                    # print(repeats_allowed)
-                elif i.url == "numberOfRepeatPrescriptionsIssued":
-                    repeats_issued = i.valueUnsignedInt
-                    # print(f"Repeats Issued:{repeats_issued}")
-            if repeats_allowed is not None and repeats_issued is not None:
-                remaining_repeats = repeats_allowed - repeats_issued
-                # misc_notes.append(
-                #     f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
-                # )
-                prescription_information.append(
-                    f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
-                )
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatusReason-1"
-        ):
-            for i in ext.extension:
-                if i.url == "statusReason":
-                    status_reason = i.valueCodeableConcept.text
-                    misc_notes.append(f"Medication status reason: {status_reason}")
+    if based_on_request.extension:
+        for ext in based_on_request.extension:
+            if (
+                ext.url
+                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
+            ):
+                prescription_type = ext.valueCodeableConcept.coding[0].display
+            if (
+                ext.url
+                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
+            ):
+                # print("Medication repeat information extension found")
+                repeats_allowed = None
+                repeats_issued = None
+                for i in ext.extension:
+                    if i.url == "numberOfRepeatPrescriptionsAllowed":
+                        repeats_allowed = i.valuePositiveInt
+                        # print(repeats_allowed)
+                    elif i.url == "numberOfRepeatPrescriptionsIssued":
+                        repeats_issued = i.valueUnsignedInt
+                        # print(f"Repeats Issued:{repeats_issued}")
+                if repeats_allowed is not None and repeats_issued is not None:
+                    remaining_repeats = repeats_allowed - repeats_issued
+                    # misc_notes.append(
+                    #     f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                    # )
+                    prescription_information.append(
+                        f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                    )
+            if (
+                ext.url
+                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatusReason-1"
+            ):
+                for i in ext.extension:
+                    if i.url == "statusReason":
+                        status_reason = i.valueCodeableConcept.text
+                        misc_notes.append(f"Medication status reason: {status_reason}")
 
     # process issued quantity from based_on_request
     if based_on_request.dispenseRequest and based_on_request.dispenseRequest.quantity:

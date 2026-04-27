@@ -148,6 +148,7 @@ async def gpconnect(
             outcome=AuditOutcome.ok,
         )
     except Exception as e:
+        msg = f"PDS lookup failed: {e}"
         await _attempt_audit(
             request=request,
             nhs_number=str(nhsno),
