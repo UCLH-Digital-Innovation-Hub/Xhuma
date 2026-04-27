@@ -272,27 +272,32 @@ def medication(
         substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
     )
 
-    # check for prescriping agency and last issued date extensions
-    for ext in entry.extension:
-        # print(ext.url)
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
-        ):
-            prescribing_agency = ext.valueCodeableConcept.coding[0].display
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
-        ):
-            last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
+    # check for prescribing agency and last issued date extensions
+    if entry.extension:
+        for ext in entry.extension:
+            # print(ext.url)
+            if (
+                ext.url
+                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
+            ):
+                prescribing_agency = ext.valueCodeableConcept.coding[0].display
+            if (
+                ext.url
+                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
+            ):
+                last_issued_date = readable_date(
+                    date_helper(ext.valueDateTime.isostring)
+                )
 
-    # look for prescrtion type in medication request
-    for ext in based_on_request.extension:
-        if (
-            ext.url
-            == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
-        ):
-            prescription_type = ext.valueCodeableConcept.coding[0].display
+    # look for prescription type in medication request
+    print(f"based_on_request: {based_on_request}")
+    if based_on_request.extension:
+        for ext in based_on_request.extension:
+            if (
+                ext.url
+                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
+            ):
+                prescription_type = ext.valueCodeableConcept.coding[0].display
 
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
