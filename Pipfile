@@ -41,6 +41,7 @@ pytest-asyncio = "*"
 pytest-benchmark = "*"
 flake8 = "*"
 pre-commit = "*"
+coverage = "*"
 
 [requires]
 python_version = "3.13"
