@@ -9,18 +9,19 @@ The service implements a stateless architecture with Redis caching and supports 
 profiles for healthcare interoperability.
 """
 
+import base64
 import json
 import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
+from fastapi import FastAPI, Form, Request, Response
 # Configure Azure Monitor OpenTelemetry if connection string is present
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor()
 
-from fastapi import FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
@@ -193,9 +194,6 @@ async def root():
             <h4>Endpoints</h4>
             <p>/pds/lookuppatient/nhsno will perform a pds lookup and return the fhir response.
                <a href="pds/lookup_patient/9449306680">Example</a></p>
-            <p>/gpconnect/nhsno will perform a gpconnect access record structured query,
-               convert it to a CCDA and return the cached record uuid.
-               <a href="gpconnect/9690937278">Example</a></p>
             <p>For the purposes of the internet facing demo /demo/nhsno will return the
                mime encoded ccda. <a href="/demo/9690937278">Example</a></p>
         </body>
@@ -242,6 +240,15 @@ async def demo(nhsno: int, request: Request):
     )
 
     bundle_id = await gpconnect(nhsno, audit_dict, request=request)
+    response = json.loads(bundle_id.body)  # validate json
+    # if success then retrieve from redis and return
+    if response["success"] == True:
+        ccda = redis_client.get(response["document_id"])
+        # if ccda decode from base64 and return xml
+        if ccda:
+            ccda_decoded = base64.b64decode(ccda).decode("utf-8")
+            return Response(content=ccda_decoded, media_type="application/xml")
+
     # decode jsonresponse
 
     # gpcon_response = json.loads(bundle_id)  # validate json

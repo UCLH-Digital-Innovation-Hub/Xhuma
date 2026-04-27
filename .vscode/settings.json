@@ -4,5 +4,8 @@
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true,
-    "python-envs.defaultEnvManager": "ms-python.python:pipenv"
+    "python-envs.defaultEnvManager": "ms-python.python:pipenv",
+    "cSpell.words": [
+        "SNOMED"
+    ]
 }

@@ -230,3 +230,10 @@ def organization_to_author(
     org = AuthorParticipation(assignedAuthor=author)
 
     return org
+
+
+def clean_number(x):
+    # if x is a float and is an integer, convert to int
+    if isinstance(x, float) and x.is_integer():
+        return int(x)
+    return x

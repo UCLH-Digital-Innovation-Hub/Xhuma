@@ -505,6 +505,7 @@ async def gpconnect(
 
     try:
         xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+
     except Exception as e:
         msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
         logging.exception(msg)
@@ -548,7 +549,7 @@ if __name__ == "__main__":
     saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 
     # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(gpconnect(9692140466, saml))
+    result = asyncio.run(gpconnect(9692136744, saml))
     print(result.body.decode())
     print(result.status_code)
     # assert "error" in result.body.decode()
