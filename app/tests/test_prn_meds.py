@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
-from fhirclient.models import medication, medicationstatement
+from fhirclient.models import medication, medicationrequest, medicationstatement
 
 from app.ccda.entries import medication as medication_entry
 
@@ -90,6 +90,88 @@ prn_med = medication.Medication(
     }
 )
 
+med_request = medicationrequest.MedicationRequest(
+    {
+        "resourceType": "MedicationRequest",
+        "id": "2E352BA6-8F87-479B-BC80-41494027F2E6",
+        "meta": {
+            "profile": [
+                "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationRequest-1"
+            ]
+        },
+        "extension": [
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1",
+                "extension": [
+                    {
+                        "url": "numberOfRepeatPrescriptionsAllowed",
+                        "valueUnsignedInt": 6,
+                    },
+                    {"url": "numberOfRepeatPrescriptionsIssued", "valueUnsignedInt": 0},
+                ],
+            },
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1",
+                "valueCodeableConcept": {
+                    "coding": [
+                        {
+                            "system": "https://fhir.nhs.uk/STU3/CodeSystem/CareConnect-PrescriptionType-1",
+                            "code": "repeat",
+                            "display": "Repeat",
+                        }
+                    ]
+                },
+            },
+        ],
+        "identifier": [
+            {
+                "system": "https://EMISWeb/A82038",
+                "value": "7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6",
+            }
+        ],
+        "groupIdentifier": {"value": "2e352ba6-8f87-479b-bc80-41494027f2e6"},
+        "status": "active",
+        "intent": "plan",
+        "medicationReference": {
+            "reference": "Medication/A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7"
+        },
+        "subject": {"reference": "Patient/37"},
+        "authoredOn": "2020-03-04T16:35:02.273+00:00",
+        "recorder": {"reference": "Practitioner/2DB481A3-306A-4133-9491-1558161D6A2B"},
+        "note": [{"text": "Patient Notes:Take 30 mins before a meal or snack"}],
+        "dosageInstruction": [
+            {
+                "text": "1 tablet, daily, in morning, 30 minutes before a meal",
+                "timing": {
+                    "repeat": {
+                        "frequency": 1,
+                        "period": 1,
+                        "periodUnit": "d",
+                        "when": ["MORN", "AC"],
+                        "offset": 30,
+                    }
+                },
+                "doseQuantity": {
+                    "value": 1,
+                    "unit": "tablet",
+                    "system": "http://snomed.info/sct",
+                    "code": "428673006",
+                },
+            }
+        ],
+        "dispenseRequest": {
+            "validityPeriod": {"start": "2020-03-04"},
+            "quantity": {"value": 28, "unit": "tablet"},
+            "expectedSupplyDuration": {
+                "value": 28,
+                "unit": "day",
+                "system": "http://unitsofmeasure.org",
+                "code": "d",
+            },
+        },
+    }
+)
+
 
 def test_prn_medication_statement():
     """Test the conversion of a PRN medication statement to a CCDA entry."""
@@ -97,11 +179,13 @@ def test_prn_medication_statement():
     index_dict = {
         "Medication/1004837_1": prn_med,
         "prn_medicationStatement/9": prn_med,
+        "MedicationRequest/1000000000000000_71eff60000000000_plan": med_request,
     }
     substance_administration = medication_entry(prn_statement, index_dict)
+    substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
     # Print the CCDA entry for debugging purposes
-    pprint.pprint(substance_administration)
+    # pprint.pprint(substance_administration)
 
     # Check that the entry is not None
     assert substance_administration is not None
