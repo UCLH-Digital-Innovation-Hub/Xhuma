@@ -1,6 +1,6 @@
 # Xhuma - GP Connect to CCDA Middleware Service
 
-![Python version](https://img.shields.io/github/pipenv/locked/python-version/JMathiszig-Lee/GPconnect)
+![Python version](https://img.shields.io/github/pipenv/locked/python-version/UCLH-Digital-Innovation-Hub/Xhuma) [![Coverage Status](https://coveralls.io/repos/github/UCLH-Digital-Innovation-Hub/Xhuma/badge.svg?branch=main)](https://coveralls.io/github/UCLH-Digital-Innovation-Hub/Xhuma?branch=main) [![CI](https://github.com/UCLH-Digital-Innovation-Hub/Xhuma/actions/workflows/ci.yml/badge.svg)](https://github.com/UCLH-Digital-Innovation-Hub/Xhuma/actions/workflows/ci.yml)
 
 ## Overview
 
@@ -13,10 +13,11 @@ Xhuma is a stateless middleware service that facilitates the conversion of GP Co
   - Memory management and persistence
   - Connection pooling and automatic retry
   - Comprehensive monitoring
-- IHE ITI profile implementation (ITI-47, ITI-38, ITI-39)
+- IHE ITI profile implementation (ITI-55, ITI-38, ITI-39)
 - FHIR to CCDA conversion
 - JWT-based authentication for NHS Digital services
 - SOAP message handling for healthcare interoperability
+- parsing of AMP/VMP GP prescriptions to true structured data using dm+d
 
 ## Technical Architecture
 
@@ -25,6 +26,7 @@ The service is built on FastAPI and follows a modular design pattern. For detail
 - [Technical Architecture](docs/technical_architecture.md)
 - [Data Flow Documentation](docs/data_flow.md)
 - [Technical Resources](docs/technical_resources.md)
+- [Structured Dose Mapping](docs/dm+d_mapping.md)
 
 ## System Flow
 
@@ -72,6 +74,22 @@ sequenceDiagram
 - Docker
 - Docker Compose
 - NHS Digital API access credentials
+
+## Development
+1. install pipenv
+
+2. install development dependencies
+```bash
+pipenv install --dev
+```
+
+3. install pre-commit hooks to ensure consistency
+```bash
+pre-commit install
+```
+
+4. configure environmental variables and use docker as below
+
 
 ## Deployment
 

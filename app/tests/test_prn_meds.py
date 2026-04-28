@@ -2,6 +2,7 @@ import json
 import pprint
 from unittest.mock import patch
 
+import pytest
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import medication, medicationrequest, medicationstatement
@@ -173,7 +174,8 @@ med_request = medicationrequest.MedicationRequest(
 )
 
 
-def test_prn_medication_statement():
+@pytest.mark.asyncio
+async def test_prn_medication_statement():
     """Test the conversion of a PRN medication statement to a CCDA entry."""
     # Convert the FHIR MedicationStatement to a CCDA entry
     index_dict = {
@@ -181,7 +183,7 @@ def test_prn_medication_statement():
         "prn_medicationStatement/9": prn_med,
         "MedicationRequest/1000000000000000_71eff60000000000_plan": med_request,
     }
-    substance_administration = medication_entry(prn_statement, index_dict)
+    substance_administration = await medication_entry(prn_statement, index_dict)
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
     # Print the CCDA entry for debugging purposes

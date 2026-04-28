@@ -45,8 +45,12 @@ async def test_warnings_handling():
         if section.get("section", {}).get("code", {}).get("@code") == "10160-0"
     ][0]
 
-    medications_text = medications_section["section"]["text"]["list"]
+    # print(medications_section["section"]["text"] )
 
-    assert any(
-        "information not available" in text.lower() for text in medications_text["item"]
-    )
+    medications_text = medications_section["section"]["text"]["paragraph"]["#text"]
+    print(medications_text)
+
+    # assert any(
+    #     "information not available" in text.lower() for text in medications_text
+    # )
+    assert "information not available" in medications_text.lower()

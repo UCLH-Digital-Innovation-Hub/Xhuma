@@ -1,7 +1,9 @@
+import asyncio
 import json
 import pprint
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+import pytest
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import medication, medicationrequest, medicationstatement
@@ -9,6 +11,7 @@ from fhirclient.models import medication, medicationrequest, medicationstatement
 from app.ccda.entries import medication as medication_entry
 from app.ccda.models.base import SubstanceAdministration
 from app.ccda.models.datatypes import II
+from app.ccda.models.dmd import DMDConcept, VPIProperty
 
 med = medication.Medication(
     {
@@ -262,7 +265,8 @@ structured_statement = medicationstatement.MedicationStatement(
 
 # write tests to check if the pydantic models are working correctly
 # @patch("app.ccda.entries.medication.referenced_med", return_value=med)
-def test_substance_administration():
+@pytest.mark.asyncio
+async def test_substance_administration():
     """
     Test the SubstanceAdministration model
     """
@@ -272,7 +276,7 @@ def test_substance_administration():
         "MedicationStatement/9": med,
         "MedicationRequest/32": med_request,
     }
-    substance_administration = medication_entry(med_statement, index_dict)
+    substance_administration = await medication_entry(med_statement, index_dict)
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
     # print(substance_administration)
@@ -285,7 +289,8 @@ def test_substance_administration():
     # assert substance_administration.id[0].root is not None
 
 
-def test_structured_dosage():
+@pytest.mark.asyncio
+async def test_structured_dosage():
     """
     Test the structured dosage
     """
@@ -313,7 +318,7 @@ def test_structured_dosage():
                     referenced_item = bundle_index[entry.item.reference]
                     # pprint.pprint(referenced_item.as_json())
 
-                    entry_with_row = medication_entry(
+                    entry_with_row = await medication_entry(
                         referenced_item,
                         bundle_index,
                     )
@@ -327,14 +332,15 @@ def test_structured_dosage():
     assert len(medication_list) == 27
 
 
-def test_structured_detail():
+@pytest.mark.asyncio
+async def test_structured_detail():
     index_dict = {
         "Medication/A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7": structured_med,
         "MedicationStatement/9": structured_med,
         "MedicationRequest/2E352BA6-8F87-479B-BC80-41494027F2E6": med_request,
     }
 
-    substance_administration = medication_entry(structured_statement, index_dict)
+    substance_administration = await medication_entry(structured_statement, index_dict)
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
 
@@ -460,13 +466,22 @@ new_med = medication.Medication(
 )
 
 
-def test_new_structured_detail():
+@pytest.mark.asyncio
+@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+async def test_new_structured_detail(mock_dmd_lookup):
+    mock_dmd_lookup.return_value = DMDConcept(
+        concept_id=212169831,
+        valueString="Atenolol 100mg tablets",
+        vpi=VPIProperty(unit="mg", value=100),
+    )
     index_dict = {
         "Medication/C60BB8CF-14D7-46F7-83A7-34007026F45E": new_med,
         "MedicationStatement/A07283C9-A77A-4850-8092-9AB8486D2865-MS": new_structured_statement,
         "MedicationRequest/A07283C9-A77A-4850-8092-9AB8486D2865": med_request,
     }
-    substance_administration = medication_entry(new_structured_statement, index_dict)
+    substance_administration = await medication_entry(
+        new_structured_statement, index_dict
+    )
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
 
@@ -474,6 +489,5 @@ def test_new_structured_detail():
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
     assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"
-    assert substance_administration["doseQuantity"]["@value"] == 1
-    # assert quantiy unit is not present
-    assert "@unit" not in substance_administration["doseQuantity"]
+    assert substance_administration["doseQuantity"]["@value"] == 100
+    assert substance_administration["doseQuantity"]["@unit"] == "mg"
