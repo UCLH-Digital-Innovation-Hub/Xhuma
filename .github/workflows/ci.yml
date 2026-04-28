@@ -28,11 +28,10 @@ jobs:
       - name: Install dependencies
         run: pipenv install --dev --system --deploy
 
-      - name: Check formatting with Black
-        run: black --check .
-
-      - name: Lint with flake8
-        run: flake8 .
+      - name: Run pre-commit
+        uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: --all-files
   test:
     name: Tests
     runs-on: ubuntu-latest
