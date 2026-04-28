@@ -160,3 +160,4 @@ walkthrough.md
 .terraform/
 *.tfstate
 *.tfstate.backup
+*.code-workspace
