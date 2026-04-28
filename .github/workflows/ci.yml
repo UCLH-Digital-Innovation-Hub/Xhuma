@@ -67,6 +67,9 @@ jobs:
         coverage xml
       continue-on-error: true
 
+    - name: Generate coverage report
+      run: coverage xml
+
     - name: Upload coverage to Coveralls
       if: always()
       uses: coverallsapp/github-action@v2
