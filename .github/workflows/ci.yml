@@ -34,7 +34,6 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    needs: quality
 
     permissions:
       contents: read
