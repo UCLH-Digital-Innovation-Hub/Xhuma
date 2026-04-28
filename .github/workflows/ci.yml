@@ -46,10 +46,11 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 
     - name: Run tests with coverage
-      run: |
-        coverage run -m pytest
-        coverage xml
+      run: coverage run -m pytest
       continue-on-error: true
+
+    - name: Generate coverage report
+      run: coverage xml
 
     - name: Upload coverage to Coveralls
       uses: coverallsapp/github-action@v2
