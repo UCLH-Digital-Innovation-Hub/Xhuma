@@ -7,7 +7,6 @@ import xmltodict
 
 from app.audit.audit import process_saml_attributes
 from app.audit.build import build_audit_event
-
 # Adjust imports to match your code
 from app.audit.models import AuditEvent, AuditOutcome, SAMLAttributes
 from app.audit.store import insert_audit_event

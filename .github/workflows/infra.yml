@@ -26,9 +26,9 @@ env:
   TF_VAR_docker_registry_username: "${{ github.actor }}"
   # Secrets for Postgres
   TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
-  
+
   # Construct names dynamically (Using static names for persistence in Main environment)
-  TF_VAR_app_service_name: "xhuma-app-prod" 
+  TF_VAR_app_service_name: "xhuma-app-prod"
   TF_VAR_redis_name: "xhuma-redis-prod"
   TF_VAR_postgres_server_name: "xhuma-psql-prod"
 
@@ -37,7 +37,7 @@ jobs:
     name: "Terraform"
     runs-on: ubuntu-latest
     environment: rg-xhuma-play
-    
+
     defaults:
       run:
         shell: bash
@@ -67,10 +67,10 @@ jobs:
           # Run terraform and save output
           terraform apply -auto-approve -input=false > output.txt 2>&1
           EXIT_CODE=$?
-          
+
           # Print the full output so it shows in the step logs
           cat output.txt
-          
+
           if [ $EXIT_CODE -ne 0 ]; then
             echo "::error::Terraform exited with code $EXIT_CODE"
             echo "### Terraform Apply Error Log" >> $GITHUB_STEP_SUMMARY

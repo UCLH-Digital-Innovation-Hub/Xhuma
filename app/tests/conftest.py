@@ -1,6 +1,7 @@
 import os
-import pytest
 from unittest import mock
+
+import pytest
 
 # Generated dummy key for testing
 TEST_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
