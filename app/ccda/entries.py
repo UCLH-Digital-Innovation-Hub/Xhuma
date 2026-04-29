@@ -4,19 +4,28 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional, Sequence
 
-from fhirclient.models import (allergyintolerance, coding, condition,
-                               immunization)
+from fhirclient.models import allergyintolerance, coding, condition, immunization
 from fhirclient.models import medication as fhirmed
-from fhirclient.models import (medicationrequest, medicationstatement,
-                               observation)
+from fhirclient.models import medicationrequest, medicationstatement, observation
 
 from ..redis_connect import snomed_client
 from .dmd import dmd_lookup
-from .helpers import (clean_number, code_with_translations, date_helper,
-                      effective_time_helper, organization_to_author,
-                      readable_date, templateId)
-from .models.base import (EntryRelationship, Observation, ResultObservation,
-                          ResultsOrganizer, SubstanceAdministration)
+from .helpers import (
+    clean_number,
+    code_with_translations,
+    date_helper,
+    effective_time_helper,
+    organization_to_author,
+    readable_date,
+    templateId,
+)
+from .models.base import (
+    EntryRelationship,
+    Observation,
+    ResultObservation,
+    ResultsOrganizer,
+    SubstanceAdministration,
+)
 from .models.datatypes import CD, EIVL_TS, IVL_INT, IVL_PQ, IVL_TS, PIVL_TS, PQ
 
 Cell = str

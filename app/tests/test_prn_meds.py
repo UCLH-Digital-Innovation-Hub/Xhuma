@@ -5,8 +5,7 @@ from unittest.mock import patch
 import pytest
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
-from fhirclient.models import (medication, medicationrequest,
-                               medicationstatement)
+from fhirclient.models import medication, medicationrequest, medicationstatement
 
 from app.ccda.entries import medication as medication_entry
 

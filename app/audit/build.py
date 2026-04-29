@@ -11,9 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.sequence import next_audit_sequence
 
-from .models import (AuditEvent, AuditEventDetail, AuditOutcome,
-                     AuthorityIdentity, DeviceInfo, EventDataRefs,
-                     SAMLAttributes)
+from .models import (
+    AuditEvent,
+    AuditEventDetail,
+    AuditOutcome,
+    AuthorityIdentity,
+    DeviceInfo,
+    EventDataRefs,
+    SAMLAttributes,
+)
 
 
 def _utcnow() -> datetime:
