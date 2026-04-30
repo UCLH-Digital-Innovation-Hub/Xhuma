@@ -4,7 +4,7 @@ on:
   push:
     branches: [ dev, feature/*, infra/* ]
   pull_request:
-    branches: [ dev, main ]
+    branches: [ dev, int, main ]
 
 jobs:
   quality:
@@ -92,7 +92,14 @@ jobs:
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: fs
+          scan-type: 'fs'
           ignore-unfixed: true
-          format: table
-          severity: CRITICAL,HIGH
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
