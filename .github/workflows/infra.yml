@@ -1,0 +1,88 @@
+name: Infrastructure
+
+on:
+  push:
+    branches: [ int, main ]
+  pull_request:
+    branches: [ int, main ]
+    paths:
+      - 'infra/**'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+  ARM_CLIENT_SECRET: "${{ secrets.AZURE_CLIENT_SECRET }}"
+  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+  TF_VAR_resource_group_name: "${{ secrets.RESOURCE_GROUP }}"
+  TF_VAR_api_key: "${{ secrets.API_KEY }}"
+  TF_VAR_jwt_key: "${{ secrets.JWT_KEY }}"
+  TF_VAR_registry_id: "${{ secrets.REGISTRY_ID }}"
+  TF_VAR_docker_registry_password: "${{ secrets.CR_PAT }}"
+  TF_VAR_docker_registry_username: "${{ github.actor }}"
+  # Secrets for Postgres
+  TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
+
+  # Construct names dynamically (Using static names for persistence in Main environment)
+  TF_VAR_app_service_name: "xhuma-app-prod"
+  TF_VAR_redis_name: "xhuma-redis-prod"
+  TF_VAR_postgres_server_name: "xhuma-psql-prod"
+
+jobs:
+  terraform:
+    name: "Terraform"
+    runs-on: ubuntu-latest
+    environment: rg-xhuma-play
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./infra
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Format
+        run: terraform fmt -check
+
+      - name: Terraform Plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -input=false
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/int')
+        run: |
+          set +e
+          # Run terraform and save output
+          terraform apply -auto-approve -input=false > output.txt 2>&1
+          EXIT_CODE=$?
+
+          # Print the full output so it shows in the step logs
+          cat output.txt
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Terraform exited with code $EXIT_CODE"
+            echo "### Terraform Apply Error Log" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            tail -n 100 output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit $EXIT_CODE
+          fi
+
+      - name: Upload Terraform Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-logs
+          path: infra/*.log

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7.2
+    ports:
+      - "6379:6379"
+
+  xhuma-tests:
+    build: .
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - API_KEY=test
+      - JWTKEY=test
+      - REGISTRY_ID=test
+      # Disable relay for tests
+      - USE_RELAY=0
+    depends_on:
+      - redis
+    command: ["pytest"]
+    volumes:
+      - ./app:/code/app

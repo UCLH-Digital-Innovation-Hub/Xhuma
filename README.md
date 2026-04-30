@@ -1,6 +1,6 @@
 # Xhuma - GP Connect to CCDA Middleware Service
 
-![Python version](https://img.shields.io/github/pipenv/locked/python-version/JMathiszig-Lee/GPconnect)
+![Python version](https://img.shields.io/github/pipenv/locked/python-version/UCLH-Digital-Innovation-Hub/Xhuma) [![Coverage Status](https://coveralls.io/repos/github/UCLH-Digital-Innovation-Hub/Xhuma/badge.svg?branch=main)](https://coveralls.io/github/UCLH-Digital-Innovation-Hub/Xhuma?branch=main) [![CI](https://github.com/UCLH-Digital-Innovation-Hub/Xhuma/actions/workflows/ci.yml/badge.svg)](https://github.com/UCLH-Digital-Innovation-Hub/Xhuma/actions/workflows/ci.yml)
 
 ## Overview
 
@@ -13,10 +13,11 @@ Xhuma is a stateless middleware service that facilitates the conversion of GP Co
   - Memory management and persistence
   - Connection pooling and automatic retry
   - Comprehensive monitoring
-- IHE ITI profile implementation (ITI-47, ITI-38, ITI-39)
+- IHE ITI profile implementation (ITI-55, ITI-38, ITI-39)
 - FHIR to CCDA conversion
 - JWT-based authentication for NHS Digital services
 - SOAP message handling for healthcare interoperability
+- parsing of AMP/VMP GP prescriptions to true structured data using dm+d
 
 ## Technical Architecture
 
@@ -25,6 +26,7 @@ The service is built on FastAPI and follows a modular design pattern. For detail
 - [Technical Architecture](docs/technical_architecture.md)
 - [Data Flow Documentation](docs/data_flow.md)
 - [Technical Resources](docs/technical_resources.md)
+- [Structured Dose Mapping](docs/dm+d_mapping.md)
 
 ## System Flow
 
@@ -73,6 +75,22 @@ sequenceDiagram
 - Docker Compose
 - NHS Digital API access credentials
 
+## Development
+1. install pipenv
+
+2. install development dependencies
+```bash
+pipenv install --dev
+```
+
+3. install pre-commit hooks to ensure consistency
+```bash
+pre-commit install
+```
+
+4. configure environmental variables and use docker as below
+
+
 ## Deployment
 
 1. Clone the repository:
@@ -106,6 +124,36 @@ docker-compose up -d
 ```
 
 The service will be available at `http://localhost:8000`
+
+## Azure Deployment (NHS TRE)
+
+Infrastructure as Code (Terraform) and CI/CD pipelines (GitHub Actions) are provided for deploying to the NHS Azure TRE.
+
+### Infrastructure
+The `infra/` directory contains Terraform configuration for:
+- Azure Web App for Containers (Linux)
+- Azure Cache for Redis (Standard)
+- Azure Monitor (Application Insights & Log Analytics)
+
+### CI/CD Pipelines
+- **CI (`.github/workflows/ci.yml`)**: Runs linting and tests on PRs to `dev`.
+- **Infrastructure (`.github/workflows/infra.yml`)**: Plans Terraform changes on PRs, and Applies on merge to `main`.
+- **Deployment (`.github/workflows/cd.yml`)**: Builds Docker image, pushes to GitHub Container Registry (GHCR), and deploys to Azure Web App on merge to `main`.
+
+### Observability
+End-to-end traceability is implemented using **Azure Monitor OpenTelemetry**.
+- Ensure `APPLICATIONINSIGHTS_CONNECTION_STRING` is set in the environment (configured automatically by Terraform).
+- Logs and traces are correlated and sent to the Application Insights workspace.
+
+### Prerequisites for Azure
+1. Configure GitHub Secrets:
+   - `AZURE_CREDENTIALS` (Service Principal JSON)
+   - `AZURE_SUBSCRIPTION_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`
+   - `RESOURCE_GROUP`
+   - `API_KEY`, `JWTKEY`, `REGISTRY_ID`
+   - `CR_PAT` (GitHub Personal Access Token for GHCR write access, if needed)
+
+2. **Important**: You must run `pipenv lock` locally to update `Pipfile.lock` with the new `azure-monitor-opentelemetry` dependency before pushing.
 
 ## Redis Configuration
 

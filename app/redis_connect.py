@@ -73,13 +73,13 @@ def retry_on_connection_error(max_retries: int = MAX_RETRIES, delay: int = RETRY
 class RedisClient:
     """Redis client with connection pooling and error handling."""
 
-    def __init__(self):
+    def __init__(self, db: int = REDIS_DB):
         """Initialize Redis client with connection pool."""
         self._pool = ConnectionPool(
             host=REDIS_HOST,
             port=REDIS_PORT,
             db=REDIS_DB,
-            # password=REDIS_PASSWORD,
+            password=REDIS_PASSWORD,
             max_connections=POOL_MAX_CONNECTIONS,
             socket_timeout=SOCKET_TIMEOUT,
             socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
@@ -171,6 +171,8 @@ redis_client = RedisClient()
 
 # Export the redis_connect instance for use in other modules
 redis_connect = redis_client
+
+snomed_client = RedisClient(db=2)  # Separate Redis database for SNOMED data
 
 
 def get_cached_data(key: str) -> Optional[bytes]:

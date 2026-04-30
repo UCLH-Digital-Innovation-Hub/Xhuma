@@ -82,6 +82,11 @@ async def _attempt_audit(
 
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
+    # Verify files exist before trying to load
+    for p in [cert_path, key_path, ca_path]:
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"NHS Certificate file not found: {p}")
+
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
     ssl_context.check_hostname = True
     ssl_context.verify_mode = ssl.CERT_REQUIRED
@@ -91,22 +96,25 @@ def create_nhs_ssl_context(cert_path, key_path, ca_path):
     return ssl_context
 
 
-ssl_context = create_nhs_ssl_context(
-    "keys/nhs_certs/client_cert.pem",
-    "keys/nhs_certs/client_key.pem",
-    "keys/nhs_certs/nhs_bundle.pem",
-)
+# Global client and ssl_context removed to prevent ImportErrors when keys are missing.
+# They were unused in the main logic (which uses _direct_http_call with its own context).
 
-logging.basicConfig(level=logging.DEBUG)
+# ssl_context = create_nhs_ssl_context(
+#     "keys/nhs_certs/client_cert.pem",
+#     "keys/nhs_certs/client_key.pem",
+#     "keys/nhs_certs/nhs_bundle.pem",
+# )
+
+logging.basicConfig(level=logging.INFO)
 httpx_logger = logging.getLogger("httpx")
-httpx_logger.setLevel(logging.DEBUG)
+httpx_logger.setLevel(logging.WARNING)
 
-client = httpx.AsyncClient(
-    cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
-    verify=ssl_context,  # This fixes the silent failures!
-    timeout=httpx.Timeout(30.0),
-    http2=False,
-)
+# client = httpx.AsyncClient(
+#     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
+#     verify=ssl_context,  # This fixes the silent failures!
+#     timeout=httpx.Timeout(30.0),
+#     http2=False,
+# )
 
 
 @router.get("/gpconnect/{nhsno}")
@@ -140,6 +148,7 @@ async def gpconnect(
             outcome=AuditOutcome.ok,
         )
     except Exception as e:
+        msg = f"PDS lookup failed: {e}"
         await _attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -406,7 +415,7 @@ async def gpconnect(
                 os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
             ) as f:
                 f.write(resp.text)
-        logging.info(resp.text)
+        logging.info(f"GP Connect request successful with status {resp.status_code}")
 
     except Exception as e:
         msg = f"Transport error: {e}"
@@ -496,6 +505,7 @@ async def gpconnect(
 
     try:
         xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+
     except Exception as e:
         msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
         logging.exception(msg)
@@ -539,7 +549,7 @@ if __name__ == "__main__":
     saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 
     # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(gpconnect(9692140466, saml))
+    result = asyncio.run(gpconnect(9692136744, saml))
     print(result.body.decode())
     print(result.status_code)
     # assert "error" in result.body.decode()
