@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -176,28 +176,49 @@ example_route_concept = {
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.dmd.httpx.get")
-@patch("app.ccda.dmd.snomed_client.setex")
-async def test_dmd_lookup(mock_get, mock_dmd):
-    # mock each response in turn
-    mock_get = AsyncMock(
-        side_effect=[
-            json.dumps(example_return),
-            json.dumps(example_unit_concept),
-            json.dumps(example_route_concept),
-        ]
-    )
+@patch("app.ccda.dmd.snomed_client")
+@patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock)
+@patch("app.ccda.dmd.httpx.AsyncClient")
+async def test_dmd_lookup(mock_async_client, mock_get_token, mock_snomed):
+    # Redis/cache behaviour
+    mock_snomed.get.return_value = None
+    mock_snomed.setex.return_value = True
 
-    mock_dmd.patch.object(dmd_lookup, "httpx.get", mock_get)
+    # Token
+    mock_get_token.return_value = "fake-dmd-token"
 
-    concept = await dmd_lookup("42010411000001105")
+    # Mock API responses, in order:
+    # 1. main DMD concept
+    # 2. unit concept
+    # 3. route concept
+    response_1 = MagicMock()
+    response_1.status_code = 200
+    response_1.json.return_value = example_return
+
+    response_2 = MagicMock()
+    response_2.status_code = 200
+    response_2.json.return_value = example_unit_concept
+
+    response_3 = MagicMock()
+    response_3.status_code = 200
+    response_3.json.return_value = example_route_concept
+
+    mock_client_instance = AsyncMock()
+    mock_client_instance.get.side_effect = [response_1, response_2, response_3]
+
+    mock_async_client.return_value.__aenter__.return_value = mock_client_instance
+
+    concept = await dmd_lookup(42010411000001105)
+
     assert concept.concept_id == 42010411000001105
     assert concept.valueString == "Codeine 30mg tablets"
 
     assert concept.vpi is not None
     assert concept.vpi.value == 30.0
-    assert concept.vpi.unit == "mg"
+    assert concept.vpi.unit == "gram"
 
     assert concept.route is not None
     assert concept.route.code == "26643006"
     assert concept.route.displayName == "Oral"
+
+    assert mock_snomed.setex.call_count == 3

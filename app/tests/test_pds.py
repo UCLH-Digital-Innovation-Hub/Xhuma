@@ -6,10 +6,15 @@ import pytest
 from app.pds.pds import lookup_patient
 
 
-@pytest.mark.asyncio
+@patch("app.pds.pds.redis_client")
 @patch("app.pds.pds.httpx.post")
 @patch("app.pds.pds.httpx.AsyncClient")
-async def test_get_data_success(mock_async_client, mock_post):
+@pytest.mark.asyncio
+async def test_get_data_success(mock_async_client, mock_post, mock_redis):
+    # --- mock redis: no token exists ---
+    mock_redis.exists.return_value = False
+    mock_redis.setex.return_value = True  # avoid failure
+
     # --- mock token response ---
     mock_post.return_value.text = json.dumps(
         {"access_token": "fake-token", "expires_in": 300}
