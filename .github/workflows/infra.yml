@@ -28,15 +28,16 @@ env:
   TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
 
   # Construct names dynamically (Using static names for persistence in Main environment)
-  TF_VAR_app_service_name: "xhuma-app-prod"
-  TF_VAR_redis_name: "xhuma-redis-prod"
-  TF_VAR_postgres_server_name: "xhuma-psql-prod"
+  TF_VAR_app_service_name: ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || github.ref == 'refs/heads/int' && 'xhuma-app-int' || 'xhuma-app-play' }}
+  TF_VAR_redis_name: ${{ github.ref == 'refs/heads/main' && 'xhuma-redis-prd' || github.ref == 'refs/heads/int' && 'xhuma-redis-int' || 'xhuma-redis-play' }}
+  TF_VAR_postgres_server_name: ${{ github.ref == 'refs/heads/main' && 'xhuma-psql-prd' || github.ref == 'refs/heads/int' && 'xhuma-psql-int' || 'xhuma-psql-play' }}
 
 jobs:
   terraform:
     name: "Terraform"
     runs-on: ubuntu-latest
-    environment: rg-xhuma-play
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/int' && 'rg-xhuma-int' || 'rg-xhuma-play' }}
 
     defaults:
       run:
@@ -50,8 +51,39 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
 
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Bootstrap Terraform State Storage
+        run: |
+          RG_NAME="${{ secrets.RESOURCE_GROUP }}"
+          CLEAN_RG=$(echo $RG_NAME | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
+          SA_NAME="xtf${CLEAN_RG}"
+          SA_NAME=${SA_NAME:0:24}
+
+          echo "Ensuring Storage Account $SA_NAME exists in $RG_NAME..."
+          if ! az storage account show --name $SA_NAME --resource-group $RG_NAME &>/dev/null; then
+            az storage account create --resource-group $RG_NAME --name $SA_NAME --sku Standard_LRS --encryption-services blob --allow-blob-public-access false
+          fi
+          
+          ACCOUNT_KEY=$(az storage account keys list --resource-group $RG_NAME --account-name $SA_NAME --query '[0].value' -o tsv)
+          
+          if ! az storage container show --name tfstate --account-name $SA_NAME --account-key $ACCOUNT_KEY &>/dev/null; then
+            az storage container create --name tfstate --account-name $SA_NAME --account-key $ACCOUNT_KEY
+          fi
+
+          echo "TF_STATE_SA=$SA_NAME" >> $GITHUB_ENV
+          echo "TF_STATE_RG=$RG_NAME" >> $GITHUB_ENV
+
       - name: Terraform Init
-        run: terraform init
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ env.TF_STATE_RG }}" \
+            -backend-config="storage_account_name=${{ env.TF_STATE_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=terraform.tfstate"
 
       - name: Terraform Format
         run: terraform fmt -check
