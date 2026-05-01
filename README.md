@@ -135,10 +135,12 @@ The `infra/` directory contains Terraform configuration for:
 - Azure Cache for Redis (Standard)
 - Azure Monitor (Application Insights & Log Analytics)
 
-### CI/CD Pipelines
-- **CI (`.github/workflows/ci.yml`)**: Runs linting and tests on PRs to `dev`.
-- **Infrastructure (`.github/workflows/infra.yml`)**: Plans Terraform changes on PRs, and Applies on merge to `main`.
-- **Deployment (`.github/workflows/cd.yml`)**: Builds Docker image, pushes to GitHub Container Registry (GHCR), and deploys to Azure Web App on merge to `main`.
+### CI/CD Pipelines & Multi-Tenant Deployment
+The pipeline implements a **"Shared-Nothing" Bootstrapped State Architecture**, designed to deploy isolated infrastructure per NHS Trust with zero manual engineering.
+
+- **CI (`.github/workflows/ci.yml`)**: Runs code quality (Black, isort), CodeQL vulnerability scanning, and pytest suites. Triggers on `dev`, `int`, and `main`.
+- **Infrastructure (`.github/workflows/infra.yml`)**: Dynamically routes deployments based on the triggering branch (`int` deploys to `rg-xhuma-int`, `main` deploys to `rg-xhuma-uclh-prd`). Automatically bootstraps an isolated Azure Storage Account for Terraform state (`tfstate`) within the target Resource Group before running Terraform.
+- **Deployment (`.github/workflows/cd.yml`)**: Builds the Docker image, runs Trivy vulnerability scanning (CRITICAL/HIGH severities), pushes to GitHub Container Registry (GHCR), and deploys to the dynamically targeted Azure Web App.
 
 ### Observability
 End-to-end traceability is implemented using **Azure Monitor OpenTelemetry**.
@@ -175,10 +177,10 @@ Access the interactive API documentation at:
 
 ## Branch Strategy
 
-- `main`: Production releases
-- `dev`: Development branch
+- `main`: Production releases (Triggers deployments to `rg-xhuma-uclh-prd` and future trust environments)
+- `int`: Integration/Stabilization branch (Triggers deployments to `rg-xhuma-int` for dry runs)
+- `dev`: Active development and feature integration
 - `feature/*`: Feature branches
-- `integration`: Integration testing
 
 ## Contributing
 

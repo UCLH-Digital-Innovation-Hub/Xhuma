@@ -28,9 +28,10 @@ flowchart LR
     F --> G[Container Restarts with New Image]
 ```
 
-1. **Build:** Commits to protected branches trigger the CD pipeline. The runner builds a new Docker image from the working directory.
+1. **Build:** Commits to protected branches (`int` and `main`) trigger the CD pipeline. The runner builds a new Docker image from the working directory.
 2. **Registry:** The built image is tagged with the Git SHA and pushed to the GitHub Container Registry (`ghcr.io/uclh-digital-innovation-hub/xhuma`).
-3. **Deploy:** The pipeline authenticates to Azure and commands the `xhuma-app-prod` Azure Web App to pull the latest image and update the deployment, which includes running Alembic database migrations on startup.
+3. **Deploy:** The pipeline dynamically authenticates to the isolated Azure Resource Group tied to the branch (e.g., `rg-xhuma-int` or `rg-xhuma-uclh-prd`) and commands the dynamically targeted Azure Web App to pull the latest image.
+4. **Infrastructure State:** Terraform state is automatically bootstrapped into isolated Storage Accounts within each target Resource Group to ensure a strict "Shared-Nothing" boundary between trust environments.
 
 ---
 

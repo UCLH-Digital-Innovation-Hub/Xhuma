@@ -2,9 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [ dev, feature/*, infra/* ]
+    branches: [ dev, int, main ]
   pull_request:
     branches: [ dev, int, main ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   quality:

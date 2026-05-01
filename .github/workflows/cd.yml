@@ -12,7 +12,8 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    environment: rg-xhuma-play
+    environment:
+      name: ${{ github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/int' && 'rg-xhuma-int' || 'rg-xhuma-play' }}
     permissions:
       contents: read
       packages: write
@@ -63,6 +64,6 @@ jobs:
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
-          app-name: 'xhuma-app-prod' # Matches the resource created by Terraform
+          app-name: ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || github.ref == 'refs/heads/int' && 'xhuma-app-int' || 'xhuma-app-play' }}
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}'
           # Service principal login configured by azure/login above
