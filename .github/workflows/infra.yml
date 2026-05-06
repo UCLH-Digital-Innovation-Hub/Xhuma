@@ -67,9 +67,9 @@ jobs:
           if ! az storage account show --name $SA_NAME --resource-group $RG_NAME &>/dev/null; then
             az storage account create --resource-group $RG_NAME --name $SA_NAME --sku Standard_LRS --encryption-services blob --allow-blob-public-access false
           fi
-          
+
           ACCOUNT_KEY=$(az storage account keys list --resource-group $RG_NAME --account-name $SA_NAME --query '[0].value' -o tsv)
-          
+
           if ! az storage container show --name tfstate --account-name $SA_NAME --account-key $ACCOUNT_KEY &>/dev/null; then
             az storage container create --name tfstate --account-name $SA_NAME --account-key $ACCOUNT_KEY
           fi
