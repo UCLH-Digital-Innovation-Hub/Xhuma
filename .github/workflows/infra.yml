@@ -65,7 +65,7 @@ jobs:
 
           echo "Ensuring Storage Account $SA_NAME exists in $RG_NAME..."
           if ! az storage account show --name $SA_NAME --resource-group $RG_NAME &>/dev/null; then
-            az storage account create --resource-group $RG_NAME --name $SA_NAME --sku Standard_LRS --encryption-services blob --allow-blob-public-access false
+            az storage account create --resource-group $RG_NAME --name $SA_NAME --sku Standard_LRS --encryption-services blob --allow-blob-public-access false --min-tls-version TLS1_2
           fi
 
           ACCOUNT_KEY=$(az storage account keys list --resource-group $RG_NAME --account-name $SA_NAME --query '[0].value' -o tsv)

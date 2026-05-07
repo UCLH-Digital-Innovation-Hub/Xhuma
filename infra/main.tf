@@ -64,6 +64,13 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
 
   # For simplified deployment, we allow public access (controlled by firewall rules)
   # Ideally use VNET integration in production
+
+  lifecycle {
+    ignore_changes = [
+      zone,
+      high_availability.0.standby_availability_zone
+    ]
+  }
 }
 
 resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_services" {
