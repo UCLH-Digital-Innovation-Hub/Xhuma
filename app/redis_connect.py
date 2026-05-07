@@ -75,7 +75,9 @@ class RedisClient:
 
     def __init__(self, db: int = REDIS_DB):
         """Initialize Redis client with connection pool."""
-        logger.warning(f"Initializing Redis client connecting to {REDIS_HOST}:{REDIS_PORT} (SSL: {REDIS_SSL})")
+        logger.warning(
+            f"Initializing Redis client connecting to {REDIS_HOST}:{REDIS_PORT} (SSL: {REDIS_SSL})"
+        )
         self._client = redis.Redis(
             host=REDIS_HOST,
             port=REDIS_PORT,

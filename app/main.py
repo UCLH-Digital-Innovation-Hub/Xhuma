@@ -64,7 +64,10 @@ async def lifespan(app: FastAPI):
     app.state.SessionLocal = SessionLocal
 
     # Store registry ID in Redis with 24 hour expiry
-    redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
+    try:
+        redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
+    except Exception as e:
+        print(f"Warning: Failed to connect to Redis during startup: {e}")
 
     # Handle JWK generation/verification securely entirely in-memory
     jwt_key = os.getenv("JWTKEY")

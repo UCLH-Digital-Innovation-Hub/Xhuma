@@ -12,7 +12,7 @@ RUN pip install pipenv
 COPY Pipfile /code/Pipfile
 COPY Pipfile.lock /code/Pipfile.lock
 
-RUN pipenv install --system
+RUN pipenv install --system --skip-lock
 # Copy APP code
 COPY app /code/app
 

@@ -30,7 +30,7 @@ jobs:
           python -m pip install pipenv
 
       - name: Install dependencies
-        run: pipenv install --dev --system
+        run: pipenv install --dev --system --skip-lock
 
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
@@ -58,7 +58,7 @@ jobs:
         pip install pipenv
 
     - name: Install dependencies
-      run: pipenv install --dev --system
+      run: pipenv install --dev --system --skip-lock
 
     - name: Run tests with coverage
       id: tests
