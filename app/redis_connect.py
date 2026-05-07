@@ -36,9 +36,9 @@ REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
 
 # Connection pool configuration
 POOL_MAX_CONNECTIONS = 10
-POOL_TIMEOUT = 20
-SOCKET_TIMEOUT = 5
-SOCKET_CONNECT_TIMEOUT = 5
+POOL_TIMEOUT = 30
+SOCKET_TIMEOUT = 30
+SOCKET_CONNECT_TIMEOUT = 30
 MAX_RETRIES = 3
 RETRY_DELAY = 1  # seconds
 
@@ -75,6 +75,7 @@ class RedisClient:
 
     def __init__(self, db: int = REDIS_DB):
         """Initialize Redis client with connection pool."""
+        logger.info(f"Initializing Redis client connecting to {REDIS_HOST}:{REDIS_PORT} (SSL: {REDIS_SSL})")
         self._client = redis.Redis(
             host=REDIS_HOST,
             port=REDIS_PORT,
