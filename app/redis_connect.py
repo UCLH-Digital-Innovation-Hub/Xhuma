@@ -75,7 +75,6 @@ class RedisClient:
             "host": REDIS_HOST,
             "port": REDIS_PORT,
             "db": db,
-            "password": REDIS_PASSWORD,
             "max_connections": POOL_MAX_CONNECTIONS,
             "socket_timeout": SOCKET_TIMEOUT,
             "socket_connect_timeout": SOCKET_CONNECT_TIMEOUT,
@@ -84,9 +83,16 @@ class RedisClient:
             "protocol": 2,  # Use RESP2 protocol for better compatibility
         }
 
+        if REDIS_PASSWORD:
+            pool_kwargs["password"] = REDIS_PASSWORD
+
         if REDIS_SSL:
             pool_kwargs["connection_class"] = SSLConnection
             pool_kwargs["ssl_cert_reqs"] = REDIS_SSL_CERT_REQS
+            if REDIS_SSL_CERT_REQS == ssl.CERT_NONE:
+                logger.warning(
+                    "REDIS_SSL_CERT_REQS is set to 'none'; SSL certificate validation is disabled"
+                )
 
         self._pool = ConnectionPool(**pool_kwargs)
         self._client = redis.Redis(connection_pool=self._pool)
