@@ -16,7 +16,7 @@ def database_url() -> str:
     password = os.getenv("POSTGRES_PASSWORD", "postgres")
     db = os.getenv("POSTGRES_DB", "xhuma")
 
-    return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
+    return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}?ssl=require"
 
 
 def make_engine() -> AsyncEngine:

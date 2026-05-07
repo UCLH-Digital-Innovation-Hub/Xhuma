@@ -80,6 +80,13 @@ resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_service
   end_ip_address   = "0.0.0.0" # This specific rule allows access from Azure services
 }
 
+resource "azurerm_postgresql_flexible_server_database" "xhuma_db" {
+  name      = "xhuma"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  charset   = "UTF8"
+  collation = "en_US.utf8"
+}
+
 resource "azurerm_linux_web_app" "app" {
   name                = var.app_service_name
   resource_group_name = data.azurerm_resource_group.rg.name

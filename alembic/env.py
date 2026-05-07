@@ -39,6 +39,8 @@ def get_alembic_url() -> str:
     # Otherwise convert asyncpg -> psycopg.
     if url.startswith("postgresql+asyncpg://"):
         url = url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
+        url = url.replace("?ssl=require", "?sslmode=require")
+        url = url.replace("&ssl=require", "&sslmode=require")
 
     return url
 
