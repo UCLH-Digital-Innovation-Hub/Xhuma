@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import json
+import logging
 import os
 from copy import deepcopy
 from typing import List
@@ -9,8 +10,6 @@ import xmltodict
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
-
-from app import logging
 
 from .entries import allergy, immunization_entry, medication, problem
 from .helpers import date_helper, templateId
