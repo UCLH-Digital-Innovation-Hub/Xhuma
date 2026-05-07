@@ -4,11 +4,9 @@ import logging
 import os
 import pprint
 import uuid
-from datetime import timedelta
 
 import fastapi
 import httpx
-from fhirclient.models import patient as p
 
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
@@ -127,7 +125,6 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
 
 
 if __name__ == "__main__":
-
     patient = asyncio.run(lookup_patient(9658218873))
     pprint.pprint(patient)
 

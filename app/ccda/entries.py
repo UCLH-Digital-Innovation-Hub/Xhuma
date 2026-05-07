@@ -1,14 +1,12 @@
-import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional, Sequence
+from typing import Any, List, Optional
 
-from fhirclient.models import allergyintolerance, coding, condition, immunization
+from fhirclient.models import allergyintolerance, condition, immunization
 from fhirclient.models import medication as fhirmed
-from fhirclient.models import medicationrequest, medicationstatement, observation
+from fhirclient.models import medicationrequest, medicationstatement
 
-from ..redis_connect import snomed_client
 from .dmd import dmd_lookup
 from .helpers import (
     clean_number,
@@ -21,12 +19,11 @@ from .helpers import (
 )
 from .models.base import (
     EntryRelationship,
-    Observation,
     ResultObservation,
     ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import CD, EIVL_TS, IVL_INT, IVL_PQ, IVL_TS, PIVL_TS, PQ
+from .models.datatypes import CD, IVL_INT, IVL_TS, PIVL_TS, PQ, IVL_PQ, IVXB_PQ
 
 Cell = str
 Row = List[Cell]
@@ -136,107 +133,42 @@ async def medication(
                 "originalText": entry.dosage[0].doseQuantity.unit,
             }
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
-    if entry.dosage[0].timing:
-        # check if medication is prn
-        if entry.dosage[0].timing.repeat.frequencyMax:
-            # medicine is prn
-            dose_period = (
-                entry.dosage[0].timing.repeat.period
-                / entry.dosage[0].timing.repeat.frequencyMax
-            )
+    # check if dosage has as needed boolean of tru
 
-            # populate precondition
-            substance_administration.precondition = {
-                "@typeCode": "PRCN",
-                "criterion": {
-                    "templateId": templateId(
-                        root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"
-                    ),
-                    "code": {
-                        "@code": "ASSERTION",
-                        "@codeSystem": "2.16.840.1.113883.5.4",
-                    },
+    if entry.dosage[0].asNeededBoolean:
+        # populate precondition
+        substance_administration.precondition = {
+            "@typeCode": "PRCN",
+            "criterion": {
+                "templateId": templateId(
+                    root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"
+                ),
+                "code": {
+                    "@code": "ASSERTION",
+                    "@codeSystem": "2.16.840.1.113883.5.4",
                 },
+            },
+        }
+        # if there is a asNeededCodeableConcept, use it
+        if entry.dosage[0].asNeededCodeableConcept:
+            substance_administration.precondition["criterion"]["value"] = {
+                "@xsi:type": "CD",
+                "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
+                "@displayName": entry.dosage[0]
+                .asNeededCodeableConcept.coding[0]
+                .display,
+                "@codeSystemName": entry.dosage[0]
+                .asNeededCodeableConcept.coding[0]
+                .value,
             }
-            # if there is a asNeededCodeableConcept, use it
-            if entry.dosage[0].asNeededCodeableConcept:
-                substance_administration.precondition["criterion"]["value"] = {
-                    "@xsi:type": "CD",
-                    "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
-                    "@displayName": entry.dosage[0]
-                    .asNeededCodeableConcept.coding[0]
-                    .display,
-                    "@codeSystemName": entry.dosage[0]
-                    .asNeededCodeableConcept.coding[0]
-                    .value,
-                }
-            else:
-                # if no asNeededCodeableConcept, use NI
-                substance_administration.precondition["criterion"]["value"] = {
-                    "@xsi:type": "CD",
-                    "@nullFlavor": "NI",
-                }
-
         else:
-            # frequency is the occurrence per period. C-CDA has a single period between doses hence division
+            # if no asNeededCodeableConcept, use NI
+            substance_administration.precondition["criterion"]["value"] = {
+                "@xsi:type": "CD",
+                "@nullFlavor": "NI",
+            }
 
-            # check frequency has period and frequency
-            repeat = entry.dosage[0].timing.repeat
-            period = getattr(repeat, "period", None)
-            frequency = getattr(repeat, "frequency", None)
-            if period and frequency:
-
-                dose_period = (
-                    entry.dosage[0].timing.repeat.period
-                    / entry.dosage[0].timing.repeat.frequency
-                )
-        # print(f"dose period: {dose_period}")
-
-        # https://hl7.org/fhir/R4/valueset-event-timing.html
-        # event_codes = [
-        #     "MORN",
-        #     "MORN.early",
-        #     "MORN.late",
-        #     "NOON",
-        #     "AFT",
-        #     "AFT.early",
-        #     "AFT.late",
-        #     "EVE",
-        #     "EVE.early",
-        #     "EVE.late",
-        #     "NIGHT",
-        #     "PHS",
-        #     "HS",
-        #     "WAKE",
-        #     "C",
-        #     "CM",
-        #     "CD",
-        #     "CV",
-        #     "AC",
-        #     "ACM",
-        #     "ACD",
-        #     "ACV",
-        #     "PC",
-        #     "PCM",
-        #     "PCD",
-        #     "PCV",
-        # ]
-        # # check if timing contains event codes
-        # if entry.dosage[0].timing.repeat.when:
-        #     for event in entry.dosage[0].timing.repeat.when:
-        #         if event in event_codes:
-        #             substance_administration.effectiveTime.append(
-        #                 EIVL_TS(
-        #                     **{
-        #                         "@xsi:type": "EIVL_TS",
-        #                         "@operator": "A",
-        #                         "event": {
-        #                             "@code": event,
-        #                         },
-        #                     }
-        #                 )
-        #             )
-        # else:
+    if entry.dosage[0].timing:
         pivl = PIVL_TS(
             **{
                 "@xsi:type": "PIVL_TS",
@@ -247,14 +179,53 @@ async def medication(
             }
         )
 
-        # if there is a dose period in locals, add it to pivl
-        if "dose_period" in locals() and dose_period:
-            pivl.period = {
-                "@value": dose_period,
-                "@unit": entry.dosage[0].timing.repeat.periodUnit,
-            }
+        # check frequency has period and frequency
+        repeat = entry.dosage[0].timing.repeat
+        period = getattr(repeat, "period", None)
+        frequency = getattr(repeat, "frequency", None)
+        period_max = getattr(repeat, "periodMax", None)
+        period_unit = getattr(repeat, "periodUnit", None)
+        # make sure frequency and period are not None
+        if period is not None and frequency is not None:
+            # if period and frequency:
+            if period_max is not None:
+                low_period = period / frequency
+                high_period = period_max / frequency
+                pivl.period = IVL_PQ(
+                    low=IVXB_PQ(**{"@value": low_period, "@unit": period_unit}),
+                    high=IVXB_PQ(**{"@value": high_period, "@unit": period_unit}),
+                )
+
+            else:
+                # frequency is the occurrence per period. C-CDA has a single period between doses hence division
+                dose_period = period / frequency
+
+                pivl.period = {
+                    "@value": dose_period,
+                    "@unit": period_unit,
+                }
 
         substance_administration.effectiveTime.append(pivl)
+
+    if entry.dosage[0].maxDosePerPeriod:
+        numerator = entry.dosage[0].maxDosePerPeriod.numerator
+        denominator = entry.dosage[0].maxDosePerPeriod.denominator
+        if numerator and denominator:
+            try:
+                substance_administration.maxDoseQuantity = {
+                    "@xsi:type": "RTO_PQ_PQ",
+                    "numerator": {
+                        "@value": numerator.value,
+                        "@unit": numerator.unit,
+                    },
+                    "denominator": {
+                        "@value": denominator.value,
+                        "@unit": denominator.unit,
+                    },
+                }
+            except Exception as e:
+                logging.error(f"Error processing maxDosePerPeriod: {e}")
+                pass
 
     #   check if route is in dosage
     if entry.dosage[0].method:
@@ -326,14 +297,10 @@ async def medication(
         for et in substance_administration.effectiveTime
         if getattr(et, "operator", None) == "high"
     ]
-    med_name = (
-        substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
-    )
+    med_name = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
 
     # check if snomed code is in cache and if so add to med name
-    snomed_code = (
-        substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
-    )
+    snomed_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
     unit = (
@@ -351,7 +318,6 @@ async def medication(
                 dmd_data = await dmd_lookup(int(snomed_code))
                 # only process dose if a single dosage instruction
                 if len(entry.dosage) == 1:
-
                     if dmd_data.vpi and substance_administration.doseQuantity:
                         processed_dose = (
                             dmd_data.vpi.value
@@ -371,7 +337,7 @@ async def medication(
 
                 elif len(entry.dosage) > 1:
                     # multiple dosage instrutions so add warning to medication name instead of processing dose
-                    warning_text = f"Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
+                    warning_text = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
                     misc_notes.append(warning_text)
 
                 if substance_administration.routeCode:
@@ -509,7 +475,7 @@ async def medication(
     def add_numbering(instruction_list):
         if len(instruction_list) > 1:
             for i, instruction in enumerate(instruction_list):
-                new_instruction = f"{i+1}. {instruction}"
+                new_instruction = f"{i + 1}. {instruction}"
                 instruction_list[i] = new_instruction
         return instruction_list
 
@@ -797,7 +763,7 @@ def result(entry, index: dict) -> dict:
             }
             for ident in entry.identifier
         ]
-        effective_time = entry.issued
+        # effective_time = entry.issued
         components = []
         for related in entry.related:
             print(f"Related: {related.type} - {related.target.reference}")

@@ -77,7 +77,6 @@ async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
         token = await get_terminology_token()
 
     async with httpx.AsyncClient() as client:
-
         url = f"https://ontology.nhs.uk/production1/fhir/CodeSystem/$lookup?system=https://dmd.nhs.uk&code={concept_id}"
         if properties:
             for prop in properties:
@@ -115,7 +114,6 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
         )
         dmd = json.loads(dmd)
 
-    print(type(dmd))
     display_name = [
         prop["valueString"] for prop in dmd["parameter"] if prop["name"] == "display"
     ]
@@ -159,7 +157,7 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
                 dmd = await get_dmd_concept(int(value_codes[0]), properties=properties)
 
     vpi_properties = await get_property("VPI", dmd)
-    logging.info(f"Found {len(vpi_properties)} VPI properties for concept {concept_id}")
+    # logging.info(f"Found {len(vpi_properties)} VPI properties for concept {concept_id}")
     if len(vpi_properties) == 1:
         # single ingrediant so process
         dose_value_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_VAL")
@@ -175,8 +173,8 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
         if dose_unit_code:
             # lookup the unit code in SNOMED to get the display name
             unit_concept = await get_dmd_concept(dose_unit_code)
-            pprint.pprint(unit_concept)
-            print(type(unit_concept))
+            # pprint.pprint(unit_concept)
+            # print(type(unit_concept))
             unit_display_parameter = [
                 parm for parm in unit_concept["parameter"] if parm["name"] == "display"
             ]
@@ -230,7 +228,7 @@ if __name__ == "__main__":
         # print(f"Access Token: {token}")
 
         concept_id = 38893711000001104  # Replace with a valid SNOMED concept ID
-        properties = ["*"]  # Fetch all properties
+        # properties = ["*"]  # Fetch all properties
         # full_properties = await get_dmd_concept(concept_id, properties=properties)
         # pprint.pprint(full_properties)
         concept_term = await dmd_lookup(concept_id)

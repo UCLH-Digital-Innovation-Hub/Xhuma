@@ -33,14 +33,21 @@ def get_alembic_url() -> str:
     Your app URL is asyncpg; convert it to psycopg for migrations.
     """
     url = str(database_url())
-    # print("DATABASE_URL:", url, type(url))
 
-    # If user already provided a sync URL via DATABASE_URL, keep it.
-    # Otherwise convert asyncpg -> psycopg.
     if url.startswith("postgresql+asyncpg://"):
         url = url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
-        url = url.replace("?ssl=require", "?sslmode=require")
-        url = url.replace("&ssl=require", "&sslmode=require")
+
+    # Convert asyncpg-style SSL args if present
+    url = url.replace("?ssl=require", "?sslmode=require")
+    url = url.replace("&ssl=require", "&sslmode=require")
+
+    # For local Docker Postgres, force non-SSL
+    url = url.replace("?sslmode=require", "?sslmode=disable")
+    url = url.replace("&sslmode=require", "&sslmode=disable")
+
+    if "sslmode=" not in url:
+        separator = "&" if "?" in url else "?"
+        url = f"{url}{separator}sslmode=disable"
 
     return url
 
