@@ -43,12 +43,16 @@ resource "azurerm_redis_cache" "redis" {
   }
 }
 
-resource "azurerm_redis_firewall_rule" "allow_azure_services" {
-  name                = "AllowAzureServices"
+# Remove the global 0.0.0.0 'All Azure Services' rule and explicitly whitelist ONLY 
+# our App Service's specific outbound IP pool. This is both significantly more secure 
+# and fixes the known Azure Linux App Service routing bug.
+resource "azurerm_redis_firewall_rule" "app_service_outbound" {
+  for_each            = toset(azurerm_linux_web_app.app.possible_outbound_ip_address_list)
+  name                = "AppSvcOutbound-${replace(each.key, ".", "-")}"
   redis_cache_name    = azurerm_redis_cache.redis.name
   resource_group_name = data.azurerm_resource_group.rg.name
-  start_ip            = "0.0.0.0"
-  end_ip              = "0.0.0.0"
+  start_ip            = each.key
+  end_ip              = each.key
 }
 
 resource "azurerm_postgresql_flexible_server" "postgres" {
