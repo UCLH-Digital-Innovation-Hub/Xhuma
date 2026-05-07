@@ -37,8 +37,8 @@ resource "azurerm_redis_cache" "redis" {
   minimum_tls_version  = "1.2"
 
   redis_configuration {
-    maxmemory_reserved = 2
-    maxmemory_delta    = 2
+    maxmemory_reserved = 125
+    maxmemory_delta    = 125
     maxmemory_policy   = "allkeys-lru"
   }
 }
