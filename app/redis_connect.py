@@ -33,6 +33,7 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
 
 # Connection pool configuration
 POOL_MAX_CONNECTIONS = 10
@@ -86,6 +87,8 @@ class RedisClient:
             retry_on_timeout=True,
             decode_responses=False,  # Keep as bytes for MIME data
             protocol=2,  # Use RESP2 protocol for better compatibility
+            ssl=REDIS_SSL,
+            ssl_cert_reqs=None if REDIS_SSL else "none"
         )
         self._client = redis.Redis(
             connection_pool=self._pool,
