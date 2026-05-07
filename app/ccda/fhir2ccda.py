@@ -1,18 +1,18 @@
 import asyncio
 import datetime
 import json
+import logging
 import os
-import pprint
 from copy import deepcopy
 from typing import List
 
 import xmltodict
-from fhirclient.models import bundle, humanname
+from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
-from fhirclient.models import medicationstatement, patient
+from fhirclient.models import patient
 
-from .entries import allergy, immunization_entry, medication, problem, result
-from .helpers import date_helper, readable_date, templateId
+from .entries import allergy, immunization_entry, medication, problem
+from .helpers import date_helper, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -376,7 +376,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     },
                 }
             else:
-
                 comp["section"]["entry"] = []
                 rows = []
                 references = [index[entry.item.reference] for entry in list.entry]
@@ -516,9 +515,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     ccda["ClinicalDocument"]["component"] = {}
     ccda["ClinicalDocument"]["component"]["structuredBody"] = {}
-    ccda["ClinicalDocument"]["component"]["structuredBody"][
-        "component"
-    ] = bundle_components
+    ccda["ClinicalDocument"]["component"]["structuredBody"]["component"] = (
+        bundle_components
+    )
 
     return ccda
 
@@ -544,8 +543,10 @@ if __name__ == "__main__":
         try:
             address = f"{entry.resource.resource_type}/{entry.resource.id}"
             bundle_index[address] = entry.resource
-        except:
-            pass
+        except Exception:
+            logging.error(
+                f"Could not index resource {entry.resource} with id {entry.resource.id}"
+            )
 
     # ccda = await convert_bundle(fhir_bundle, bundle_index)
     ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))

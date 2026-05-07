@@ -1,10 +1,4 @@
-import json
-import pprint
-from unittest.mock import patch
-
 import pytest
-from fhirclient.models import bundle
-from fhirclient.models import list as fhirlist
 from fhirclient.models import medication, medicationrequest, medicationstatement
 
 from app.ccda.entries import medication as medication_entry
@@ -12,17 +6,13 @@ from app.ccda.entries import medication as medication_entry
 prn_statement = medicationstatement.MedicationStatement(
     {
         "resourceType": "MedicationStatement",
-        "id": "1000000000000000_71eff60000000000",
+        "id": "968546F0-EF03-491B-A045-4D46EE61A860-MS",
         "meta": {
             "profile": [
                 "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationStatement-1"
             ]
         },
         "extension": [
-            {
-                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1",
-                "valueDateTime": "2020-02-25",
-            },
             {
                 "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1",
                 "valueCodeableConcept": {
@@ -35,34 +25,63 @@ prn_statement = medicationstatement.MedicationStatement(
                     ]
                 },
             },
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1",
+                "valueDateTime": "2026-02-24T00:00:00+00:00",
+            },
         ],
         "identifier": [
             {
-                "system": "https://tpp-uk.com/Id/ccs-id",
-                "value": "1000000000000000_71eff60000000000",
+                "system": "https://EMISWeb/A82038",
+                "value": "593C97B57B9943269140B329CC03A0D1968546F0EF03491BA0454D46EE61A860MS",
             }
         ],
         "basedOn": [
-            {"reference": "MedicationRequest/1000000000000000_71eff60000000000_plan"}
+            {"reference": "MedicationRequest/968546F0-EF03-491B-A045-4D46EE61A860"}
         ],
-        "context": {"reference": "Encounter/4000000000000000_1e6a090000000000"},
-        "status": "active",
-        "medicationReference": {"reference": "Medication/1004837_1"},
-        "effectivePeriod": {"start": "2020-02-25", "end": "2020-03-24"},
-        "dateAsserted": "2020-02-25",
-        "subject": {"reference": "Patient/37"},
+        "status": "completed",
+        "medicationReference": {
+            "reference": "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511"
+        },
+        "effectivePeriod": {"start": "2026-02-24", "end": "2026-03-10"},
+        "dateAsserted": "2026-02-24T10:08:32.33+00:00",
+        "subject": {"reference": "Patient/593C97B5-7B99-4326-9140-B329CC03A0D1"},
         "taken": "unk",
         "dosage": [
             {
-                "text": "1 drop, twice a day",
-                "timing": {
-                    "repeat": {"frequencyMax": 4, "period": 1, "periodUnit": "d"}
+                "text": "Take One Tablet As Required On Each Day There Is A Risk Of Drinking Alcohol. Maximum One Tablet Daily.",
+                "additionalInstruction": [
+                    {"text": "on each day there is a risk of drinking alcohol"}
+                ],
+                "asNeededBoolean": True,
+                "method": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "419652001",
+                            "display": "Oral",
+                        }
+                    ]
                 },
                 "doseQuantity": {
                     "value": 1,
-                    "unit": "drop",
+                    "unit": "mg",
                     "system": "http://snomed.info/sct",
-                    "code": "10693611000001100",
+                    "code": "428673006",
+                },
+                "maxDosePerPeriod": {
+                    "numerator": {
+                        "value": 1,
+                        "unit": "Tablet",
+                        "system": "http://snomed.info/sct",
+                        "code": "428673006",
+                    },
+                    "denominator": {
+                        "value": 1,
+                        "unit": "day",
+                        "system": "http://unitsofmeasure.org",
+                        "code": "d",
+                    },
                 },
             }
         ],
@@ -94,7 +113,7 @@ prn_med = medication.Medication(
 med_request = medicationrequest.MedicationRequest(
     {
         "resourceType": "MedicationRequest",
-        "id": "2E352BA6-8F87-479B-BC80-41494027F2E6",
+        "id": "968546F0-EF03-491B-A045-4D46EE61A860",
         "meta": {
             "profile": [
                 "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationRequest-1"
@@ -102,55 +121,48 @@ med_request = medicationrequest.MedicationRequest(
         },
         "extension": [
             {
-                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1",
-                "extension": [
-                    {
-                        "url": "numberOfRepeatPrescriptionsAllowed",
-                        "valueUnsignedInt": 6,
-                    },
-                    {"url": "numberOfRepeatPrescriptionsIssued", "valueUnsignedInt": 0},
-                ],
-            },
-            {
                 "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1",
                 "valueCodeableConcept": {
                     "coding": [
                         {
                             "system": "https://fhir.nhs.uk/STU3/CodeSystem/CareConnect-PrescriptionType-1",
-                            "code": "repeat",
-                            "display": "Repeat",
+                            "code": "acute",
+                            "display": "Acute",
                         }
                     ]
                 },
-            },
+            }
         ],
         "identifier": [
             {
                 "system": "https://EMISWeb/A82038",
-                "value": "7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6",
+                "value": "593C97B57B9943269140B329CC03A0D1968546F0EF03491BA0454D46EE61A860",
             }
         ],
-        "groupIdentifier": {"value": "2e352ba6-8f87-479b-bc80-41494027f2e6"},
-        "status": "active",
+        "groupIdentifier": {"value": "968546f0-ef03-491b-a045-4d46ee61a860"},
+        "status": "completed",
         "intent": "plan",
         "medicationReference": {
-            "reference": "Medication/A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7"
+            "reference": "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511"
         },
-        "subject": {"reference": "Patient/37"},
-        "authoredOn": "2020-03-04T16:35:02.273+00:00",
-        "recorder": {"reference": "Practitioner/2DB481A3-306A-4133-9491-1558161D6A2B"},
-        "note": [{"text": "Patient Notes:Take 30 mins before a meal or snack"}],
+        "subject": {"reference": "Patient/593C97B5-7B99-4326-9140-B329CC03A0D1"},
+        "authoredOn": "2026-02-24T10:08:32.33+00:00",
+        "recorder": {"reference": "Practitioner/C8FD0E2C-3124-4C72-AC8D-ABEA65537D1B"},
         "dosageInstruction": [
             {
-                "text": "1 tablet, daily, in morning, 30 minutes before a meal",
-                "timing": {
-                    "repeat": {
-                        "frequency": 1,
-                        "period": 1,
-                        "periodUnit": "d",
-                        "when": ["MORN", "AC"],
-                        "offset": 30,
-                    }
+                "text": "Take One Tablet As Required On Each Day There Is A Risk Of Drinking Alcohol. Maximum One Tablet Daily.",
+                "additionalInstruction": [
+                    {"text": "on each day there is a risk of drinking alcohol"}
+                ],
+                "asNeededBoolean": True,
+                "method": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "419652001",
+                            "display": "Take",
+                        }
+                    ]
                 },
                 "doseQuantity": {
                     "value": 1,
@@ -158,13 +170,27 @@ med_request = medicationrequest.MedicationRequest(
                     "system": "http://snomed.info/sct",
                     "code": "428673006",
                 },
+                "maxDosePerPeriod": {
+                    "numerator": {
+                        "value": 1,
+                        "unit": "tablet",
+                        "system": "http://snomed.info/sct",
+                        "code": "428673006",
+                    },
+                    "denominator": {
+                        "value": 1,
+                        "unit": "day",
+                        "system": "http://unitsofmeasure.org",
+                        "code": "d",
+                    },
+                },
             }
         ],
         "dispenseRequest": {
-            "validityPeriod": {"start": "2020-03-04"},
-            "quantity": {"value": 28, "unit": "tablet"},
+            "validityPeriod": {"start": "2026-02-24", "end": "2026-03-10"},
+            "quantity": {"value": 14, "unit": "tablet"},
             "expectedSupplyDuration": {
-                "value": 28,
+                "value": 14,
                 "unit": "day",
                 "system": "http://unitsofmeasure.org",
                 "code": "d",
@@ -179,9 +205,9 @@ async def test_prn_medication_statement():
     """Test the conversion of a PRN medication statement to a CCDA entry."""
     # Convert the FHIR MedicationStatement to a CCDA entry
     index_dict = {
-        "Medication/1004837_1": prn_med,
+        "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511": prn_med,
         "prn_medicationStatement/9": prn_med,
-        "MedicationRequest/1000000000000000_71eff60000000000_plan": med_request,
+        "MedicationRequest/968546F0-EF03-491B-A045-4D46EE61A860": med_request,
     }
     substance_administration = await medication_entry(prn_statement, index_dict)
     substance_administration = substance_administration.entry
@@ -208,3 +234,20 @@ async def test_prn_medication_statement():
         == "NI"
     )
     # Check the medication details
+
+
+@pytest.mark.asyncio
+async def test_max_dose_quantity():
+    """Test that max dose quantity is correctly converted to the CCDA entry."""
+    index_dict = {
+        "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511": prn_med,
+        "prn_medicationStatement/9": prn_med,
+        "MedicationRequest/968546F0-EF03-491B-A045-4D46EE61A860": med_request,
+    }
+    substance_administration = await medication_entry(prn_statement, index_dict)
+    substance_administration = substance_administration.entry
+    substance_administration = substance_administration["substanceAdministration"]
+
+    assert "maxDoseQuantity" in substance_administration
+    assert substance_administration["maxDoseQuantity"]["numerator"]["@value"] == 1
+    assert substance_administration["maxDoseQuantity"]["numerator"]["@unit"] == "Tablet"

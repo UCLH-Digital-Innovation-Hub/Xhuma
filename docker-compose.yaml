@@ -135,7 +135,7 @@ services:
       - ./alembic.ini:/code/alembic.ini
     networks:
       - xhuma-net
-    command: ["python","-m","uvicorn","app.main:app","--host","0.0.0.0","--port","${PORT:-80}", "--reload"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80", "--reload"]
 
   prometheus:
     image: prom/prometheus:v2.45.0

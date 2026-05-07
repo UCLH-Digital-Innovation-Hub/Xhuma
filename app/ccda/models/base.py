@@ -5,7 +5,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Extra, Field, field_serializer
 
-from ..helpers import templateId
 from .admin import AuthorParticipation
 from .datatypes import (
     ANY,
@@ -21,6 +20,7 @@ from .datatypes import (
     PIVL_TS,
     PQ,
     SXCM_TS,
+    RTO_PQ_PQ,
 )
 
 
@@ -159,6 +159,7 @@ class SubstanceAdministration(BaseModel):
     routeCode: Optional[CE] = None
     doseQuantity: Optional[IVL_PQ] = None
     rateQuantity: Optional[IVL_PQ] = None
+    maxDoseQuantity: Optional[RTO_PQ_PQ] = None
     entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
     repeatNumber: Optional[IVL_INT] = None
     # TODO flesh out precondition model

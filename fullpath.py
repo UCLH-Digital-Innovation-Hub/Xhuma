@@ -8,7 +8,6 @@ from xmlschema import XMLSchema
 from app.ccda.helpers import extract_soap_request
 
 if __name__ == "__main__":
-
     with open("xml/pdqRequest.xml") as iti47:
         response_schema = XMLSchema("xml/multicacheschemas/PRPA_IN201306UV02.xsd")
 
@@ -32,7 +31,6 @@ if __name__ == "__main__":
     docid = ""
 
     with open("xml/2. Perform XCA ITI-38 query.xml") as iti38:
-
         print("ITI38 query")
 
         dom = ElementTree.parse(iti38)

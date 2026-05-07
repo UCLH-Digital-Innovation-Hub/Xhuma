@@ -1,14 +1,11 @@
-import base64
 import json
 import logging
 import os
-import pprint
 import uuid
 from datetime import datetime, timedelta
 
 import xmltodict
 from fastapi import Request
-from httpx import AsyncClient
 
 from ..audit.models import SAMLAttributes
 from ..gpconnect import gpconnect
@@ -441,9 +438,9 @@ async def iti_38_response(
                 "success": False,
                 "error": f"Internal error retrieving structured record for NHS number {nhsno}. error: {e}",
             }
-            body["AdhocQueryResponse"][
-                "@status"
-            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            body["AdhocQueryResponse"]["@status"] = (
+                "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            )
             body["AdhocQueryResponse"]["RegistryErrorList"] = {
                 "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 "RegistryError": {
@@ -456,9 +453,9 @@ async def iti_38_response(
 
         if not r.get("success"):
             logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
-            body["AdhocQueryResponse"][
-                "@status"
-            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            body["AdhocQueryResponse"]["@status"] = (
+                "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+            )
             body["AdhocQueryResponse"]["RegistryErrorList"] = {
                 "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 "RegistryError": {
@@ -473,7 +470,6 @@ async def iti_38_response(
             docid = r["document_id"]
 
     if docid is not None:
-
         # make sure docid is a string and not bytes
         if isinstance(docid, bytes):
             docid = docid.decode("utf-8")

@@ -1,68 +1,63 @@
 """
 Redis Connection Module
-
-This module provides Redis connection functionality for the Xhuma middleware service.
-It implements a stateless caching strategy using Redis for temporary storage of:
-- CCDA documents
-- PDS lookup results
-- SDS endpoint information
-- NHS number to CEID mappings
-
-The Redis connection is configured through environment variables and includes:
-- Connection pooling
-- Error handling
-- Automatic reconnection
-- Memory monitoring
 """
 
 import logging
 import os
+import ssl
 import time
 from functools import wraps
 from typing import Any, Dict, Optional, Union
 
 import redis
-from redis.connection import Connection, ConnectionPool, SSLConnection
-from redis.exceptions import ConnectionError, RedisError
+from redis.connection import ConnectionPool, SSLConnection
+from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
-# Redis connection configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
+REDIS_SSL_CERT_REQS = {
+    "required": ssl.CERT_REQUIRED,
+    "optional": ssl.CERT_OPTIONAL,
+    "none": ssl.CERT_NONE,
+}.get(os.getenv("REDIS_SSL_CERT_REQS", "required").lower(), ssl.CERT_REQUIRED)
 
-# Connection pool configuration
 POOL_MAX_CONNECTIONS = 10
-POOL_TIMEOUT = 20
 SOCKET_TIMEOUT = 5
 SOCKET_CONNECT_TIMEOUT = 5
 MAX_RETRIES = 3
-RETRY_DELAY = 1  # seconds
+RETRY_DELAY = 1
 
 
 def retry_on_connection_error(max_retries: int = MAX_RETRIES, delay: int = RETRY_DELAY):
-    """Decorator to retry Redis operations on connection errors."""
+    """Retry Redis operations on connection errors."""
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             last_error = None
+
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
-                except (ConnectionError, TimeoutError) as e:
-                    last_error = e
+                except (ConnectionError, TimeoutError) as exc:
+                    last_error = exc
                     if attempt < max_retries - 1:
-                        time.sleep(delay)
                         logger.warning(
-                            f"Retrying Redis operation, attempt {attempt + 2}/{max_retries}"
+                            "Retrying Redis operation, attempt %s/%s",
+                            attempt + 2,
+                            max_retries,
                         )
+                        time.sleep(delay)
+
             logger.error(
-                f"Redis operation failed after {max_retries} attempts: {str(last_error)}"
+                "Redis operation failed after %s attempts: %s",
+                max_retries,
+                last_error,
             )
             raise last_error
 
@@ -79,8 +74,7 @@ class RedisClient:
         pool_kwargs = {
             "host": REDIS_HOST,
             "port": REDIS_PORT,
-            "db": REDIS_DB,
-            "password": REDIS_PASSWORD,
+            "db": db,
             "max_connections": POOL_MAX_CONNECTIONS,
             "socket_timeout": SOCKET_TIMEOUT,
             "socket_connect_timeout": SOCKET_CONNECT_TIMEOUT,
@@ -89,25 +83,24 @@ class RedisClient:
             "protocol": 2,  # Use RESP2 protocol for better compatibility
         }
 
+        if REDIS_PASSWORD:
+            pool_kwargs["password"] = REDIS_PASSWORD
+
         if REDIS_SSL:
             pool_kwargs["connection_class"] = SSLConnection
-            pool_kwargs["ssl_cert_reqs"] = "none"
-        else:
-            pool_kwargs["connection_class"] = Connection
+            pool_kwargs["ssl_cert_reqs"] = REDIS_SSL_CERT_REQS
+            if REDIS_SSL_CERT_REQS == ssl.CERT_NONE:
+                logger.warning(
+                    "REDIS_SSL_CERT_REQS is set to 'none'; SSL certificate validation is disabled"
+                )
 
         self._pool = ConnectionPool(**pool_kwargs)
-        self._client = redis.Redis(
-            connection_pool=self._pool,
-            socket_timeout=SOCKET_TIMEOUT,
-            retry_on_timeout=True,
-            decode_responses=False,  # Keep as bytes for MIME data
-            protocol=2,  # Use RESP2 protocol for better compatibility
-        )
+        self._client = redis.Redis(connection_pool=self._pool)
 
     @retry_on_connection_error()
     def ping(self) -> bool:
         """Test Redis connection."""
-        return self._client.ping()
+        return bool(self._client.ping())
 
     @retry_on_connection_error()
     def get(self, key: str) -> Optional[bytes]:
@@ -117,12 +110,12 @@ class RedisClient:
     @retry_on_connection_error()
     def setex(self, key: str, time: int, value: Union[str, bytes]) -> bool:
         """Set key-value pair with expiry time."""
-        return self._client.setex(key, time, value)
+        return bool(self._client.setex(key, time, value))
 
     @retry_on_connection_error()
     def delete(self, *keys: str) -> int:
         """Delete one or more keys."""
-        return self._client.delete(*keys)
+        return int(self._client.delete(*keys))
 
     @retry_on_connection_error()
     def keys(self, pattern: str = "*") -> list:
@@ -147,6 +140,10 @@ class RedisClient:
             memory_used = info.get("used_memory", 0)
             total_memory = info.get("maxmemory", 0)
 
+            hits = info.get("keyspace_hits", 0)
+            misses = info.get("keyspace_misses", 0)
+            total_lookups = hits + misses
+
             stats = {
                 "total_keys": total_keys,
                 "memory_used": memory_used,
@@ -155,41 +152,39 @@ class RedisClient:
                     (memory_used / total_memory * 100) if total_memory else 0
                 ),
                 "connected_clients": info.get("connected_clients", 0),
-                "hit_rate": info.get("keyspace_hits", 0)
-                / (info.get("keyspace_hits", 0) + info.get("keyspace_misses", 1)),
+                "hit_rate": hits / total_lookups if total_lookups else 0,
             }
 
-            # Log warning if memory usage is high
             if stats["memory_usage_percent"] > 80:
                 logger.warning(
-                    f"Redis memory usage is high: {stats['memory_usage_percent']:.1f}%"
+                    "Redis memory usage is high: %.1f%%",
+                    stats["memory_usage_percent"],
                 )
 
             return stats
-        except RedisError as e:
-            logger.error(f"Failed to retrieve cache information: {str(e)}")
-            return {"error": str(e)}
 
-    def close(self):
+        except RedisError as exc:
+            logger.error("Failed to retrieve cache information: %s", exc)
+            return {"error": str(exc)}
+
+    def close(self) -> None:
         """Close all connections in the pool."""
         self._pool.disconnect()
 
 
-# Create global Redis client instance
 redis_client = RedisClient()
-
-# Export the redis_connect instance for use in other modules
 redis_connect = redis_client
 
-snomed_client = RedisClient(db=2)  # Separate Redis database for SNOMED data
+# Separate Redis database for SNOMED data
+snomed_client = RedisClient(db=2)
 
 
 def get_cached_data(key: str) -> Optional[bytes]:
     """Retrieve cached data for a given key."""
     try:
         return redis_client.get(key)
-    except RedisError as e:
-        logger.error(f"Error retrieving cached data: {str(e)}")
+    except RedisError as exc:
+        logger.error("Error retrieving cached data: %s", exc)
         return None
 
 
@@ -197,8 +192,8 @@ def cache_data(key: str, value: Union[str, bytes], expiry: int = 3600) -> bool:
     """Cache data with expiry time."""
     try:
         return redis_client.setex(key, expiry, value)
-    except RedisError as e:
-        logger.error(f"Error caching data: {str(e)}")
+    except RedisError as exc:
+        logger.error("Error caching data: %s", exc)
         return False
 
 
@@ -209,6 +204,6 @@ def clear_cache(pattern: str = "*") -> bool:
         if keys:
             return bool(redis_client.delete(*keys))
         return True
-    except RedisError as e:
-        logger.error(f"Error clearing cache: {str(e)}")
+    except RedisError as exc:
+        logger.error("Error clearing cache: %s", exc)
         return False
