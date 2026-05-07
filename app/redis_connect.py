@@ -22,7 +22,6 @@ from functools import wraps
 from typing import Any, Dict, Optional, Union
 
 import redis
-from redis.connection import Connection, ConnectionPool, SSLConnection
 from redis.exceptions import ConnectionError, RedisError
 
 # Configure logging
@@ -76,29 +75,15 @@ class RedisClient:
 
     def __init__(self, db: int = REDIS_DB):
         """Initialize Redis client with connection pool."""
-        pool_kwargs = {
-            "host": REDIS_HOST,
-            "port": REDIS_PORT,
-            "db": REDIS_DB,
-            "password": REDIS_PASSWORD,
-            "max_connections": POOL_MAX_CONNECTIONS,
-            "socket_timeout": SOCKET_TIMEOUT,
-            "socket_connect_timeout": SOCKET_CONNECT_TIMEOUT,
-            "retry_on_timeout": True,
-            "decode_responses": False,  # Keep as bytes for MIME data
-            "protocol": 2,  # Use RESP2 protocol for better compatibility
-        }
-
-        if REDIS_SSL:
-            pool_kwargs["connection_class"] = SSLConnection
-            pool_kwargs["ssl_cert_reqs"] = "none"
-        else:
-            pool_kwargs["connection_class"] = Connection
-
-        self._pool = ConnectionPool(**pool_kwargs)
         self._client = redis.Redis(
-            connection_pool=self._pool,
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            db=db,
+            password=REDIS_PASSWORD,
+            ssl=REDIS_SSL,
+            max_connections=POOL_MAX_CONNECTIONS,
             socket_timeout=SOCKET_TIMEOUT,
+            socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
             retry_on_timeout=True,
             decode_responses=False,  # Keep as bytes for MIME data
             protocol=2,  # Use RESP2 protocol for better compatibility
@@ -172,7 +157,7 @@ class RedisClient:
 
     def close(self):
         """Close all connections in the pool."""
-        self._pool.disconnect()
+        self._client.connection_pool.disconnect()
 
 
 # Create global Redis client instance
