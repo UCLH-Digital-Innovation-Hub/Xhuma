@@ -30,7 +30,7 @@ jobs:
           python -m pip install pipenv
 
       - name: Install dependencies
-        run: pipenv install --dev --system --deploy
+        run: pipenv install --dev --system
 
       - name: Run pre-commit
         uses: pre-commit/action@v3.0.1
