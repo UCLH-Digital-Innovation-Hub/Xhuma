@@ -4,12 +4,13 @@ Redis Connection Module
 
 import logging
 import os
+import ssl
 import time
 from functools import wraps
 from typing import Any, Dict, Optional, Union
 
 import redis
-from redis.connection import Connection, ConnectionPool, SSLConnection
+from redis.connection import ConnectionPool, SSLConnection
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,11 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
-REDIS_SSL_CERT_REQS = os.getenv("REDIS_SSL_CERT_REQS", "required").lower()
+REDIS_SSL_CERT_REQS = {
+    "required": ssl.CERT_REQUIRED,
+    "optional": ssl.CERT_OPTIONAL,
+    "none": ssl.CERT_NONE,
+}.get(os.getenv("REDIS_SSL_CERT_REQS", "required").lower(), ssl.CERT_REQUIRED)
 
 POOL_MAX_CONNECTIONS = 10
 SOCKET_TIMEOUT = 5
@@ -82,8 +87,6 @@ class RedisClient:
         if REDIS_SSL:
             pool_kwargs["connection_class"] = SSLConnection
             pool_kwargs["ssl_cert_reqs"] = REDIS_SSL_CERT_REQS
-        else:
-            pool_kwargs["connection_class"] = Connection
 
         self._pool = ConnectionPool(**pool_kwargs)
         self._client = redis.Redis(connection_pool=self._pool)
