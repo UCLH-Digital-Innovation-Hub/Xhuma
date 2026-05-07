@@ -9,6 +9,7 @@ from functools import wraps
 from typing import Any, Dict, Optional, Union
 
 import redis
+from redis.connection import Connection, ConnectionPool, SSLConnection
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
 logger = logging.getLogger(__name__)
@@ -63,25 +64,34 @@ class RedisClient:
     """Redis client with connection pooling and error handling."""
 
     def __init__(self, db: int = REDIS_DB):
-        scheme = "rediss" if REDIS_SSL else "redis"
-
-        auth = f":{REDIS_PASSWORD}@" if REDIS_PASSWORD else ""
-        redis_url = f"{scheme}://{auth}{REDIS_HOST}:{REDIS_PORT}/{db}"
-
-        redis_kwargs = {
+        """Initialize Redis client with connection pool."""
+        pool_kwargs = {
+            "host": REDIS_HOST,
+            "port": REDIS_PORT,
+            "db": db,
+            "password": REDIS_PASSWORD,
             "max_connections": POOL_MAX_CONNECTIONS,
             "socket_timeout": SOCKET_TIMEOUT,
             "socket_connect_timeout": SOCKET_CONNECT_TIMEOUT,
             "retry_on_timeout": True,
-            "decode_responses": False,
-            "protocol": 2,
+            "decode_responses": False,  # Keep as bytes for MIME data
+            "protocol": 2,  # Use RESP2 protocol for better compatibility
         }
 
         if REDIS_SSL:
-            redis_kwargs["ssl_cert_reqs"] = None
+            pool_kwargs["connection_class"] = SSLConnection
+            pool_kwargs["ssl_cert_reqs"] = "none"
+        else:
+            pool_kwargs["connection_class"] = Connection
 
-        self._client = redis.Redis.from_url(redis_url, **redis_kwargs)
-        self._pool = self._client.connection_pool
+        self._pool = ConnectionPool(**pool_kwargs)
+        self._client = redis.Redis(
+            connection_pool=self._pool,
+            socket_timeout=SOCKET_TIMEOUT,
+            retry_on_timeout=True,
+            decode_responses=False,  # Keep as bytes for MIME data
+            protocol=2,  # Use RESP2 protocol for better compatibility
+        )
 
     @retry_on_connection_error()
     def ping(self) -> bool:
