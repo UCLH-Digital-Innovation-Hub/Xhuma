@@ -88,9 +88,6 @@ resource "azurerm_linux_web_app" "app" {
 
     container_registry_use_managed_identity = false
 
-    # Run migrations on startup
-    app_command_line = "/bin/sh -c \"alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port 80\""
-
     # Enable WebSockets for the Relay
     # Enable WebSockets for the Relay
     websockets_enabled = true

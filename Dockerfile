@@ -20,4 +20,6 @@ COPY app /code/app
 COPY alembic.ini /code/alembic.ini
 COPY alembic /code/alembic
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
+COPY startup.sh /code/startup.sh
+
+CMD ["./startup.sh"]
