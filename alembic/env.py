@@ -1,4 +1,5 @@
 from logging.config import fileConfig
+import os
 
 from sqlalchemy import engine_from_config, pool
 
@@ -41,9 +42,10 @@ def get_alembic_url() -> str:
     url = url.replace("?ssl=require", "?sslmode=require")
     url = url.replace("&ssl=require", "&sslmode=require")
 
-    # For local Docker Postgres, force non-SSL
-    url = url.replace("?sslmode=require", "?sslmode=disable")
-    url = url.replace("&sslmode=require", "&sslmode=disable")
+    if os.getenv("ENV", "prod").lower() in ("dev", "local"):
+        # For local Docker Postgres, force non-SSL
+        url = url.replace("?sslmode=require", "?sslmode=disable")
+        url = url.replace("&sslmode=require", "&sslmode=disable")
 
     if "sslmode=" not in url:
         separator = "&" if "?" in url else "?"

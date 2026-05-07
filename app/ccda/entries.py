@@ -133,7 +133,7 @@ async def medication(
                 "originalText": entry.dosage[0].doseQuantity.unit,
             }
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
-    # check if dosage has as needed boolean of tru
+    # check if dosage has as needed boolean of true
 
     if entry.dosage[0].asNeededBoolean:
         # populate precondition

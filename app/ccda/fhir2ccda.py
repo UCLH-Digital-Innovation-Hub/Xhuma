@@ -3,7 +3,6 @@ import datetime
 import json
 import os
 from copy import deepcopy
-from sys import exception
 from typing import List
 
 import xmltodict
@@ -545,8 +544,8 @@ if __name__ == "__main__":
         try:
             address = f"{entry.resource.resource_type}/{entry.resource.id}"
             bundle_index[address] = entry.resource
-        except exception:
-            logging.warning(
+        except Exception:
+            logging.error(
                 f"Could not index resource {entry.resource} with id {entry.resource.id}"
             )
 

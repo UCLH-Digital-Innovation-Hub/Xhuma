@@ -23,7 +23,7 @@ def get_gp_connect_inclusions():
     }
 
 
-def build_gp_connect_parameters(inclusions: dict) -> dict:
+def build_gp_connect_parameters(inclusions: dict) -> list[dict]:
     parameters = []
 
     if inclusions.get("include_allergies", True):
