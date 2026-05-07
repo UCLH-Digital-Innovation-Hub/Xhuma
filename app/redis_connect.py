@@ -19,6 +19,7 @@ REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
+REDIS_SSL_CERT_REQS = os.getenv("REDIS_SSL_CERT_REQS", "required").lower()
 
 POOL_MAX_CONNECTIONS = 10
 SOCKET_TIMEOUT = 5
@@ -80,18 +81,12 @@ class RedisClient:
 
         if REDIS_SSL:
             pool_kwargs["connection_class"] = SSLConnection
-            pool_kwargs["ssl_cert_reqs"] = "none"
+            pool_kwargs["ssl_cert_reqs"] = REDIS_SSL_CERT_REQS
         else:
             pool_kwargs["connection_class"] = Connection
 
         self._pool = ConnectionPool(**pool_kwargs)
-        self._client = redis.Redis(
-            connection_pool=self._pool,
-            socket_timeout=SOCKET_TIMEOUT,
-            retry_on_timeout=True,
-            decode_responses=False,  # Keep as bytes for MIME data
-            protocol=2,  # Use RESP2 protocol for better compatibility
-        )
+        self._client = redis.Redis(connection_pool=self._pool)
 
     @retry_on_connection_error()
     def ping(self) -> bool:
