@@ -48,7 +48,7 @@ resource "azurerm_redis_cache" "redis" {
 # and fixes the known Azure Linux App Service routing bug.
 resource "azurerm_redis_firewall_rule" "app_service_outbound" {
   for_each            = toset(azurerm_linux_web_app.app.possible_outbound_ip_address_list)
-  name                = "AppSvcOutbound-${replace(each.key, ".", "-")}"
+  name                = "AppSvcOutbound_${replace(each.key, ".", "_")}"
   redis_cache_name    = azurerm_redis_cache.redis.name
   resource_group_name = data.azurerm_resource_group.rg.name
   start_ip            = each.key
