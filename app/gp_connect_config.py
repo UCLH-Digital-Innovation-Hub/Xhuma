@@ -1,3 +1,4 @@
+import logging
 import os
 
 # get environmental variables for gpconnect query inclusions
@@ -56,3 +57,21 @@ def build_gp_connect_parameters(inclusions: dict) -> list[dict]:
 GP_CONNECT_PARAMETERS = build_gp_connect_parameters(
     inclusions=get_gp_connect_inclusions()
 )
+
+INT_BASE_PATH = "https://int.api.service.nhs.uk/"
+
+
+def get_pds_path() -> str:
+    "Get the PDS path from environment variable or use default"
+    # if env is dev or int, use int base path, otherwise use sandbox
+    env = os.getenv("ENV", "int").lower()
+    if env in ["dev", "int"]:
+        return INT_BASE_PATH
+    elif env == "prod":
+        return "whatever the prod path is"
+    else:
+        logging.error(f"Invalid ENV value: {env}. Must be 'dev', 'int', or 'prod'.")
+        raise ValueError(f"Invalid ENV value: {env}. Must be 'dev', 'int', or 'prod'.")
+
+
+PDS_PATH = get_pds_path()

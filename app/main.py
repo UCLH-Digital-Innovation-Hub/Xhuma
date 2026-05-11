@@ -33,8 +33,6 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from sqlmodel import select
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.ccda.entries import result
-
 from .audit.db_models import AuditEventRow
 from .audit.models import SAMLAttributes, _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
@@ -77,6 +75,7 @@ async def lifespan(app: FastAPI):
         try:
             # Reformat env var newlines safely and convert to JWK
             from app.security import fix_pem_formatting
+
             private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
             public_jwk = jwk.JWK.from_pem(private_pem)
             app.state.jwk_json = public_jwk.export_public(as_dict=True)
@@ -97,6 +96,14 @@ async def lifespan(app: FastAPI):
         print(
             "Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error."
         )
+
+    # find self ASID and export it as environment variable for use in GP Connect requests
+    try:
+        self_asid = await pds.get_self_asid()
+        os.environ["ORG_ASID"] = self_asid
+        print(f"Self ASID determined: {self_asid}")
+    except Exception as e:
+        print(f"Warning: Failed to determine self ASID during startup: {e}")
 
     # Set up OpenTelemetry metrics
     otlp_endpoint = os.getenv(

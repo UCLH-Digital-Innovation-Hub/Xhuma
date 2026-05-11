@@ -8,6 +8,7 @@ import uuid
 import fastapi
 import httpx
 
+from app.gp_connect_config import PDS_PATH
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
 from app.security import pds_jwt
@@ -23,7 +24,7 @@ router = fastapi.APIRouter(prefix="/pds")
 @router.get("/lookup_patient/{nhsno}")
 async def lookup_patient(nhsno: int):
     def get_pds_token():
-        full_path = f"{INT_BASE_PATH}oauth2/token"
+        full_path = f"{PDS_PATH}oauth2/token"
         jwt_token = pds_jwt(API_KEY, API_KEY, full_path, "test-1")
         # print(f"jwt_token: {jwt_token}")
 
@@ -41,8 +42,6 @@ async def lookup_patient(nhsno: int):
         redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
         return nhs_token
 
-        return nhs_token
-
     # if nhs token expired or not request, get one and cache
 
     if not redis_client.exists("access_token"):
@@ -57,13 +56,12 @@ async def lookup_patient(nhsno: int):
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
         "X-Correlation-ID": str(uuid.uuid4()),
-        # TODO make end user organisation dynamic
-        "NHSD-End-User-Organisation-ODS": "Y12345",
+        "NHSD-End-User-Organisation-ODS": os.getenv("ORG_CODE", "RRV00"),
         "Authorization": f"Bearer {nhs_token}",
         "accept": "application/fhir+json",
     }
 
-    url = f"{INT_BASE_PATH}personal-demographics/FHIR/R4/Patient/{nhsno}"
+    url = f"{PDS_PATH}personal-demographics/FHIR/R4/Patient/{nhsno}"
     # print(url)
     async with httpx.AsyncClient(
         event_hooks={"request": [log_request], "response": [log_response]}
@@ -97,14 +95,18 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
 
     else:
         suffix = "Device"
-        identifier = [
-            # "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:psis:REPC_IN150016UK05"
-            "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
-        ]
+        # if identifier in kwargs, use that, otherwise use default
+        if "identifiers" in kwargs:
+            identifier = kwargs["identifiers"]
+            print(f"Using custom identifiers: {identifier}")
+        else:
+            identifier = [
+                # "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:psis:REPC_IN150016UK05"
+                "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
+            ]
 
     url = f"{INT_BASE_PATH}spine-directory/FHIR/R4/{suffix}"
     organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|{ods}"
-    # organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|YES"
 
     api_key = os.environ.get("API_KEY")
     parameters = {
@@ -124,18 +126,54 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     return json.loads(r.text)
 
 
+async def get_self_asid():
+    # looks up organisation's own ASID using the SDS trace endpoint
+    ods = os.getenv("ORG_CODE")
+
+    if not ods:
+        raise Exception("ORG_CODE environment variable not set")
+
+    prefix = "https://fhir.nhs.uk/Id/"
+    "https://fhir.nhs.uk/Id/objectClass|nhsAs"
+    parameters = {
+        "nhsIDCode": ods,
+        "objectClass": "nhsAs",
+        "nhsAsSvcIAD": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
+        "nhsMhsManufacturerOrg": ods,
+    }
+    identifiers = [
+        f"{prefix}nhsIDCode|{ods}",
+        f"{prefix}objectClass|nhsAs",
+    ]
+    url = f"{PDS_PATH}spine-directory/FHIR/R4/Device"
+    # r = httpx.get(url, params=parameters, identifiers=identifiers)
+    asid_trace = await sds_trace(ods, endpoint=False)
+    try:
+        for item in (
+            asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
+        ):
+            if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
+                asid = item.get("value")
+            elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+                nhsmhsparty = item.get("value")
+    except Exception as e:
+        msg = f"Unable to parse SDS trace response: {e}"
+        raise Exception(msg)
+    if asid:
+        return asid
+    else:
+        raise Exception(f"ASID not found in SDS trace response: {asid_trace}")
+
+
 if __name__ == "__main__":
-    patient = asyncio.run(lookup_patient(9658218873))
-    pprint.pprint(patient)
+    # patient = asyncio.run(lookup_patient(9658218873))
+    # pprint.pprint(patient)
 
     # print(patient.gender)
     # print(patient.name[0].family)
     # print(patient.generalPractitioner[0].identifier.value)
-
-    # ods = asyncio.run(sds_trace("A82038"))
-    # pprint.pprint(ods)
-    # for i in ods["entry"]:
-    #     pprint.pprint(i)
+    self_trace = asyncio.run(get_self_asid())
+    pprint.pprint(self_trace)
 
     # try self lookup
     prefix = "https://fhir.nhs.uk/Id/"

@@ -19,11 +19,11 @@ from .audit.store import insert_audit_event
 from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
+from .gp_connect_config import GP_CONNECT_PARAMETERS
 from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
-from .gp_connect_config import GP_CONNECT_PARAMETERS
 
 # from app.metrics.metric_utils import classify_error, now
 
@@ -317,7 +317,7 @@ async def gpconnect(
     token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
     headers = {
         "Ssp-TraceID": str(uuid4()),
-        "Ssp-From": "200000002574",  # TODO this should be dynamic as each client endpoint will have own SSID
+        "Ssp-From": os.getenv("ORG_ASID", "unknown"),
         "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
