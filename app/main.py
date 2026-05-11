@@ -76,7 +76,8 @@ async def lifespan(app: FastAPI):
     if jwt_key:
         try:
             # Reformat env var newlines safely and convert to JWK
-            private_pem = jwt_key.replace("\\n", "\n").encode("utf-8")
+            from app.security import fix_pem_formatting
+            private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
             public_jwk = jwk.JWK.from_pem(private_pem)
             app.state.jwk_json = public_jwk.export_public(as_dict=True)
         except Exception as e:
