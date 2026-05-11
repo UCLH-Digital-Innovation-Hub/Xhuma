@@ -1,6 +1,3 @@
-import os
-from unittest import mock
-
 import pytest
 
 # Generated dummy key for testing

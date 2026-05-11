@@ -1,25 +1,26 @@
 FROM python:3.13-slim
 
-# Upgrade pip and system packages to reduce vulnerabilities
-RUN apt-get update && apt-get upgrade -y && \
-	pip install --upgrade pip && \
-	apt-get clean && rm -rf /var/lib/apt/lists/*
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV UV_COMPILE_BYTECODE=1
+ENV UV_LINK_MODE=copy
 
 WORKDIR /code
 
-RUN pip install pipenv
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY Pipfile /code/Pipfile
-COPY Pipfile.lock /code/Pipfile.lock
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-RUN pipenv install --system --skip-lock
-# Copy APP code
+COPY pyproject.toml uv.lock /code/
+
+RUN uv sync --locked --no-dev --no-install-project
+
 COPY app /code/app
-
-# copy alembic files for migrations
 COPY alembic.ini /code/alembic.ini
 COPY alembic /code/alembic
-
 COPY startup.sh /code/startup.sh
+
+ENV PATH="/code/.venv/bin:$PATH"
 
 CMD ["./startup.sh"]

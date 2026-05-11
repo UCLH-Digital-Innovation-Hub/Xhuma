@@ -1,8 +1,6 @@
-import pytest
 from fhirclient.models import coding
 
 from app.ccda.helpers import code_with_translations
-from app.ccda.models.datatypes import CD
 
 
 def test_single_snomed_code_only():

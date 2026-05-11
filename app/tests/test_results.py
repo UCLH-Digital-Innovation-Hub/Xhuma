@@ -23,7 +23,7 @@ for entry in fhir_bundle.entry:
     try:
         address = f"{entry.resource.resource_type}/{entry.resource.id}"
         bundle_index[address] = entry.resource
-    except:
+    except Exception:
         pass
 
 lists = [
@@ -31,15 +31,15 @@ lists = [
     for entry in fhir_bundle.entry
     if isinstance(entry.resource, fhirlist.List)
 ]
-for l in lists:
-    print(f"List ID: {l.id}, Title: {l.title}, Status: {l.status}")
+for lst in lists:
+    print(f"List ID: {lst.id}, Title: {lst.title}, Status: {lst.status}")
 
 # only have investigations for now
-lists = [l for l in lists if l.code and l.title == "Investigations and Results"]
+lists = [lst for lst in lists if lst.code and lst.title == "Investigations and Results"]
 
-for l in lists:
-    print(f"List: {l.title}")
-    for entry in l.entry:
+for lst in lists:
+    print(f"List: {lst.title}")
+    for entry in lst.entry:
         print(entry.item.reference)
         resource = bundle_index.get(entry.item.reference)
         if resource:
@@ -81,8 +81,8 @@ for l in lists:
         else:
             print("  - No resource found")
 
-for l in lists:
-    for entry in l.entry:
+for lst in lists:
+    for entry in lst.entry:
         resource = bundle_index.get(entry.item.reference)
         for r in resource.result:
             result_resource = bundle_index.get(r.reference)

@@ -2,14 +2,13 @@ import asyncio
 import json
 import logging
 import os
-import pprint
 import ssl
 from datetime import timedelta
 from uuid import uuid4
 
 import httpx
 import xmltodict
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
@@ -17,13 +16,14 @@ from .audit.audit import process_saml_attributes
 from .audit.build import build_audit_event
 from .audit.models import AuditOutcome, SAMLAttributes
 from .audit.store import insert_audit_event
-from .ccda.convert_mime import base64_xml, convert_mime
+from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
 from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
-from .settings import RELAY_TIMEOUT, USE_RELAY
+from .settings import USE_RELAY
+from .gp_connect_config import GP_CONNECT_PARAMETERS
 
 # from app.metrics.metric_utils import classify_error, now
 
@@ -334,18 +334,10 @@ async def gpconnect(
                     "value": f"{nhsno}",
                 },
             },
-            {
-                "name": "includeAllergies",
-                "part": [{"name": "includeResolvedAllergies", "valueBoolean": False}],
-            },
-            {
-                "name": "includeMedication",
-                "part": [{"name": "includePrescriptionIssues", "valueBoolean": False}],
-            },
-            {"name": "includeProblems"},
-            {"name": "includeInvestigations"},
         ],
     }
+
+    body["parameter"].extend(GP_CONNECT_PARAMETERS)
     if log_dir:
         with open(os.path.join(log_dir, "request_headers.json"), "w") as f:
             json.dump(headers, f, indent=2)
@@ -434,7 +426,7 @@ async def gpconnect(
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    except httpx.ReadError as e:
+    except httpx.ReadError:
         msg = "ReadError: server closed connection before responding"
         print("❌", msg)
         if log_dir:

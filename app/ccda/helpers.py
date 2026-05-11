@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from typing import List
 from xml.etree import ElementTree
@@ -155,7 +154,6 @@ def clean_soap(
         "urn:hl7-org:v3": None,
         "soap": None,
         "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd": None,
-        "urn:oasis:names:tc:SAML:2.0:assertion": None,
         "urn:oasis:names:tc:SAML:2.0:assertion": None,
     },
 ) -> dict:

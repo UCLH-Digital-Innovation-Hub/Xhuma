@@ -33,7 +33,6 @@ from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from sqlmodel import select
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.ccda.entries import result
 
 from .audit.db_models import AuditEventRow
 from .audit.models import SAMLAttributes, _subject_ref_from_nhs_number
@@ -76,7 +75,9 @@ async def lifespan(app: FastAPI):
     if jwt_key:
         try:
             # Reformat env var newlines safely and convert to JWK
-            private_pem = jwt_key.replace("\\n", "\n").encode("utf-8")
+            from app.security import fix_pem_formatting
+
+            private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
             public_jwk = jwk.JWK.from_pem(private_pem)
             app.state.jwk_json = public_jwk.export_public(as_dict=True)
         except Exception as e:
@@ -134,7 +135,7 @@ app = FastAPI(
 # register soap error handler
 soap.register_handlers(app)
 
-from app.middleware.mtls import MTLSMiddleware
+from app.middleware.mtls import MTLSMiddleware  # noqa: E402
 
 # 1) Trusted hosts
 allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "*")
@@ -246,7 +247,7 @@ async def demo(nhsno: int, request: Request):
     bundle_id = await gpconnect(nhsno, audit_dict, request=request)
     response = json.loads(bundle_id.body)  # validate json
     # if success then retrieve from redis and return
-    if response["success"] == True:
+    if response["success"]:
         ccda = redis_client.get(response["document_id"])
         # if ccda decode from base64 and return xml
         if ccda:

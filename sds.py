@@ -38,10 +38,10 @@ async def test_pds(nhsno):
         )
         try:
             fhir_endpoint = sds_search["entry"][0]["resource"]["address"]
-        except:
+        except Exception:
             pass
             # print(sds_search)
-    except:
+    except Exception:
         if pds_search["meta"]["security"]:
             gp_ods = "restricted"
         else:

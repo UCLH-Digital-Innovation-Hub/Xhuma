@@ -4,7 +4,7 @@ Contains CDA datatype objects with pydantic validation
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -272,7 +272,7 @@ class IVL_INT(ANY):
 class PIVL_TS(SXCM_TS):
     resource_type: str = Field("PIVL_TS", description="", alias="@xsi:type")
     phase: Optional[IVL_TS] = None
-    period: Optional[PQ] = None
+    period: Optional[Union[IVL_PQ, PQ]] = None
     alignment: Optional[CalendarCycle] = Field(alias="@alignment", default=None)
     institutionSpecified: Optional[str] = Field(
         alias="@institutionSpecified", default=None
@@ -294,3 +294,13 @@ class EIVL_TS(SXCM_TS):
 class CalendarCycle(ANY):
     resource_type: str = Field("CalendarCycle", description="", alias="@xsi:type")
     name: Optional[str] = None
+
+
+class RTO_PQ_PQ(QTY):
+    resource_type: str = Field(
+        "RTO_PQ_PQ",
+        description="A ratio of two physical quantities.",
+        alias="@xsi:type",
+    )
+    numerator: Optional[PQ] = None
+    denominator: Optional[PQ] = None
