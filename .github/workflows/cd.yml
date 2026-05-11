@@ -68,11 +68,4 @@ jobs:
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}'
           # Service principal login configured by azure/login above
 
-      - name: Run Alembic Database Migrations
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            az webapp exec \
-              --resource-group ${{ github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/int' && 'rg-xhuma-int' || 'rg-xhuma-play' }} \
-              --name ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || github.ref == 'refs/heads/int' && 'xhuma-app-int' || 'xhuma-app-play' }} \
-              --command "alembic upgrade head"
+

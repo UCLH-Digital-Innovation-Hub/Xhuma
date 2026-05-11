@@ -31,6 +31,7 @@ sqlmodel = "*"
 alembic = "*"
 psycopg = {extras = ["binary"], version = "*"}
 azure-monitor-opentelemetry = ">=1.8.7"
+greenlet = "*"
 
 [dev-packages]
 black = "*"
