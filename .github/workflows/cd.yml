@@ -67,3 +67,5 @@ jobs:
           app-name: ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || github.ref == 'refs/heads/int' && 'xhuma-app-int' || 'xhuma-app-play' }}
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}'
           # Service principal login configured by azure/login above
+
+

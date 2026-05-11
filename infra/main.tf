@@ -2,6 +2,72 @@ data "azurerm_resource_group" "rg" {
   name = var.resource_group_name
 }
 
+resource "azurerm_virtual_network" "vnet" {
+  name                = "${var.app_service_name}-vnet"
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
+  address_space       = ["10.1.0.0/16"]
+}
+
+resource "azurerm_subnet" "app_subnet" {
+  name                 = "app-subnet"
+  resource_group_name  = data.azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.1.1.0/24"]
+  delegation {
+    name = "app-delegation"
+    service_delegation {
+      name    = "Microsoft.Web/serverFarms"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+
+resource "azurerm_subnet" "db_subnet" {
+  name                 = "db-subnet"
+  resource_group_name  = data.azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.1.2.0/24"]
+  delegation {
+    name = "db-delegation"
+    service_delegation {
+      name    = "Microsoft.DBforPostgreSQL/flexibleServers"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
+
+resource "azurerm_subnet" "pe_subnet" {
+  name                 = "pe-subnet"
+  resource_group_name  = data.azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.1.3.0/24"]
+}
+
+resource "azurerm_private_dns_zone" "pg_dns" {
+  name                = "privatelink.postgres.database.azure.com"
+  resource_group_name = data.azurerm_resource_group.rg.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "pg_dns_link" {
+  name                  = "pg-vnet-link"
+  private_dns_zone_name = azurerm_private_dns_zone.pg_dns.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
+  resource_group_name   = data.azurerm_resource_group.rg.name
+}
+
+resource "azurerm_private_dns_zone" "redis_dns" {
+  name                = "privatelink.redis.cache.windows.net"
+  resource_group_name = data.azurerm_resource_group.rg.name
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "redis_dns_link" {
+  name                  = "redis-vnet-link"
+  private_dns_zone_name = azurerm_private_dns_zone.redis_dns.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
+  resource_group_name   = data.azurerm_resource_group.rg.name
+}
+
 resource "azurerm_service_plan" "plan" {
   name                = "${var.app_service_name}-plan"
   resource_group_name = data.azurerm_resource_group.rg.name
@@ -27,43 +93,57 @@ resource "azurerm_application_insights" "appinsights" {
 }
 
 resource "azurerm_redis_cache" "redis" {
-  name                 = var.redis_name
-  location             = data.azurerm_resource_group.rg.location
-  resource_group_name  = data.azurerm_resource_group.rg.name
-  capacity             = var.redis_capacity
-  family               = var.redis_family
-  sku_name             = var.redis_sku_name
-  non_ssl_port_enabled = false
-  minimum_tls_version  = "1.2"
+  name                          = var.redis_name
+  location                      = data.azurerm_resource_group.rg.location
+  resource_group_name           = data.azurerm_resource_group.rg.name
+  capacity                      = var.redis_capacity
+  family                        = var.redis_family
+  sku_name                      = var.redis_sku_name
+  non_ssl_port_enabled          = false
+  minimum_tls_version           = "1.2"
+  public_network_access_enabled = false
 
   redis_configuration {
-    maxmemory_reserved = 2
-    maxmemory_delta    = 2
+    maxmemory_reserved = 125
+    maxmemory_delta    = 125
     maxmemory_policy   = "allkeys-lru"
   }
 }
 
-resource "azurerm_redis_firewall_rule" "allow_azure_services" {
-  name                = "AllowAzureServices"
-  redis_cache_name    = azurerm_redis_cache.redis.name
+resource "azurerm_private_endpoint" "redis_pe" {
+  name                = "${var.redis_name}-pe"
+  location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
-  start_ip            = "0.0.0.0"
-  end_ip              = "0.0.0.0"
+  subnet_id           = azurerm_subnet.pe_subnet.id
+
+  private_service_connection {
+    name                           = "redis-privatelink"
+    private_connection_resource_id = azurerm_redis_cache.redis.id
+    is_manual_connection           = false
+    subresource_names              = ["redisCache"]
+  }
+
+  private_dns_zone_group {
+    name                 = "redis-dns-group"
+    private_dns_zone_ids = [azurerm_private_dns_zone.redis_dns.id]
+  }
 }
 
 resource "azurerm_postgresql_flexible_server" "postgres" {
-  name                   = var.postgres_server_name
-  resource_group_name    = data.azurerm_resource_group.rg.name
-  location               = data.azurerm_resource_group.rg.location
-  version                = "15"
-  administrator_login    = var.postgres_admin_username
-  administrator_password = var.postgres_admin_password
-  storage_mb             = 32768
-  sku_name               = "B_Standard_B1ms"
-  backup_retention_days  = 7
+  name                          = var.postgres_server_name
+  resource_group_name           = data.azurerm_resource_group.rg.name
+  location                      = data.azurerm_resource_group.rg.location
+  version                       = "15"
+  administrator_login           = var.postgres_admin_username
+  administrator_password        = var.postgres_admin_password
+  storage_mb                    = 32768
+  sku_name                      = "B_Standard_B1ms"
+  backup_retention_days         = 7
+  delegated_subnet_id           = azurerm_subnet.db_subnet.id
+  private_dns_zone_id           = azurerm_private_dns_zone.pg_dns.id
+  public_network_access_enabled = false
 
-  # For simplified deployment, we allow public access (controlled by firewall rules)
-  # Ideally use VNET integration in production
+  depends_on = [azurerm_private_dns_zone_virtual_network_link.pg_dns_link]
 
   lifecycle {
     ignore_changes = [
@@ -71,13 +151,6 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
       high_availability.0.standby_availability_zone
     ]
   }
-}
-
-resource "azurerm_postgresql_flexible_server_firewall_rule" "allow_azure_services" {
-  name             = "allow_azure_services"
-  server_id        = azurerm_postgresql_flexible_server.postgres.id
-  start_ip_address = "0.0.0.0"
-  end_ip_address   = "0.0.0.0" # This specific rule allows access from Azure services
 }
 
 resource "azurerm_postgresql_flexible_server_database" "xhuma_db" {
@@ -88,10 +161,11 @@ resource "azurerm_postgresql_flexible_server_database" "xhuma_db" {
 }
 
 resource "azurerm_linux_web_app" "app" {
-  name                = var.app_service_name
-  resource_group_name = data.azurerm_resource_group.rg.name
-  location            = data.azurerm_resource_group.rg.location
-  service_plan_id     = azurerm_service_plan.plan.id
+  name                      = var.app_service_name
+  resource_group_name       = data.azurerm_resource_group.rg.name
+  location                  = data.azurerm_resource_group.rg.location
+  service_plan_id           = azurerm_service_plan.plan.id
+  virtual_network_subnet_id = azurerm_subnet.app_subnet.id
 
   site_config {
     application_stack {

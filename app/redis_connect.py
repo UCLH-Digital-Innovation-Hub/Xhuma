@@ -10,13 +10,12 @@ from functools import wraps
 from typing import Any, Dict, Optional, Union
 
 import redis
-from redis.connection import ConnectionPool, SSLConnection
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
 logger = logging.getLogger(__name__)
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_PORT = int(os.getenv("REDIS_PORT", 6380))
 REDIS_DB = int(os.getenv("REDIS_DB", 0))
 REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
 REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
@@ -27,8 +26,9 @@ REDIS_SSL_CERT_REQS = {
 }.get(os.getenv("REDIS_SSL_CERT_REQS", "required").lower(), ssl.CERT_REQUIRED)
 
 POOL_MAX_CONNECTIONS = 10
-SOCKET_TIMEOUT = 5
-SOCKET_CONNECT_TIMEOUT = 5
+POOL_TIMEOUT = 30
+SOCKET_TIMEOUT = 30
+SOCKET_CONNECT_TIMEOUT = 30
 MAX_RETRIES = 3
 RETRY_DELAY = 1
 
@@ -71,7 +71,7 @@ class RedisClient:
 
     def __init__(self, db: int = REDIS_DB):
         """Initialize Redis client with connection pool."""
-        pool_kwargs = {
+        kwargs = {
             "host": REDIS_HOST,
             "port": REDIS_PORT,
             "db": db,
@@ -84,18 +84,23 @@ class RedisClient:
         }
 
         if REDIS_PASSWORD:
-            pool_kwargs["password"] = REDIS_PASSWORD
+            kwargs["password"] = REDIS_PASSWORD
 
         if REDIS_SSL:
-            pool_kwargs["connection_class"] = SSLConnection
-            pool_kwargs["ssl_cert_reqs"] = REDIS_SSL_CERT_REQS
+            kwargs["ssl"] = True
+            kwargs["ssl_cert_reqs"] = REDIS_SSL_CERT_REQS
             if REDIS_SSL_CERT_REQS == ssl.CERT_NONE:
                 logger.warning(
                     "REDIS_SSL_CERT_REQS is set to 'none'; SSL certificate validation is disabled"
                 )
 
-        self._pool = ConnectionPool(**pool_kwargs)
-        self._client = redis.Redis(connection_pool=self._pool)
+        logger.warning(
+            "Initializing Redis client connecting to %s:%s (SSL: %s)",
+            REDIS_HOST,
+            REDIS_PORT,
+            REDIS_SSL,
+        )
+        self._client = redis.Redis(**kwargs)
 
     @retry_on_connection_error()
     def ping(self) -> bool:
@@ -169,7 +174,7 @@ class RedisClient:
 
     def close(self) -> None:
         """Close all connections in the pool."""
-        self._pool.disconnect()
+        self._client.connection_pool.disconnect()
 
 
 redis_client = RedisClient()
