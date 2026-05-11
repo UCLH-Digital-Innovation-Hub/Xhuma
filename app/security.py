@@ -17,7 +17,6 @@ import uuid
 from time import time
 
 import jwt
-from fhirclient.models import humanname, practitioner
 
 from .audit.models import SAMLAttributes
 
@@ -30,7 +29,10 @@ def fix_pem_formatting(pem_string: str) -> str:
     pem_string = pem_string.replace("\\n", "\n")
     if "\n" not in pem_string:
         import re
-        match = re.search(r'(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)', pem_string)
+
+        match = re.search(
+            r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string
+        )
         if match:
             header = match.group(1)
             body = match.group(2).replace(" ", "\n").strip()
@@ -70,7 +72,7 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
     private_key = os.getenv("JWTKEY")
     if private_key is not None:
         private_key = fix_pem_formatting(private_key)
-        
+
     if private_key is None:
         # Fallback to local file if it exists, otherwise raise clear error
         key_path = "keys/test-1.pem"
@@ -194,7 +196,6 @@ def create_jwt(
     #     json.dump(payload, f, indent=4)
     # Get private key from environment or file
 
-    headers = {"alg": "RS512", "typ": "JWT", "kid": "test-1"}
     # log headers to file for debugging
     # with open("app/logs/int_troubleshooting/jwt_headers.json", "w") as f:
     #     import json
@@ -205,7 +206,7 @@ def create_jwt(
     private_key = os.getenv("JWTKEY")
     if private_key is not None:
         private_key = fix_pem_formatting(private_key)
-        
+
     if private_key is None:
         key_path = "keys/test-1.pem"
         if os.path.exists(key_path):

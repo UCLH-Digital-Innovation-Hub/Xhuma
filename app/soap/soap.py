@@ -17,8 +17,8 @@ from datetime import datetime
 from email import charset
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any, Callable, Dict
-from urllib.request import Request
+from typing import Callable
+
 
 import httpx
 import xmltodict
@@ -261,11 +261,11 @@ async def iti47(request: Request):
                 ceid = param["value"]["@extension"]
         if not nhsno:
             raise HTTPException(
-                status_code=400, detail=f"Invalid request, no nhs number found"
+                status_code=400, detail="Invalid request, no nhs number found"
             )
         if not ceid:
             raise HTTPException(
-                status_code=400, detail=f"Invalid request, no care everywhere id found"
+                status_code=400, detail="Invalid request, no care everywhere id found"
             )
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
         client.set(ceid, nhsno)
@@ -392,8 +392,8 @@ async def iti39(request: Request):
             document_id = envelope["Body"]["RetrieveDocumentSetRequest"][
                 "DocumentRequest"
             ]["DocumentUniqueId"]
-        except:
-            raise HTTPException(status_code=404, detail=f"DocumentUniqueId not found")
+        except Exception:
+            raise HTTPException(status_code=404, detail="DocumentUniqueId not found")
 
         document = client.get(document_id)
 

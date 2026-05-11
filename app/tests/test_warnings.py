@@ -1,15 +1,9 @@
 import json
-from unittest.mock import patch
 
 import pytest
-import xmltodict
-from fastapi.testclient import TestClient
 from fhirclient.models import bundle
-from httpx import Response
 
 from app.ccda import fhir2ccda
-from app.main import app
-from app.tests.configure_tests import get_nhs_ids, load_bundle, load_pds
 
 
 @pytest.mark.asyncio
@@ -25,7 +19,7 @@ async def test_warnings_handling():
         try:
             address = f"{entry.resource.resource_type}/{entry.resource.id}"
             bundle_index[address] = entry.resource
-        except:
+        except Exception:
             pass
 
     xml_ccda = await fhir2ccda.convert_bundle(fhir_bundle, bundle_index)

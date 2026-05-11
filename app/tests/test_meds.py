@@ -1,4 +1,3 @@
-import asyncio
 import json
 import pprint
 from unittest.mock import AsyncMock, patch
@@ -9,8 +8,6 @@ from fhirclient.models import list as fhirlist
 from fhirclient.models import medication, medicationrequest, medicationstatement
 
 from app.ccda.entries import medication as medication_entry
-from app.ccda.models.base import SubstanceAdministration
-from app.ccda.models.datatypes import II
 from app.ccda.models.dmd import DMDConcept, VPIProperty
 
 med = medication.Medication(
@@ -305,7 +302,7 @@ async def test_structured_dosage():
         try:
             address = f"{entry.resource.resource_type}/{entry.resource.id}"
             bundle_index[address] = entry.resource
-        except:
+        except Exception:
             pass
     medication_list = []
     for list in fhir_bundle.entry:

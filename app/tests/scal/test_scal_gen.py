@@ -52,7 +52,6 @@ async def test_GPC_STR_TST_GEN_05():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-05", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
 
@@ -71,7 +70,6 @@ async def test_GPC_STR_TST_GEN_06():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-06", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
 
@@ -157,7 +155,7 @@ async def test_GPC_STR_TST_GEN_11():
         async with capture_test_logs("GPC-STR-TST-GEN-11", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
-            body = json.loads(result.body)
+            json.loads(result.body)
             assert code == 404
 
 
@@ -189,7 +187,6 @@ async def test_GPC_STR_TST_GEN_13():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-13", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             assert body["success"] is False
 
@@ -223,7 +220,6 @@ async def test_GPC_STR_TST_GEN_15():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-15", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             # TODO clarify test as we used fixed allergy parameters
             assert body["success"] is False
@@ -240,7 +236,6 @@ async def test_GPC_STR_TST_GEN_16():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-16", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             # TODO clarify test as we used fixed allergy parameters
             assert body["success"] is False
@@ -256,7 +251,7 @@ async def test_GPC_STR_TST_GEN_17():
         async with capture_test_logs("GPC-STR-TST-GEN-17", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
-            body = json.loads(result.body)
+            json.loads(result.body)
             assert code == 200
 
 
@@ -271,7 +266,7 @@ async def test_GPC_STR_TST_GEN_18():
         async with capture_test_logs("GPC-STR-TST-GEN-18", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
-            body = json.loads(result.body)
+            json.loads(result.body)
             assert code == 200
 
 
@@ -287,5 +282,5 @@ async def test_GPC_STR_TST_GEN_20():
         async with capture_test_logs("GPC-STR-TST-GEN-20", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
-            body = json.loads(result.body)
+            json.loads(result.body)
             assert code == 200
