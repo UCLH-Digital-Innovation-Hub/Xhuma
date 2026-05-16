@@ -233,7 +233,25 @@ async def medication(
             entry.dosage[0].method.coding
         )
 
-    for dose in entry.dosage:
+    patient_instr_list = [
+        dosage.patientInstruction
+        for dosage in entry.dosage
+        if dosage.patientInstruction
+    ]
+    text_instr_list = [dosage.text for dosage in entry.dosage if dosage.text]
+
+    def add_numbering(instruction_list):
+        if len(instruction_list) > 1:
+            for i, instruction in enumerate(instruction_list):
+                new_instruction = f"{i + 1}. {instruction}"
+                instruction_list[i] = new_instruction
+        return instruction_list
+
+    patient_instr_list = add_numbering(patient_instr_list)
+    text_instr_list = add_numbering(text_instr_list)
+
+    if text_instr_list:
+        combined_text = " ".join(text_instr_list)
         dosage_entry = EntryRelationship(**{"@typeCode": "COMP", "@inversionInd": True})
         dosage_entry.substanceAdministration = SubstanceAdministration(
             moodCode="EVN",
@@ -247,44 +265,27 @@ async def medication(
                 codeSystem="2.16.840.1.113883.6.1",
                 displayName="Dosage instructions",
             ),
-            text=dose.text,
+            text=combined_text,
         )
-        # substance_administration.entryRelationship.append(
-        #     EntryRelationship(
-        #         **{
-        #             "sequenceNumber": (
-        #                 entry.dosage.index(dose) + 1 if len(entry.dosage) > 1 else None
-        #             ),
-        #             "@typeCode": "COMP",
-        #             "@inversionInd": True,
-        #             "substanceAdministration": {
-        #                 "@classCode": "SBADM",
-        #                 "@moodCode": "EVN",
-        #                 "templateId": [{"@root": "2.16.840.1.113883.10.20.22.4.147"}],
-        #                 "code": CD(code="76662-6", codeSystem="2.16.840.1.113883.6.1", displayName="Dosage instructions"),
-        #                 # "text": {"@xsi:type": "ED", "xmlText": dose.text},
-        #                 "text": dose.text,
-        #             },
-        #         }
-        #     )
-        # )
         substance_administration.entryRelationship.append(dosage_entry)
-        if dose.patientInstruction:
-            instruction_entry = EntryRelationship()
-            instruction_entry.act = {
-                "@classCode": "ACT",
-                "@moodCode": "INT",
-                "templateId": templateId(
-                    root="2.16.840.1.113883.10.20.22.4.200", extension="2014-06-09"
-                ),
-                "code": {
-                    "@code": "422037009",
-                    "@codeSystem": "2.16.840.1.113883.6.96",
-                    "@codeSystemName": "http://snomed.info/sct",
-                },
-                "text": dose.patientInstruction,
-            }
-            substance_administration.entryRelationship.append(instruction_entry)
+
+    if patient_instr_list:
+        combined_patient_instructions = " ".join(patient_instr_list)
+        instruction_entry = EntryRelationship()
+        instruction_entry.act = {
+            "@classCode": "ACT",
+            "@moodCode": "INT",
+            "templateId": templateId(
+                root="2.16.840.1.113883.10.20.22.4.200", extension="2014-06-09"
+            ),
+            "code": {
+                "@code": "422037009",
+                "@codeSystem": "2.16.840.1.113883.6.96",
+                "@codeSystemName": "http://snomed.info/sct",
+            },
+            "text": combined_patient_instructions,
+        }
+        substance_administration.entryRelationship.append(instruction_entry)
     # find effective time entry with operator of low
 
     low_time = [
@@ -465,22 +466,6 @@ async def medication(
     )
     # prescription_information = [f"{info} <br />" for info in prescription_information]
 
-    patient_instr_list = [
-        dosage.patientInstruction
-        for dosage in entry.dosage
-        if dosage.patientInstruction
-    ]
-    text_instr_list = [dosage.text for dosage in entry.dosage if dosage.text]
-
-    def add_numbering(instruction_list):
-        if len(instruction_list) > 1:
-            for i, instruction in enumerate(instruction_list):
-                new_instruction = f"{i + 1}. {instruction}"
-                instruction_list[i] = new_instruction
-        return instruction_list
-
-    patient_instr_list = add_numbering(patient_instr_list)
-    text_instr_list = add_numbering(text_instr_list)
     patient_instructions = (
         "Patient Instructions: " + "<br />".join(patient_instr_list)
         if patient_instr_list
