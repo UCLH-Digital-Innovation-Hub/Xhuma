@@ -98,7 +98,6 @@ class ResultObservation(Observation):
     targetSiteCode: Optional[CD] = None
     author: Optional[AuthorParticipation] = None
     referenceRange: Optional[Dict] = None
-    value: Optional[Dict] = None  # PQ is used for numeric values
 
 
 class InstructionObservation(Observation):
