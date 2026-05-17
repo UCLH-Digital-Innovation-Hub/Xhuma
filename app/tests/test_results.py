@@ -1,3 +1,4 @@
+import asyncio
 import json
 import pprint
 
@@ -5,6 +6,7 @@ from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 
 from app.ccda.entries import result as result_entry
+from app.ccda.results import investigation
 
 with open("app/tests/fixtures/bundles/9692136744.json") as f:
     # with open("app/tests/fixtures/bundles/9690937286.json") as f:
@@ -87,4 +89,17 @@ for l in lists:
         resource = bundle_index.get(entry.item.reference)
         # print(resource)
         print(resource.resource_type)
-        pprint.pprint(result_entry(resource, bundle_index))
+
+        #     observations: list[obs.Observation] = (
+        #     [index[x] for x in diagnostic_report.result] if diagnostic_report.result else []
+        # )
+        # for result in resource.result:
+        # print(bundle_index.get(result.reference))
+        # pprint.pprint(result_entry(resource, bundle_index))
+        organizerwithtable = asyncio.run(investigation(resource, bundle_index))
+
+        pprint.pprint(organizerwithtable.table)
+
+        # print table to console
+        # for row in organizerwithtable.table.rows:
+        #     print(row)

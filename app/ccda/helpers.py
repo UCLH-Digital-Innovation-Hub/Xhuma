@@ -4,10 +4,10 @@ from typing import List
 from xml.etree import ElementTree
 
 import xmltodict
-from fhirclient.models import coding, organization, period
+from fhirclient.models import coding, fhirdate, identifier, organization, period
 
 from .models.admin import AssignedAuthor, AuthorParticipation
-from .models.datatypes import CD, SXCM_TS
+from .models.datatypes import CD, II, SXCM_TS
 
 
 def validateNHSnumber(number: int) -> bool:
@@ -100,6 +100,15 @@ def templateId(root: str, extension: str) -> list:
     return template
 
 
+def id_helper(identities: identifier.Identifier) -> list[II]:
+    """
+    takes list of dicts with root and extension and returns list of II objects
+    """
+    return [
+        II(**{"@root": item.system, "@extension": item.value}) for item in identities
+    ]
+
+
 def date_helper(isodate):
     """
     takes iso string and returns to format valid for ccda
@@ -108,6 +117,17 @@ def date_helper(isodate):
     new_date = datetime.strptime(isodate[:10], "%Y-%m-%d").strftime("%Y%m%d")
 
     return new_date
+
+
+def datetime_helper(fhirdate: fhirdate.FHIRDate) -> str:
+    """
+    takes a FHIRDate object and returns a string in the format YYYYMMDDHHMMSS
+    """
+    if fhirdate is None:
+        return None
+    return datetime.strptime(fhirdate.isostring[:10], "%Y-%m-%d").strftime(
+        "%Y%m%d%H%M%S"
+    )
 
 
 def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
