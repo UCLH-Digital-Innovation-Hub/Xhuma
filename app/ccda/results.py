@@ -97,11 +97,17 @@ async def create_result_component(observation: obs.Observation) -> ResultWithRow
     # block for value/comment
     content = []
     if observation.valueQuantity:
+
         result_component.value = PQ(
-            value=observation.valueQuantity.value, unit=observation.valueQuantity.unit
+            value=observation.valueQuantity.value,
+            unit=(
+                observation.valueQuantity.unit
+                if observation.valueQuantity.unit
+                else None
+            ),
         )
         content.append(
-            f"{observation.valueQuantity.value} {observation.valueQuantity.unit}"
+            f"{observation.valueQuantity.value} {observation.valueQuantity.unit if observation.valueQuantity.unit else ''}"
         )
 
     if observation.comment:
