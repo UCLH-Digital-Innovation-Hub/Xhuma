@@ -2,6 +2,7 @@ import asyncio
 import json
 import pprint
 
+import xmltodict
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 
@@ -39,56 +40,12 @@ for l in lists:
 # only have investigations for now
 lists = [l for l in lists if l.code and l.title == "Investigations and results"]
 
-for l in lists:
-    print(f"List: {l.title}")
-    for entry in l.entry:
-        print(entry.item.reference)
-        resource = bundle_index.get(entry.item.reference)
-        if resource:
-            print(f"  - {resource.resource_type}: {resource.id}")
-            print(
-                f"    - {resource.code.coding[0].display if hasattr(resource, 'code') else 'No code'}"
-            )
-            if resource.result:
-                for result in resource.result:
-                    print(f"      - {result.reference}")
-                    result_resource = bundle_index.get(result.reference)
-                    if result_resource:
-                        print(
-                            f"          - {result_resource.code.coding[0].display if hasattr(result_resource, 'code') else 'No code'}"
-                        )
-                        # check if result_resource related has type of "has-member"
-                        # if resource related is not none:
-                        if (
-                            hasattr(result_resource, "related")
-                            and result_resource.related
-                        ):
-                            print(
-                                f"            - Related Resources:{len(result_resource.related)}"
-                            )
-                            for related in result_resource.related:
-                                if related.type == "has-member":
-                                    related_resource = bundle_index.get(
-                                        related.target.reference
-                                    )
-                                    if related_resource:
-                                        print(
-                                            f"             - {related_resource.code.coding[0].display if hasattr(related_resource, 'code') else 'No code'}"
-                                        )
-                                    else:
-                                        print("            - No related resource found")
-                    else:
-                        print("        - No resource found")
-
-        else:
-            print("  - No resource found")
 
 for l in lists:
-    print(f"List: {l.title}")
+    # print(f"List: {l.title}")
     for entry in l.entry:
         resource = bundle_index.get(entry.item.reference)
         # print(resource)
-        print(resource.resource_type)
 
         #     observations: list[obs.Observation] = (
         #     [index[x] for x in diagnostic_report.result] if diagnostic_report.result else []
@@ -97,8 +54,11 @@ for l in lists:
         # print(bundle_index.get(result.reference))
         # pprint.pprint(result_entry(resource, bundle_index))
         organizerwithtable = asyncio.run(investigation(resource, bundle_index))
+        xml_dict = {"xml": organizerwithtable.table}
+        xml_table = xmltodict.unparse(xml_dict, pretty=True)
+        print(xml_table)
 
-        pprint.pprint(organizerwithtable.table)
+        # pprint.pprint(organizerwithtable.organizer)
 
         # print table to console
         # for row in organizerwithtable.table.rows:

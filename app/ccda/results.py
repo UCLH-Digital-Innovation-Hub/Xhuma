@@ -4,17 +4,14 @@ from dataclasses import dataclass
 from fhirclient.models import diagnosticreport as dr
 from fhirclient.models import observation as obs
 
-from app import logging
-
 from .entries import EntryWithRow
 from .helpers import (
     code_with_translations,
     datetime_helper,
-    effective_time_helper,
     id_helper,
 )
 from .models.base import ResultObservation, ResultsOrganizer
-from .models.datatypes import CS, IVL_TS, IVXB_TS, PQ
+from .models.datatypes import CD, CS, II, IVL_TS, IVXB_TS, PQ
 
 COMMENT_NOTE_SNOMED = ["37331000000100", "364712009"]  # SNOMED codes for comment note
 INVESTIGATION_RESULT = "24641000000107"
@@ -86,31 +83,106 @@ def create_xml_table(table: ResultTable) -> dict:
     return table_dict
 
 
-async def create_result_component(observation: obs.Observation) -> ResultWithRow:
+async def create_result_component(
+    observation: obs.Observation, group_time: IVL_TS = None
+) -> ResultWithRow:
     result_component = ResultObservation(
         code=code_with_translations(observation.code.coding),
         id=id_helper(observation.identifier) if observation.identifier else None,
+        statusCode=CS(code=observation.status) if observation.status else None,
     )
+    if group_time:
+        result_component.effectiveTime = group_time
+    else:
+        result_component.effectiveTime = (
+            IVL_TS(low=IVXB_TS(value=datetime_helper(observation.effectiveDateTime)))
+            if observation.effectiveDateTime
+            else None
+        )
     table_row = ResultTableRow(cells=[])
     table_row.cells.append(result_component.code.displayName)
 
     # block for value/comment
     content = []
-    if observation.valueQuantity:
 
-        result_component.value = PQ(
-            value=observation.valueQuantity.value,
-            unit=(
-                observation.valueQuantity.unit
-                if observation.valueQuantity.unit
-                else None
-            ),
-        )
-        content.append(
-            f"{observation.valueQuantity.value} {observation.valueQuantity.unit if observation.valueQuantity.unit else ''}"
-        )
+    if observation.valueString:
+        result_component.value = {"@value": observation.valueString}
+        content.append(observation.valueString)
+
+    elif observation.valueQuantity:
+        vq = observation.valueQuantity
+        # Handle comparator logic
+        if getattr(vq, "comparator", None):
+            # comparator means IVL_PQ
+            value = {"@xsi:type": "IVL_PQ"}
+            if "<" in vq.comparator:
+                value["high"] = {
+                    "@value": vq.value,
+                    "@unit": vq.unit,
+                }
+                if "=" in vq.comparator:
+                    value["high"]["@inclusive"] = "true"
+                # lower bound for physical measurement is 0
+                value["low"] = {
+                    "@value": 0,
+                    "@unit": vq.unit,
+                    "@inclusive": "true",
+                }
+            elif ">" in vq.comparator:
+                value["low"] = {
+                    "@value": vq.value,
+                    "@unit": vq.unit,
+                }
+                if "=" in vq.comparator:
+                    value["low"]["@inclusive"] = "true"
+                # high bound for greater than physical measurement is infinity
+                value["high"] = {"@nullFlavor": "PINF"}
+            result_component.value = value
+            content.append(f"{vq.comparator} {vq.value} {vq.unit if vq.unit else ''}")
+        else:
+            result_component.value = PQ(
+                value=vq.value,
+                unit=(vq.unit if vq.unit else None),
+            )
+            value_text = f"{vq.value} {vq.unit if vq.unit else ''}"
+
+            outside_reference_range = False
+            if observation.referenceRange:
+                has_numeric_range = False
+                for reference_range in observation.referenceRange:
+                    low = getattr(reference_range, "low", None)
+                    high = getattr(reference_range, "high", None)
+                    low_value = getattr(low, "value", None)
+                    high_value = getattr(high, "value", None)
+                    if low_value is None and high_value is None:
+                        continue
+
+                    has_numeric_range = True
+                    try:
+                        within_low = low_value is None or vq.value >= low_value
+                        within_high = high_value is None or vq.value <= high_value
+                    except TypeError:
+                        result_value = float(vq.value)
+                        within_low = low_value is None or result_value >= float(
+                            low_value
+                        )
+                        within_high = high_value is None or result_value <= float(
+                            high_value
+                        )
+
+                    if within_low and within_high:
+                        break
+                else:
+                    outside_reference_range = has_numeric_range
+
+            content.append(
+                {"@styleCode": "flagData", "#text": value_text}
+                if outside_reference_range
+                else value_text
+            )
 
     if observation.comment:
+        result_component.text = observation.comment
         comment_dict = {
             "@styleCode": "allIndent",
             "content": [
@@ -120,7 +192,12 @@ async def create_result_component(observation: obs.Observation) -> ResultWithRow
         }
         content.append(comment_dict)
 
-    table_row.cells.append(content)
+    table_row.cells.append({"content": content})
+
+    if hasattr(observation, "interpretation") and observation.interpretation:
+        result_component.interpretationCode = code_with_translations(
+            observation.interpretation.coding
+        )
 
     # reference range
     if observation.referenceRange:
@@ -183,6 +260,10 @@ async def investigation(
         if diagnostic_report.result
         else []
     )
+
+    report_issued_time = IVL_TS(
+        low=IVXB_TS(value=datetime_helper(diagnostic_report.issued))
+    )
     comment_observations = [o for o in observations if is_comment_note(o)]
     test_group_headers = [o for o in observations if is_test_group_header(o)]
 
@@ -192,7 +273,8 @@ async def investigation(
             for member in header.hasMember:
                 observations.append(index[member.reference])
 
-    if len(test_group_headers) > 1:
+    category_observation = None
+    if len(test_group_headers) == 0 or len(test_group_headers) > 1:
         test_title = "Diagnostic Report"
         # treat all non comments as test results and ignore test group headers
         test_results = [o for o in observations if not is_comment_note(o)]
@@ -202,6 +284,29 @@ async def investigation(
             if test_group_headers
             else "Diagnostic Report"
         )
+
+        # look for category in test group header
+        for category in test_group_headers[0].category:
+            for code in category.coding:
+                if code.system == "http://hl7.org/fhir/observation-category":
+                    if code.code == "laboratory":
+                        print("Category is laboratory")
+                        category_observation = ResultObservation(
+                            templateId=[
+                                II(
+                                    root="2.16.840.1.113883.10.20.22.4.2",
+                                ),
+                                II(
+                                    root="1.2.840.114350.1.72.3.4",
+                                ),
+                            ],
+                            value=CD(
+                                code="16",
+                                codeSystem="1.2.840.114350.1.72.1.5007",
+                            ),
+                            effectiveTime=report_issued_time,
+                        )
+
         # remaining observations are test results
         test_results = [
             o
@@ -219,17 +324,18 @@ async def investigation(
             if test_group_headers
             else None
         ),
-    )
-    organizer.effectiveTime = (
-        IVL_TS(low=IVXB_TS(value=datetime_helper(diagnostic_report.issued)))
-        if diagnostic_report.effectiveDateTime
-        else None
+        effectiveTime=report_issued_time,
     )
     result_components = asyncio.gather(
-        *[create_result_component(o) for o in test_results]
+        *[create_result_component(o, report_issued_time) for o in test_results]
     )
     organizer.component = [c.entry for c in await result_components]
+    organizer.component.extend([category_observation]) if category_observation else None
     table_rows = [c.row for c in await result_components]
+
+    for comment in comment_observations:
+        comment_row = ResultTableRow(cells=[{"content": comment.comment}])
+        table_rows.append(comment_row)
 
     result_table = ResultTable(
         title=f"{test_title} {diagnostic_report.issued.date}",
@@ -237,7 +343,6 @@ async def investigation(
         rows=table_rows,
     )
 
-    print(result_table)
     return InvestigationWithTable(
         organizer=organizer, table=create_xml_table(result_table)
     )
