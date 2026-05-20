@@ -235,15 +235,15 @@ async def medication(
 
     patient_instr_list = []
     text_instr_list = []
-    
+
     multiple_dosages = len(entry.dosage) > 1
 
     for i, dosage in enumerate(entry.dosage):
         prefix = f"{i + 1}. " if multiple_dosages else ""
-        
+
         if dosage.patientInstruction:
             patient_instr_list.append(f"{prefix}{dosage.patientInstruction}")
-            
+
         if dosage.text:
             text_instr_list.append(f"{prefix}{dosage.text}")
 
