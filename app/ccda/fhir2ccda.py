@@ -12,6 +12,7 @@ from fhirclient.models import patient
 
 from .entries import allergy, immunization_entry, medication, problem, result
 from .helpers import date_helper, readable_date, templateId
+from .results import investigation
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -131,7 +132,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # vital_signs.title = "Vital Signs"
     # lists.append(vital_signs)s
 
-    def create_section(list: fhirlist.List) -> dict:
+    async def create_section(list: fhirlist.List) -> dict:
         templates = {
             "Allergies and adverse reactions": {
                 "displayName": "Allergies, adverse reactions, alerts",
@@ -335,7 +336,38 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
             return comp
 
-    bundle_components = [create_section(list) for list in lists]
+        elif list.title == "Investigations and results":
+            print(list.title)
+            comp = {}
+            comp["section"] = {
+                "templateId": templateId(templates[list.title]["root"], "2015-08-01"),
+                "code": {
+                    "@code": templates[list.title]["Code"],
+                    "@displayName": templates[list.title]["displayName"],
+                    "@codeSystem": "2.16.840.1.113883.6.1",
+                },
+                "title": templates[list.title]["displayName"],
+                "text": "",  # Will be populated with table
+            }
+
+            # organizer_with_table = asyncio.gather(
+            #     *[investigation(entry, index) for entry in list.entry]
+            # )
+            # print(organizer_with_table)
+            references = [index[entry.item.reference] for entry in list.entry]
+
+            organizer_with_table = [
+                await investigation(ref, index) for ref in references
+            ]
+
+            table_list = {
+                "@styleCode": "TOC",
+                "item": [org.table for org in organizer_with_table],
+            }
+            comp["section"]["text"] = {"list": table_list}
+            return comp
+
+    bundle_components = [await create_section(list) for list in lists]
     bundle_components = [x for x in bundle_components if x is not None]
     caching_period = os.environ.get("CCDA_CACHING_PERIOD", "24 hours")
     header_components = {
@@ -356,7 +388,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9692136744.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None

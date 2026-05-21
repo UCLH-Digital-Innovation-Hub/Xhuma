@@ -99,15 +99,15 @@ async def create_result_component(
             if observation.effectiveDateTime
             else None
         )
-    table_row = ResultTableRow(cells=[])
-    table_row.cells.append(result_component.code.displayName)
+    table_row = ResultTableRow(cells=[None, None, None, None])
+    table_row.cells.insert(0, result_component.code.displayName)
 
     # block for value/comment
     content = []
 
     if observation.valueString:
         result_component.value = {"@value": observation.valueString}
-        content.append(observation.valueString)
+        table_row.cells.insert(1, observation.valueString)
 
     elif observation.valueQuantity:
         vq = observation.valueQuantity
@@ -138,7 +138,9 @@ async def create_result_component(
                 # high bound for greater than physical measurement is infinity
                 value["high"] = {"@nullFlavor": "PINF"}
             result_component.value = value
-            content.append(f"{vq.comparator} {vq.value} {vq.unit if vq.unit else ''}")
+            table_row.cells.insert(
+                1, f"{vq.comparator} {vq.value} {vq.unit if vq.unit else ''}"
+            )
         else:
             result_component.value = PQ(
                 value=vq.value,
@@ -154,31 +156,34 @@ async def create_result_component(
                     high = getattr(reference_range, "high", None)
                     low_value = getattr(low, "value", None)
                     high_value = getattr(high, "value", None)
-                    if low_value is None and high_value is None:
-                        continue
 
-                    has_numeric_range = True
-                    try:
-                        within_low = low_value is None or vq.value >= low_value
-                        within_high = high_value is None or vq.value <= high_value
-                    except TypeError:
-                        result_value = float(vq.value)
-                        within_low = low_value is None or result_value >= float(
-                            low_value
-                        )
-                        within_high = high_value is None or result_value <= float(
-                            high_value
-                        )
+                    # Handle single-bound ranges
+                    if low_value is not None and high_value is None:
+                        has_numeric_range = True
+                        if vq.value < low_value:
+                            outside_reference_range = True
+                            break
+                    elif high_value is not None and low_value is None:
+                        has_numeric_range = True
+                        if vq.value > high_value:
+                            outside_reference_range = True
+                            break
+                    elif low_value is not None and high_value is not None:
+                        has_numeric_range = True
+                        if not (low_value <= vq.value <= high_value):
+                            outside_reference_range = True
+                            break
 
-                    if within_low and within_high:
-                        break
-                else:
-                    outside_reference_range = has_numeric_range
+                if not has_numeric_range:
+                    outside_reference_range = False
 
-            content.append(
-                {"@styleCode": "flagData", "#text": value_text}
-                if outside_reference_range
-                else value_text
+            table_row.cells.insert(
+                1,
+                (
+                    {"content": {"@styleCode": "flagData", "#text": value_text}}
+                    if outside_reference_range
+                    else value_text
+                ),
             )
 
     if observation.comment:
@@ -186,13 +191,15 @@ async def create_result_component(
         comment_dict = {
             "@styleCode": "allIndent",
             "content": [
-                {"@styleCode": "cellHeader", "#text": "Comment:"},
-                {"#text": observation.comment},
+                # {"@styleCode": "cellHeader", "#text": "Comment:"},
+                # {"#text": observation.comment},
+                {"@styleCode": "cellHeader", "#text": observation.comment}
             ],
         }
-        content.append(comment_dict)
+        # content.append(comment_dict)
+        table_row.cells.insert(3, {"content": comment_dict})
 
-    table_row.cells.append({"content": content})
+    # table_row.cells.insert(1, {"content": content})
 
     if hasattr(observation, "interpretation") and observation.interpretation:
         result_component.interpretationCode = code_with_translations(
@@ -246,7 +253,7 @@ async def create_result_component(
                     for r in observation_ranges
                 ]
             )
-            table_row.cells.append(reference_range_str)
+            table_row.cells.insert(2, {"#text": reference_range_str})
 
     return ResultWithRow(entry=result_component, row=table_row)
 
@@ -324,22 +331,28 @@ async def investigation(
             if test_group_headers
             else None
         ),
+        # this should be the specimen collection time if available, but for now will use report issued time
         effectiveTime=report_issued_time,
     )
     result_components = asyncio.gather(
         *[create_result_component(o, report_issued_time) for o in test_results]
     )
     organizer.component = [c.entry for c in await result_components]
-    organizer.component.extend([category_observation]) if category_observation else None
+    if category_observation:
+        organizer.component.append(category_observation)
     table_rows = [c.row for c in await result_components]
 
     for comment in comment_observations:
-        comment_row = ResultTableRow(cells=[{"content": comment.comment}])
+        comment_row = ResultTableRow(cells=[{"@colspan": 4, "#text": comment.comment}])
+        if comment.valueString:
+            table_rows.append(
+                ResultTableRow(cells=[{"@colspan": 4, "#text": comment.valueString}])
+            )
         table_rows.append(comment_row)
 
     result_table = ResultTable(
         title=f"{test_title} {diagnostic_report.issued.date}",
-        headers=["Component", "Value/Comment", "Reference Range"],
+        headers=["Component", "Value", "Reference Range", "Comments"],
         rows=table_rows,
     )
 
