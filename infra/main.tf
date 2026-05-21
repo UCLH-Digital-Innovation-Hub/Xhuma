@@ -2,6 +2,25 @@ data "azurerm_resource_group" "rg" {
   name = var.resource_group_name
 }
 
+data "azurerm_client_config" "current" {}
+
+data "azurerm_key_vault" "shared_kv" {
+  name                = var.shared_key_vault_name
+  resource_group_name = var.shared_resource_group_name
+}
+
+resource "azurerm_key_vault" "local_kv" {
+  name                        = "${var.app_service_name}-kv"
+  location                    = data.azurerm_resource_group.rg.location
+  resource_group_name         = data.azurerm_resource_group.rg.name
+  enabled_for_disk_encryption = true
+  tenant_id                   = data.azurerm_client_config.current.tenant_id
+  soft_delete_retention_days  = 7
+  purge_protection_enabled    = false
+
+  sku_name = "standard"
+}
+
 resource "azurerm_virtual_network" "vnet" {
   name                = "${var.app_service_name}-vnet"
   location            = data.azurerm_resource_group.rg.location
@@ -167,6 +186,10 @@ resource "azurerm_linux_web_app" "app" {
   service_plan_id           = azurerm_service_plan.plan.id
   virtual_network_subnet_id = azurerm_subnet.app_subnet.id
 
+  identity {
+    type = "SystemAssigned"
+  }
+
   site_config {
     application_stack {
       docker_image     = lower(split(":", var.docker_image)[0])
@@ -192,9 +215,11 @@ resource "azurerm_linux_web_app" "app" {
     "DOCKER_REGISTRY_SERVER_USERNAME"     = var.docker_registry_username
     "DOCKER_REGISTRY_SERVER_PASSWORD"     = var.docker_registry_password
 
-    # App Config
-    "API_KEY"        = var.api_key
-    "JWTKEY"         = var.jwt_key
+    # App Config (Key Vault References)
+    "API_KEY"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=api-key)"
+    "JWTKEY"            = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=jwtkey)"
+    "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
+
     "REGISTRY_ID"    = var.registry_id
     "REDIS_HOST"     = azurerm_redis_cache.redis.hostname
     "REDIS_PORT"     = azurerm_redis_cache.redis.ssl_port
@@ -217,12 +242,41 @@ resource "azurerm_linux_web_app" "app" {
     "OTEL_METRIC_EXPORT_INTERVAL_MS"        = var.otel_metric_export_interval_ms
 
     # Business Logic
-    "ORG_CODE" = var.org_code
-    "ENV"      = var.env
+    "ORG_CODE"  = var.org_code
+    "ENV"       = var.env
+    "VERSION"   = var.version
+    "DEVICE_ID" = var.device_id
+    "ORG_ASID"  = var.org_asid
+
+    "GP_CONNECT_INCLUDE_ALLERGIES"      = var.gp_connect_include_allergies
+    "GP_CONNECT_INCLUDE_MEDICATION"     = var.gp_connect_include_medication
+    "GP_CONNECT_INCLUDE_PROBLEMS"       = var.gp_connect_include_problems
+    "GP_CONNECT_INCLUDE_INVESTIGATIONS" = var.gp_connect_include_investigations
+    "GP_CONNECT_INCLUDE_IMMUNISATIONS"  = var.gp_connect_include_immunisations
 
     # Security
     "CORS_ORIGINS"  = var.cors_origins
     "ALLOWED_HOSTS" = var.allowed_hosts
     "REQUIRE_MTLS"  = var.require_mtls
   }
+}
+
+# Access Policy for Local Vault
+resource "azurerm_key_vault_access_policy" "app_local_policy" {
+  key_vault_id = azurerm_key_vault.local_kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_linux_web_app.app.identity[0].principal_id
+
+  secret_permissions      = ["Get", "List"]
+  certificate_permissions = ["Get", "List"]
+}
+
+# Access Policy for Shared Vault
+resource "azurerm_key_vault_access_policy" "app_shared_policy" {
+  key_vault_id = data.azurerm_key_vault.shared_kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_linux_web_app.app.identity[0].principal_id
+
+  secret_permissions      = ["Get", "List"]
+  certificate_permissions = ["Get", "List"]
 }
