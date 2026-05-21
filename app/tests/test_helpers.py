@@ -1,7 +1,5 @@
 import unittest
-from datetime import datetime
 from unittest import TestCase
-from unittest.mock import MagicMock
 
 from fhirclient.models import period
 

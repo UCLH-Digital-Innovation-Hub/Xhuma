@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -15,7 +14,6 @@ from .models import (
     AuditEvent,
     AuditEventDetail,
     AuditOutcome,
-    AuthorityIdentity,
     DeviceInfo,
     EventDataRefs,
     SAMLAttributes,

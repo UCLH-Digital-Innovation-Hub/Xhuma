@@ -52,7 +52,6 @@ async def test_GPC_STR_TST_PRB_01():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-PRB-01", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
 
@@ -68,7 +67,6 @@ async def test_GPC_STR_TST_PRB_04():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-PRB-04", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
 
@@ -84,7 +82,6 @@ async def test_GPC_STR_TST_PRB_05():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-PRB-05", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body
 
@@ -99,6 +96,5 @@ async def test_GPC_STR_TST_PRB_08():
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-PRB-08", nhsno) as log_dir:
             result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
-            code = result.status_code
             body = json.loads(result.body)
             assert "document_id" in body

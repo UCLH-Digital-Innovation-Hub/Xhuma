@@ -1,4 +1,3 @@
-import re
 from datetime import datetime
 from typing import List
 from xml.etree import ElementTree
@@ -176,7 +175,6 @@ def clean_soap(
         "soap": None,
         "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd": None,
         "urn:oasis:names:tc:SAML:2.0:assertion": None,
-        "urn:oasis:names:tc:SAML:2.0:assertion": None,
     },
 ) -> dict:
     """
@@ -250,3 +248,10 @@ def organization_to_author(
     org = AuthorParticipation(assignedAuthor=author)
 
     return org
+
+
+def clean_number(x):
+    # if x is a float and is an integer, convert to int
+    if isinstance(x, float) and x.is_integer():
+        return int(x)
+    return x

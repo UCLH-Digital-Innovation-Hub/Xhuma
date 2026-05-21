@@ -1,9 +1,10 @@
+from __future__ import annotations
+
 from typing import Dict, List, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Extra, Field, field_serializer
 
-from ..helpers import templateId
 from .admin import AuthorParticipation
 from .datatypes import (
     ANY,
@@ -13,11 +14,12 @@ from .datatypes import (
     ED,
     EIVL_TS,
     II,
+    IVL_INT,
     IVL_PQ,
     IVL_TS,
     PIVL_TS,
-    PQ,
     SXCM_TS,
+    RTO_PQ_PQ,
 )
 
 
@@ -128,22 +130,6 @@ class InstructionObservation(Observation):
             "@code": "completed",
         }
     )
-    # value: Optional[CD]  = {
-    #     "@code": "422037009",
-    #     "@codeSystem": "2.16.840.1.113883.6.96",
-    #     "@displayName": "Provider medication administration instructions",
-    #     "@codeSystemName": "SNOMED CT",
-    # }
-
-
-class EntryRelationship(BaseModel, extra=Extra.allow):
-    # act: EntryRelationshipAct
-    typeCode: str = Field(alias="@typeCode", default="SUBJ")
-    inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
-    sequenceNumber: Optional[int] = None
-    act: Optional[Act] = None
-    observation: Optional[Observation] = None
-    # accept any type of object
 
 
 class SubstanceAdministration(BaseModel):
@@ -165,7 +151,8 @@ class SubstanceAdministration(BaseModel):
     #         }
     #     )
     # )
-    text: Optional[ED] = None
+    code: Optional[CD] = None
+    text: Optional[Union[str, ED]] = None
     statusCode: Optional[CS] = None
     effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
         default_factory=list
@@ -174,7 +161,9 @@ class SubstanceAdministration(BaseModel):
     routeCode: Optional[CE] = None
     doseQuantity: Optional[IVL_PQ] = None
     rateQuantity: Optional[IVL_PQ] = None
-    entryRelationship: List[EntryRelationship] = Field(default_factory=list)
+    maxDoseQuantity: Optional[RTO_PQ_PQ] = None
+    entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
+    repeatNumber: Optional[IVL_INT] = None
     # TODO flesh out precondition model
     precondition: Optional[Dict] = None
 
@@ -201,6 +190,17 @@ class SubstanceAdministration(BaseModel):
             time_list.insert(0, sxcm)
         return time_list
         # print(time_list)
+
+
+class EntryRelationship(BaseModel, extra=Extra.allow):
+    # act: EntryRelationshipAct
+    typeCode: str = Field(alias="@typeCode", default="SUBJ")
+    inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
+    sequenceNumber: Optional[int] = None
+    act: Optional[Act] = None
+    observation: Optional[Observation] = None
+    substanceAdministration: Optional["SubstanceAdministration"] = None
+    # accept any type of object
 
 
 class Entry(BaseModel):
@@ -280,3 +280,8 @@ class ResultsSection(Section):
     title: Optional[str] = "Results"
     text: Optional[str] = None
     entry: Optional[List[ResultsOrganizer]] = Field(default_factory=list)
+
+
+Observation.model_rebuild()
+SubstanceAdministration.model_rebuild()
+EntryRelationship.model_rebuild()

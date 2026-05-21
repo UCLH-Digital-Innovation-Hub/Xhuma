@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import List
 
 import pytest
 from pydantic import BaseModel, Field, ValidationError

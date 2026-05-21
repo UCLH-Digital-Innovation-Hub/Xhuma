@@ -4,7 +4,7 @@ Contains CDA datatype objects with pydantic validation
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -42,6 +42,7 @@ class TEL(URL):
     )
     usablePeriod: Optional[List[SXCM_TS]] = None
     use: Optional[List[str]] = None
+    value: Optional[str] = Field(alias="@value", default=None)
 
 
 class ED(BIN):
@@ -57,6 +58,7 @@ class ED(BIN):
     integrityCheckAlgorithm: Optional[str] = None  # enum SHA1 or SHA256
     language: Optional[str] = None
     mediaType: Optional[str] = None
+    xmlText: Optional[str] = None
 
 
 class QTY(ANY):
@@ -91,6 +93,7 @@ class II(ANY):
 
 CODE_SYSTEM_NAMES = {
     "http://snomed.info/sct": "2.16.840.1.113883.6.96",
+    "https://dmd.nhs.uk": "2.16.840.1.113883.6.96",
     "LOINC": "2.16.840.1.113883.6.1",
     "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
     "https://fhir.hl7.org.uk/Id/resipuk-gemscript-drug-codes": "2.16.840.1.113883.2.1.6.15",
@@ -250,10 +253,26 @@ class IVL_TS(IVXB_TS):
     }
 
 
+class IVL_INT(ANY):
+    resource_type: str = Field(
+        "IVL_INT", description="Interval of integers.", alias="@xsi:type"
+    )
+    nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)
+    value: Optional[int] = Field(alias="@value", default=None)
+    operator: Optional[str] = Field(alias="@operator", default=None)
+    low: Optional[int] = None
+    center: Optional[int] = None
+    width: Optional[int] = None
+    high: Optional[int] = None
+    model_config = {
+        "populate_by_name": True,
+    }
+
+
 class PIVL_TS(SXCM_TS):
     resource_type: str = Field("PIVL_TS", description="", alias="@xsi:type")
     phase: Optional[IVL_TS] = None
-    period: Optional[PQ] = None
+    period: Optional[Union[IVL_PQ, PQ]] = None
     alignment: Optional[CalendarCycle] = Field(alias="@alignment", default=None)
     institutionSpecified: Optional[str] = Field(
         alias="@institutionSpecified", default=None
@@ -275,3 +294,13 @@ class EIVL_TS(SXCM_TS):
 class CalendarCycle(ANY):
     resource_type: str = Field("CalendarCycle", description="", alias="@xsi:type")
     name: Optional[str] = None
+
+
+class RTO_PQ_PQ(QTY):
+    resource_type: str = Field(
+        "RTO_PQ_PQ",
+        description="A ratio of two physical quantities.",
+        alias="@xsi:type",
+    )
+    numerator: Optional[PQ] = None
+    denominator: Optional[PQ] = None
