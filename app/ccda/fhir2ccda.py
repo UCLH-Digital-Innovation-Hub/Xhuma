@@ -446,6 +446,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "item": [org.table for org in organizer_with_table],
             }
             comp["section"]["text"] = {"list": table_list}
+            entries = [org.organizer for org in organizer_with_table]
+            comp["section"]["entry"] = entries
             return comp
 
     bundle_components = [await create_section(list) for list in lists]
