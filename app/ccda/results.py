@@ -103,7 +103,6 @@ async def create_result_component(
     table_row.cells.insert(0, result_component.code.displayName)
 
     # block for value/comment
-    content = []
 
     if observation.valueString:
         result_component.value = {"@value": observation.valueString}
@@ -357,5 +356,6 @@ async def investigation(
     )
 
     return InvestigationWithTable(
-        organizer=organizer, table=create_xml_table(result_table)
+        organizer=organizer.model_dump(by_alias=True, exclude_none=True),
+        table=create_xml_table(result_table),
     )
