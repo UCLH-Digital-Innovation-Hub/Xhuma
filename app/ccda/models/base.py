@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Extra, Field, field_serializer
 
 from .admin import AuthorParticipation
 from .datatypes import (
-    ANY,
     CD,
     CE,
     CS,
@@ -76,7 +75,7 @@ class Observation(BaseModel):
     text: Optional[str] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
-    value: Optional[ANY] = None
+    value: Optional[Any] = None
     entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
 
 
@@ -234,7 +233,7 @@ class ResultsOrganizer(BaseModel):
     Representation of a CDA Results Organizer model object.
     """
 
-    classCode: str = Field(alias="@classCode", default="BATTERY")
+    classCode: str = Field(alias="@classCode", default="CLUSTER")
     moodCode: str = Field(alias="@moodCode", default="EVN")
     templateId: List[II] = Field(
         default=[
@@ -243,7 +242,12 @@ class ResultsOrganizer(BaseModel):
                     "@root": "2.16.840.1.113883.10.20.22.4.1",
                     "@extension": "2015-08-01",
                 }
-            )
+            ),
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.4.1",
+                }
+            ),
         ],
     )
     id: Optional[List[II]] = Field(default_factory=list)
@@ -251,7 +255,7 @@ class ResultsOrganizer(BaseModel):
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
     author: Optional[AuthorParticipation] = None
-    component: List[ResultObservation] = Field(default_factory=list)
+    component: List[Dict[str, ResultObservation]] = Field(default_factory=list)
 
 
 class ResultsSection(Section):
@@ -266,7 +270,12 @@ class ResultsSection(Section):
                     "@root": "2.16.840.1.113883.10.20.22.2.3.1",
                     "@extension": "2015-08-01",
                 }
-            )
+            ),
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.2.3.1",
+                }
+            ),
         ]
     )
     code: CE = Field(

@@ -336,9 +336,9 @@ async def investigation(
     result_components = asyncio.gather(
         *[create_result_component(o, report_issued_time) for o in test_results]
     )
-    organizer.component = [c.entry for c in await result_components]
+    organizer.component = [{"observation": c.entry} for c in await result_components]
     if category_observation:
-        organizer.component.append(category_observation)
+        organizer.component.append({"observation": category_observation})
     table_rows = [c.row for c in await result_components]
 
     for comment in comment_observations:

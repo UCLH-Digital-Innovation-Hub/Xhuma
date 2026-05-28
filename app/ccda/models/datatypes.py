@@ -181,6 +181,9 @@ class PQ(QTY):
     translation: Optional[List[PQR]] = None
     unit: Optional[str] = Field(alias="@unit", default=None)
     value: Optional[float] = Field(alias="@value", default=None)
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 class TS(QTY):

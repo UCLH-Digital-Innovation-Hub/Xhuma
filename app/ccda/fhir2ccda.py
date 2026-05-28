@@ -175,7 +175,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             },
             "Investigations and results": {
                 "displayName": "Investigations and results",
-                "root": "2.16.840.1.113883.6.1",
+                "root": "2.16.840.1.113883.10.20.22.2.3",
                 "Code": "30954-2",
             },
         }
@@ -446,7 +446,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "item": [org.table for org in organizer_with_table],
             }
             comp["section"]["text"] = {"list": table_list}
-            entries = [org.organizer for org in organizer_with_table]
+            entries = [
+                {"@typeCode": "DRIV", "organizer": org.organizer}
+                for org in organizer_with_table
+            ]
             comp["section"]["entry"] = entries
             return comp
 
