@@ -91,6 +91,11 @@ async def create_result_component(
         id=id_helper(observation.identifier) if observation.identifier else None,
         statusCode=CS(code=observation.status) if observation.status else None,
     )
+
+    # change final to completed for better mapping to CDA status codes
+    if result_component.statusCode and result_component.statusCode.code == "final":
+        result_component.statusCode.code = "Completed"
+
     if group_time:
         result_component.effectiveTime = group_time
     else:
@@ -333,6 +338,10 @@ async def investigation(
         # this should be the specimen collection time if available, but for now will use report issued time
         effectiveTime=report_issued_time,
     )
+
+    # change final to completed for better mapping to CDA status codes
+    if organizer.statusCode and organizer.statusCode.code == "final":
+        organizer.statusCode.code = "Completed"
     result_components = asyncio.gather(
         *[create_result_component(o, report_issued_time) for o in test_results]
     )
