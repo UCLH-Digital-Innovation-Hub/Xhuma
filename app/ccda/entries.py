@@ -233,25 +233,22 @@ async def medication(
             entry.dosage[0].method.coding
         )
 
-    patient_instr_list = [
-        dosage.patientInstruction
-        for dosage in entry.dosage
-        if dosage.patientInstruction
-    ]
-    text_instr_list = [dosage.text for dosage in entry.dosage if dosage.text]
+    patient_instr_list = []
+    text_instr_list = []
 
-    def add_numbering(instruction_list):
-        if len(instruction_list) > 1:
-            for i, instruction in enumerate(instruction_list):
-                new_instruction = f"{i + 1}. {instruction}"
-                instruction_list[i] = new_instruction
-        return instruction_list
+    multiple_dosages = len(entry.dosage) > 1
 
-    patient_instr_list = add_numbering(patient_instr_list)
-    text_instr_list = add_numbering(text_instr_list)
+    for i, dosage in enumerate(entry.dosage):
+        prefix = f"{i + 1}. " if multiple_dosages else ""
+
+        if dosage.patientInstruction:
+            patient_instr_list.append(f"{prefix}{dosage.patientInstruction}")
+
+        if dosage.text:
+            text_instr_list.append(f"{prefix}{dosage.text}")
 
     if text_instr_list:
-        combined_text = " ".join(text_instr_list)
+        combined_text = "; ".join(text_instr_list)
         dosage_entry = EntryRelationship(**{"@typeCode": "COMP", "@inversionInd": True})
         dosage_entry.substanceAdministration = SubstanceAdministration(
             moodCode="EVN",
@@ -270,7 +267,7 @@ async def medication(
         substance_administration.entryRelationship.append(dosage_entry)
 
     if patient_instr_list:
-        combined_patient_instructions = " ".join(patient_instr_list)
+        combined_patient_instructions = "; ".join(patient_instr_list)
         instruction_entry = EntryRelationship()
         instruction_entry.act = {
             "@classCode": "ACT",
