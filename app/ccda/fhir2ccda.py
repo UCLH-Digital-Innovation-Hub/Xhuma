@@ -3,8 +3,10 @@ import datetime
 import json
 import logging
 import os
+from typing import List
 
 import xmltodict
+from copy import deepcopy
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
@@ -453,8 +455,80 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             comp["section"]["entry"] = entries
             return comp
 
-    bundle_components = [await create_section(list) for list in lists]
-    bundle_components = [x for x in bundle_components if x is not None]
+    def split_medications(medications: fhirlist.List) -> List[dict]:
+        """Splits medications into active and past based on status
+
+        Args:
+            medications (fhirlist.List): list of medication dicts with status field
+
+        Returns:
+            List[dict]: list of medication dicts with active and past medications split
+        """
+        active = []
+        past = []
+
+        for med in medications.entry:
+            print(med)
+            referenced_med = index[med.item.reference]
+            # print(referenced_med)
+            # status active or end date in the future
+            if referenced_med.status == "active":
+                active.append(med)
+            elif (
+                referenced_med.status == "completed"
+                and hasattr(referenced_med, "endDate")
+                and referenced_med.endDate is not None
+                and date_helper(referenced_med.endDate) > datetime.datetime.now()
+            ):
+                active.append(med)
+            else:
+                past.append(med)
+        # print(f"split medications into {len(active)} active and {len(past)} past")
+        # print(active)
+        return active, past
+
+    def clone_list(original, new_title, new_entries):
+        new_list = deepcopy(original)
+        new_list.title = new_title
+        new_list.entry = new_entries
+        return new_list
+
+    # bundle_components = [await create_section(list) for list in lists]
+    # bundle_components = [x for x in bundle_components if x is not None]
+    bundle_components = []
+    for list_obj in lists:
+        if list_obj.title == "Medications and medical devices":
+            try:
+                active, past = split_medications(list_obj)
+                # print(f"active medications: {len(active)}, past medications: {len(past)}")
+                active_section = await create_section(
+                    clone_list(list_obj, "Active Medications", active)
+                )
+
+                # delete the third column for acute medications as we don't have status for active medications and it is always active
+                for entry in active_section["section"]["text"]["table"]["tbody"]["tr"]:
+                    del entry["td"][2]
+                # delete the third columf ro the header too
+                del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
+
+                past_section = await create_section(
+                    clone_list(list_obj, "Past Medications", past)
+                )
+                bundle_components.append(active_section)
+                bundle_components.append(past_section)
+            except Exception as e:
+                print(f"Error processing medications: {e}")
+                try:
+                    section = await create_section(list_obj)
+                    if section is not None:
+                        bundle_components.append(section)
+                except Exception as e:
+                    print(f"Error processing medications without split: {e}")
+        else:
+            section = await create_section(list_obj)
+            if section is not None:
+                bundle_components.append(section)
+
     caching_period = os.environ.get("CCDA_CACHING_PERIOD", "24 hours")
     # header_components = {
     #     "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),
