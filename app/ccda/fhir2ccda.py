@@ -437,6 +437,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             #     *[investigation(entry, index) for entry in list.entry]
             # )
             # print(organizer_with_table)
+            if not list.entry:
+                comp["section"]["text"] = {"paragraph": "No Information Available"}
+                return comp
             references = [index[entry.item.reference] for entry in list.entry]
 
             organizer_with_table = [
