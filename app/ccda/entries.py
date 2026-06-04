@@ -20,7 +20,7 @@ from .models.base import (
     EntryRelationship,
     SubstanceAdministration,
 )
-from .models.datatypes import CD, IVL_PQ, IVL_TS, PIVL_TS
+from .models.datatypes import CD, IVL_PQ, IVL_TS, PIVL_TS, EIVL_TS
 from .models.datatypes import IVL_INT, IVXB_PQ
 
 Cell = str
@@ -167,6 +167,42 @@ async def medication(
             }
 
     if entry.dosage[0].timing:
+        if entry.dosage[0].timing.repeat.when:
+            periodicals = entry.dosage[0].timing.repeat.when
+            offset = None
+
+            # list of "before" events
+            before_events = ["AC", "ACD", "ACM", "HS"]
+
+            # check if there is an offset, if periodicals is before event offset is high
+            if entry.dosage[0].timing.repeat.offset:
+                if any(periodical in before_events for periodical in periodicals):
+                    offset = IVL_PQ(
+                        low=IVXB_PQ(
+                            **{
+                                "@value": entry.dosage[0].timing.repeat.offset,
+                                "@unit": "min",
+                            }
+                        )
+                    )
+                else:
+                    offset = IVL_PQ(
+                        high=IVXB_PQ(
+                            **{
+                                "@value": entry.dosage[0].timing.repeat.offset,
+                                "@unit": "min",
+                            }
+                        )
+                    )
+
+            for periodical in periodicals:
+                eivl = EIVL_TS(operator="A", event={"@code": periodical})
+
+                if offset:
+                    eivl.offset = offset
+
+                substance_administration.effectiveTime.append(eivl)
+
         pivl = PIVL_TS(
             **{
                 "@xsi:type": "PIVL_TS",
@@ -476,14 +512,15 @@ async def medication(
 
     # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
     # print(f"Misc notes text: {''.join(misc_notes_text)}")
-    comment_activity = EntryRelationship()
-    comment_activity.act = {
-        "code": {
-            "@code": "48767-8",
-        },
-        "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
-    }
-    substance_administration.entryRelationship.append(comment_activity)
+    if misc_notes_text:
+        comment_activity = EntryRelationship()
+        comment_activity.act = {
+            "code": {
+                "@code": "48767-8",
+            },
+            "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
+        }
+        substance_administration.entryRelationship.append(comment_activity)
 
     # add dispensing  request
     if based_on_request.dispenseRequest:
