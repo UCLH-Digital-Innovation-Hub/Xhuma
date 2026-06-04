@@ -14,6 +14,15 @@ client_id = os.getenv("DMD_CLIENT_ID")
 client_secret = os.getenv("DMD_CLIENT_SECRET")
 
 
+def _decode_cached_token(token: bytes | str | None) -> str | None:
+    """Normalize cached token value from Redis into a plain string."""
+    if token is None:
+        return None
+    if isinstance(token, bytes):
+        return token.decode("utf-8")
+    return token
+
+
 async def get_terminology_token():
     """Fetch an access token from the DMD API using client credentials."""
 
@@ -43,8 +52,8 @@ async def get_terminology_token():
         response.raise_for_status()
         token_data = response.json()
 
-        # cache the token for 5 minutes
-        snomed_client.setex("dmd_token", 300, token_data["access_token"])
+        # cache the token for 30 minutes
+        snomed_client.setex("dmd_token", 30 * 60, token_data["access_token"])
 
         return token_data["access_token"]
 
@@ -70,7 +79,7 @@ async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
     # If not in cache, fetch from DMD API
 
     # check for cached token
-    token = snomed_client.get("dmd_token")
+    token = _decode_cached_token(snomed_client.get("dmd_token"))
     # if token is not cached, fetch a new one
     if not token:
         logging.info("No cached DMD token found. Fetching new token.")
