@@ -153,7 +153,7 @@ services:
       NGINX_TLS_KEY: ${NGINX_TLS_KEY:-/etc/letsencrypt/live/xhumademo.com/privkey.pem}
       NGINX_RELAY_TLS_CERT: ${NGINX_RELAY_TLS_CERT:-/etc/letsencrypt/live/xhumademo.com/fullchain.pem}
       NGINX_RELAY_TLS_KEY: ${NGINX_RELAY_TLS_KEY:-/etc/letsencrypt/live/xhumademo.com/privkey.pem}
-      NGINX_RELAY_CLIENT_CA: ${NGINX_RELAY_CLIENT_CA:-/etc/nginx/client-ca/relay-client-ca.pem}
+      NGINX_RELAY_CLIENT_CA: ${NGINX_RELAY_CLIENT_CA:-/etc/nginx/client-ca/ca.crt}
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/templates:ro
       - ${NGINX_CERTS_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
