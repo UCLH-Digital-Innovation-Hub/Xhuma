@@ -157,7 +157,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/templates:ro
       - ${NGINX_CERTS_DIR:-/etc/letsencrypt}:/etc/letsencrypt:ro
-      - ${NGINX_CLIENT_CA_DIR:-/etc/ssl/clients}:/etc/nginx/client-ca:ro
+      - ${NGINX_CLIENT_CA_DIR:-/etc/nginx/client-ca}:/etc/nginx/client-ca:ro
     networks:
       - xhuma-net
 
