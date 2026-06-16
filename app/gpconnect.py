@@ -372,13 +372,17 @@ async def gpconnect(
             "body": json.dumps(body) if isinstance(body, dict) else str(body)
         }
 
-        from .settings import EXTERNAL_RELAY_URL, EXTERNAL_RELAY_CLIENT_ID
+        from .settings import EXTERNAL_RELAY_URL, EXTERNAL_RELAY_CLIENT_ID, EXTERNAL_RELAY_TOKEN
 
         if EXTERNAL_RELAY_URL:
+            req_headers = {}
+            if EXTERNAL_RELAY_TOKEN:
+                req_headers["Authorization"] = f"Bearer {EXTERNAL_RELAY_TOKEN}"
+
             async with httpx.AsyncClient(timeout=httpx.Timeout(75.0)) as client:
                 relay_target = f"{EXTERNAL_RELAY_URL.rstrip('/')}/send/{EXTERNAL_RELAY_CLIENT_ID}"
                 try:
-                    ext_resp = await client.post(relay_target, json=relay_req)
+                    ext_resp = await client.post(relay_target, headers=req_headers, json=relay_req)
                     if ext_resp.status_code != 200:
                         raise HTTPException(502, f"External relay error: {ext_resp.text}")
                     resp = ext_resp.json()
