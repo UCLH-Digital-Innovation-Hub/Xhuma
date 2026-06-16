@@ -363,7 +363,14 @@ async def gpconnect(
 
     async def _relay_call(url: str, headers: dict, body: dict) -> httpx.Response:
         """Send via relay and return an httpx.Response with status_code and text."""
-        relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
+        # Fix compatibility with standalone Relay Server RelayRequest schema
+        relay_req = {
+            "request_id": str(uuid4()),
+            "method": "POST", 
+            "url": url, 
+            "headers": headers, 
+            "body": json.dumps(body) if isinstance(body, dict) else str(body)
+        }
 
         from .settings import EXTERNAL_RELAY_URL, EXTERNAL_RELAY_CLIENT_ID
 
