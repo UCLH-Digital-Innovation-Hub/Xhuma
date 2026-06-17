@@ -18,6 +18,8 @@ server {
 
     ssl_certificate ${NGINX_TLS_CERT};
     ssl_certificate_key ${NGINX_TLS_KEY};
+    ssl_client_certificate ${NGINX_PUBLIC_CLIENT_CA};
+    ssl_verify_client on;
 
     location / {
         proxy_pass http://${NGINX_UPSTREAM};
