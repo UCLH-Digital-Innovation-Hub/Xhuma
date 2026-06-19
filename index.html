@@ -1,23 +1,23 @@
 <!doctype html>
-<!-- xhuma.co.uk landing page. Contact email (hello@xhuma.co.uk) and demo CTA
-     (scroll-to-contact) confirmed. Outstanding: company registration details in footer (if needed). -->
+<!-- xhuma.co.uk landing page. Contact email hello@xhuma.co.uk confirmed.
+     Team shown as organisations only (no named individuals). Register-interest CTA = mailto. -->
 <html lang="en-GB">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Xhuma — NHS primary care records, in your EHR</title>
-<meta name="description" content="Xhuma connects NHS GP Connect to IHE document exchange, so EHRs like Epic Care Everywhere can retrieve NHS primary care records as standards-based CCDA documents — securely.">
-<meta property="og:title" content="Xhuma — NHS primary care records, in your EHR">
-<meta property="og:description" content="Connecting GP Connect to IHE document exchange for secure, standards-based access to NHS primary care records.">
+<title>Xhuma — structured GP records, reconciled into Epic</title>
+<meta name="description" content="Xhuma is middleware from UCLH's Digital Innovation Hub that connects Epic to the national GP Connect APIs — bringing structured GP record data into Epic via Care Everywhere as standards-based CCDA, ready to view and reconcile.">
+<meta property="og:title" content="Xhuma — structured GP records, reconciled into Epic">
+<meta property="og:description" content="Middleware connecting Epic to NHS GP Connect, so structured GP record data flows into Epic via Care Everywhere as standards-based CCDA — ready to view and reconcile.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://xhuma.co.uk">
 <meta property="og:image" content="https://xhuma.co.uk/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Xhuma — bring NHS GP records into your EHR via GP Connect and IHE document exchange.">
+<meta property="og:image:alt" content="Xhuma — bring structured NHS GP records into Epic via GP Connect and Care Everywhere.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Xhuma — NHS primary care records, in your EHR">
-<meta name="twitter:description" content="Connecting GP Connect to IHE document exchange for secure, standards-based access to NHS primary care records.">
+<meta name="twitter:title" content="Xhuma — structured GP records, reconciled into Epic">
+<meta name="twitter:description" content="Middleware connecting Epic to NHS GP Connect, so structured GP record data flows into Epic as standards-based CCDA.">
 <meta name="twitter:image" content="https://xhuma.co.uk/og-image.png">
 <meta name="theme-color" content="#005eb8">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -25,11 +25,11 @@
   :root{
     --nhs-blue:#005eb8; --nhs-dark:#003087; --ink:#0b1f33; --muted:#4a5b6d;
     --line:#e3e9ef; --surface:#ffffff; --page:#f7f9fb; --accent-bg:#e8f1fb;
-    --max:1080px;
+    --green:#0a7d4b; --max:1080px;
   }
   @media (prefers-color-scheme: dark){
     :root{ --nhs-blue:#4d97e0; --nhs-dark:#7fb6ec; --ink:#eaf1f8; --muted:#a7b6c6;
-      --line:#22303f; --surface:#101b26; --page:#0a1119; --accent-bg:#14283c; }
+      --line:#22303f; --surface:#101b26; --page:#0a1119; --accent-bg:#14283c; --green:#3fbd84; }
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
@@ -52,38 +52,53 @@
   .brand b{color:var(--nhs-blue)}
   .nav-links{display:flex;gap:26px;font-size:15px;color:var(--muted)}
   .nav-links a{color:var(--muted)} .nav-links a:hover{color:var(--nhs-blue)}
-  @media(max-width:680px){.nav-links{display:none}}
+  @media(max-width:760px){.nav-links{display:none}}
 
-  .hero{text-align:center;padding:84px 0 64px}
+  .hero{text-align:center;padding:84px 0 60px}
   .pill{display:inline-flex;align-items:center;gap:7px;background:var(--accent-bg);color:var(--nhs-dark);
     font-size:13px;font-weight:600;padding:6px 14px;border-radius:999px;margin-bottom:22px}
   .hero h1{font-size:clamp(30px,5vw,46px);line-height:1.12;letter-spacing:-.025em;margin:0 auto 18px;max-width:16ch}
-  .hero p{font-size:clamp(16px,2.4vw,19px);color:var(--muted);max-width:54ch;margin:0 auto 30px}
+  .hero p{font-size:clamp(16px,2.4vw,19px);color:var(--muted);max-width:56ch;margin:0 auto 30px}
   .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
 
-  section{padding:56px 0}
+  section{padding:54px 0}
   .eyebrow{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--nhs-blue);margin:0 0 10px}
   h2{font-size:clamp(24px,3.4vw,32px);letter-spacing:-.02em;margin:0 0 8px}
-  .lead{color:var(--muted);max-width:60ch;margin:0 0 34px}
+  .lead{color:var(--muted);max-width:62ch;margin:0 0 18px}
 
-  .grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .turn{background:var(--accent-bg);border-radius:14px;padding:22px 26px;max-width:62ch;margin-top:22px;color:var(--ink)}
+  .turn b{color:var(--nhs-dark)}
+
+  .grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));margin-top:8px}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px}
   .ico{width:44px;height:44px;border-radius:10px;background:var(--accent-bg);color:var(--nhs-blue);
     display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:16px}
   .card h3{font-size:18px;margin:0 0 8px} .card p{margin:0;color:var(--muted);font-size:15px}
 
-  .steps{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));counter-reset:s}
+  .steps{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));counter-reset:s;margin-top:8px}
   .step{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;position:relative}
   .step:before{counter-increment:s;content:counter(s);display:flex;align-items:center;justify-content:center;
     width:30px;height:30px;border-radius:50%;background:var(--nhs-blue);color:#fff;font-weight:700;font-size:15px;margin-bottom:14px}
   .step h3{font-size:16px;margin:0 0 6px} .step p{margin:0;color:var(--muted);font-size:14px}
 
   .standards{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:28px;text-align:center}
-  .standards .row{display:flex;flex-wrap:wrap;gap:10px 18px;justify-content:center;margin-top:14px}
+  .standards .row{display:flex;flex-wrap:wrap;gap:10px 14px;justify-content:center;margin-top:14px}
   .tag{font-size:14px;color:var(--ink);background:var(--page);border:1px solid var(--line);border-radius:8px;padding:7px 13px}
 
-  .contact{background:var(--accent-bg);border-radius:18px;padding:46px 28px;text-align:center;margin:10px 0 60px}
-  .contact h2{margin-bottom:10px} .contact p{color:var(--muted);margin:0 auto 22px;max-width:48ch}
+  .status{display:inline-flex;align-items:center;gap:9px;background:var(--surface);border:1px solid var(--line);
+    border-radius:999px;padding:8px 16px;font-size:14px;font-weight:600;color:var(--ink);margin-bottom:18px}
+  .status .dot{width:9px;height:9px;border-radius:50%;background:var(--green);flex:none;box-shadow:0 0 0 4px color-mix(in srgb,var(--green) 22%,transparent)}
+  .checks{list-style:none;padding:0;margin:20px 0 0;display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));max-width:760px}
+  .checks li{position:relative;padding-left:30px;color:var(--ink);font-size:15px}
+  .checks li:before{content:"\2713";position:absolute;left:0;top:0;color:var(--nhs-blue);font-weight:800}
+  .checks li span{color:var(--muted)}
+
+  .partners{display:flex;flex-wrap:wrap;gap:10px 14px;margin-top:18px}
+  .partner{font-size:15px;font-weight:600;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 16px}
+
+  .contact{background:var(--accent-bg);border-radius:18px;padding:46px 28px;text-align:center;margin:10px 0 24px}
+  .contact h2{margin-bottom:10px} .contact p{color:var(--muted);margin:0 auto 22px;max-width:52ch}
+  .contact .alt{font-size:15px;margin-top:18px;margin-bottom:0}
 
   footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px}
   .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
@@ -93,97 +108,131 @@
 <body>
 <header>
   <div class="wrap nav">
-    <span class="brand"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="32" height="32" rx="7.5" fill="#005eb8"/><path d="M11 11l10 10M21 11L11 21" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></svg>Xhu<b>ma</b></span>
+    <span class="brand"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="32" height="32" rx="7.5" fill="#005eb8"/><path d="M11 11l10 10M21 11L11 21" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></svg><span>Xhu<b>ma</b></span></span>
     <nav class="nav-links">
-      <a href="#product">Product</a>
+      <a href="#product">What it does</a>
       <a href="#how">How it works</a>
-      <a href="#security">Security</a>
-      <a href="#contact">Contact</a>
+      <a href="#assurance">Assurance</a>
+      <a href="#contact">Get involved</a>
     </nav>
-    <a class="btn btn-primary" href="#contact" style="padding:9px 16px;font-size:14px">Request a demo</a>
+    <a class="btn btn-primary" href="#contact" style="padding:9px 16px;font-size:14px">Register interest</a>
   </div>
 </header>
 
 <main>
   <section class="hero wrap" aria-labelledby="h1">
-    <span class="pill">NHS interoperability</span>
-    <h1 id="h1">Bring NHS GP records into your EHR</h1>
-    <p>Xhuma connects GP Connect to IHE document exchange, so clinicians using Epic Care Everywhere and other standards-based systems can retrieve NHS primary care records as CCDA documents.</p>
+    <span class="pill">NHS primary care interoperability</span>
+    <h1 id="h1">Bring structured GP records into Epic</h1>
+    <p>Xhuma is middleware that connects Epic to the national GP Connect APIs, pulling structured data from a patient's GP record into Epic via Care Everywhere — ready for clinicians to view and reconcile as standards-based CCDA.</p>
     <div class="cta">
-      <a class="btn btn-primary" href="#contact">Request a demo</a>
+      <a class="btn btn-primary" href="mailto:hello@xhuma.co.uk?subject=Register%20interest%20in%20Xhuma">Register your interest</a>
       <a class="btn btn-ghost" href="#how">How it works</a>
     </div>
   </section>
 
+  <section id="problem" class="wrap">
+    <p class="eyebrow">The problem</p>
+    <h2>Vital information, lost in free text</h2>
+    <p class="lead">Most EHRs can record structured data — a patient's medication history, diagnoses, allergies, immunisations and results. Too often, though, that information is gathered by asking the patient the same questions again and again, then typed into free-text notes where systems can't reliably use it.</p>
+    <div class="turn"><b>Xhuma takes a different route.</b> The structured record flows electronically from GP Connect into Epic, where the clinician reviews and reconciles it — improving the safety, efficiency and quality of the data that care depends on.</div>
+  </section>
+
   <section id="product" class="wrap">
     <p class="eyebrow">What Xhuma does</p>
-    <h2>A bridge between NHS primary care and your record system</h2>
-    <p class="lead">Xhuma sits between your EHR's document-exchange layer and NHS services, translating between standards so patient records flow without bespoke integration.</p>
+    <h2>Structured GP records, brought into Epic</h2>
+    <p class="lead">Xhuma is middleware that sits between Epic and the national GP Connect APIs, translating between standards so a patient's GP record flows into Epic — no bespoke integration.</p>
     <div class="grid">
       <div class="card">
         <div class="ico" aria-hidden="true">&#9889;</div>
-        <h3>GP Connect integration</h3>
-        <p>Retrieves structured patient records from NHS primary care via GP Connect, authenticated against NHS Spine.</p>
+        <h3>Connects to GP Connect</h3>
+        <p>Requests structured data items from the patient's GP record system through the national GP Connect APIs, over secure, authenticated connections.</p>
       </div>
       <div class="card">
         <div class="ico" aria-hidden="true">&#128196;</div>
-        <h3>Standards-based conversion</h3>
-        <p>Transforms FHIR structured records into Consolidated CDA (CCDA), implementing IHE ITI profiles your EHR already speaks.</p>
+        <h3>Converts to a standard Epic speaks</h3>
+        <p>Transforms the FHIR record from GP Connect into a Consolidated CDA (CCDA) document, delivered through the IHE profiles Epic Care Everywhere already uses.</p>
       </div>
       <div class="card">
-        <div class="ico" aria-hidden="true">&#128274;</div>
-        <h3>Secure by design</h3>
-        <p>Mutual TLS on every hop, full audit logging, and data handling built for personal health information.</p>
+        <div class="ico" aria-hidden="true">&#9989;</div>
+        <h3>View and reconcile in Epic</h3>
+        <p>Medication history, diagnoses, allergies, immunisations and results arrive in Epic for the clinician to review and reconcile into the patient's chart.</p>
       </div>
     </div>
   </section>
 
   <section id="how" class="wrap">
     <p class="eyebrow">How it works</p>
-    <h2>From EHR query to NHS record in three steps</h2>
-    <p class="lead">No new clinician workflow — the record arrives through the document-exchange your EHR already uses.</p>
+    <h2>From Epic query to reconciled record, in three steps</h2>
+    <p class="lead">No new clinician workflow — the record arrives through the interoperability engine Epic already uses.</p>
     <div class="steps">
       <div class="step">
-        <h3>The EHR requests records</h3>
-        <p>A clinician's system queries for a patient via IHE / Care Everywhere, as it would any other community.</p>
+        <h3>Epic requests the record</h3>
+        <p>Using Care Everywhere, Epic queries for the patient just as it would any other community.</p>
       </div>
       <div class="step">
         <h3>Xhuma fetches and converts</h3>
-        <p>Xhuma queries NHS GP Connect, resolves the patient via PDS/SDS, and converts the structured record to CCDA.</p>
+        <p>Xhuma resolves the patient, requests their structured record from GP Connect, and converts the FHIR bundle into a standards-based CCDA document.</p>
       </div>
       <div class="step">
-        <h3>The record is returned</h3>
-        <p>A standards-based CCDA document is delivered back to the EHR, ready to view in the patient's chart.</p>
+        <h3>The clinician reconciles</h3>
+        <p>The CCDA is returned to Epic, where structured items can be viewed and reconciled into the patient's chart.</p>
       </div>
     </div>
   </section>
 
-  <section id="security" class="wrap">
+  <section id="standards" class="wrap">
     <div class="standards">
-      <p class="eyebrow" style="margin-bottom:0">Built on open standards</p>
+      <p class="eyebrow" style="margin-bottom:0">Secure, standards-based throughout</p>
+      <p style="color:var(--muted);max-width:54ch;margin:10px auto 0">Encrypted connections on every hop and open healthcare standards end to end — no proprietary interfaces.</p>
       <div class="row">
         <span class="tag">GP Connect</span>
-        <span class="tag">IHE XCA (ITI-38 / ITI-39)</span>
-        <span class="tag">PDS</span>
-        <span class="tag">SDS</span>
-        <span class="tag">Epic Care Everywhere</span>
+        <span class="tag">FHIR</span>
+        <span class="tag">IHE ITI-55</span>
+        <span class="tag">IHE ITI-38</span>
+        <span class="tag">IHE ITI-39</span>
         <span class="tag">HL7 CDA / CCDA</span>
+        <span class="tag">Epic Care Everywhere</span>
       </div>
+    </div>
+  </section>
+
+  <section id="assurance" class="wrap">
+    <p class="eyebrow">Assurance &amp; safety</p>
+    <h2>Built for NHS safety and governance</h2>
+    <span class="status"><span class="dot" aria-hidden="true"></span>Technical development complete &middot; In NHS assurance</span>
+    <p class="lead">The Xhuma software is technically complete. The team is now taking the service through the NHS supplier conformance assessment (SCAL) process and full clinical and information-governance assurance:</p>
+    <ul class="checks">
+      <li>Clinical risk management <span>— DCB0129 &amp; DCB0160</span></li>
+      <li>Data Security &amp; Protection <span>— DSP Toolkit</span></li>
+      <li>Information governance <span>— IG</span></li>
+      <li>Cyber security <span>— OWASP testing &amp; assurance</span></li>
+    </ul>
+  </section>
+
+  <section id="about" class="wrap">
+    <p class="eyebrow">Who's behind it</p>
+    <h2>Made at UCLH's Digital Innovation Hub</h2>
+    <p class="lead">Xhuma was developed by the Digital Innovation Hub at University College London Hospitals, with support from Epic and the NHS England Digital Medicines team. The service is hosted by UCLH.</p>
+    <div class="partners">
+      <span class="partner">UCLH Digital Innovation Hub</span>
+      <span class="partner">Epic</span>
+      <span class="partner">NHS England Digital Medicines</span>
     </div>
   </section>
 
   <section id="contact" class="wrap">
     <div class="contact">
-      <h2>Talk to us about your integration</h2>
-      <p>Whether you run Epic Care Everywhere or another IHE-compliant system, we'd be glad to show you how Xhuma fits.</p>
-      <a class="btn btn-primary" href="mailto:hello@xhuma.co.uk">hello@xhuma.co.uk</a>
+      <h2>Bring Xhuma to your trust</h2>
+      <p>Xhuma is hosted by UCLH, and we plan to offer it to UK NHS trusts running Epic. We're working through the basis on which we can do that — register your interest and we'll keep you posted.</p>
+      <a class="btn btn-primary" href="mailto:hello@xhuma.co.uk?subject=Register%20interest%20in%20Xhuma">Register your interest</a>
+      <p class="alt">Not on Epic? If your EHR uses the same IHE profiles (ITI-55 / 38 / 39) and consumes CCDA, we can likely help — <a href="mailto:hello@xhuma.co.uk?subject=Xhuma%20enquiry">get in touch</a>.</p>
     </div>
   </section>
 </main>
 
 <footer>
   <div class="wrap foot">
-    <span>&copy; 2026 Xhuma &middot; United Kingdom</span>
+    <span>&copy; 2026 Xhuma &middot; A UCLH Digital Innovation Hub project</span>
     <span>Clinical interoperability for the NHS</span>
   </div>
 </footer>
