@@ -11,6 +11,8 @@
 <meta property="og:description" content="Connecting GP Connect to IHE document exchange for secure, standards-based access to NHS primary care records.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://xhuma.co.uk">
+<meta name="theme-color" content="#005eb8">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
   :root{
     --nhs-blue:#005eb8; --nhs-dark:#003087; --ink:#0b1f33; --muted:#4a5b6d;
@@ -37,7 +39,8 @@
   header{position:sticky;top:0;background:color-mix(in srgb,var(--page) 88%,transparent);
     backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--line);z-index:10}
   .nav{display:flex;align-items:center;justify-content:space-between;height:64px}
-  .brand{font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+  .brand{display:inline-flex;align-items:center;gap:9px;font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+  .brand svg{width:26px;height:26px;border-radius:7px;flex:none}
   .brand b{color:var(--nhs-blue)}
   .nav-links{display:flex;gap:26px;font-size:15px;color:var(--muted)}
   .nav-links a{color:var(--muted)} .nav-links a:hover{color:var(--nhs-blue)}
@@ -82,7 +85,7 @@
 <body>
 <header>
   <div class="wrap nav">
-    <span class="brand">Xhu<b>ma</b></span>
+    <span class="brand"><svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect width="32" height="32" rx="7.5" fill="#005eb8"/><path d="M11 11l10 10M21 11L11 21" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round"/></svg>Xhu<b>ma</b></span>
     <nav class="nav-links">
       <a href="#product">Product</a>
       <a href="#how">How it works</a>
