@@ -1,0 +1,180 @@
+<!doctype html>
+<!-- xhuma.co.uk landing page. PLACEHOLDERS to confirm: contact email (hello@xhuma.co.uk),
+     demo/contact links, and any company registration details in the footer. -->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Xhuma — NHS primary care records, in your EHR</title>
+<meta name="description" content="Xhuma connects NHS GP Connect to IHE document exchange, so EHRs like Epic Care Everywhere can retrieve NHS primary care records as standards-based CCDA documents — securely.">
+<meta property="og:title" content="Xhuma — NHS primary care records, in your EHR">
+<meta property="og:description" content="Connecting GP Connect to IHE document exchange for secure, standards-based access to NHS primary care records.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://xhuma.co.uk">
+<style>
+  :root{
+    --nhs-blue:#005eb8; --nhs-dark:#003087; --ink:#0b1f33; --muted:#4a5b6d;
+    --line:#e3e9ef; --surface:#ffffff; --page:#f7f9fb; --accent-bg:#e8f1fb;
+    --max:1080px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --nhs-blue:#4d97e0; --nhs-dark:#7fb6ec; --ink:#eaf1f8; --muted:#a7b6c6;
+      --line:#22303f; --surface:#101b26; --page:#0a1119; --accent-bg:#14283c; }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--page);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--nhs-blue);text-decoration:none}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+  .btn{display:inline-block;font-weight:600;font-size:15px;padding:12px 22px;border-radius:8px;border:1px solid transparent}
+  .btn-primary{background:var(--nhs-blue);color:#fff}
+  .btn-primary:hover{background:var(--nhs-dark)}
+  .btn-ghost{border-color:var(--line);color:var(--ink)}
+  .btn-ghost:hover{border-color:var(--nhs-blue);color:var(--nhs-blue)}
+
+  header{position:sticky;top:0;background:color-mix(in srgb,var(--page) 88%,transparent);
+    backdrop-filter:saturate(180%) blur(8px);border-bottom:1px solid var(--line);z-index:10}
+  .nav{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .brand{font-size:22px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+  .brand b{color:var(--nhs-blue)}
+  .nav-links{display:flex;gap:26px;font-size:15px;color:var(--muted)}
+  .nav-links a{color:var(--muted)} .nav-links a:hover{color:var(--nhs-blue)}
+  @media(max-width:680px){.nav-links{display:none}}
+
+  .hero{text-align:center;padding:84px 0 64px}
+  .pill{display:inline-flex;align-items:center;gap:7px;background:var(--accent-bg);color:var(--nhs-dark);
+    font-size:13px;font-weight:600;padding:6px 14px;border-radius:999px;margin-bottom:22px}
+  .hero h1{font-size:clamp(30px,5vw,46px);line-height:1.12;letter-spacing:-.025em;margin:0 auto 18px;max-width:16ch}
+  .hero p{font-size:clamp(16px,2.4vw,19px);color:var(--muted);max-width:54ch;margin:0 auto 30px}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+
+  section{padding:56px 0}
+  .eyebrow{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--nhs-blue);margin:0 0 10px}
+  h2{font-size:clamp(24px,3.4vw,32px);letter-spacing:-.02em;margin:0 0 8px}
+  .lead{color:var(--muted);max-width:60ch;margin:0 0 34px}
+
+  .grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:26px}
+  .ico{width:44px;height:44px;border-radius:10px;background:var(--accent-bg);color:var(--nhs-blue);
+    display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:16px}
+  .card h3{font-size:18px;margin:0 0 8px} .card p{margin:0;color:var(--muted);font-size:15px}
+
+  .steps{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));counter-reset:s}
+  .step{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:24px;position:relative}
+  .step:before{counter-increment:s;content:counter(s);display:flex;align-items:center;justify-content:center;
+    width:30px;height:30px;border-radius:50%;background:var(--nhs-blue);color:#fff;font-weight:700;font-size:15px;margin-bottom:14px}
+  .step h3{font-size:16px;margin:0 0 6px} .step p{margin:0;color:var(--muted);font-size:14px}
+
+  .standards{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:28px;text-align:center}
+  .standards .row{display:flex;flex-wrap:wrap;gap:10px 18px;justify-content:center;margin-top:14px}
+  .tag{font-size:14px;color:var(--ink);background:var(--page);border:1px solid var(--line);border-radius:8px;padding:7px 13px}
+
+  .contact{background:var(--accent-bg);border-radius:18px;padding:46px 28px;text-align:center;margin:10px 0 60px}
+  .contact h2{margin-bottom:10px} .contact p{color:var(--muted);margin:0 auto 22px;max-width:48ch}
+
+  footer{border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px}
+  .foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap nav">
+    <span class="brand">Xhu<b>ma</b></span>
+    <nav class="nav-links">
+      <a href="#product">Product</a>
+      <a href="#how">How it works</a>
+      <a href="#security">Security</a>
+      <a href="#contact">Contact</a>
+    </nav>
+    <a class="btn btn-primary" href="#contact" style="padding:9px 16px;font-size:14px">Request a demo</a>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap" aria-labelledby="h1">
+    <span class="pill">NHS interoperability</span>
+    <h1 id="h1">Bring NHS GP records into your EHR</h1>
+    <p>Xhuma connects GP Connect to IHE document exchange, so clinicians using Epic Care Everywhere and other standards-based systems can retrieve NHS primary care records as CCDA documents.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#contact">Request a demo</a>
+      <a class="btn btn-ghost" href="#how">How it works</a>
+    </div>
+  </section>
+
+  <section id="product" class="wrap">
+    <p class="eyebrow">What Xhuma does</p>
+    <h2>A bridge between NHS primary care and your record system</h2>
+    <p class="lead">Xhuma sits between your EHR's document-exchange layer and NHS services, translating between standards so patient records flow without bespoke integration.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="ico" aria-hidden="true">&#9889;</div>
+        <h3>GP Connect integration</h3>
+        <p>Retrieves structured patient records from NHS primary care via GP Connect, authenticated against NHS Spine.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true">&#128196;</div>
+        <h3>Standards-based conversion</h3>
+        <p>Transforms FHIR structured records into Consolidated CDA (CCDA), implementing IHE ITI profiles your EHR already speaks.</p>
+      </div>
+      <div class="card">
+        <div class="ico" aria-hidden="true">&#128274;</div>
+        <h3>Secure by design</h3>
+        <p>Mutual TLS on every hop, full audit logging, and data handling built for personal health information.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="how" class="wrap">
+    <p class="eyebrow">How it works</p>
+    <h2>From EHR query to NHS record in three steps</h2>
+    <p class="lead">No new clinician workflow — the record arrives through the document-exchange your EHR already uses.</p>
+    <div class="steps">
+      <div class="step">
+        <h3>The EHR requests records</h3>
+        <p>A clinician's system queries for a patient via IHE / Care Everywhere, as it would any other community.</p>
+      </div>
+      <div class="step">
+        <h3>Xhuma fetches and converts</h3>
+        <p>Xhuma queries NHS GP Connect, resolves the patient via PDS/SDS, and converts the structured record to CCDA.</p>
+      </div>
+      <div class="step">
+        <h3>The record is returned</h3>
+        <p>A standards-based CCDA document is delivered back to the EHR, ready to view in the patient's chart.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="security" class="wrap">
+    <div class="standards">
+      <p class="eyebrow" style="margin-bottom:0">Built on open standards</p>
+      <div class="row">
+        <span class="tag">GP Connect</span>
+        <span class="tag">IHE XCA (ITI-38 / ITI-39)</span>
+        <span class="tag">PDS</span>
+        <span class="tag">SDS</span>
+        <span class="tag">Epic Care Everywhere</span>
+        <span class="tag">HL7 CDA / CCDA</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="contact" class="wrap">
+    <div class="contact">
+      <h2>Talk to us about your integration</h2>
+      <p>Whether you run Epic Care Everywhere or another IHE-compliant system, we'd be glad to show you how Xhuma fits.</p>
+      <a class="btn btn-primary" href="mailto:hello@xhuma.co.uk">hello@xhuma.co.uk</a>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>&copy; 2026 Xhuma &middot; United Kingdom</span>
+    <span>Clinical interoperability for the NHS</span>
+  </div>
+</footer>
+</body>
+</html>
