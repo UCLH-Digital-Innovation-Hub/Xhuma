@@ -96,6 +96,16 @@
   .partners{display:flex;flex-wrap:wrap;gap:10px 14px;margin-top:18px}
   .partner{font-size:15px;font-weight:600;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 16px}
 
+  .datagrid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:8px}
+  .datagrid .card h3{font-size:16px;margin:0 0 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .mini{font-size:12px;font-weight:600;color:var(--nhs-dark);background:var(--accent-bg);padding:3px 10px;border-radius:999px}
+  .ilist,.xlist{list-style:none;padding:0;margin:0;display:grid;gap:11px}
+  .ilist li,.xlist li{position:relative;padding-left:28px;font-size:15px;color:var(--ink)}
+  .ilist li:before{content:"\2713";position:absolute;left:0;top:0;color:var(--green);font-weight:800}
+  .ilist li span{color:var(--muted);font-size:14px}
+  .xlist li:before{content:"\00d7";position:absolute;left:1px;top:-2px;color:var(--muted);font-weight:800;font-size:19px;line-height:1}
+  .privacy{margin:16px 0 0;padding-top:14px;border-top:1px solid var(--line);color:var(--muted);font-size:14px}
+
   .contact{background:var(--accent-bg);border-radius:18px;padding:46px 28px;text-align:center;margin:10px 0 24px}
   .contact h2{margin-bottom:10px} .contact p{color:var(--muted);margin:0 auto 22px;max-width:52ch}
   .contact .alt{font-size:15px;margin-top:18px;margin-bottom:0}
@@ -156,6 +166,31 @@
         <div class="ico" aria-hidden="true">&#9989;</div>
         <h3>View and reconcile in Epic</h3>
         <p>Medication history, diagnoses, allergies, immunisations and results arrive in Epic for the clinician to review and reconcile into the patient's chart.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="data" class="wrap">
+    <p class="eyebrow">What you receive</p>
+    <h2>The information that comes across</h2>
+    <p class="lead">Xhuma brings discrete, structured items from the GP record into Epic for the clinician to review and reconcile — never free-text notes.</p>
+    <div class="datagrid">
+      <div class="card">
+        <h3>Included <span class="mini">pending assurance</span></h3>
+        <ul class="ilist">
+          <li>Medications <span>— the full medication list from the GP system</span></li>
+          <li>Active diagnoses</li>
+          <li>Active allergies</li>
+          <li>Immunisation history</li>
+          <li>Discrete lab test data</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Not included</h3>
+        <ul class="xlist">
+          <li>GP consultation notes &amp; free text</li>
+        </ul>
+        <p class="privacy">Confidentiality and sensitivity flags in the GP record are always respected.</p>
       </div>
     </div>
   </section>
