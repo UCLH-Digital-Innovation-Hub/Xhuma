@@ -129,3 +129,22 @@ variable "require_mtls" {
   type        = string
   default     = "false"
 }
+
+variable "external_relay_url" {
+  description = "The URL of the external Shared Relay Server"
+  type        = string
+  default     = ""
+}
+
+variable "external_relay_client_id" {
+  description = "The Client ID to route through on the Shared Relay Server"
+  type        = string
+  default     = "client1"
+}
+
+variable "external_relay_token" {
+  description = "The Bearer token to authenticate to the Shared Relay Server"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

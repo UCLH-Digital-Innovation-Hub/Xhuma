@@ -202,7 +202,10 @@ resource "azurerm_linux_web_app" "app" {
     "REDIS_SSL"      = "true"
 
     # Relay Configuration
-    "USE_RELAY" = "1" # Enabled by default for this deployment
+    "USE_RELAY"                = "1" # Enabled by default for this deployment
+    "EXTERNAL_RELAY_URL"       = var.external_relay_url
+    "EXTERNAL_RELAY_CLIENT_ID" = var.external_relay_client_id
+    "EXTERNAL_RELAY_TOKEN"     = var.external_relay_token
 
     # Postgres Config
     "POSTGRES_HOST"     = azurerm_postgresql_flexible_server.postgres.fqdn
