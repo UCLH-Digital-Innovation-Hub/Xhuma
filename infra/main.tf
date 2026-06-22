@@ -251,7 +251,7 @@ resource "azurerm_linux_web_app" "app" {
     # Business Logic
     "ORG_CODE"  = var.org_code
     "ENV"       = var.env
-    "VERSION"   = var.version
+    "VERSION"   = var.app_version
     "DEVICE_ID" = var.device_id
     "ORG_ASID"  = var.org_asid
 
