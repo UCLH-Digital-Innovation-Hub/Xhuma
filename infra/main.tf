@@ -199,8 +199,8 @@ resource "azurerm_linux_web_app" "app" {
     container_registry_use_managed_identity = false
 
     # Enable WebSockets for the Relay
-    websockets_enabled = true
-    use_32_bit_worker  = true # Typically false for production but B1 is small
+    websockets_enabled     = true
+    use_32_bit_worker      = true # Typically false for production but B1 is small
     vnet_route_all_enabled = true
   }
 
