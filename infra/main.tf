@@ -196,13 +196,12 @@ resource "azurerm_linux_web_app" "app" {
       docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[1] : "latest"
     }
 
-
     container_registry_use_managed_identity = false
 
     # Enable WebSockets for the Relay
-    # Enable WebSockets for the Relay
     websockets_enabled = true
     use_32_bit_worker  = true # Typically false for production but B1 is small
+    vnet_route_all_enabled = true
   }
 
   # Enable mTLS: Optional allows public endpoints/health checks while passing the cert to the app
@@ -219,6 +218,7 @@ resource "azurerm_linux_web_app" "app" {
     "API_KEY"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=api-key)"
     "JWTKEY"            = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=jwtkey)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
+    "EPIC_CA_CERT"      = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.local_kv.name};SecretName=epic-ca-cert)"
 
     "REGISTRY_ID"    = var.registry_id
     "REDIS_HOST"     = azurerm_redis_cache.redis.hostname

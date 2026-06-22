@@ -179,4 +179,3 @@ variable "external_relay_client_id" {
   type        = string
   default     = "client1"
 }
-
