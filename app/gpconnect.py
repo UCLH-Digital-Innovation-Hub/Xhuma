@@ -366,13 +366,17 @@ async def gpconnect(
         # Fix compatibility with standalone Relay Server RelayRequest schema
         relay_req = {
             "request_id": str(uuid4()),
-            "method": "POST", 
-            "url": url, 
-            "headers": headers, 
-            "body": json.dumps(body) if isinstance(body, dict) else str(body)
+            "method": "POST",
+            "url": url,
+            "headers": headers,
+            "body": json.dumps(body) if isinstance(body, dict) else str(body),
         }
 
-        from .settings import EXTERNAL_RELAY_URL, EXTERNAL_RELAY_CLIENT_ID, EXTERNAL_RELAY_TOKEN
+        from .settings import (
+            EXTERNAL_RELAY_URL,
+            EXTERNAL_RELAY_CLIENT_ID,
+            EXTERNAL_RELAY_TOKEN,
+        )
 
         if EXTERNAL_RELAY_URL:
             req_headers = {}
@@ -380,11 +384,17 @@ async def gpconnect(
                 req_headers["Authorization"] = f"Bearer {EXTERNAL_RELAY_TOKEN}"
 
             async with httpx.AsyncClient(timeout=httpx.Timeout(75.0)) as client:
-                relay_target = f"{EXTERNAL_RELAY_URL.rstrip('/')}/send/{EXTERNAL_RELAY_CLIENT_ID}"
+                relay_target = (
+                    f"{EXTERNAL_RELAY_URL.rstrip('/')}/send/{EXTERNAL_RELAY_CLIENT_ID}"
+                )
                 try:
-                    ext_resp = await client.post(relay_target, headers=req_headers, json=relay_req)
+                    ext_resp = await client.post(
+                        relay_target, headers=req_headers, json=relay_req
+                    )
                     if ext_resp.status_code != 200:
-                        raise HTTPException(502, f"External relay error: {ext_resp.text}")
+                        raise HTTPException(
+                            502, f"External relay error: {ext_resp.text}"
+                        )
                     resp = ext_resp.json()
                 except Exception as e:
                     raise HTTPException(502, f"Failed to call external relay: {e}")
