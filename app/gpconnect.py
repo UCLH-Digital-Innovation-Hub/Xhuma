@@ -324,6 +324,13 @@ async def gpconnect(
         "accept": "application/fhir+json",
         "Content-Type": "application/fhir+json",
     }
+    
+    # Inject OpenTelemetry traceparent context into headers for Relay propagation
+    try:
+        from opentelemetry.propagate import inject
+        inject(headers)
+    except ImportError:
+        pass
     body = {
         "resourceType": "Parameters",
         "parameter": [
