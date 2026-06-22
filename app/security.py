@@ -35,7 +35,11 @@ def fix_pem_formatting(pem_string: str) -> str:
         )
         if match:
             header = match.group(1)
-            body = match.group(2).replace(" ", "\n").strip()
+            # Remove all whitespace from the base64 body
+            raw_body = re.sub(r"\s+", "", match.group(2))
+            # Chunk the body into 64-character lines
+            body_lines = [raw_body[i:i+64] for i in range(0, len(raw_body), 64)]
+            body = "\n".join(body_lines)
             footer = match.group(3)
             return f"{header}\n{body}\n{footer}"
     return pem_string
