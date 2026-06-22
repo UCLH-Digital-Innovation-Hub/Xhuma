@@ -180,9 +180,3 @@ variable "external_relay_client_id" {
   default     = "client1"
 }
 
-variable "external_relay_token" {
-  description = "The Bearer token to authenticate to the Shared Relay Server"
-  type        = string
-  sensitive   = true
-  default     = ""
-}

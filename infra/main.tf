@@ -227,11 +227,14 @@ resource "azurerm_linux_web_app" "app" {
     "REDIS_SSL"      = "true"
 
     # Relay Configuration
-    "USE_RELAY"                = "1" # Enabled by default for this deployment
-    "EXTERNAL_RELAY_URL"       = var.external_relay_url
-    "EXTERNAL_RELAY_CLIENT_ID" = var.external_relay_client_id
-    "EXTERNAL_RELAY_TOKEN"     = var.external_relay_token
-    "RELAY_CLIENT_CERT_HEADER" = "X-ARR-ClientCert" # Required for Azure App Service mTLS
+    "USE_RELAY"                      = "1" # Enabled by default for this deployment
+    "EXTERNAL_RELAY_URL"             = var.external_relay_url
+    "EXTERNAL_RELAY_CLIENT_ID"       = var.external_relay_client_id
+    "RELAY_CLIENT_CERT_HEADER"       = "X-ARR-ClientCert" # Required for Azure App Service mTLS
+    
+    # Secure Key Vault References for Relay
+    "EXTERNAL_RELAY_TOKEN"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=external-relay-token)"
+    "RELAY_MTLS_ALLOWED_CERT_SHA256" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=relay-mtls-allowed-cert-sha256)"
 
     # Postgres Config
     "POSTGRES_HOST"     = azurerm_postgresql_flexible_server.postgres.fqdn
