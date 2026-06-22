@@ -26,7 +26,7 @@ env:
   TF_VAR_docker_registry_username: "${{ github.actor }}"
   # Secrets for Postgres
   TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
-  
+
   # Secrets for Shared Key Vault
   TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
   TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
