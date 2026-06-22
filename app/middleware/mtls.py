@@ -23,6 +23,7 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
 
     try:
         from app.security import fix_pem_formatting
+
         epic_ca_str = fix_pem_formatting(epic_ca_pem).encode("utf-8")
         ca_cert = x509.load_pem_x509_certificate(epic_ca_str, default_backend())
     except Exception:
@@ -104,8 +105,10 @@ class MTLSMiddleware(BaseHTTPMiddleware):
         # Validate Epic CA for all other protected endpoints (e.g., /soap, /pds)
         if not _verify_epic_cert(client_cert):
             return JSONResponse(
-                status_code=403, content={"detail": "Invalid Client Certificate. Epic CA Verification Failed."}
+                status_code=403,
+                content={
+                    "detail": "Invalid Client Certificate. Epic CA Verification Failed."
+                },
             )
 
         return await call_next(request)
-
