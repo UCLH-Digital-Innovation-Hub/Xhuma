@@ -1,18 +1,17 @@
 [project]
 name = "Xhuma"
 version = "0.9"
-requires-python = "~=3.13"
+requires-python = ">=3.13"
 dependencies = [
-    "fastapi",
-    "pyjwt",
+    "fastapi>=0.138",
+    "pyjwt>=2.13.0",
     "httpx",
     "xmltodict",
     "uvicorn[standard]",
     "fhirclient~=3.0.0",
     "redis",
-    "cryptography",
+    "cryptography>=48.0.1",
     "jwcrypto",
-    "celery",
     "pydantic",
     "opentelemetry-api",
     "opentelemetry-sdk",
@@ -24,13 +23,11 @@ dependencies = [
     "asyncpg",
     "sqlalchemy",
     "grpcio",
-    "python-multipart>=0.0.18",
+    "python-multipart>=0.0.31",
     "sqlmodel",
     "alembic",
-    "mako>=1.3.9",
     "psycopg[binary]",
     "azure-monitor-opentelemetry>=1.8.7",
-    "greenlet",
 ]
 
 [tool.isort]
@@ -58,3 +55,10 @@ default-groups = "all"
 [[tool.uv.index]]
 name = "pypi"
 url = "https://pypi.python.org/simple"
+
+[tool.creosote]
+paths=[
+    "app",
+    "alembic"]
+deps-file="pyproject.toml"
+sections=["project.dependencies"]
