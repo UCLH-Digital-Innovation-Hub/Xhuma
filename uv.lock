@@ -1,6 +1,6 @@
 version = 1
 revision = 3
-requires-python = ">=3.13, <4"
+requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version < '3.14'",
@@ -562,7 +562,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.136.1"
+version = "0.138.0"
 source = { registry = "https://pypi.python.org/simple" }
 dependencies = [
     { name = "annotated-doc" },
@@ -571,9 +571,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5d/45/c130091c2dfa061bbfe3150f2a5091ef1adf149f2a8d2ae769ecaf6e99a2/fastapi-0.136.1.tar.gz", hash = "sha256:7af665ad7acfa0a3baf8983d393b6b471b9da10ede59c60045f49fbc89a0fa7f", size = 397448, upload-time = "2026-04-23T16:49:44.046Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5b/58/ff455d9fe47c60abadb34b9e05a304b1f05f5ab8000ac01565156b6f5e43/fastapi-0.138.0.tar.gz", hash = "sha256:d445a4877636ad191e7053e08c9bf98cb921a6756776848400bb773d1740c061", size = 419240, upload-time = "2026-06-20T01:18:05.259Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/ff/2e4eca3ade2c22fe1dea7043b8ee9dabe47753349eb1b56a202de8af6349/fastapi-0.136.1-py3-none-any.whl", hash = "sha256:a6e9d7eeada96c93a4d69cb03836b44fa34e2854accb7244a1ece36cd4781c3f", size = 117683, upload-time = "2026-04-23T16:49:42.437Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/ff/8496d9847a5fedae775eb49460722d3efaa80487854273e9647ae876218c/fastapi-0.138.0-py3-none-any.whl", hash = "sha256:b6f54fd1bd72c80b0f899f172c61a600f6f7af9b43d4d772a018f35624048cb0", size = 126779, upload-time = "2026-06-20T01:18:03.483Z" },
 ]
 
 [[package]]
@@ -1551,11 +1551,11 @@ wheels = [
 
 [[package]]
 name = "pyjwt"
-version = "2.12.1"
+version = "2.13.0"
 source = { registry = "https://pypi.python.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c2/27/a3b6e5bf6ff856d2509292e95c8f57f0df7017cf5394921fc4e4ef40308a/pyjwt-2.12.1.tar.gz", hash = "sha256:c74a7a2adf861c04d002db713dd85f84beb242228e671280bf709d765b03672b", size = 102564, upload-time = "2026-03-13T19:27:37.25Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/81/58d0ac84e1ef3a3843791d6954d94c0b33d526c75eeb1efbce9d0a4c4077/pyjwt-2.13.0.tar.gz", hash = "sha256:41571c89ca91598c79e8ef18a2d07367d4810fbbd6f637794879baf1b7703423", size = 107515, upload-time = "2026-05-21T19:54:36.618Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/7a/8dd906bd22e79e47397a61742927f6747fe93242ef86645ee9092e610244/pyjwt-2.12.1-py3-none-any.whl", hash = "sha256:28ca37c070cad8ba8cd9790cd940535d40274d22f80ab87f3ac6a713e6e8454c", size = 29726, upload-time = "2026-03-13T19:27:35.677Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/5e/ecf12fdb62546d64385c158514e9b2b671f7832108ef2ecd2020ce0af2d1/pyjwt-2.13.0-py3-none-any.whl", hash = "sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728", size = 31274, upload-time = "2026-05-21T19:54:35.362Z" },
 ]
 
 [package.optional-dependencies]
@@ -2166,7 +2166,7 @@ requires-dist = [
     { name = "azure-monitor-opentelemetry", specifier = ">=1.8.7" },
     { name = "celery" },
     { name = "cryptography" },
-    { name = "fastapi" },
+    { name = "fastapi", specifier = ">=0.138" },
     { name = "fhirclient", specifier = "~=3.0.0" },
     { name = "greenlet" },
     { name = "grpcio" },
@@ -2182,7 +2182,7 @@ requires-dist = [
     { name = "opentelemetry-sdk" },
     { name = "psycopg", extras = ["binary"] },
     { name = "pydantic" },
-    { name = "pyjwt" },
+    { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "python-multipart", specifier = ">=0.0.18" },
     { name = "redis" },
     { name = "sqlalchemy" },

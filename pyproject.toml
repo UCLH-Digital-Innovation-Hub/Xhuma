@@ -1,10 +1,10 @@
 [project]
 name = "Xhuma"
 version = "0.9"
-requires-python = "~=3.13"
+requires-python = ">=3.13"
 dependencies = [
-    "fastapi",
-    "pyjwt",
+    "fastapi>=0.138",
+    "pyjwt>=2.13.0",
     "httpx",
     "xmltodict",
     "uvicorn[standard]",
