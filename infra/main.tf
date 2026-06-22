@@ -33,6 +33,7 @@ resource "azurerm_subnet" "app_subnet" {
   resource_group_name  = data.azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = ["10.1.1.0/24"]
+  service_endpoints    = ["Microsoft.KeyVault"]
   delegation {
     name = "app-delegation"
     service_delegation {
@@ -265,6 +266,12 @@ resource "azurerm_linux_web_app" "app" {
     "CORS_ORIGINS"  = var.cors_origins
     "ALLOWED_HOSTS" = var.allowed_hosts
     "REQUIRE_MTLS"  = var.require_mtls
+  }
+
+  lifecycle {
+    ignore_changes = [
+      app_settings["WEBSITE_VNET_ROUTE_ALL"]
+    ]
   }
 }
 
