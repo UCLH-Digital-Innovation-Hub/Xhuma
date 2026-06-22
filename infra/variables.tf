@@ -64,7 +64,7 @@ variable "shared_key_vault_name" {
   type        = string
 }
 
-variable "version" {
+variable "app_version" {
   type    = string
   default = "0.9"
 }
