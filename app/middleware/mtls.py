@@ -83,6 +83,7 @@ class MTLSMiddleware(BaseHTTPMiddleware):
             "/health",
             "/_dev/audit",
             "/favicon.ico",
+            "/robots",
         ]
 
         is_public = (request.url.path == "/") or any(
