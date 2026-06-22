@@ -54,8 +54,8 @@ def log_info(req_body, res_body, client_ip, method, url, status_code):
         status_code: The response status code
     """
     logging.info(f"Client IP: {client_ip}, Method: {method}, URL: {url}")
-    logging.info(f"Request Body: {req_body}")
-    logging.info(f"Response Body: {res_body}")
+    logging.info("Request Body: [REDACTED FOR PHI SECURITY]")
+    logging.info("Response Body: [REDACTED FOR PHI SECURITY]")
     logging.info(f"Status Code: {status_code}")
 
 
@@ -76,13 +76,12 @@ class LoggingRoute(APIRoute):
 
         async def custom_route_handler(request: Request) -> Response:
             logging.info(f"Handling request for {request.url}")
-            req_body = await request.body()
             client_ip = request.headers.get("x-forwarded-for") or request.client.host
-            logging.info(f"Time: {datetime.now()}")
             method = request.method
+            logging.info(f"Time: {datetime.now()}")
             logging.info(f"Method: {method}")
             logging.info(f"Client IP: {client_ip}")
-            logging.info(f"Request Body: {req_body}")
+            logging.info("Request Body: [REDACTED FOR PHI SECURITY]")
             return await original_route_handler(request)
 
         return custom_route_handler
