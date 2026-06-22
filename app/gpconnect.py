@@ -363,12 +363,46 @@ async def gpconnect(
 
     async def _relay_call(url: str, headers: dict, body: dict) -> httpx.Response:
         """Send via relay and return an httpx.Response with status_code and text."""
-        hub = getattr(request.app.state, "relay_hub", None)
-        if not hub:
-            raise HTTPException(404, "Relay not available in this process")
+        # Fix compatibility with standalone Relay Server RelayRequest schema
+        relay_req = {
+            "request_id": str(uuid4()),
+            "method": "POST",
+            "url": url,
+            "headers": headers,
+            "body": json.dumps(body) if isinstance(body, dict) else str(body),
+        }
 
-        relay_req = {"method": "POST", "url": url, "headers": headers, "body": body}
-        resp: dict = await hub.send(relay_req)
+        from .settings import (
+            EXTERNAL_RELAY_URL,
+            EXTERNAL_RELAY_CLIENT_ID,
+            EXTERNAL_RELAY_TOKEN,
+        )
+
+        if EXTERNAL_RELAY_URL:
+            req_headers = {}
+            if EXTERNAL_RELAY_TOKEN:
+                req_headers["Authorization"] = f"Bearer {EXTERNAL_RELAY_TOKEN}"
+
+            async with httpx.AsyncClient(timeout=httpx.Timeout(75.0)) as client:
+                relay_target = (
+                    f"{EXTERNAL_RELAY_URL.rstrip('/')}/send/{EXTERNAL_RELAY_CLIENT_ID}"
+                )
+                try:
+                    ext_resp = await client.post(
+                        relay_target, headers=req_headers, json=relay_req
+                    )
+                    if ext_resp.status_code != 200:
+                        raise HTTPException(
+                            502, f"External relay error: {ext_resp.text}"
+                        )
+                    resp = ext_resp.json()
+                except Exception as e:
+                    raise HTTPException(502, f"Failed to call external relay: {e}")
+        else:
+            hub = getattr(request.app.state, "relay_hub", None)
+            if not hub:
+                raise HTTPException(404, "Relay not available in this process")
+            resp: dict = await hub.send(relay_req)
 
         status_code = int(resp.get("status_code", 502))
         body_raw = resp.get("body")
