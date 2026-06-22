@@ -116,12 +116,32 @@ REGISTRY_ID=your_registry_id
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
+
+# Relay configuration
+USE_RELAY=false
+RELAY_REQUIRE_MTLS=true
+RELAY_CLIENT_CERT_HEADER=X-Relay-ClientCert
+# Optional certificate pinning for dedicated relay cert(s):
+# RELAY_MTLS_ALLOWED_CERT_SHA256=<sha256_hex>[,<sha256_hex>...]
+
+# Compose-managed nginx
+NGINX_PUBLIC_SERVER_NAME=xhumademo.com
+NGINX_RELAY_SERVER_NAME=relay.xhumademo.com
+NGINX_CERTS_DIR=/etc/letsencrypt
+NGINX_CLIENT_CA_DIR=/etc/ssl/clients
+# Optional if the relay host uses a separate server cert/key pair:
+# NGINX_RELAY_TLS_CERT=/etc/letsencrypt/live/relay.xhumademo.com/fullchain.pem
+# NGINX_RELAY_TLS_KEY=/etc/letsencrypt/live/relay.xhumademo.com/privkey.pem
+# Dedicated relay client CA bundle mounted into nginx:
+# NGINX_RELAY_CLIENT_CA=/etc/nginx/client-ca/relay-client-ca.pem
 ```
 
 4. Deploy with Docker Compose:
 ```bash
 docker-compose up -d
 ```
+
+When using the bundled Nginx proxy, point the public site at `NGINX_PUBLIC_SERVER_NAME` and the relay agent at `NGINX_RELAY_SERVER_NAME`. The relay hostname is terminated separately in Nginx so it can require a dedicated relay client CA at the TLS layer; that is not possible on the same hostname and port with path-based routing alone.
 
 The service will be available at `http://localhost:8000`
 
