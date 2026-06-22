@@ -210,7 +210,6 @@ resource "azurerm_linux_web_app" "app" {
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
-    "WEBSITE_VNET_ROUTE_ALL"              = "1"
     "DOCKER_REGISTRY_SERVER_URL"          = var.docker_registry_url
     "DOCKER_REGISTRY_SERVER_USERNAME"     = var.docker_registry_username
     "DOCKER_REGISTRY_SERVER_PASSWORD"     = var.docker_registry_password
