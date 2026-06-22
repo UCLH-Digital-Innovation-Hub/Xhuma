@@ -24,6 +24,7 @@ from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
 from .gp_connect_config import GP_CONNECT_PARAMETERS
+from .logging import record_application_failure
 
 # from app.metrics.metric_utils import classify_error, now
 
@@ -158,6 +159,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -200,6 +202,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -226,6 +229,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -244,6 +248,7 @@ async def gpconnect(
                 nhsmhsparty = item.get("value")
     except Exception as e:
         msg = f"Unable to parse SDS trace response: {e}"
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -288,6 +293,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -324,10 +330,11 @@ async def gpconnect(
         "accept": "application/fhir+json",
         "Content-Type": "application/fhir+json",
     }
-    
+
     # Inject OpenTelemetry traceparent context into headers for Relay propagation
     try:
         from opentelemetry.propagate import inject
+
         inject(headers)
     except ImportError:
         pass
@@ -462,6 +469,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -521,6 +529,7 @@ async def gpconnect(
         fhir_bundle = bundle.Bundle(scr_bundle)
     except Exception as e:
         msg = f"Failed to parse FHIR Bundle from GP Connect response: {e}"
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -541,6 +550,7 @@ async def gpconnect(
 
     except Exception as e:
         msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
