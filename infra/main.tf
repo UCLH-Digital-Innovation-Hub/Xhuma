@@ -206,6 +206,7 @@ resource "azurerm_linux_web_app" "app" {
     "EXTERNAL_RELAY_URL"       = var.external_relay_url
     "EXTERNAL_RELAY_CLIENT_ID" = var.external_relay_client_id
     "EXTERNAL_RELAY_TOKEN"     = var.external_relay_token
+    "RELAY_CLIENT_CERT_HEADER" = "X-ARR-ClientCert" # Required for Azure App Service mTLS
 
     # Postgres Config
     "POSTGRES_HOST"     = azurerm_postgresql_flexible_server.postgres.fqdn
