@@ -206,6 +206,14 @@ async def root():
     """
 
 
+@app.get("/health")
+async def health_check():
+    """
+    Public health check endpoint.
+    """
+    return {"status": "ok"}
+
+
 @app.get("/demo/{nhsno}")
 async def demo(nhsno: int, request: Request):
     """
