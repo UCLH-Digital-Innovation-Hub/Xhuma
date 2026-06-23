@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import urllib.parse
 import base64
@@ -44,6 +45,9 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
     cert_header = os.getenv("RELAY_CLIENT_CERT_HEADER", "X-Relay-ClientCert")
     cert_value = websocket.headers.get(cert_header)
     if not cert_value:
+        logging.warning(
+            f"Relay mTLS failed: Client certificate required in header: {cert_header}"
+        )
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason=f"Client certificate required in header: {cert_header}",
@@ -51,6 +55,7 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
     cert = _parse_client_cert_from_header(cert_value)
     if cert is None:
+        logging.warning("Relay mTLS failed: Invalid client certificate format")
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Invalid client certificate format",
@@ -62,6 +67,9 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
     fingerprint = cert.fingerprint(hashes.SHA256()).hex()
     if fingerprint not in allowed:
+        logging.warning(
+            f"Relay mTLS failed: Relay client certificate {fingerprint} is not allow-listed"
+        )
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Relay client certificate is not allow-listed",
