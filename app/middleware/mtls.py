@@ -32,15 +32,29 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
         from app.security import fix_pem_formatting
 
         epic_ca_str = fix_pem_formatting(epic_ca_pem).encode("utf-8")
-        ca_cert = x509.load_pem_x509_certificate(epic_ca_str, default_backend())
+        try:
+            ca_certs = x509.load_pem_x509_certificates(epic_ca_str, default_backend())
+        except AttributeError:
+            # Fallback for older cryptography versions
+            ca_certs = [x509.load_pem_x509_certificate(epic_ca_str, default_backend())]
     except Exception:
         # Fallback in case they pasted a base64 DER string instead of PEM
         try:
             der_ca = base64.b64decode(epic_ca_pem)
-            ca_cert = x509.load_der_x509_certificate(der_ca, default_backend())
-        except Exception:
-            print("Warning: Failed to parse EPIC_CA_CERT")
+            ca_certs = [x509.load_der_x509_certificate(der_ca, default_backend())]
+        except Exception as e:
+            print(
+                f"Epic CA Verification: Failed to parse EPIC_CA_CERT. Error: {str(e)}",
+                flush=True,
+            )
             return False
+
+    if not ca_certs:
+        print(
+            "Epic CA Verification: No valid CA certificates found in EPIC_CA_CERT",
+            flush=True,
+        )
+        return False
 
     # Check expiry
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -53,29 +67,40 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
         not_after = client_cert.not_valid_after.replace(tzinfo=datetime.timezone.utc)
 
     if now < not_before or now > not_after:
+        print(
+            "Epic CA Verification: Client certificate is expired or not yet valid",
+            flush=True,
+        )
         return False
 
-    # Verify cryptographic signature
-    public_key = ca_cert.public_key()
-    try:
-        if isinstance(public_key, rsa.RSAPublicKey):
-            public_key.verify(
-                client_cert.signature,
-                client_cert.tbs_certificate_bytes,
-                padding.PKCS1v15(),
-                client_cert.signature_hash_algorithm,
-            )
-        elif isinstance(public_key, ec.EllipticCurvePublicKey):
-            public_key.verify(
-                client_cert.signature,
-                client_cert.tbs_certificate_bytes,
-                ec.ECDSA(client_cert.signature_hash_algorithm),
-            )
-        else:
-            return False
-        return True
-    except Exception:
-        return False
+    # Verify cryptographic signature against any of the CAs in the bundle
+    for ca_cert in ca_certs:
+        public_key = ca_cert.public_key()
+        try:
+            if isinstance(public_key, rsa.RSAPublicKey):
+                public_key.verify(
+                    client_cert.signature,
+                    client_cert.tbs_certificate_bytes,
+                    padding.PKCS1v15(),
+                    client_cert.signature_hash_algorithm,
+                )
+            elif isinstance(public_key, ec.EllipticCurvePublicKey):
+                public_key.verify(
+                    client_cert.signature,
+                    client_cert.tbs_certificate_bytes,
+                    ec.ECDSA(client_cert.signature_hash_algorithm),
+                )
+            else:
+                continue
+            return True  # Successfully verified by this CA!
+        except Exception:
+            continue
+
+    print(
+        "Epic CA Verification: Client cert signature did not match any provided CA",
+        flush=True,
+    )
+    return False
 
 
 class MTLSMiddleware(BaseHTTPMiddleware):
