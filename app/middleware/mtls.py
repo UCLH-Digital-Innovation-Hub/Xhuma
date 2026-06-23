@@ -83,6 +83,7 @@ class MTLSMiddleware(BaseHTTPMiddleware):
             "/health",
             "/_dev/audit",
             "/favicon.ico",
+            "/robots",
         ]
 
         is_public = (request.url.path == "/") or any(
@@ -92,15 +93,16 @@ class MTLSMiddleware(BaseHTTPMiddleware):
         if not require_mtls or is_public:
             return await call_next(request)
 
+        # Bypass all global mTLS checks for Relay connections.
+        # Relay handles its own certificate presence and validation entirely in routes.py
+        if request.url.path.startswith("/relay"):
+            return await call_next(request)
+
         client_cert = request.headers.get("X-ARR-ClientCert")
         if not client_cert:
             return JSONResponse(
                 status_code=403, content={"detail": "Client Certificate Required"}
             )
-
-        # Bypass Epic validation for Relay connections (Relay handles its own validation in routes.py)
-        if request.url.path.startswith("/relay"):
-            return await call_next(request)
 
         # Validate Epic CA for all other protected endpoints (e.g., /soap, /pds)
         if not _verify_epic_cert(client_cert):
