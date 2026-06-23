@@ -235,6 +235,7 @@ resource "azurerm_linux_web_app" "app" {
 
     # Secure Key Vault References for Relay
     "EXTERNAL_RELAY_TOKEN"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=external-relay-token)"
+    "RELAY_WS_TOKEN"                 = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=relay-ws-token)"
     "RELAY_MTLS_ALLOWED_CERT_SHA256" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=relay-mtls-allowed-cert-sha256)"
 
     # Postgres Config
