@@ -1,8 +1,8 @@
 import json
-import logging
 import os
 import urllib.parse
 import base64
+import hmac
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -42,20 +42,38 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
     if not _env_is_true("RELAY_REQUIRE_MTLS", "true"):
         return
 
+    # 1. Token-based auth fallback (for Azure App Service WS limitations)
+    ws_token = os.getenv("RELAY_WS_TOKEN")
+    auth_header = websocket.headers.get("Authorization")
+
+    if ws_token and auth_header and auth_header.startswith("Bearer "):
+        client_token = auth_header[7:]
+        if hmac.compare_digest(client_token.encode("utf-8"), ws_token.encode("utf-8")):
+            return  # Token is valid, allow connection
+        else:
+            print("Relay Auth failed: Invalid Bearer token provided", flush=True)
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Invalid Bearer token provided",
+            )
+
+    # 2. Certificate-based auth (for DigitalOcean/Nginx)
     cert_header = os.getenv("RELAY_CLIENT_CERT_HEADER", "X-Relay-ClientCert")
     cert_value = websocket.headers.get(cert_header)
+
     if not cert_value:
-        logging.warning(
-            f"Relay mTLS failed: Client certificate required in header: {cert_header}"
+        print(
+            f"Relay Auth failed: Client certificate ({cert_header}) or valid Bearer Token required",
+            flush=True,
         )
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
-            reason=f"Client certificate required in header: {cert_header}",
+            reason=f"Client certificate ({cert_header}) or valid Bearer Token required",
         )
 
     cert = _parse_client_cert_from_header(cert_value)
     if cert is None:
-        logging.warning("Relay mTLS failed: Invalid client certificate format")
+        print("Relay mTLS failed: Invalid client certificate format", flush=True)
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Invalid client certificate format",
@@ -67,8 +85,9 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
     fingerprint = cert.fingerprint(hashes.SHA256()).hex()
     if fingerprint not in allowed:
-        logging.warning(
-            f"Relay mTLS failed: Relay client certificate {fingerprint} is not allow-listed"
+        print(
+            f"Relay mTLS failed: Relay client certificate {fingerprint} is not allow-listed",
+            flush=True,
         )
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
