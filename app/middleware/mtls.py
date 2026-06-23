@@ -130,6 +130,14 @@ class MTLSMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/relay"):
             return await call_next(request)
 
+        # Temporary troubleshooting: Allow anonymous GET requests to /SOAP for WSDL probing
+        if request.method == "GET" and request.url.path.startswith("/SOAP"):
+            print(
+                f"MTLS Middleware: Troubleshooting - Allowing anonymous GET request to {request.url.path} (Query: {request.url.query})",
+                flush=True,
+            )
+            return await call_next(request)
+
         client_cert = request.headers.get("X-ARR-ClientCert")
         if not client_cert:
             print(
