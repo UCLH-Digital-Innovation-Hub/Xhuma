@@ -13,11 +13,18 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
     try:
         der_cert = base64.b64decode(client_cert_b64)
         client_cert = x509.load_der_x509_certificate(der_cert, default_backend())
-    except Exception:
+    except Exception as e:
+        print(
+            f"Epic CA Verification: Failed to decode client cert. Error: {str(e)}",
+            flush=True,
+        )
         return False
 
     epic_ca_pem = os.getenv("EPIC_CA_CERT")
     if not epic_ca_pem:
+        print(
+            "Epic CA Verification: EPIC_CA_CERT env var is missing or empty", flush=True
+        )
         # Secure default: If we enforce mTLS but have no CA configured, reject.
         return False
 
@@ -100,12 +107,20 @@ class MTLSMiddleware(BaseHTTPMiddleware):
 
         client_cert = request.headers.get("X-ARR-ClientCert")
         if not client_cert:
+            print(
+                f"MTLS Middleware: Blocked request to {request.url.path} because X-ARR-ClientCert header is missing",
+                flush=True,
+            )
             return JSONResponse(
                 status_code=403, content={"detail": "Client Certificate Required"}
             )
 
         # Validate Epic CA for all other protected endpoints (e.g., /soap, /pds)
         if not _verify_epic_cert(client_cert):
+            print(
+                f"MTLS Middleware: Blocked request to {request.url.path} because Epic CA Verification Failed",
+                flush=True,
+            )
             return JSONResponse(
                 status_code=403,
                 content={
