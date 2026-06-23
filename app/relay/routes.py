@@ -78,9 +78,14 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
 @router.websocket("/ws/{client_id}")
 async def relay_ws(websocket: WebSocket, client_id: str):
-    _enforce_relay_mtls(websocket)
-    hub = websocket.app.state.relay_hub
     await websocket.accept()
+    try:
+        _enforce_relay_mtls(websocket)
+    except WebSocketException as e:
+        await websocket.close(code=e.code, reason=e.reason)
+        return
+
+    hub = websocket.app.state.relay_hub
     await hub.register(websocket)
     try:
         while True:
