@@ -131,7 +131,7 @@ class MTLSMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Temporary troubleshooting: Allow anonymous GET requests to /SOAP for WSDL probing
-        if request.method == "GET" and request.url.path.startswith("/SOAP"):
+        if request.method == "GET" and request.url.path.lower().startswith("/soap"):
             print(
                 f"MTLS Middleware: Troubleshooting - Allowing anonymous GET request to {request.url.path} (Query: {request.url.query})",
                 flush=True,
