@@ -132,6 +132,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+    FastAPIInstrumentor.instrument_app(app)
+
+
 # register soap error handler
 soap.register_handlers(app)
 
