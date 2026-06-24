@@ -192,7 +192,7 @@ async def iti55(request: Request):
             )
             return Response(content=data, media_type="application/soap+xml")
 
-        patient = await lookup_patient(nhsno)
+        patient = await lookup_patient(nhsno, request=request)
         # TODO implement checking of demographics
 
         if (not patient) or (
@@ -286,7 +286,7 @@ async def iti47(request: Request):
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
         client.set(ceid, nhsno)
         # TODO add audit stuff here too
-        patient = await lookup_patient(nhsno)
+        patient = await lookup_patient(nhsno, request=request)
         print(f"Patient: {patient}")
         if not patient:
             print("Patient not found")

@@ -21,10 +21,10 @@ router = fastapi.APIRouter(prefix="/pds")
 
 
 @router.get("/lookup_patient/{nhsno}")
-async def lookup_patient(nhsno: int):
-    def get_pds_token():
+async def lookup_patient(nhsno: int, request: fastapi.Request = None):
+    def get_pds_token(kid: str):
         full_path = f"{INT_BASE_PATH}oauth2/token"
-        jwt_token = pds_jwt(API_KEY, API_KEY, full_path, "test-1")
+        jwt_token = pds_jwt(API_KEY, API_KEY, full_path, kid)
         # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {
@@ -50,7 +50,12 @@ async def lookup_patient(nhsno: int):
 
     if not redis_client.exists("access_token"):
         logging.info("NHS token expired or not found, getting new one")
-        nhs_token = get_pds_token()
+        # Extract dynamically generated Key ID, fallback to 'test-1'
+        kid = "test-1"
+        if hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
+            kid = request.app.state.jwk_json.get("kid", "test-1")
+
+        nhs_token = get_pds_token(kid)
     else:
         logging.info("NHS token found in cache")
         nhs_token = redis_client.get("access_token").decode("utf-8")
