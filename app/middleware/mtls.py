@@ -2,7 +2,6 @@ import os
 import base64
 import datetime
 from cryptography import x509
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -12,7 +11,7 @@ from starlette.responses import JSONResponse
 def _verify_epic_cert(client_cert_b64: str) -> bool:
     try:
         der_cert = base64.b64decode(client_cert_b64)
-        client_cert = x509.load_der_x509_certificate(der_cert, default_backend())
+        client_cert = x509.load_der_x509_certificate(der_cert)
     except Exception as e:
         print(
             f"Epic CA Verification: Failed to decode client cert. Error: {str(e)}",
@@ -33,10 +32,10 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
 
         epic_ca_str = fix_pem_formatting(epic_ca_pem).encode("utf-8")
         try:
-            ca_certs = x509.load_pem_x509_certificates(epic_ca_str, default_backend())
+            ca_certs = x509.load_pem_x509_certificates(epic_ca_str)
         except AttributeError:
             # Fallback for older cryptography versions
-            ca_certs = [x509.load_pem_x509_certificate(epic_ca_str, default_backend())]
+            ca_certs = [x509.load_pem_x509_certificate(epic_ca_str)]
     except Exception as pem_error:
         print(
             f"Epic CA Verification: Failed to load as PEM string. Error: {str(pem_error)}",
@@ -45,7 +44,7 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
         # Fallback in case they pasted a base64 DER string instead of PEM
         try:
             der_ca = base64.b64decode(epic_ca_pem)
-            ca_certs = [x509.load_der_x509_certificate(der_ca, default_backend())]
+            ca_certs = [x509.load_der_x509_certificate(der_ca)]
         except Exception as e:
             print(
                 f"Epic CA Verification: Failed to parse EPIC_CA_CERT. Error: {str(e)}",
