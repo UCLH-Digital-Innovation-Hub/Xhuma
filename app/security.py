@@ -43,7 +43,7 @@ def fix_pem_formatting(pem_string: str) -> str:
             body = "\n".join(body_lines)
             footer = match.group(3)
             formatted_certs.append(f"{header}\n{body}\n{footer}")
-            
+
         if formatted_certs:
             return "\n".join(formatted_certs)
     return pem_string
