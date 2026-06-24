@@ -35,12 +35,15 @@ async def lookup_patient(nhsno: int):
         r = httpx.post(full_path, data=oauth_params)
 
         response_dict = json.loads(r.text)
-        # print(response_dict)
+        if "access_token" not in response_dict:
+            logging.error(
+                f"Failed to retrieve PDS access token. NHS API Response: {r.text}"
+            )
+            raise Exception(f"PDS Token Retrieval Error: {r.text}")
+
         nhs_token = response_dict["access_token"]
 
         redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
-        return nhs_token
-
         return nhs_token
 
     # if nhs token expired or not request, get one and cache
