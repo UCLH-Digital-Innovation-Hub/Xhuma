@@ -30,10 +30,11 @@ def fix_pem_formatting(pem_string: str) -> str:
     if "\n" not in pem_string:
         import re
 
-        match = re.search(
+        formatted_certs = []
+        matches = re.finditer(
             r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string
         )
-        if match:
+        for match in matches:
             header = match.group(1)
             # Remove all whitespace from the base64 body
             raw_body = re.sub(r"\s+", "", match.group(2))
@@ -41,7 +42,10 @@ def fix_pem_formatting(pem_string: str) -> str:
             body_lines = [raw_body[i : i + 64] for i in range(0, len(raw_body), 64)]
             body = "\n".join(body_lines)
             footer = match.group(3)
-            return f"{header}\n{body}\n{footer}"
+            formatted_certs.append(f"{header}\n{body}\n{footer}")
+            
+        if formatted_certs:
+            return "\n".join(formatted_certs)
     return pem_string
 
 
