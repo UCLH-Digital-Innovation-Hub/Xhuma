@@ -39,7 +39,9 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
             logging.error(
                 f"Failed to retrieve PDS access token. NHS API Response: {r.text}"
             )
-            raise Exception(f"PDS Token Retrieval Error: {r.text}")
+            raise fastapi.HTTPException(
+                status_code=500, detail="NHS API Authentication Failed"
+            )
 
         nhs_token = response_dict["access_token"]
 

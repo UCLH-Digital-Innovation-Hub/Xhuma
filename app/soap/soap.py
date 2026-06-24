@@ -128,23 +128,6 @@ def register_handlers(app: FastAPI):
         )
 
 
-@router.get("/iti55")
-async def iti55_wsdl(request: Request):
-    """
-    Dummy endpoint for WSDL probing troubleshooting.
-    Epic may attempt to do an anonymous GET /SOAP/iti55?wsdl
-    """
-    print(
-        f"Troubleshooting: Received GET on /SOAP/iti55. Query params: {request.query_params}",
-        flush=True,
-    )
-    return Response(
-        content="<wsdl:definitions xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'></wsdl:definitions>",
-        media_type="application/xml",
-        status_code=200,
-    )
-
-
 @router.post("/iti55")
 async def iti55(request: Request):
     """
