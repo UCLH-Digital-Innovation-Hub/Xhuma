@@ -59,6 +59,27 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
         )
         return False
 
+    print(
+        f"Epic CA Verification: Loaded {len(ca_certs)} CA certificates from Key Vault",
+        flush=True,
+    )
+    try:
+        print(
+            f"Epic CA Verification: Client cert issuer: {client_cert.issuer.rfc4514_string()}",
+            flush=True,
+        )
+    except Exception:
+        pass
+
+    for i, ca_cert in enumerate(ca_certs):
+        try:
+            print(
+                f"Epic CA Verification: Checking CA {i} subject: {ca_cert.subject.rfc4514_string()}",
+                flush=True,
+            )
+        except Exception:
+            pass
+
     # Check expiry
     now = datetime.datetime.now(datetime.timezone.utc)
     try:
