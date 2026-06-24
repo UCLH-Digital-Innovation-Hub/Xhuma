@@ -37,7 +37,11 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
         except AttributeError:
             # Fallback for older cryptography versions
             ca_certs = [x509.load_pem_x509_certificate(epic_ca_str, default_backend())]
-    except Exception:
+    except Exception as pem_error:
+        print(
+            f"Epic CA Verification: Failed to load as PEM string. Error: {str(pem_error)}",
+            flush=True,
+        )
         # Fallback in case they pasted a base64 DER string instead of PEM
         try:
             der_ca = base64.b64decode(epic_ca_pem)
