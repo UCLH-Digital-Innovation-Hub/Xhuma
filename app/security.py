@@ -17,6 +17,9 @@ import uuid
 from time import time
 
 import jwt
+import json
+from jwt.algorithms import RSAAlgorithm
+
 
 from .audit.models import SAMLAttributes
 
@@ -47,6 +50,22 @@ def fix_pem_formatting(pem_string: str) -> str:
         if formatted_certs:
             return "\n".join(formatted_certs)
     return pem_string
+
+
+def public_key_to_jwks(public_key, kid: str, alg: str = "RS512"):
+    jwk = json.loads(RSAAlgorithm.to_jwk(public_key))
+
+    jwk.pop("key_ops", None)
+
+    jwk.update(
+        {
+            "use": "sig",
+            "kid": kid,
+            "alg": alg,
+        }
+    )
+
+    return {"keys": [jwk]}
 
 
 def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:

@@ -32,6 +32,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from sqlmodel import select
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from cryptography.hazmat.primitives import serialization
 
 
 from .audit.db_models import AuditEventRow
@@ -44,6 +45,7 @@ from .relay import routes
 from .relay.hub import WebSocketHub
 from .settings import USE_RELAY
 from .soap import soap
+from .security import public_key_to_jwks
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
@@ -79,7 +81,9 @@ async def lifespan(app: FastAPI):
 
             private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
             public_jwk = jwk.JWK.from_pem(private_pem)
-            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+            jwks = public_key_to_jwks(public_jwk)
+            app.state.jwk_json = jwks
+            # app.state.jwk_json = public_jwk.export_public(as_dict=True)
         except Exception as e:
             print(f"Warning: Failed to load JWTKEY from environment: {e}")
     elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile(
@@ -89,10 +93,15 @@ async def lifespan(app: FastAPI):
         print(
             "Warning: Falling back to local keys/test-1.pem key. Not for use in production."
         )
-        with open("keys/test-1.pem", "rb") as pemfile:
-            private_pem = pemfile.read()
-            public_jwk = jwk.JWK.from_pem(data=private_pem)
-            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+        with open("keys/public_key.pem", "rb") as pemfile:
+            # private_pem = pemfile.read()
+            # public_jwk = jwk.JWK.from_pem(data=pemfile)
+
+            # something
+            public_key = serialization.load_pem_public_key(pemfile.read())
+            jwks = public_key_to_jwks(public_key, kid="test-1")
+            print(jwks)
+            app.state.jwk_json = jwks
     else:
         print(
             "Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error."
