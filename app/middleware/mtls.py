@@ -63,22 +63,6 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
         f"Epic CA Verification: Loaded {len(ca_certs)} CA certificates from Key Vault",
         flush=True,
     )
-    try:
-        print(
-            f"Epic CA Verification: Client cert issuer: {client_cert.issuer.rfc4514_string()}",
-            flush=True,
-        )
-    except Exception:
-        pass
-
-    for i, ca_cert in enumerate(ca_certs):
-        try:
-            print(
-                f"Epic CA Verification: Checking CA {i} subject: {ca_cert.subject.rfc4514_string()}",
-                flush=True,
-            )
-        except Exception:
-            pass
 
     # Check expiry
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -152,14 +136,6 @@ class MTLSMiddleware(BaseHTTPMiddleware):
         # Bypass all global mTLS checks for Relay connections.
         # Relay handles its own certificate presence and validation entirely in routes.py
         if request.url.path.startswith("/relay"):
-            return await call_next(request)
-
-        # Temporary troubleshooting: Allow anonymous GET requests to /SOAP for WSDL probing
-        if request.method == "GET" and request.url.path.lower().startswith("/soap"):
-            print(
-                f"MTLS Middleware: Troubleshooting - Allowing anonymous GET request to {request.url.path} (Query: {request.url.query})",
-                flush=True,
-            )
             return await call_next(request)
 
         client_cert = request.headers.get("X-ARR-ClientCert")
