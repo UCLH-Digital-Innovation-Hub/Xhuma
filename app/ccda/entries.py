@@ -902,5 +902,28 @@ def empty_entry(title: str) -> List[dict]:
                 }
             }
         }]
+    elif title in ["Investigations and results", "Vital Signs"]:
+        return [{
+            "organizer": {
+                "@classCode": "BATTERY",
+                "@moodCode": "EVN",
+                "templateId": templateId("2.16.840.1.113883.10.20.22.4.1", "2015-08-01"),
+                "id": [{"@root": entry_id}],
+                "code": {"@nullFlavor": "NI"},
+                "statusCode": {"@code": "completed"},
+                "component": {
+                    "observation": {
+                        "@classCode": "OBS",
+                        "@moodCode": "EVN",
+                        "templateId": templateId("2.16.840.1.113883.10.20.22.4.2", "2015-08-01"),
+                        "id": [{"@root": str(uuid.uuid4())}],
+                        "code": {"@nullFlavor": "NI"},
+                        "statusCode": {"@code": "completed"},
+                        "effectiveTime": {"@nullFlavor": "NI"},
+                        "value": {"@xsi:type": "ANY", "@nullFlavor": "NI"}
+                    }
+                }
+            }
+        }]
     return []
 
