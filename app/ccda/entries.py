@@ -720,9 +720,15 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     if entry.route:
         immunization_entry.route = code_with_translations(entry.route.coding)
 
-    # return immunization_entry.model_dump(by_alias=True, exclude_none=True)
+    date_val = readable_date(date_helper(entry.date.isostring)) if entry.date else ""
+    vaccine_val = entry.vaccineCode.coding[0].display if (entry.vaccineCode and entry.vaccineCode.coding) else ""
+    lot_val = entry.lotNumber if entry.lotNumber else ""
+    status_val = entry.status if entry.status else ""
+
+    immunization_row = [date_val, vaccine_val, lot_val, status_val]
+
     return EntryWithRow(
-        entry=immunization_entry.model_dump(by_alias=True, exclude_none=True), row=None
+        entry=immunization_entry.model_dump(by_alias=True, exclude_none=True), row=immunization_row
     )
 
 
