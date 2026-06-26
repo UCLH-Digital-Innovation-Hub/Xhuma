@@ -23,7 +23,7 @@ from .models.base import (
     ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import CD, IVL_INT, IVL_TS, PIVL_TS, PQ, IVL_PQ, IVXB_PQ
+from .models.datatypes import CD, IVL_INT, IVL_TS, PIVL_TS, PQ, IVL_PQ, IVXB_PQ, SXCM_TS
 
 Cell = str
 Row = List[Cell]
@@ -703,7 +703,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
         id=[{"@root": entry.id}],
         statusCode={"@code": entry.status},
-        effectiveTime=effective_time_helper(entry.date),
+        effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))] if entry.date else [],
         consumable={
             "manufacturedProduct": {
                 "templateId": templateId(
