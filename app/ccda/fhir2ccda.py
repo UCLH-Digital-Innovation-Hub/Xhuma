@@ -255,7 +255,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "Description",
                         "Reaction",
                     ],
-                    "parser": lambda list: [allergy(entry) for entry in list if entry.__class__.__name__ == "AllergyIntolerance"],
+                    "parser": lambda lst: [
+                        allergy(entry) if entry.__class__.__name__ == "AllergyIntolerance" else observation_entry(entry, index, 4)
+                        for entry in lst
+                    ],
                 },
                 "Medications and medical devices": {
                     "section_headers": [
@@ -299,12 +302,16 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 },
                 "Problems": {
                     "section_headers": ["Date", "Status", "Condition"],
-                    "parser": lambda list: [problem(entry) for entry in list if entry.__class__.__name__ == "Condition"],
+                    "parser": lambda lst: [
+                        problem(entry) if entry.__class__.__name__ == "Condition" else observation_entry(entry, index, 3)
+                        for entry in lst
+                    ],
                 },
                 "Immunisations": {
                     "section_headers": ["Date", "Vaccine", "Lot Number", "Status"],
-                    "parser": lambda list: [
-                        immunization_entry(entry, index) for entry in list if entry.__class__.__name__ == "Immunization"
+                    "parser": lambda lst: [
+                        immunization_entry(entry, index) if entry.__class__.__name__ == "Immunization" else observation_entry(entry, index, 4)
+                        for entry in lst
                     ],
                 },
             }

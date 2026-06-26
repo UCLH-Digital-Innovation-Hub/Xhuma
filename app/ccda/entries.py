@@ -732,6 +732,34 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     )
 
 
+def observation_entry(entry, index: dict, row_length: int) -> EntryWithRow:
+    from .models.base import Observation
+
+    obs = Observation(
+        templateId=templateId("2.16.840.1.113883.10.20.22.4.2", "2015-08-01"),
+        id=[{"@root": entry.id}],
+        statusCode={"@code": entry.status},
+    )
+
+    if hasattr(entry, "code") and entry.code:
+        obs.code = code_with_translations(entry.code.coding)
+
+    date_val = "N/A"
+    if hasattr(entry, "effectiveDateTime") and entry.effectiveDateTime:
+        obs.effectiveTime = IVL_TS(**{"@value": date_helper(entry.effectiveDateTime.isostring)})
+        date_val = readable_date(date_helper(entry.effectiveDateTime.isostring))
+
+    name_val = entry.code.coding[0].display if (hasattr(entry, "code") and entry.code and entry.code.coding) else "N/A"
+
+    row = [date_val, name_val]
+    while len(row) < row_length:
+        row.append("N/A")
+
+    return EntryWithRow(
+        entry={"observation": obs.model_dump(by_alias=True, exclude_none=True)}, row=row
+    )
+
+
 def result(entry, index: dict) -> dict:
     """
     Entry for results section. Entries are defined by lists that contain the related type has-member indicating results groups
