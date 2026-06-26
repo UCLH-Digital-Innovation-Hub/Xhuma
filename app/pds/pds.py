@@ -36,9 +36,9 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
 
         response_dict = json.loads(r.text)
         if "access_token" not in response_dict:
-            logging.error(
-                f"Failed to retrieve PDS access token. NHS API Response: {r.text}"
-            )
+            error_msg = f"Failed to retrieve PDS access token. NHS API Response: {r.text}"
+            logging.error(error_msg)
+            print(f"CRITICAL NHS AUTH ERROR: {error_msg}", flush=True)  # Print directly to Azure logs
             raise fastapi.HTTPException(
                 status_code=500, detail="NHS API Authentication Failed"
             )
