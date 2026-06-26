@@ -11,6 +11,7 @@ except FileNotFoundError:
     sys.exit(1)
 
 from app.security import fix_pem_formatting
+
 fixed_pem = fix_pem_formatting(pem_data)
 
 try:
@@ -18,8 +19,8 @@ try:
     print(f"Loaded {len(ca_certs)} certificates.")
     for i, cert in enumerate(ca_certs):
         fingerprint = cert.fingerprint(hashes.SHA1())
-        hex_fp = binascii.hexlify(fingerprint).decode('utf-8')
-        print(f"Certificate {i+1}:")
+        hex_fp = binascii.hexlify(fingerprint).decode("utf-8")
+        print(f"Certificate {i + 1}:")
         print(f"  Subject: {cert.subject.rfc4514_string()}")
         print(f"  Thumbprint: {hex_fp}")
 except Exception as e:

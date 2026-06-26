@@ -11,7 +11,7 @@ from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
 
-from .entries import allergy, immunization_entry, medication, problem
+from .entries import allergy, immunization_entry, medication, observation_entry, problem
 from .helpers import date_helper, templateId
 
 
@@ -256,7 +256,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "Reaction",
                     ],
                     "parser": lambda lst: [
-                        allergy(entry) if entry.__class__.__name__ == "AllergyIntolerance" else observation_entry(entry, index, 4)
+                        allergy(entry)
+                        if entry.__class__.__name__ == "AllergyIntolerance"
+                        else observation_entry(entry, index, 4)
                         for entry in lst
                     ],
                 },
@@ -303,14 +305,18 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "Problems": {
                     "section_headers": ["Date", "Status", "Condition"],
                     "parser": lambda lst: [
-                        problem(entry) if entry.__class__.__name__ == "Condition" else observation_entry(entry, index, 3)
+                        problem(entry)
+                        if entry.__class__.__name__ == "Condition"
+                        else observation_entry(entry, index, 3)
                         for entry in lst
                     ],
                 },
                 "Immunisations": {
                     "section_headers": ["Date", "Vaccine", "Lot Number", "Status"],
                     "parser": lambda lst: [
-                        immunization_entry(entry, index) if entry.__class__.__name__ == "Immunization" else observation_entry(entry, index, 4)
+                        immunization_entry(entry, index)
+                        if entry.__class__.__name__ == "Immunization"
+                        else observation_entry(entry, index, 4)
                         for entry in lst
                     ],
                 },
@@ -382,8 +388,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         },
                     },
                 }
-                
+
                 from .entries import empty_entry
+
                 empty_e = empty_entry(list.title)
                 if empty_e:
                     comp["section"]["entry"] = empty_e

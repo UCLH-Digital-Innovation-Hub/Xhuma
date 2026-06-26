@@ -1,5 +1,6 @@
 import re
 
+
 def fix_pem_formatting(pem_string: str) -> str:
     if not pem_string:
         return pem_string
@@ -16,6 +17,7 @@ def fix_pem_formatting(pem_string: str) -> str:
             footer = match.group(3)
             return f"{header}\n{body}\n{footer}"
     return pem_string
+
 
 pem = "-----BEGIN PRIVATE KEY-----MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDEdK-----END PRIVATE KEY-----"
 print(repr(fix_pem_formatting(pem)))

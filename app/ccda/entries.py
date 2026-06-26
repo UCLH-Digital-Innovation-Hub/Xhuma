@@ -703,7 +703,9 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
         id=[{"@root": entry.id}],
         statusCode={"@code": entry.status},
-        effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))] if entry.date else [],
+        effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))]
+        if entry.date
+        else [],
         consumable={
             "manufacturedProduct": {
                 "templateId": templateId(
@@ -721,14 +723,19 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         immunization_entry.route = code_with_translations(entry.route.coding)
 
     date_val = readable_date(date_helper(entry.date.isostring)) if entry.date else ""
-    vaccine_val = entry.vaccineCode.coding[0].display if (entry.vaccineCode and entry.vaccineCode.coding) else ""
+    vaccine_val = (
+        entry.vaccineCode.coding[0].display
+        if (entry.vaccineCode and entry.vaccineCode.coding)
+        else ""
+    )
     lot_val = entry.lotNumber if entry.lotNumber else ""
     status_val = entry.status if entry.status else ""
 
     immunization_row = [date_val, vaccine_val, lot_val, status_val]
 
     return EntryWithRow(
-        entry=immunization_entry.model_dump(by_alias=True, exclude_none=True), row=immunization_row
+        entry=immunization_entry.model_dump(by_alias=True, exclude_none=True),
+        row=immunization_row,
     )
 
 
@@ -746,10 +753,16 @@ def observation_entry(entry, index: dict, row_length: int) -> EntryWithRow:
 
     date_val = "N/A"
     if hasattr(entry, "effectiveDateTime") and entry.effectiveDateTime:
-        obs.effectiveTime = IVL_TS(**{"@value": date_helper(entry.effectiveDateTime.isostring)})
+        obs.effectiveTime = IVL_TS(
+            **{"@value": date_helper(entry.effectiveDateTime.isostring)}
+        )
         date_val = readable_date(date_helper(entry.effectiveDateTime.isostring))
 
-    name_val = entry.code.coding[0].display if (hasattr(entry, "code") and entry.code and entry.code.coding) else "N/A"
+    name_val = (
+        entry.code.coding[0].display
+        if (hasattr(entry, "code") and entry.code and entry.code.coding)
+        else "N/A"
+    )
 
     row = [date_val, name_val]
     while len(row) < row_length:
@@ -841,117 +854,164 @@ def empty_entry(title: str) -> List[dict]:
     """Generates an empty C-CDA entry with nullFlavor="NI" for empty sections."""
     entry_id = str(uuid.uuid4())
     if title == "Allergies and adverse reactions":
-        return [{
-            "act": {
-                "@classCode": "ACT",
-                "@moodCode": "EVN",
-                "templateId": templateId("2.16.840.1.113883.10.20.22.4.30", "2015-08-01"),
-                "id": [{"@root": entry_id}],
-                "code": {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"},
-                "statusCode": {"@code": "active"},
-                "effectiveTime": {"@nullFlavor": "NI"},
-                "entryRelationship": [{
-                    "@typeCode": "SUBJ",
-                    "observation": {
-                        "@classCode": "OBS",
-                        "@moodCode": "EVN",
-                        "templateId": templateId("2.16.840.1.113883.10.20.22.4.7", "2014-06-09"),
-                        "id": [{"@root": str(uuid.uuid4())}],
-                        "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
-                        "statusCode": {"@code": "completed"},
-                        "value": {"@xsi:type": "CD", "@nullFlavor": "NI"}
-                    }
-                }]
+        return [
+            {
+                "act": {
+                    "@classCode": "ACT",
+                    "@moodCode": "EVN",
+                    "templateId": templateId(
+                        "2.16.840.1.113883.10.20.22.4.30", "2015-08-01"
+                    ),
+                    "id": [{"@root": entry_id}],
+                    "code": {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"},
+                    "statusCode": {"@code": "active"},
+                    "effectiveTime": {"@nullFlavor": "NI"},
+                    "entryRelationship": [
+                        {
+                            "@typeCode": "SUBJ",
+                            "observation": {
+                                "@classCode": "OBS",
+                                "@moodCode": "EVN",
+                                "templateId": templateId(
+                                    "2.16.840.1.113883.10.20.22.4.7", "2014-06-09"
+                                ),
+                                "id": [{"@root": str(uuid.uuid4())}],
+                                "code": {
+                                    "@code": "ASSERTION",
+                                    "@codeSystem": "2.16.840.1.113883.5.4",
+                                },
+                                "statusCode": {"@code": "completed"},
+                                "value": {"@xsi:type": "CD", "@nullFlavor": "NI"},
+                            },
+                        }
+                    ],
+                }
             }
-        }]
+        ]
     elif title == "Problems":
-        return [{
-            "act": {
-                "@classCode": "ACT",
-                "@moodCode": "EVN",
-                "templateId": templateId("2.16.840.1.113883.10.20.22.4.3", "2015-08-01"),
-                "id": [{"@root": entry_id}],
-                "code": {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"},
-                "statusCode": {"@code": "active"},
-                "effectiveTime": {"@nullFlavor": "NI"},
-                "entryRelationship": [{
-                    "@typeCode": "SUBJ",
-                    "observation": {
-                        "@classCode": "OBS",
-                        "@moodCode": "EVN",
-                        "templateId": templateId("2.16.840.1.113883.10.20.22.4.4", "2015-08-01"),
-                        "id": [{"@root": str(uuid.uuid4())}],
-                        "code": [
-                            {"@code": "64572001", "@displayName": "Condition", "@codeSystemName": "SNOMED CT", "@codeSystem": "2.16.840.1.113883.6.96"},
-                            {"@code": "75323-6", "@displayName": "Condition", "@codeSystemName": "LOINC", "@codeSystem": "2.16.840.1.113883.6.1"}
-                        ],
-                        "statusCode": {"@code": "completed"},
-                        "effectiveTime": {"@nullFlavor": "NI"},
-                        "value": {"@xsi:type": "CD", "@nullFlavor": "NI"}
-                    }
-                }]
-            }
-        }]
-    elif title in ["Active Medications", "Past Medications", "Medications and medical devices"]:
-        return [{
-            "substanceAdministration": {
-                "@classCode": "SBADM",
-                "@moodCode": "EVN",
-                "templateId": templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
-                "id": [{"@root": entry_id}],
-                "statusCode": {"@code": "active"},
-                "effectiveTime": [{"@nullFlavor": "NI"}],
-                "consumable": {
-                    "manufacturedProduct": {
-                        "templateId": templateId(root="2.16.840.1.113883.10.20.22.4.23", extension="2014-06-09"),
-                        "manufacturedMaterial": {
-                            "code": {"@nullFlavor": "NI"}
+        return [
+            {
+                "act": {
+                    "@classCode": "ACT",
+                    "@moodCode": "EVN",
+                    "templateId": templateId(
+                        "2.16.840.1.113883.10.20.22.4.3", "2015-08-01"
+                    ),
+                    "id": [{"@root": entry_id}],
+                    "code": {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"},
+                    "statusCode": {"@code": "active"},
+                    "effectiveTime": {"@nullFlavor": "NI"},
+                    "entryRelationship": [
+                        {
+                            "@typeCode": "SUBJ",
+                            "observation": {
+                                "@classCode": "OBS",
+                                "@moodCode": "EVN",
+                                "templateId": templateId(
+                                    "2.16.840.1.113883.10.20.22.4.4", "2015-08-01"
+                                ),
+                                "id": [{"@root": str(uuid.uuid4())}],
+                                "code": [
+                                    {
+                                        "@code": "64572001",
+                                        "@displayName": "Condition",
+                                        "@codeSystemName": "SNOMED CT",
+                                        "@codeSystem": "2.16.840.1.113883.6.96",
+                                    },
+                                    {
+                                        "@code": "75323-6",
+                                        "@displayName": "Condition",
+                                        "@codeSystemName": "LOINC",
+                                        "@codeSystem": "2.16.840.1.113883.6.1",
+                                    },
+                                ],
+                                "statusCode": {"@code": "completed"},
+                                "effectiveTime": {"@nullFlavor": "NI"},
+                                "value": {"@xsi:type": "CD", "@nullFlavor": "NI"},
+                            },
                         }
-                    }
+                    ],
                 }
             }
-        }]
+        ]
+    elif title in [
+        "Active Medications",
+        "Past Medications",
+        "Medications and medical devices",
+    ]:
+        return [
+            {
+                "substanceAdministration": {
+                    "@classCode": "SBADM",
+                    "@moodCode": "EVN",
+                    "templateId": templateId(
+                        "2.16.840.1.113883.10.20.22.4.16", "2014-06-09"
+                    ),
+                    "id": [{"@root": entry_id}],
+                    "statusCode": {"@code": "active"},
+                    "effectiveTime": [{"@nullFlavor": "NI"}],
+                    "consumable": {
+                        "manufacturedProduct": {
+                            "templateId": templateId(
+                                root="2.16.840.1.113883.10.20.22.4.23",
+                                extension="2014-06-09",
+                            ),
+                            "manufacturedMaterial": {"code": {"@nullFlavor": "NI"}},
+                        }
+                    },
+                }
+            }
+        ]
     elif title == "Immunisations":
-        return [{
-            "substanceAdministration": {
-                "@classCode": "SBADM",
-                "@moodCode": "EVN",
-                "templateId": templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
-                "id": [{"@root": entry_id}],
-                "statusCode": {"@code": "completed"},
-                "effectiveTime": [{"@nullFlavor": "NI"}],
-                "consumable": {
-                    "manufacturedProduct": {
-                        "templateId": templateId("2.16.840.1.113883.10.20.22.4.54", "2014-06-09"),
-                        "manufacturedMaterial": {
-                            "code": {"@nullFlavor": "NI"}
+        return [
+            {
+                "substanceAdministration": {
+                    "@classCode": "SBADM",
+                    "@moodCode": "EVN",
+                    "templateId": templateId(
+                        "2.16.840.1.113883.10.20.22.4.52", "2014-06-09"
+                    ),
+                    "id": [{"@root": entry_id}],
+                    "statusCode": {"@code": "completed"},
+                    "effectiveTime": [{"@nullFlavor": "NI"}],
+                    "consumable": {
+                        "manufacturedProduct": {
+                            "templateId": templateId(
+                                "2.16.840.1.113883.10.20.22.4.54", "2014-06-09"
+                            ),
+                            "manufacturedMaterial": {"code": {"@nullFlavor": "NI"}},
                         }
-                    }
+                    },
                 }
             }
-        }]
+        ]
     elif title in ["Investigations and results", "Vital Signs"]:
-        return [{
-            "organizer": {
-                "@classCode": "BATTERY",
-                "@moodCode": "EVN",
-                "templateId": templateId("2.16.840.1.113883.10.20.22.4.1", "2015-08-01"),
-                "id": [{"@root": entry_id}],
-                "code": {"@nullFlavor": "NI"},
-                "statusCode": {"@code": "completed"},
-                "component": {
-                    "observation": {
-                        "@classCode": "OBS",
-                        "@moodCode": "EVN",
-                        "templateId": templateId("2.16.840.1.113883.10.20.22.4.2", "2015-08-01"),
-                        "id": [{"@root": str(uuid.uuid4())}],
-                        "code": {"@nullFlavor": "NI"},
-                        "statusCode": {"@code": "completed"},
-                        "effectiveTime": {"@nullFlavor": "NI"},
-                        "value": {"@xsi:type": "ANY", "@nullFlavor": "NI"}
-                    }
+        return [
+            {
+                "organizer": {
+                    "@classCode": "BATTERY",
+                    "@moodCode": "EVN",
+                    "templateId": templateId(
+                        "2.16.840.1.113883.10.20.22.4.1", "2015-08-01"
+                    ),
+                    "id": [{"@root": entry_id}],
+                    "code": {"@nullFlavor": "NI"},
+                    "statusCode": {"@code": "completed"},
+                    "component": {
+                        "observation": {
+                            "@classCode": "OBS",
+                            "@moodCode": "EVN",
+                            "templateId": templateId(
+                                "2.16.840.1.113883.10.20.22.4.2", "2015-08-01"
+                            ),
+                            "id": [{"@root": str(uuid.uuid4())}],
+                            "code": {"@nullFlavor": "NI"},
+                            "statusCode": {"@code": "completed"},
+                            "effectiveTime": {"@nullFlavor": "NI"},
+                            "value": {"@xsi:type": "ANY", "@nullFlavor": "NI"},
+                        }
+                    },
                 }
             }
-        }]
+        ]
     return []
-
