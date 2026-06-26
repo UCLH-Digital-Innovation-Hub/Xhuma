@@ -23,7 +23,7 @@ from .models.base import (
     ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import CD, IVL_INT, IVL_TS, PIVL_TS, PQ, IVL_PQ, IVXB_PQ
+from .models.datatypes import CD, IVL_INT, IVL_TS, PIVL_TS, PQ, IVL_PQ, IVXB_PQ, SXCM_TS
 
 Cell = str
 Row = List[Cell]
@@ -703,7 +703,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
         id=[{"@root": entry.id}],
         statusCode={"@code": entry.status},
-        effectiveTime=effective_time_helper(entry.date),
+        effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))] if entry.date else [],
         consumable={
             "manufacturedProduct": {
                 "templateId": templateId(
@@ -720,9 +720,15 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     if entry.route:
         immunization_entry.route = code_with_translations(entry.route.coding)
 
-    # return immunization_entry.model_dump(by_alias=True, exclude_none=True)
+    date_val = readable_date(date_helper(entry.date.isostring)) if entry.date else ""
+    vaccine_val = entry.vaccineCode.coding[0].display if (entry.vaccineCode and entry.vaccineCode.coding) else ""
+    lot_val = entry.lotNumber if entry.lotNumber else ""
+    status_val = entry.status if entry.status else ""
+
+    immunization_row = [date_val, vaccine_val, lot_val, status_val]
+
     return EntryWithRow(
-        entry=immunization_entry.model_dump(by_alias=True, exclude_none=True), row=None
+        entry=immunization_entry.model_dump(by_alias=True, exclude_none=True), row=immunization_row
     )
 
 
