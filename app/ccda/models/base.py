@@ -178,7 +178,7 @@ class SubstanceAdministration(BaseModel):
         for eff_time in sxcm_ts_list:
             # print(f"eff_time: {eff_time}")
             # print(isinstance(eff_time, SXCM_TS))
-            if eff_time.resource_type == "SXCM_TS":
+            if eff_time.resource_type == "SXCM_TS" and getattr(eff_time, "operator", None):
                 # add the operator to the dictionary
                 sxcm[eff_time.operator] = {"@value": eff_time.value}
             else:
