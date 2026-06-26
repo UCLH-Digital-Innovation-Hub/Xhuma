@@ -18,6 +18,6 @@ services:
       - USE_RELAY=0
     depends_on:
       - redis
-    command: ["pytest"]
+    command: ["sh", "-c", "uv sync --locked && pytest"]
     volumes:
       - ./app:/code/app
