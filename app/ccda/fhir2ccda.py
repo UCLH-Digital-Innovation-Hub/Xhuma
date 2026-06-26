@@ -304,7 +304,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "Immunisations": {
                     "section_headers": ["Date", "Vaccine", "Lot Number", "Status"],
                     "parser": lambda list: [
-                        immunization_entry(entry) for entry in list
+                        immunization_entry(entry, index) for entry in list
                     ],
                 },
             }
@@ -375,6 +375,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         },
                     },
                 }
+                
+                from .entries import empty_entry
+                empty_e = empty_entry(list.title)
+                if empty_e:
+                    comp["section"]["entry"] = empty_e
             else:
                 comp["section"]["entry"] = []
                 rows = []

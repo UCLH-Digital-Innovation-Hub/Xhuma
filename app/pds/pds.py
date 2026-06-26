@@ -54,7 +54,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
         logging.info("NHS token expired or not found, getting new one")
         # Extract dynamically generated Key ID, fallback to 'test-1'
         kid = "test-1"
-        if hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
+        if request and hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
             kid = request.app.state.jwk_json.get("kid", "test-1")
 
         nhs_token = get_pds_token(kid)

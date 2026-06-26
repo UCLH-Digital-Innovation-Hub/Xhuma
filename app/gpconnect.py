@@ -140,7 +140,7 @@ async def gpconnect(
     # 2) PDS lookup (consider caching in future)
     # t = now()
     try:
-        pds_search = await lookup_patient(nhsno)
+        pds_search = await lookup_patient(nhsno, request=request)
         await _attempt_audit(
             request=request,
             nhs_number=str(nhsno),
