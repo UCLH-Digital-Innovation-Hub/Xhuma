@@ -218,6 +218,7 @@ resource "azurerm_linux_web_app" "app" {
     # App Config (Key Vault References)
     "API_KEY"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=api-key)"
     "JWTKEY"            = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=jwtkey)"
+    "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
     "EPIC_CA_CERT"      = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.local_kv.name};SecretName=epic-ca-cert)"
 

@@ -128,23 +128,6 @@ def register_handlers(app: FastAPI):
         )
 
 
-@router.get("/iti55")
-async def iti55_wsdl(request: Request):
-    """
-    Dummy endpoint for WSDL probing troubleshooting.
-    Epic may attempt to do an anonymous GET /SOAP/iti55?wsdl
-    """
-    print(
-        f"Troubleshooting: Received GET on /SOAP/iti55. Query params: {request.query_params}",
-        flush=True,
-    )
-    return Response(
-        content="<wsdl:definitions xmlns:wsdl='http://schemas.xmlsoap.org/wsdl/'></wsdl:definitions>",
-        media_type="application/xml",
-        status_code=200,
-    )
-
-
 @router.post("/iti55")
 async def iti55(request: Request):
     """
@@ -192,7 +175,7 @@ async def iti55(request: Request):
             )
             return Response(content=data, media_type="application/soap+xml")
 
-        patient = await lookup_patient(nhsno)
+        patient = await lookup_patient(nhsno, request=request)
         # TODO implement checking of demographics
 
         if (not patient) or (
@@ -286,7 +269,7 @@ async def iti47(request: Request):
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
         client.set(ceid, nhsno)
         # TODO add audit stuff here too
-        patient = await lookup_patient(nhsno)
+        patient = await lookup_patient(nhsno, request=request)
         print(f"Patient: {patient}")
         if not patient:
             print("Patient not found")

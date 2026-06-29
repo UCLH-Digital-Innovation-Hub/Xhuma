@@ -79,7 +79,10 @@ async def lifespan(app: FastAPI):
 
             private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
             public_jwk = jwk.JWK.from_pem(private_pem)
-            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+            jwk_dict = public_jwk.export_public(as_dict=True)
+            jwk_dict["alg"] = "RS512"
+            jwk_dict["use"] = "sig"
+            app.state.jwk_json = jwk_dict
         except Exception as e:
             print(f"Warning: Failed to load JWTKEY from environment: {e}")
     elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile(
@@ -92,7 +95,10 @@ async def lifespan(app: FastAPI):
         with open("keys/test-1.pem", "rb") as pemfile:
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
-            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+            jwk_dict = public_jwk.export_public(as_dict=True)
+            jwk_dict["alg"] = "RS512"
+            jwk_dict["use"] = "sig"
+            app.state.jwk_json = jwk_dict
     else:
         print(
             "Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error."
@@ -295,10 +301,10 @@ async def get_jwk(request: Request):
     trust with the service.
 
     Returns:
-        dict: JSON Web Key in dictionary format.
+        dict: JSON Web Key Set in dictionary format.
     """
     if hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
-        return request.app.state.jwk_json
+        return {"keys": [request.app.state.jwk_json]}
     return {"error": "JWK not configured on this server"}
 
 
