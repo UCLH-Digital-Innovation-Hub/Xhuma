@@ -208,40 +208,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "text": "",  # Will be populated with table
             }
 
-            table_headers = {
-                "Allergies and adverse reactions": [
-                    "Start Date",
-                    "Status",
-                    "Description",
-                    "Reaction",
-                ],
-                "Medications and medical devices": [
-                    "Start Date",
-                    "End Date",
-                    "Status",
-                    "Medication",
-                    "Instructions",
-                ],
-                "Active Medications": [
-                    "Start Date",
-                    "End Date",
-                    "Status",
-                    "Medication",
-                    "Instructions",
-                ],
-                "Past Medications": [
-                    "Start Date",
-                    "End Date",
-                    "Status",
-                    "Medication",
-                    "Instructions",
-                ],
-                "Problems": ["Date", "Status", "Condition"],
-                "Immunisations": ["Date", "Vaccine", "Lot Number", "Status"],
-                "Vital Signs": ["Date", "Type", "Value", "Units"],
-                "Investigations and results": ["Date", "Type", "Result"],
-            }
-
             async def parse_medications(references):
                 # run lookups concurrently (much faster than awaiting in a loop)
                 return await asyncio.gather(
@@ -259,7 +225,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "parser": lambda lst: [
                         allergy(entry)
                         if entry.__class__.__name__ == "AllergyIntolerance"
-                        else observation_entry(entry, index, 4)
+                        else observation_entry(
+                            entry, index, "Allergies and adverse reactions"
+                        )
                         for entry in lst
                     ],
                 },
@@ -308,7 +276,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "parser": lambda lst: [
                         problem(entry)
                         if entry.__class__.__name__ == "Condition"
-                        else observation_entry(entry, index, 3)
+                        else observation_entry(entry, index, "Problems")
                         for entry in lst
                     ],
                 },
@@ -317,7 +285,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "parser": lambda lst: [
                         immunization_entry(entry, index)
                         if entry.__class__.__name__ == "Immunization"
-                        else observation_entry(entry, index, 4)
+                        else observation_entry(entry, index, "Immunisations")
                         for entry in lst
                     ],
                 },
@@ -382,7 +350,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "tbody": {
                             "tr": {
                                 "td": {
-                                    "@colspan": len(table_headers[list.title]),
+                                    "@colspan": len(
+                                        section_setup[list.title]["section_headers"]
+                                    ),
                                     "#text": "No Information Available",
                                 }
                             }
@@ -488,11 +458,24 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     clone_list(list_obj, "Active Medications", active)
                 )
 
-                # delete the third column for acute medications as we don't have status for active medications and it is always active
-                for entry in active_section["section"]["text"]["table"]["tbody"]["tr"]:
-                    del entry["td"][2]
-                # delete the third columf ro the header too
-                del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
+                if active:
+                    # delete the third column for acute medications as we don't have status for active medications and it is always active
+                    for entry in active_section["section"]["text"]["table"]["tbody"][
+                        "tr"
+                    ]:
+                        del entry["td"][2]
+                    # delete the third column from the header too
+                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][
+                        2
+                    ]
+                else:
+                    # active is empty, adjust the header and colspan of the empty row td
+                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][
+                        2
+                    ]
+                    active_section["section"]["text"]["table"]["tbody"]["tr"]["td"][
+                        "@colspan"
+                    ] = 7
 
                 past_section = await create_section(
                     clone_list(list_obj, "Past Medications", past)

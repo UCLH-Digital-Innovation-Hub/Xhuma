@@ -1,7 +1,7 @@
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 from fhirclient.models import allergyintolerance, condition, immunization
 from fhirclient.models import medication as fhirmed
@@ -23,7 +23,17 @@ from .models.base import (
     ResultsOrganizer,
     SubstanceAdministration,
 )
-from .models.datatypes import CD, IVL_INT, IVL_TS, PIVL_TS, PQ, IVL_PQ, IVXB_PQ, SXCM_TS
+from .models.datatypes import (
+    CD,
+    IVL_INT,
+    IVL_TS,
+    PIVL_TS,
+    PQ,
+    IVL_PQ,
+    IVXB_PQ,
+    SXCM_TS,
+    IVXB_TS,
+)
 
 Cell = str
 Row = List[Cell]
@@ -416,11 +426,17 @@ async def medication(
                 repeats_allowed = None
                 repeats_issued = None
                 for i in ext.extension:
+                    val = getattr(i, "valuePositiveInt", None)
+                    if val is None:
+                        val = getattr(i, "valueUnsignedInt", None)
+                    if val is None:
+                        val = getattr(i, "valueInteger", None)
+
                     if i.url == "numberOfRepeatPrescriptionsAllowed":
-                        repeats_allowed = i.valuePositiveInt
+                        repeats_allowed = val
                         # print(repeats_allowed)
                     elif i.url == "numberOfRepeatPrescriptionsIssued":
-                        repeats_issued = i.valueUnsignedInt
+                        repeats_issued = val
                         # print(f"Repeats Issued:{repeats_issued}")
                 if repeats_allowed is not None and repeats_issued is not None:
                     remaining_repeats = repeats_allowed - repeats_issued
@@ -717,10 +733,56 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
                 },
             }
         },
+        entryRelationship=[],
     )
 
     if entry.route:
         immunization_entry.route = code_with_translations(entry.route.coding)
+
+    # Parse additional information
+    misc_notes = []
+    if hasattr(entry, "note") and entry.note:
+        for note in entry.note:
+            if hasattr(note, "text") and note.text:
+                misc_notes.append(note.text)
+            elif isinstance(note, str):
+                misc_notes.append(note)
+
+    if hasattr(entry, "explanation") and entry.explanation:
+        if hasattr(entry.explanation, "reason") and entry.explanation.reason:
+            for reason in entry.explanation.reason:
+                if hasattr(reason, "text") and reason.text:
+                    misc_notes.append(f"Reason: {reason.text}")
+                elif (
+                    hasattr(reason, "coding")
+                    and reason.coding
+                    and reason.coding[0].display
+                ):
+                    misc_notes.append(f"Reason: {reason.coding[0].display}")
+        if (
+            hasattr(entry.explanation, "reasonNotGiven")
+            and entry.explanation.reasonNotGiven
+        ):
+            for reason in entry.explanation.reasonNotGiven:
+                if hasattr(reason, "text") and reason.text:
+                    misc_notes.append(f"Reason not given: {reason.text}")
+                elif (
+                    hasattr(reason, "coding")
+                    and reason.coding
+                    and reason.coding[0].display
+                ):
+                    misc_notes.append(f"Reason not given: {reason.coding[0].display}")
+
+    if misc_notes:
+        misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
+        comment_activity = EntryRelationship()
+        comment_activity.act = {
+            "code": {
+                "@code": "48767-8",
+            },
+            "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
+        }
+        immunization_entry.entryRelationship.append(comment_activity)
 
     date_val = readable_date(date_helper(entry.date.isostring)) if entry.date else ""
     vaccine_val = (
@@ -728,6 +790,9 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         if (entry.vaccineCode and entry.vaccineCode.coding)
         else ""
     )
+    if misc_notes:
+        vaccine_val = f"{vaccine_val}<br />Notes: " + "<br />".join(misc_notes)
+
     lot_val = entry.lotNumber if entry.lotNumber else ""
     status_val = entry.status if entry.status else ""
 
@@ -739,17 +804,53 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     )
 
 
-def observation_entry(entry, index: dict, row_length: int) -> EntryWithRow:
+def observation_entry(
+    entry, index: dict, section_name: Union[str, int]
+) -> EntryWithRow:
     from .models.base import Observation
 
     obs = Observation(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.2", "2015-08-01"),
         id=[{"@root": entry.id}],
-        statusCode={"@code": entry.status},
+        statusCode={"@code": "completed"},
     )
 
     if hasattr(entry, "code") and entry.code:
         obs.code = code_with_translations(entry.code.coding)
+
+    # Map value if present
+    if hasattr(entry, "valueCodeableConcept") and entry.valueCodeableConcept:
+        obs.value = code_with_translations(entry.valueCodeableConcept.coding)
+    elif hasattr(entry, "valueString") and entry.valueString:
+        obs.value = {"@xsi:type": "ST", "#text": entry.valueString}
+    elif hasattr(entry, "valueQuantity") and entry.valueQuantity:
+        obs.value = {
+            "@xsi:type": "PQ",
+            "@value": entry.valueQuantity.value,
+            "@unit": entry.valueQuantity.unit,
+        }
+
+    # Parse additional notes/comments for Observation
+    obs_notes = []
+    if hasattr(entry, "comment") and entry.comment:
+        obs_notes.append(entry.comment)
+    if hasattr(entry, "note") and entry.note:
+        for note in entry.note:
+            if hasattr(note, "text") and note.text:
+                obs_notes.append(note.text)
+            elif isinstance(note, str):
+                obs_notes.append(note)
+
+    if obs_notes:
+        obs_notes_text = [f"{note} <br />" for note in obs_notes if note]
+        comment_activity = EntryRelationship()
+        comment_activity.act = {
+            "code": {
+                "@code": "48767-8",
+            },
+            "text": {"@xsi:type": "ED", "xmlText": {"BR": obs_notes_text}},
+        }
+        obs.entryRelationship = [comment_activity]
 
     date_val = "N/A"
     if hasattr(entry, "effectiveDateTime") and entry.effectiveDateTime:
@@ -757,16 +858,51 @@ def observation_entry(entry, index: dict, row_length: int) -> EntryWithRow:
             **{"@value": date_helper(entry.effectiveDateTime.isostring)}
         )
         date_val = readable_date(date_helper(entry.effectiveDateTime.isostring))
+    elif (
+        hasattr(entry, "effectivePeriod")
+        and entry.effectivePeriod
+        and entry.effectivePeriod.start
+    ):
+        obs.effectiveTime = IVL_TS(
+            low=IVXB_TS(
+                **{"@value": date_helper(entry.effectivePeriod.start.isostring)}
+            )
+        )
+        date_val = readable_date(date_helper(entry.effectivePeriod.start.isostring))
+    elif hasattr(entry, "effectiveInstant") and entry.effectiveInstant:
+        obs.effectiveTime = IVL_TS(
+            **{"@value": date_helper(entry.effectiveInstant.isostring)}
+        )
+        date_val = readable_date(date_helper(entry.effectiveInstant.isostring))
 
-    name_val = (
-        entry.code.coding[0].display
-        if (hasattr(entry, "code") and entry.code and entry.code.coding)
-        else "N/A"
-    )
+    name_val = "N/A"
+    if hasattr(entry, "code") and entry.code and entry.code.coding:
+        for coding in entry.code.coding:
+            if coding.display:
+                name_val = coding.display
+                break
 
-    row = [date_val, name_val]
-    while len(row) < row_length:
-        row.append("N/A")
+    if obs_notes:
+        name_val = f"{name_val}<br />Notes: " + "<br />".join(obs_notes)
+
+    # Build row based on the specific section layout
+    if section_name == "Immunisations":
+        row = [date_val, name_val, "N/A", "N/A"]
+    elif section_name == "Problems":
+        row = [date_val, "N/A", name_val]
+    elif section_name == "Allergies and adverse reactions":
+        row = [date_val, "N/A", name_val, "N/A"]
+    else:
+        # Fallback to old behavior if a simple integer length is passed
+        row = [date_val, name_val]
+        row_len = (
+            int(section_name)
+            if isinstance(section_name, int)
+            or (isinstance(section_name, str) and section_name.isdigit())
+            else 3
+        )
+        while len(row) < row_len:
+            row.append("N/A")
 
     return EntryWithRow(
         entry={"observation": obs.model_dump(by_alias=True, exclude_none=True)}, row=row
