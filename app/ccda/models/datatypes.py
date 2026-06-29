@@ -94,6 +94,9 @@ class II(ANY):
 CODE_SYSTEM_NAMES = {
     "http://snomed.info/sct": "2.16.840.1.113883.6.96",
     "https://dmd.nhs.uk": "2.16.840.1.113883.6.96",
+    "https://fhir.nhs.uk/Id/snomed-ct": "2.16.840.1.113883.6.96",
+    "https://fhir.nhs.uk/Id/dmd": "2.16.840.1.113883.6.96",
+    "https://fhir.nhs.uk/Id/read-codes": "2.16.840.1.113883.2.1.6.2",
     "LOINC": "2.16.840.1.113883.6.1",
     "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
     "https://fhir.hl7.org.uk/Id/resipuk-gemscript-drug-codes": "2.16.840.1.113883.2.1.6.15",
