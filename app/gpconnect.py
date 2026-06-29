@@ -545,9 +545,15 @@ async def gpconnect(
         except Exception:
             pass
 
+    import time
+
+    start_time = time.perf_counter()
     try:
         xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
-
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logging.info(
+            f"FHIR2CCDA conversion completed in {duration_ms:.2f}ms for NHS {nhsno}"
+        )
     except Exception as e:
         msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
         record_application_failure(e)
