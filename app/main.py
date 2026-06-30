@@ -143,10 +143,12 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.logging import LoggingInstrumentor
+        from opentelemetry.instrumentation.redis import RedisInstrumentor
 
         FastAPIInstrumentor.instrument_app(app)
         HTTPXClientInstrumentor().instrument()
         LoggingInstrumentor().instrument(set_logging_format=True)
+        RedisInstrumentor().instrument()
         print(
             "Application Insights OpenTelemetry instrumentation enabled successfully."
         )

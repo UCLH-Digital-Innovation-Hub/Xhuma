@@ -546,10 +546,14 @@ async def gpconnect(
             pass
 
     import time
+    from opentelemetry import trace
 
+    tracer = trace.get_tracer(__name__)
     start_time = time.perf_counter()
     try:
-        xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+        with tracer.start_as_current_span("FHIR2CCDA.convert_bundle"):
+            xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+
         duration_ms = (time.perf_counter() - start_time) * 1000
         logging.info(f"FHIR2CCDA conversion completed in {duration_ms:.2f}ms")
     except Exception as e:
