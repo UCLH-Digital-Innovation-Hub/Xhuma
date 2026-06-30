@@ -80,8 +80,9 @@ jobs:
       - name: Run tests with coverage
         id: tests
         run: |
-          uv run coverage run -m pytest
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          uv run coverage run -m pytest || exit_code=$?
+          if [ -z "$exit_code" ]; then exit_code=0; fi
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           uv run coverage xml
         continue-on-error: true
 

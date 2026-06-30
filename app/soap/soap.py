@@ -165,6 +165,20 @@ async def iti55(request: Request):
         except Exception:
             nhsno = None
 
+        # OpenTelemetry trace propagation
+        message_id = envelope.get("Header", {}).get("MessageID")
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            if message_id:
+                span.set_attribute("soap.message_id", message_id)
+            if nhsno:
+                import hashlib
+
+                hashed_nhs = hashlib.sha256(str(nhsno).encode("utf-8")).hexdigest()
+                span.set_attribute("patient.nhs_number_hashed", hashed_nhs)
+
         if not nhsno:
             data = await iti_55_error(
                 envelope["Header"]["MessageID"],
@@ -336,6 +350,26 @@ async def iti38(request: Request):
         )
 
         print(f"Patient ID: {patient_id}")
+
+        # OpenTelemetry trace propagation
+        message_id = envelope.get("Header", {}).get("MessageID")
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            if message_id:
+                span.set_attribute("soap.message_id", message_id)
+            if query_id:
+                span.set_attribute("soap.query_id", query_id)
+            try:
+                poss_nhs = re.search(r"[0-9]{10}", patient_id).group(0)
+                if poss_nhs:
+                    import hashlib
+
+                    hashed_nhs = hashlib.sha256(poss_nhs.encode("utf-8")).hexdigest()
+                    span.set_attribute("patient.nhs_number_hashed", hashed_nhs)
+            except Exception:
+                pass
         # TODO rewrite this pattern if we don't need to map CEID to NHSNO
         if not validateNHSnumber(patient_id):
             try:
@@ -393,6 +427,16 @@ async def iti39(request: Request):
             ]["DocumentUniqueId"]
         except Exception:
             raise HTTPException(status_code=404, detail="DocumentUniqueId not found")
+
+        # OpenTelemetry trace propagation
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            if message_id:
+                span.set_attribute("soap.message_id", message_id)
+            if document_id:
+                span.set_attribute("soap.document_id", document_id)
 
         document = client.get(document_id)
 
