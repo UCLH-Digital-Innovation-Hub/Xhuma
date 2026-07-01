@@ -145,6 +145,11 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         from opentelemetry.instrumentation.logging import LoggingInstrumentor
         from opentelemetry.instrumentation.redis import RedisInstrumentor
 
+        # Ensure the root logger captures INFO logs so they are exported
+        import logging
+
+        logging.getLogger().setLevel(logging.INFO)
+
         FastAPIInstrumentor.instrument_app(app)
         HTTPXClientInstrumentor().instrument()
         LoggingInstrumentor().instrument(set_logging_format=True)
