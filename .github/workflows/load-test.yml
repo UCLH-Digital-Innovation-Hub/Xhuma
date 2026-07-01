@@ -1,0 +1,49 @@
+name: Load Testing & Benchmarking
+
+on:
+  pull_request:
+    branches:
+      - main
+      - int
+  workflow_dispatch:
+    inputs:
+      users:
+        description: 'Number of concurrent Locust users'
+        required: true
+        default: '5'
+      duration:
+        description: 'Duration of the test (e.g., 30s, 1m)'
+        required: true
+        default: '30s'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          
+      - name: Start services (Test Environment)
+        run: |
+          # Spin up the app and redis in the background
+          docker compose -f docker-compose.test.yml up -d redis
+          
+          # We need to run the app in the background so locust can hit it
+          # In a real environment we'd hit the deployed int URL, but for CI we run it locally
+          uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          sleep 5 # wait for startup
+          
+      - name: Run Locust Benchmark
+        env:
+          TARGET_URL: 'http://localhost:8000'
+        run: |
+          USERS=${{ github.event.inputs.users || '2' }}
+          DURATION=${{ github.event.inputs.duration || '15s' }}
+          
+          echo "Running Locust benchmark with $USERS users for $DURATION..."
+          uv run locust -f tests/load_tests/locustfile.py --headless -u $USERS -r 1 -t $DURATION --host $TARGET_URL
