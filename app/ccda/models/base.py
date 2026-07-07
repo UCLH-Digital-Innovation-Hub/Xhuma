@@ -76,8 +76,8 @@ class Observation(BaseModel):
     code: Optional[CD] = None
     text: Optional[str] = None
     statusCode: Optional[CS] = None
-    effectiveTime: Optional[Union[IVL_TS, Dict, Any]] = None
-    value: Optional[Union[ANY, Dict, Any]] = None
+    effectiveTime: Optional[IVL_TS] = None
+    value: Optional[ANY] = None
     entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
 
 
@@ -97,7 +97,7 @@ class ResultObservation(Observation):
         ]
     )
     referenceRange: Optional[Dict] = None
-    value: Optional[Union[PQ, Dict, Any]] = None  # PQ is used for numeric values
+    value: Optional[PQ] = None  # PQ is used for numeric values
 
 
 class InstructionObservation(Observation):
@@ -152,16 +152,16 @@ class SubstanceAdministration(BaseModel):
     code: Optional[CD] = None
     text: Optional[Union[str, ED]] = None
     statusCode: Optional[CS] = None
-    effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS, Dict, Any]] = Field(
+    effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
         default_factory=list
     )
     consumable: Optional[Consumable] = None
-    routeCode: Optional[Union[CE, Dict, Any]] = None
-    doseQuantity: Optional[Union[IVL_PQ, PQ, Dict, Any]] = None
-    rateQuantity: Optional[Union[IVL_PQ, PQ, Dict, Any]] = None
-    maxDoseQuantity: Optional[Union[RTO_PQ_PQ, Dict, Any]] = None
+    routeCode: Optional[CE] = None
+    doseQuantity: Optional[Union[IVL_PQ, PQ]] = None
+    rateQuantity: Optional[Union[IVL_PQ, PQ]] = None
+    maxDoseQuantity: Optional[RTO_PQ_PQ] = None
     entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
-    repeatNumber: Optional[Union[IVL_INT, Dict, Any]] = None
+    repeatNumber: Optional[IVL_INT] = None
     # TODO flesh out precondition model
     precondition: Optional[Dict] = None
 
@@ -197,9 +197,9 @@ class EntryRelationship(BaseModel, extra=Extra.allow):
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
     sequenceNumber: Optional[int] = None
-    act: Optional[Union[Act, Dict, Any]] = None
-    observation: Optional[Union[Observation, Dict, Any]] = None
-    substanceAdministration: Optional[Union["SubstanceAdministration", Dict, Any]] = (
+    act: Optional[Act] = None
+    observation: Optional[Observation] = None
+    substanceAdministration: Optional["SubstanceAdministration"] = (
         None
     )
     # accept any type of object
@@ -211,8 +211,8 @@ class Entry(BaseModel):
     not relevant to what we get from Epic NoteReader messages - we only need Act.
     """
 
-    act: Optional[Union[Act, Dict, Any]] = None
-    substanceAdministration: Optional[Union[SubstanceAdministration, Dict, Any]] = None
+    act: Optional[Act] = None
+    substanceAdministration: Optional[SubstanceAdministration] = None
 
 
 class Section(BaseModel):
