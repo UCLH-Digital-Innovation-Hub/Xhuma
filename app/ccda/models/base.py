@@ -43,7 +43,7 @@ class Consumable(BaseModel):
 class EntryRelationshipAct(BaseModel):
     templateId: II
     code: CD
-    text: Dict
+    text: Optional[str] = None
     statusCode: Optional[CS] = None
     classCode: str = Field(alias="@classCode", default="ACT")
     moodCode: str = Field(alias="@moodCode", default="INT")
@@ -81,6 +81,18 @@ class Observation(BaseModel):
     entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
 
 
+class ObservationRange(BaseModel):
+    classCode: str = Field(alias="@classCode", default="OBS")
+    moodCode: str = Field(alias="@moodCode", default="EVN.CRT")
+    text: Optional[str] = None
+    value: Optional[ANY] = None
+
+
+class ReferenceRange(BaseModel):
+    typeCode: str = Field(alias="@typeCode", default="REFV")
+    observationRange: ObservationRange
+
+
 class ResultObservation(Observation):
     """
     Representation of CDA model object Result Observation.
@@ -96,7 +108,7 @@ class ResultObservation(Observation):
             )
         ]
     )
-    referenceRange: Optional[Dict] = None
+    referenceRange: Optional[List[ReferenceRange]] = None
     value: Optional[PQ] = None  # PQ is used for numeric values
 
 
@@ -128,6 +140,18 @@ class InstructionObservation(Observation):
             "@code": "completed",
         }
     )
+
+
+class Criterion(BaseModel):
+    classCode: str = Field(alias="@classCode", default="OBS")
+    moodCode: str = Field(alias="@moodCode", default="EVN")
+    code: Optional[CD] = None
+    value: Optional[ANY] = None
+
+
+class Precondition(BaseModel):
+    typeCode: str = Field(alias="@typeCode", default="PRCN")
+    criterion: Criterion
 
 
 class SubstanceAdministration(BaseModel):
@@ -163,7 +187,7 @@ class SubstanceAdministration(BaseModel):
     entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
     repeatNumber: Optional[IVL_INT] = None
     # TODO flesh out precondition model
-    precondition: Optional[Dict] = None
+    precondition: Optional[List[Precondition]] = None
 
     @field_serializer("effectiveTime")
     def serialize_effective_time(
