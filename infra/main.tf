@@ -64,6 +64,26 @@ resource "azurerm_subnet" "pe_subnet" {
   address_prefixes     = ["10.1.3.0/24"]
 }
 
+resource "azurerm_subnet" "locust_subnet" {
+  name                 = "locust-subnet"
+  resource_group_name  = data.azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.1.4.0/24"]
+  delegation {
+    name = "locust-delegation"
+    service_delegation {
+      name    = "Microsoft.ContainerInstance/containerGroups"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+
+resource "azurerm_user_assigned_identity" "locust_mi" {
+  location            = data.azurerm_resource_group.rg.location
+  name                = "${var.app_service_name}-locust-mi"
+  resource_group_name = data.azurerm_resource_group.rg.name
+}
+
 resource "azurerm_private_dns_zone" "pg_dns" {
   name                = "privatelink.postgres.database.azure.com"
   resource_group_name = data.azurerm_resource_group.rg.name
@@ -291,6 +311,26 @@ resource "azurerm_key_vault_access_policy" "app_shared_policy" {
   key_vault_id = data.azurerm_key_vault.shared_kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = azurerm_linux_web_app.app.identity[0].principal_id
+
+  secret_permissions      = ["Get", "List"]
+  certificate_permissions = ["Get", "List"]
+}
+
+# Locust MI Access Policy for Local Vault
+resource "azurerm_key_vault_access_policy" "locust_local_policy" {
+  key_vault_id = azurerm_key_vault.local_kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_user_assigned_identity.locust_mi.principal_id
+
+  secret_permissions      = ["Get", "List"]
+  certificate_permissions = ["Get", "List"]
+}
+
+# Locust MI Access Policy for Shared Vault
+resource "azurerm_key_vault_access_policy" "locust_shared_policy" {
+  key_vault_id = data.azurerm_key_vault.shared_kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_user_assigned_identity.locust_mi.principal_id
 
   secret_permissions      = ["Get", "List"]
   certificate_permissions = ["Get", "List"]
