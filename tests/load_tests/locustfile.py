@@ -14,14 +14,17 @@ if KEY_VAULT_URL:
         credential = DefaultAzureCredential()
         client = SecretClient(vault_url=KEY_VAULT_URL, credential=credential)
         secret = client.get_secret(PEM_SECRET_NAME)
-        
+
         # Write the secret to a temporary file because requests/Locust require a file path for mTLS
         cert_fd, CERT_FILE = tempfile.mkstemp(suffix=".pem")
-        with os.fdopen(cert_fd, 'w') as f:
+        with os.fdopen(cert_fd, "w") as f:
             f.write(secret.value)
-        print(f"Successfully loaded {PEM_SECRET_NAME} from Key Vault via Managed Identity.")
+        print(
+            f"Successfully loaded {PEM_SECRET_NAME} from Key Vault via Managed Identity."
+        )
     except Exception as e:
         print(f"Warning: Failed to fetch PEM from Key Vault: {e}")
+
 
 def generate_soap_payload(nhs_number: str) -> str:
     """Generates a mock SOAP envelope containing an ITI-55 request"""
@@ -47,6 +50,7 @@ def generate_soap_payload(nhs_number: str) -> str:
     </s:Body>
 </s:Envelope>"""
 
+
 class EpicClientUser(HttpUser):
     # Wait between 1 and 3 seconds between tasks to mimic real-world pacing
     wait_time = between(1, 3)
@@ -60,20 +64,25 @@ class EpicClientUser(HttpUser):
     def test_iti_55_patient_discovery(self):
         """Simulates an ITI-55 Patient Discovery lookup"""
         payload = generate_soap_payload("9692136744")
-        
+
         # We use a Multipart MIME boundary since Xhuma expects MTOM SOAP
         boundary = "uuid:benchmark-boundary"
         headers = {
             "Content-Type": f'multipart/related; type="application/xop+xml"; boundary="{boundary}"'
         }
-        
+
         body = f"""--{boundary}\r
 Content-Type: application/xop+xml; charset=UTF-8; type="application/soap+xml"\r
 \r
 {payload}\r
 --{boundary}--\r
 """
-        self.client.post("/SOAP/iti55", data=body, headers=headers, name="/SOAP/iti55 (Patient Discovery)")
+        self.client.post(
+            "/SOAP/iti55",
+            data=body,
+            headers=headers,
+            name="/SOAP/iti55 (Patient Discovery)",
+        )
 
     @task(1)
     def test_iti_38_document_query(self):
@@ -83,5 +92,10 @@ Content-Type: application/xop+xml; charset=UTF-8; type="application/soap+xml"\r
         headers = {
             "Content-Type": f'multipart/related; type="application/xop+xml"; boundary="{boundary}"'
         }
-        body = f"--{boundary}\\r\\nContent-Type: application/xop+xml; charset=UTF-8; type=\"application/soap+xml\"\\r\\n\\r\\n{payload}\\r\\n--{boundary}--\\r\\n"
-        self.client.post("/SOAP/iti38", data=body, headers=headers, name="/SOAP/iti38 (Document Query)")
+        body = f'--{boundary}\\r\\nContent-Type: application/xop+xml; charset=UTF-8; type="application/soap+xml"\\r\\n\\r\\n{payload}\\r\\n--{boundary}--\\r\\n'
+        self.client.post(
+            "/SOAP/iti38",
+            data=body,
+            headers=headers,
+            name="/SOAP/iti38 (Document Query)",
+        )

@@ -42,27 +42,27 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      
+
       - name: Run Serverless ACI Benchmark
         run: |
           USERS=${{ github.event.inputs.users }}
           SPAWN_RATE=${{ github.event.inputs.spawn_rate }}
           DURATION=${{ github.event.inputs.duration }}
-          
+
           echo "Triggering Serverless ACI Benchmark ($USERS users, $DURATION)..."
-          
+
           # Fetch infrastructure details
           VNET_NAME="${APP_NAME}-vnet"
           SUBNET_ID=$(az network vnet subnet show -g $RESOURCE_GROUP -n locust-subnet --vnet-name $VNET_NAME --query id -o tsv)
           MI_ID=$(az identity show -g $RESOURCE_GROUP -n "${APP_NAME}-locust-mi" --query id -o tsv)
           KV_URL="https://${APP_NAME}-kv.vault.azure.net/"
-          
+
           # We use the existing GHCR image
           IMAGE="${REGISTRY}/${IMAGE_NAME}:latest"
-          
-          # We target the internal App Service FQDN 
+
+          # We target the internal App Service FQDN
           TARGET_URL="https://${APP_NAME}.azurewebsites.net"
-          
+
           # Create and execute the ephemeral container
           az container create \
             --resource-group $RESOURCE_GROUP \
@@ -74,9 +74,9 @@ jobs:
             --restart-policy Never \
             --command-line "uv run locust -f tests/load_tests/locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL" \
             --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_ID
-            
+
           # Wait for completion and dump logs
           az container attach --resource-group $RESOURCE_GROUP --name "xhuma-benchmark"
-          
+
           echo "Benchmark complete. Tearing down container."
           az container delete --resource-group $RESOURCE_GROUP --name "xhuma-benchmark" --yes
