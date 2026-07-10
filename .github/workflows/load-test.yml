@@ -83,5 +83,8 @@ jobs:
           # Wait for completion and dump logs
           az container attach --resource-group $RESOURCE_GROUP --name "xhuma-benchmark"
 
-          echo "Benchmark complete. Tearing down container."
-          az container delete --resource-group $RESOURCE_GROUP --name "xhuma-benchmark" --yes
+      - name: Cleanup Serverless ACI
+        if: always()
+        run: |
+          echo "Tearing down benchmark container..."
+          az container delete --resource-group ${{ github.event.inputs.environment == 'main' && 'rg-xhuma-uclh-prd' || 'rg-xhuma-int' }} --name "xhuma-benchmark" --yes
