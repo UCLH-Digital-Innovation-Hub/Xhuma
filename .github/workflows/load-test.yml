@@ -36,6 +36,9 @@ jobs:
       id-token: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -70,6 +73,7 @@ jobs:
             --subnet $SUBNET_ID \
             --assign-identity $MI_ID \
             --restart-policy Never \
+            --os-type Linux \
             --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_ID LOCUSTFILE_B64=$SCRIPT_B64 \
             --command-line "/bin/sh -c 'echo \$LOCUSTFILE_B64 | base64 -d > locustfile.py && pip install locust azure-identity azure-keyvault-secrets && locust -f locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL'"
 
