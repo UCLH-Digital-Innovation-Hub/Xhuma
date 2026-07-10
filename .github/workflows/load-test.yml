@@ -1,49 +1,82 @@
-name: Load Testing & Benchmarking
+name: Serverless Benchmarking
 
 on:
-  pull_request:
-    branches:
-      - main
-      - int
   workflow_dispatch:
     inputs:
       users:
         description: 'Number of concurrent Locust users'
         required: true
-        default: '5'
-      duration:
-        description: 'Duration of the test (e.g., 30s, 1m)'
+        default: '50'
+      spawn_rate:
+        description: 'Users to spawn per second'
         required: true
-        default: '30s'
+        default: '10'
+      duration:
+        description: 'Duration of the test (e.g., 3m, 5m)'
+        required: true
+        default: '3m'
+      environment:
+        description: 'Environment to test (e.g. int, main)'
+        required: true
+        default: 'int'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+  RESOURCE_GROUP: ${{ github.event.inputs.environment == 'main' && 'rg-xhuma-uclh-prd' || 'rg-xhuma-int' }}
+  APP_NAME: ${{ github.event.inputs.environment == 'main' && 'app-xhuma-uclh-prd' || 'app-xhuma-int' }}
 
 jobs:
-  benchmark:
+  run-benchmark:
     runs-on: ubuntu-latest
-    
+    environment:
+      name: ${{ github.event.inputs.environment == 'main' && 'rg-xhuma-uclh-prd' || 'rg-xhuma-int' }}
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          enable-cache: true
-          
-      - name: Start services (Test Environment)
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Run Serverless ACI Benchmark
         run: |
-          # Spin up the app and redis in the background
-          docker compose -f docker-compose.test.yml up -d redis
+          USERS=${{ github.event.inputs.users }}
+          SPAWN_RATE=${{ github.event.inputs.spawn_rate }}
+          DURATION=${{ github.event.inputs.duration }}
           
-          # We need to run the app in the background so locust can hit it
-          # In a real environment we'd hit the deployed int URL, but for CI we run it locally
-          uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-          sleep 5 # wait for startup
+          echo "Triggering Serverless ACI Benchmark ($USERS users, $DURATION)..."
           
-      - name: Run Locust Benchmark
-        env:
-          TARGET_URL: 'http://localhost:8000'
-        run: |
-          USERS=${{ github.event.inputs.users || '2' }}
-          DURATION=${{ github.event.inputs.duration || '15s' }}
+          # Fetch infrastructure details
+          VNET_NAME="${APP_NAME}-vnet"
+          SUBNET_ID=$(az network vnet subnet show -g $RESOURCE_GROUP -n locust-subnet --vnet-name $VNET_NAME --query id -o tsv)
+          MI_ID=$(az identity show -g $RESOURCE_GROUP -n "${APP_NAME}-locust-mi" --query id -o tsv)
+          KV_URL="https://${APP_NAME}-kv.vault.azure.net/"
           
-          echo "Running Locust benchmark with $USERS users for $DURATION..."
-          uv run locust -f tests/load_tests/locustfile.py --headless -u $USERS -r 1 -t $DURATION --host $TARGET_URL
+          # We use the existing GHCR image
+          IMAGE="${REGISTRY}/${IMAGE_NAME}:latest"
+          
+          # We target the internal App Service FQDN 
+          TARGET_URL="https://${APP_NAME}.azurewebsites.net"
+          
+          # Create and execute the ephemeral container
+          az container create \
+            --resource-group $RESOURCE_GROUP \
+            --name "xhuma-benchmark" \
+            --image $IMAGE \
+            --vnet $VNET_NAME \
+            --subnet $SUBNET_ID \
+            --assign-identity $MI_ID \
+            --restart-policy Never \
+            --command-line "uv run locust -f tests/load_tests/locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL" \
+            --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_ID
+            
+          # Wait for completion and dump logs
+          az container attach --resource-group $RESOURCE_GROUP --name "xhuma-benchmark"
+          
+          echo "Benchmark complete. Tearing down container."
+          az container delete --resource-group $RESOURCE_GROUP --name "xhuma-benchmark" --yes

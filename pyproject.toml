@@ -48,6 +48,8 @@ dev = [
     "coverage",
     "ruff>=0.15.12",
     "locust",
+    "azure-identity",
+    "azure-keyvault-secrets",
 ]
 
 [tool.uv]

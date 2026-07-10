@@ -1,5 +1,27 @@
+import os
+import tempfile
 import uuid
 from locust import HttpUser, task, between
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+
+KEY_VAULT_URL = os.getenv("KEY_VAULT_URL")
+PEM_SECRET_NAME = os.getenv("PEM_SECRET_NAME", "epic-ca-cert")
+CERT_FILE = None
+
+if KEY_VAULT_URL:
+    try:
+        credential = DefaultAzureCredential()
+        client = SecretClient(vault_url=KEY_VAULT_URL, credential=credential)
+        secret = client.get_secret(PEM_SECRET_NAME)
+        
+        # Write the secret to a temporary file because requests/Locust require a file path for mTLS
+        cert_fd, CERT_FILE = tempfile.mkstemp(suffix=".pem")
+        with os.fdopen(cert_fd, 'w') as f:
+            f.write(secret.value)
+        print(f"Successfully loaded {PEM_SECRET_NAME} from Key Vault via Managed Identity.")
+    except Exception as e:
+        print(f"Warning: Failed to fetch PEM from Key Vault: {e}")
 
 def generate_soap_payload(nhs_number: str) -> str:
     """Generates a mock SOAP envelope containing an ITI-55 request"""
@@ -28,6 +50,11 @@ def generate_soap_payload(nhs_number: str) -> str:
 class EpicClientUser(HttpUser):
     # Wait between 1 and 3 seconds between tasks to mimic real-world pacing
     wait_time = between(1, 3)
+
+    def on_start(self):
+        """Called when a Locust user starts. We inject the mTLS cert here if available."""
+        if CERT_FILE:
+            self.client.cert = CERT_FILE
 
     @task(3)
     def test_iti_55_patient_discovery(self):
