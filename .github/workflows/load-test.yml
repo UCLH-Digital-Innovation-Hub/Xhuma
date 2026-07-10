@@ -27,7 +27,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
   RESOURCE_GROUP: ${{ github.event.inputs.environment == 'main' && 'rg-xhuma-uclh-prd' || 'rg-xhuma-int' }}
-  APP_NAME: ${{ github.event.inputs.environment == 'main' && 'app-xhuma-uclh-prd' || 'app-xhuma-int' }}
+  APP_NAME: ${{ github.event.inputs.environment == 'main' && 'xhuma-app-prd' || 'xhuma-app-int' }}
 
 jobs:
   run-benchmark:
@@ -59,23 +59,23 @@ jobs:
           MI_ID=$(az identity show -g $RESOURCE_GROUP -n "${APP_NAME}-locust-mi" --query id -o tsv)
           KV_URL="https://${APP_NAME}-kv.vault.azure.net/"
 
-          # We use the existing GHCR image
-          IMAGE="${REGISTRY}/${IMAGE_NAME}:latest"
+          # Encode the locustfile to pass securely to the container
+          SCRIPT_B64=$(cat tests/load_tests/locustfile.py | base64 -w 0)
 
           # We target the internal App Service FQDN
           TARGET_URL="https://${APP_NAME}.azurewebsites.net"
 
-          # Create and execute the ephemeral container
+          # Create and execute the ephemeral container using a standard python image
           az container create \
             --resource-group $RESOURCE_GROUP \
             --name "xhuma-benchmark" \
-            --image $IMAGE \
+            --image "python:3.13-slim" \
             --vnet $VNET_NAME \
             --subnet $SUBNET_ID \
             --assign-identity $MI_ID \
             --restart-policy Never \
-            --command-line "uv run locust -f tests/load_tests/locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL" \
-            --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_ID
+            --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_ID LOCUSTFILE_B64=$SCRIPT_B64 \
+            --command-line "/bin/sh -c 'echo \$LOCUSTFILE_B64 | base64 -d > locustfile.py && pip install locust azure-identity azure-keyvault-secrets && locust -f locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL'"
 
           # Wait for completion and dump logs
           az container attach --resource-group $RESOURCE_GROUP --name "xhuma-benchmark"
