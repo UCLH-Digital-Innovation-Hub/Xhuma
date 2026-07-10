@@ -6,11 +6,11 @@ on:
       users:
         description: 'Number of concurrent Locust users'
         required: true
-        default: '50'
+        default: '5'
       spawn_rate:
         description: 'Users to spawn per second'
         required: true
-        default: '10'
+        default: '2'
       duration:
         description: 'Duration of the test (e.g., 3m, 5m)'
         required: true
