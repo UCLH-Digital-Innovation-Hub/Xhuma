@@ -1,6 +1,9 @@
 name: Serverless Benchmarking
 
 on:
+  push:
+    branches:
+      - int
   workflow_dispatch:
     inputs:
       users:
@@ -45,9 +48,10 @@ jobs:
 
       - name: Run Serverless ACI Benchmark
         run: |
-          USERS=${{ github.event.inputs.users }}
-          SPAWN_RATE=${{ github.event.inputs.spawn_rate }}
-          DURATION=${{ github.event.inputs.duration }}
+          USERS="${{ github.event.inputs.users || '50' }}"
+          SPAWN_RATE="${{ github.event.inputs.spawn_rate || '10' }}"
+          DURATION="${{ github.event.inputs.duration || '3m' }}"
+          ENV_TARGET="${{ github.event.inputs.environment || 'int' }}"
 
           echo "Triggering Serverless ACI Benchmark ($USERS users, $DURATION)..."
 
