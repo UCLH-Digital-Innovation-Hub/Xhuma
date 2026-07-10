@@ -55,7 +55,8 @@ jobs:
           # Fetch infrastructure details
           VNET_NAME="${APP_NAME}-vnet"
           SUBNET_ID=$(az network vnet subnet show -g $RESOURCE_GROUP -n locust-subnet --vnet-name $VNET_NAME --query id -o tsv)
-          MI_ID=$(az identity show -g $RESOURCE_GROUP -n "${APP_NAME}-locust-mi" --query id -o tsv)
+          MI_RESOURCE_ID=$(az identity show -g $RESOURCE_GROUP -n "${APP_NAME}-locust-mi" --query id -o tsv)
+          MI_CLIENT_ID=$(az identity show -g $RESOURCE_GROUP -n "${APP_NAME}-locust-mi" --query clientId -o tsv)
           KV_URL="https://${APP_NAME}-kv.vault.azure.net/"
 
           # Encode the locustfile to pass securely to the container
@@ -71,12 +72,12 @@ jobs:
             --image "python:3.13-slim" \
             --vnet $VNET_NAME \
             --subnet $SUBNET_ID \
-            --assign-identity $MI_ID \
+            --assign-identity $MI_RESOURCE_ID \
             --restart-policy Never \
             --os-type Linux \
             --cpu 1 \
             --memory 2 \
-            --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_ID LOCUSTFILE_B64=$SCRIPT_B64 \
+            --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_CLIENT_ID LOCUSTFILE_B64=$SCRIPT_B64 \
             --command-line "/bin/sh -c 'echo \$LOCUSTFILE_B64 | base64 -d > locustfile.py && pip install locust azure-identity azure-keyvault-secrets && locust -f locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL'"
 
           # Wait for completion and dump logs
