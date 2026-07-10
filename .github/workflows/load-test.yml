@@ -78,10 +78,26 @@ jobs:
             --cpu 1 \
             --memory 2 \
             --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_CLIENT_ID LOCUSTFILE_B64=$SCRIPT_B64 \
-            --command-line "/bin/sh -c 'echo \$LOCUSTFILE_B64 | base64 -d > locustfile.py && pip install locust azure-identity azure-keyvault-secrets && locust -f locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL'"
+            --command-line "/bin/sh -c 'echo \$LOCUSTFILE_B64 | base64 -d > locustfile.py && pip install locust azure-identity azure-keyvault-secrets && locust -f locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL --html report.html && echo \"==== REPORT_START ====\" && cat report.html | base64 -w 0 && echo \"==== REPORT_END ====\"'"
 
-          # Wait for completion and dump logs
-          az container attach --resource-group $RESOURCE_GROUP --name "xhuma-benchmark"
+          # Wait for completion and dump logs, saving output to extract the HTML report
+          az container attach --resource-group $RESOURCE_GROUP --name "xhuma-benchmark" | tee benchmark.log
+
+          # Extract the base64 report and decode it
+          echo "Extracting HTML report..."
+          sed -n '/==== REPORT_START ====/,/==== REPORT_END ====/p' benchmark.log | grep -v '====' > report_b64.txt
+          if [ -s report_b64.txt ]; then
+            base64 -d report_b64.txt > benchmark_report.html
+            echo "Successfully generated benchmark_report.html!"
+          else
+            echo "Failed to extract report from logs."
+          fi
+
+      - name: Upload Benchmark Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report-${{ github.event.inputs.environment || 'int' }}
+          path: benchmark_report.html
 
       - name: Cleanup Serverless ACI
         if: always()
