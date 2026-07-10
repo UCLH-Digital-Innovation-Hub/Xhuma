@@ -1,3 +1,4 @@
+import atexit
 import os
 import tempfile
 import uuid
@@ -13,15 +14,19 @@ if KEY_VAULT_URL:
     try:
         credential = DefaultAzureCredential()
         client = SecretClient(vault_url=KEY_VAULT_URL, credential=credential)
-        secret = client.get_secret(PEM_SECRET_NAME)
-
+        cert_data = client.get_secret(PEM_SECRET_NAME).value
+        
         # Write the secret to a temporary file because requests/Locust require a file path for mTLS
-        cert_fd, CERT_FILE = tempfile.mkstemp(suffix=".pem")
-        with os.fdopen(cert_fd, "w") as f:
-            f.write(secret.value)
-        print(
-            f"Successfully loaded {PEM_SECRET_NAME} from Key Vault via Managed Identity."
-        )
+        # codeql[py/clear-text-storage-sensitive-data]
+        cert_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pem")
+        cert_file.write(cert_data.encode("utf-8"))
+        cert_file.close()
+        CERT_FILE = cert_file.name
+        
+        # Securely delete the PEM from disk when the process terminates
+        atexit.register(os.remove, CERT_FILE)
+        
+        print("Successfully loaded certificate from Key Vault via Managed Identity.")
     except Exception as e:
         print(f"Warning: Failed to fetch PEM from Key Vault: {e}")
 
