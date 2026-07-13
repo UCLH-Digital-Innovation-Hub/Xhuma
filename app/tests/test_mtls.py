@@ -37,7 +37,7 @@ def test_mtls_enabled_with_header(monkeypatch):
     monkeypatch.setenv("REQUIRE_MTLS", "true")
     # Mock the Epic CA verification to succeed for this test
     monkeypatch.setattr("app.middleware.mtls._verify_epic_cert", lambda cert: True)
-    
+
     response = client.get("/secure", headers={"X-ARR-ClientCert": "MIID..."})
     assert response.status_code == 200
 
