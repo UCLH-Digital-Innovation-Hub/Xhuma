@@ -57,8 +57,8 @@ def test_relay_ws_rejects_without_cert_header(monkeypatch, relay_client):
     monkeypatch.delenv("RELAY_MTLS_ALLOWED_CERT_SHA256", raising=False)
 
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with relay_client.websocket_connect("/relay/ws/agent-1"):
-            pass
+        with relay_client.websocket_connect("/relay/ws/agent-1") as ws:
+            ws.receive_text()
 
     assert exc_info.value.code == 1008
 
@@ -73,8 +73,8 @@ def test_relay_ws_rejects_non_allowlisted_cert(monkeypatch, relay_client):
     with pytest.raises(WebSocketDisconnect) as exc_info:
         with relay_client.websocket_connect(
             "/relay/ws/agent-1", headers={"X-Relay-ClientCert": der_b64}
-        ):
-            pass
+        ) as ws:
+            ws.receive_text()
 
     assert exc_info.value.code == 1008
 
