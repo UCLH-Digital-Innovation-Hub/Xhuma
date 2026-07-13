@@ -210,12 +210,15 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             async def parse_medications(references):
                 # run lookups concurrently with return_exceptions=True so a single failure doesn't kill the section
                 results = await asyncio.gather(
-                    *(medication(entry, index) for entry in references), return_exceptions=True
+                    *(medication(entry, index) for entry in references),
+                    return_exceptions=True,
                 )
                 valid_items = []
                 for idx, res in enumerate(results):
                     if isinstance(res, Exception):
-                        logging.error(f"Error parsing medication {getattr(references[idx], 'id', 'unknown')}: {res}")
+                        logging.error(
+                            f"Error parsing medication {getattr(references[idx], 'id', 'unknown')}: {res}"
+                        )
                     else:
                         valid_items.append(res)
                 return valid_items
@@ -227,9 +230,15 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         if entry.__class__.__name__ == "AllergyIntolerance":
                             valid_items.append(allergy(entry))
                         else:
-                            valid_items.append(observation_entry(entry, index, "Allergies and adverse reactions"))
+                            valid_items.append(
+                                observation_entry(
+                                    entry, index, "Allergies and adverse reactions"
+                                )
+                            )
                     except Exception as e:
-                        logging.error(f"Error parsing allergy {getattr(entry, 'id', 'unknown')}: {e}")
+                        logging.error(
+                            f"Error parsing allergy {getattr(entry, 'id', 'unknown')}: {e}"
+                        )
                 return valid_items
 
             def parse_problems(lst):
@@ -239,9 +248,13 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         if entry.__class__.__name__ == "Condition":
                             valid_items.append(problem(entry))
                         else:
-                            valid_items.append(observation_entry(entry, index, "Problems"))
+                            valid_items.append(
+                                observation_entry(entry, index, "Problems")
+                            )
                     except Exception as e:
-                        logging.error(f"Error parsing problem {getattr(entry, 'id', 'unknown')}: {e}")
+                        logging.error(
+                            f"Error parsing problem {getattr(entry, 'id', 'unknown')}: {e}"
+                        )
                 return valid_items
 
             def parse_immunizations(lst):
@@ -251,9 +264,13 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         if entry.__class__.__name__ == "Immunization":
                             valid_items.append(immunization_entry(entry, index))
                         else:
-                            valid_items.append(observation_entry(entry, index, "Immunisations"))
+                            valid_items.append(
+                                observation_entry(entry, index, "Immunisations")
+                            )
                     except Exception as e:
-                        logging.error(f"Error parsing immunization {getattr(entry, 'id', 'unknown')}: {e}")
+                        logging.error(
+                            f"Error parsing immunization {getattr(entry, 'id', 'unknown')}: {e}"
+                        )
                 return valid_items
 
             section_setup = {
@@ -410,19 +427,19 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 if list.title == "Medications and medical devices":
                     table_rows.sort(key=lambda x: (x["td"][2], x["td"][4]))
                 comp["section"]["entry"] = entries
-                
+
                 missing_count = len(references) - len(items)
                 warning_text = ""
                 if missing_count > 0:
                     warning_text = f"CLINICAL WARNING: {missing_count} item(s) in this section could not be safely converted due to malformed upstream data and have been omitted. Please refer directly to the GP Connect or NHS Spine source systems.<br />"
-                
+
                 comp["section"]["text"] = {
                     "paragraph": {
                         "@styleCode": "flagData",
                     },
                     "table": {"thead": headers, "tbody": {"tr": table_rows}},
                 }
-                
+
                 if warning_text:
                     comp["section"]["text"]["paragraph"]["#text"] = warning_text
 
@@ -431,7 +448,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     list.note[i].text + "<br />" for i in range(len(list.note))
                 )
                 existing_text = comp["section"]["text"]["paragraph"].get("#text", "")
-                comp["section"]["text"]["paragraph"]["#text"] = existing_text + note_text
+                comp["section"]["text"]["paragraph"]["#text"] = (
+                    existing_text + note_text
+                )
 
             return comp
 

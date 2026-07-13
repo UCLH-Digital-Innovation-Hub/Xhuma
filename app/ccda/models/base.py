@@ -223,9 +223,7 @@ class EntryRelationship(BaseModel, extra=Extra.allow):
     sequenceNumber: Optional[int] = None
     act: Optional[Act] = None
     observation: Optional[Observation] = None
-    substanceAdministration: Optional["SubstanceAdministration"] = (
-        None
-    )
+    substanceAdministration: Optional["SubstanceAdministration"] = None
     # accept any type of object
 
 
