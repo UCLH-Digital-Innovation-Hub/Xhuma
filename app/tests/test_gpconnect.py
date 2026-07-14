@@ -90,7 +90,7 @@ async def test_gpconnect_with_nhs_data(
     assert body["success"] is True
     assert "document_id" in body
 
-    mock_lookup_patient.assert_called_once_with(nhsno)
+    mock_lookup_patient.assert_called_once_with(nhsno, request=None)
     assert mock_sds_trace.call_count == 2
     mock_client.post.assert_called_once()
     mock_convert_bundle.assert_called_once()

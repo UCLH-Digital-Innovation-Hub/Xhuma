@@ -45,11 +45,25 @@ class TEL(URL):
     value: Optional[str] = Field(alias="@value", default=None)
 
 
+class AD(ANY):
+    resource_type: str = Field(
+        "AD",
+        description="Mailing and home or office addresses. A sequence of address parts.",
+    )
+    use: Optional[str] = Field(alias="@use", default=None)
+    streetAddressLine: Optional[List[str]] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postalCode: Optional[str] = None
+    country: Optional[str] = None
+
+
 class ED(BIN):
     resource_type: str = Field(
         "ED",
         description="Data that is primarily intended for human interpretation or for "
         "further machine processing is outside the scope of HL7.",
+        alias="@xsi:type",
     )
     reference: Optional[TEL] = None
     thumbnail: Optional[str] = None  # thumbnail
@@ -94,6 +108,9 @@ class II(ANY):
 CODE_SYSTEM_NAMES = {
     "http://snomed.info/sct": "2.16.840.1.113883.6.96",
     "https://dmd.nhs.uk": "2.16.840.1.113883.6.96",
+    "https://fhir.nhs.uk/Id/snomed-ct": "2.16.840.1.113883.6.96",
+    "https://fhir.nhs.uk/Id/dmd": "2.16.840.1.113883.6.96",
+    "https://fhir.nhs.uk/Id/read-codes": "2.16.840.1.113883.2.1.6.2",
     "LOINC": "2.16.840.1.113883.6.1",
     "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
     "https://fhir.hl7.org.uk/Id/resipuk-gemscript-drug-codes": "2.16.840.1.113883.2.1.6.15",

@@ -28,7 +28,10 @@ async def test_get_data_success(mock_async_client, mock_post, mock_redis):
     mock_client_instance.get.return_value = mock_response
     mock_async_client.return_value.__aenter__.return_value = mock_client_instance
 
-    patient = await lookup_patient(9690937278)
+    mock_request = MagicMock()
+    mock_request.app.state.jwk_json = {"keys": [{"kid": "test-1"}]}
+
+    patient = await lookup_patient(9690937278, request=mock_request)
 
     assert patient["resourceType"] == "Patient"
     assert patient["id"] == "9690937278"
