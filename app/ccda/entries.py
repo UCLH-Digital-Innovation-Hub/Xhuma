@@ -22,9 +22,11 @@ from .models.base import (
     ResultObservation,
     ResultsOrganizer,
     SubstanceAdministration,
+    Act,
 )
 from .models.datatypes import (
     CD,
+    ED,
     IVL_INT,
     IVL_TS,
     PIVL_TS,
@@ -279,19 +281,18 @@ async def medication(
     if patient_instr_list:
         combined_patient_instructions = "; ".join(patient_instr_list)
         instruction_entry = EntryRelationship()
-        instruction_entry.act = {
-            "@classCode": "ACT",
-            "@moodCode": "INT",
-            "templateId": templateId(
+        instruction_entry.act = Act(
+            moodCode="INT",
+            templateId=templateId(
                 root="2.16.840.1.113883.10.20.22.4.200", extension="2014-06-09"
             ),
-            "code": {
-                "@code": "422037009",
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "@codeSystemName": "http://snomed.info/sct",
-            },
-            "text": combined_patient_instructions,
-        }
+            code=CD(
+                code="422037009",
+                codeSystem="2.16.840.1.113883.6.96",
+                codeSystemName="http://snomed.info/sct",
+            ),
+            text=ED(xmlText=combined_patient_instructions),
+        )
         substance_administration.entryRelationship.append(instruction_entry)
     # find effective time entry with operator of low
 
@@ -495,12 +496,14 @@ async def medication(
     # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
     # print(f"Misc notes text: {''.join(misc_notes_text)}")
     comment_activity = EntryRelationship()
-    comment_activity.act = {
-        "code": {
-            "@code": "48767-8",
-        },
-        "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
-    }
+    comment_activity.act = Act(
+        code=CD(
+            code="48767-8",
+        ),
+        text=ED(
+            xmlText="".join(misc_notes_text) if misc_notes_text else "",
+        ),
+    )
     substance_administration.entryRelationship.append(comment_activity)
 
     # add dispensing  request

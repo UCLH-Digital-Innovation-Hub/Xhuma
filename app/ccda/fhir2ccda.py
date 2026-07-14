@@ -423,15 +423,17 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 entries = [i.entry for i in items]
                 rows = [i.row for i in items if i.row is not None]
                 table_rows = [create_row(row) for row in rows]
+
                 # if mediations sort rows by status then name of medication
                 if list.title == "Medications and medical devices":
                     table_rows.sort(key=lambda x: (x["td"][2], x["td"][4]))
+
                 comp["section"]["entry"] = entries
 
                 missing_count = len(references) - len(items)
                 warning_text = ""
                 if missing_count > 0:
-                    warning_text = f"CLINICAL WARNING: {missing_count} item(s) in this section could not be safely converted due to malformed upstream data and have been omitted. Please refer directly to the GP Connect or NHS Spine source systems.<br />"
+                    warning_text = f"CLINICAL WARNING: {missing_count} item(s) in this section could not be safely converted and have been omitted. Please refer directly to alternative systems for complete data.<br />"
 
                 comp["section"]["text"] = {
                     "paragraph": {

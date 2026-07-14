@@ -63,6 +63,7 @@ class ED(BIN):
         "ED",
         description="Data that is primarily intended for human interpretation or for "
         "further machine processing is outside the scope of HL7.",
+        alias="@xsi:type",
     )
     reference: Optional[TEL] = None
     thumbnail: Optional[str] = None  # thumbnail

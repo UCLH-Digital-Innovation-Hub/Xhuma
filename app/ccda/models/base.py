@@ -59,7 +59,7 @@ class Act(BaseModel):
     templateId: List[II] = Field(default_factory=list)
     id: Optional[List[II]] = Field(default_factory=list)
     code: Optional[CD] = None
-    text: Optional[str] = None
+    text: Optional[ED] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
 
