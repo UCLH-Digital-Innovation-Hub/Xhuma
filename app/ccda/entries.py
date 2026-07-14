@@ -127,6 +127,7 @@ async def medication(
         #         },
         #     },
         # }
+        # TODO use proper PQ model instead of dict
         substance_administration.doseQuantity = {
             "@xsi:type": "PQ",
             "@value": entry.dosage[0].doseQuantity.value,
@@ -827,6 +828,7 @@ def observation_entry(
     elif hasattr(entry, "valueString") and entry.valueString:
         obs.value = {"@xsi:type": "ST", "#text": entry.valueString}
     elif hasattr(entry, "valueQuantity") and entry.valueQuantity:
+        # TODO use formal pq model
         obs.value = {
             "@xsi:type": "PQ",
             "@value": entry.valueQuantity.value,
@@ -965,6 +967,7 @@ def result(entry, index: dict) -> dict:
                                 {"text": range.text}
                             )
                         if range.low:
+                            # TODO use proper model instead of dict
                             comp.referenceRange["observationRange"].append(
                                 {
                                     "value": {
