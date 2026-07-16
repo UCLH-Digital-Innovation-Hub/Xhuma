@@ -137,6 +137,30 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+# Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
+if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        from opentelemetry.instrumentation.logging import LoggingInstrumentor
+        from opentelemetry.instrumentation.redis import RedisInstrumentor
+
+        # Ensure the root logger captures INFO logs so they are exported
+        import logging
+
+        logging.getLogger().setLevel(logging.INFO)
+
+        FastAPIInstrumentor.instrument_app(app)
+        HTTPXClientInstrumentor().instrument()
+        LoggingInstrumentor().instrument(set_logging_format=True)
+        RedisInstrumentor().instrument()
+        print(
+            "Application Insights OpenTelemetry instrumentation enabled successfully."
+        )
+    except Exception as telemetry_err:
+        print(
+            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
+        )
 
 # register soap error handler
 soap.register_handlers(app)

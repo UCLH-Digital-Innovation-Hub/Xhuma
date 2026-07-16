@@ -26,9 +26,13 @@ def _scrub_headers(headers: httpx.Headers) -> dict:
         "x-arr-clientcert",
         "x-relay-clientcert",
         "cookie",
+        "apikey",
+        "x-api-key",
+        "nhsd-identity-header",
     ]:
-        if sensitive_key in safe_headers:
-            safe_headers[sensitive_key] = "***REDACTED***"
+        for k in list(safe_headers.keys()):
+            if k.lower() == sensitive_key:
+                safe_headers[k] = "***REDACTED***"
     return safe_headers
 
 

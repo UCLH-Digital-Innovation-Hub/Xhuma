@@ -87,13 +87,26 @@ async def relay_ws(websocket: WebSocket, client_id: str):
         await websocket.close(code=e.code, reason=e.reason)
         return
 
+    import asyncio
+    from opentelemetry import trace
+
     hub = websocket.app.state.relay_hub
     await hub.register(websocket)
+    tracer = trace.get_tracer(__name__)
     try:
         while True:
-            # Agent sends RelayResponse JSON
-            data = await websocket.receive_text()
-            hub.fulfill(json.loads(data))
+            with tracer.start_as_current_span("websocket.receive") as span:
+                span.set_attribute("client_id", client_id)
+                try:
+                    # Agent sends RelayResponse JSON
+                    data = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=30.0
+                    )
+                    hub.fulfill(json.loads(data))
+                except asyncio.TimeoutError:
+                    # Expected idle wait, log it so Azure knows we are healthy
+                    span.set_attribute("status", "idle_keepalive")
+                    continue
     except WebSocketDisconnect:
         pass
     finally:

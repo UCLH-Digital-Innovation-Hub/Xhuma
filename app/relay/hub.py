@@ -29,7 +29,8 @@ class WebSocketHub:
 
     def fulfill(self, response: dict) -> None:
         req_id = response.get("request_id")
-        print(f"Fulfilling request {req_id} with response: {response}")
+        status_code = response.get("status_code", "unknown")
+        print(f"Fulfilling request {req_id} with status {status_code}")
         fut = self.pending.pop(req_id, None)
         if fut and not fut.done():
             fut.set_result(response)

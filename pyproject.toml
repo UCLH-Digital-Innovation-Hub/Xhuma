@@ -20,6 +20,7 @@ dependencies = [
     "opentelemetry-instrumentation-asgi",
     "opentelemetry-instrumentation-httpx",
     "opentelemetry-instrumentation-logging",
+    "opentelemetry-instrumentation-redis",
     "asyncpg",
     "sqlalchemy",
     "grpcio",
