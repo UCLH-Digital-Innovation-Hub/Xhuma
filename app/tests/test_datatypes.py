@@ -51,7 +51,7 @@ def test_ii_alias_population():
     assert ii_instance.root == "1.2.3.4.5"
 
 
-class TestII(BaseModel):
+class MockII(BaseModel):
     template_Id: List[II] = Field(default_factory=list)
 
 
@@ -71,8 +71,8 @@ def test_templateId():
 def test_templateID_inclass():
     root = "2.16.840.1.113883."
     extension = "2014-06-09"
-    # test_instance = TestII(templateId=templateId(root, extension))
-    test_instance = TestII(**{"template_Id": templateId(root, extension)})
+    # test_instance = MockII(templateId=templateId(root, extension))
+    test_instance = MockII(**{"template_Id": templateId(root, extension)})
 
     assert len(test_instance.template_Id) == 2
     assert test_instance.template_Id[0].root == root

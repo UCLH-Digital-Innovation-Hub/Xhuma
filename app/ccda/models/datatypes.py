@@ -4,11 +4,27 @@ Contains CDA datatype objects with pydantic validation
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
-# TODO: add Enums
+
+class NullFlavor(str, Enum):
+    NI = "NI"
+    NA = "NA"
+    UNK = "UNK"
+    NASK = "NASK"
+    ASKU = "ASKU"
+    NAV = "NAV"
+    OTH = "OTH"
+    PINF = "PINF"
+    NINF = "NINF"
+
+
+class Representation(str, Enum):
+    B64 = "B64"
+    TXT = "TXT"
 
 
 class ANY(BaseModel):
@@ -17,13 +33,13 @@ class ANY(BaseModel):
         description="This field provides a description for each date type",
         alias="@xsi:type",
     )
-    nullFlavor: Optional[str] = None  # enumeration
+    nullFlavor: Optional[NullFlavor] = None
 
 
 class BIN(ANY):
     resource_type: str = Field("BIN", description="Binary data.")
     mixed: Optional[Dict] = None
-    representation: Optional[str] = None  # enumeration B64 or TXT
+    representation: Optional[Representation] = None
 
 
 class URL(ANY):

@@ -128,23 +128,23 @@ async def medication(
         #     },
         # }
         # TODO use proper PQ model instead of dict
-        substance_administration.doseQuantity = {
-            "@xsi:type": "PQ",
-            "@value": entry.dosage[0].doseQuantity.value,
-        }
-        if entry.dosage[0].doseQuantity.unit:
-            substance_administration.doseQuantity["@unit"] = entry.dosage[
-                0
-            ].doseQuantity.unit
+        from .models.datatypes import PQ, PQR
 
-        # if there is a code add a translation
+        translation = None
         if entry.dosage[0].doseQuantity.code:
-            substance_administration.doseQuantity["translation"] = {
-                "@value": entry.dosage[0].doseQuantity.value,
-                "@code": entry.dosage[0].doseQuantity.code,
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "originalText": entry.dosage[0].doseQuantity.unit,
-            }
+            translation = [
+                PQR(
+                    value=entry.dosage[0].doseQuantity.value,
+                    code=entry.dosage[0].doseQuantity.code,
+                    codeSystem="2.16.840.1.113883.6.96",
+                )
+            ]
+
+        substance_administration.doseQuantity = PQ(
+            value=entry.dosage[0].doseQuantity.value,
+            unit=entry.dosage[0].doseQuantity.unit,
+            translation=translation,
+        )
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
     # check if dosage has as needed boolean of true
 
@@ -829,11 +829,12 @@ def observation_entry(
         obs.value = {"@xsi:type": "ST", "#text": entry.valueString}
     elif hasattr(entry, "valueQuantity") and entry.valueQuantity:
         # TODO use formal pq model
-        obs.value = {
-            "@xsi:type": "PQ",
-            "@value": entry.valueQuantity.value,
-            "@unit": entry.valueQuantity.unit,
-        }
+        from .models.datatypes import PQ
+
+        obs.value = PQ(
+            value=entry.valueQuantity.value,
+            unit=entry.valueQuantity.unit,
+        )
 
     # Parse additional notes/comments for Observation
     obs_notes = []
@@ -968,19 +969,20 @@ def result(entry, index: dict) -> dict:
                             )
                         if range.low:
                             # TODO use proper model instead of dict
+                            from .models.datatypes import IVL_PQ, IVXB_PQ
+
                             comp.referenceRange["observationRange"].append(
                                 {
-                                    "value": {
-                                        "@xsi:type": "IVL_PQ",
-                                        "low": {
-                                            "@value": range.low.value,
-                                            "@unit": related_resource.valueQuantity.unit,
-                                        },
-                                        "high": {
-                                            "@value": range.high.value,
-                                            "@unit": related_resource.valueQuantity.unit,
-                                        },
-                                    }
+                                    "value": IVL_PQ(
+                                        low=IVXB_PQ(
+                                            value=range.low.value,
+                                            unit=related_resource.valueQuantity.unit,
+                                        ),
+                                        high=IVXB_PQ(
+                                            value=range.high.value,
+                                            unit=related_resource.valueQuantity.unit,
+                                        ),
+                                    )
                                 }
                             )
                 components.append(comp)

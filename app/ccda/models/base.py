@@ -145,6 +145,7 @@ class InstructionObservation(Observation):
 class Criterion(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN")
+    templateId: List[II] = Field(default_factory=list)
     code: Optional[CD] = None
     value: Optional[ANY] = None
 
@@ -189,7 +190,7 @@ class SubstanceAdministration(BaseModel):
     # TODO flesh out precondition model
     precondition: Optional[List[Precondition]] = None
 
-    @field_serializer("effectiveTime")
+    @field_serializer("effectiveTime", return_type=list)
     def serialize_effective_time(
         self, sxcm_ts_list: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]]
     ) -> List:
@@ -216,7 +217,8 @@ class SubstanceAdministration(BaseModel):
         # print(time_list)
 
 
-class EntryRelationship(BaseModel, extra=Extra.allow):
+class EntryRelationship(BaseModel):
+    model_config = {"extra": "allow"}
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
@@ -241,6 +243,7 @@ class Section(BaseModel):
     """
     Representation of a generic section in a CDA document. To add more attributes if needed
     """
+    model_config = {"arbitrary_types_allowed": True}
 
     id: Optional[II] = None
     templateId: List[II] = Field(default_factory=list)
@@ -249,8 +252,6 @@ class Section(BaseModel):
     text: Optional[str] = None
     entry: List[Entry] = Field(default_factory=list)
 
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class ResultsOrganizer(BaseModel):
