@@ -46,9 +46,9 @@ flowchart TD
 ### 2. Logging Flow
 ```mermaid
 flowchart TD
-    A[Application Logs] -->|JSON Format| B[Logstash]
-    B -->|Process| C[Elasticsearch]
-    C -->|Query| D[Kibana]
+    A[Application Logs] -->|OTel / OpenTelemetry| B[Azure Application Insights]
+    B -->|Ingest & Process| C[Log Analytics Workspace]
+    C -->|Query| D[Azure Monitor]
 
     E[System Logs] -->|Structured| B
     F[Access Logs] -->|Parse| B
@@ -58,10 +58,10 @@ flowchart TD
 ### 3. Tracing Flow
 ```mermaid
 flowchart TD
-    A[Request Start] -->|Generate Trace ID| B[OpenTelemetry]
-    B -->|Collect Spans| C[Trace Processing]
-    C -->|Store| D[Trace Storage]
-    D -->|Query| E[Trace Analysis]
+    A[Request Start] -->|Generate Trace ID| B[OpenTelemetry Instrumentation]
+    B -->|Collect Spans| C[Azure Application Insights]
+    C -->|Store| D[Log Analytics Workspace]
+    D -->|Query| E[Azure Monitor Application Map]
 
     F[Service Calls] -->|Add Spans| B
     G[Database Ops] -->|Add Spans| B

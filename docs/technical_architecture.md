@@ -329,6 +329,8 @@ sequenceDiagram
 
 ### 4. CCDA Conversion Engine (`app/ccda/`)
 - Transforms FHIR bundles to CCDA format
+- Implements strict schema validation using formal Pydantic models (`PQ`, `IVL_PQ`) instead of raw dictionaries.
+- Uses structural Python Enums (`NullFlavor`, `Representation`) to ensure standard compliance for missing data scenarios.
 - Implements conversion logic for clinical data
 - Manages document structure and formatting
 - Handles various clinical entry types
@@ -426,7 +428,10 @@ sequenceDiagram
   - Archival strategy
   - Search optimization
 
-### 4. Distributed Tracing (OpenTelemetry)
+### 4. Distributed Tracing & Observability (OpenTelemetry)
+- **Azure Application Insights Integration**
+  - Fully instrumented FastAPI application, HTTPX client, and Redis operations via OpenTelemetry.
+  - Automatically exports traces and logs directly to Azure Monitor.
 - **Trace Collection**
   - Request tracing
   - Service dependencies
@@ -443,16 +448,16 @@ sequenceDiagram
 
 ### 1. Unit Testing
 - **Test Organization**
-  - Feature-based test suites
+  - Feature-based test suites (e.g., `test_soap.py` for ITI-55 endpoint logic).
+  - Heavy reliance on mocked dependencies (`unittest.mock.patch`) to test complex network components (e.g., SOAP parsing and Patient Demographics lookup) in isolation.
   - Integration test suites
-  - Mock implementations
-  - Test fixtures
+  - Mock implementations and Test fixtures
 
 - **Test Coverage**
-  - Code coverage tracking
+  - Code coverage tracking via `pytest-cov`
   - Branch coverage
   - Integration points
-  - Error scenarios
+  - Error scenarios (e.g., missing NHS number, XML parsing failures)
 
 ### 2. Integration Testing
 - **Service Testing**
