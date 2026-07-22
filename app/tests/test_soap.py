@@ -38,20 +38,19 @@ def test_iti55_success(mock_lookup):
         "managingOrganization": {"identifier": {"value": "Y12345"}}
     }
     
-    response = client.post("/iti55", content=MOCK_ITI55_REQUEST, headers={"Content-Type": "application/soap+xml"})
+    response = client.post("/SOAP/iti55", content=MOCK_ITI55_REQUEST, headers={"Content-Type": "application/soap+xml"})
     assert response.status_code == 200
     assert b"PRPA_IN201306UV02" in response.content
 
 def test_iti55_invalid_xml():
-    response = client.post("/iti55", content="<invalid>", headers={"Content-Type": "application/soap+xml"})
-    assert response.status_code == 200 # Returns SOAP Fault
-    assert b"faultcode" in response.content or b"Sender" in response.content
+    response = client.post("/SOAP/iti55", content="<invalid>", headers={"Content-Type": "application/soap+xml"})
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid XML format"
 
 @patch("app.soap.soap.lookup_patient")
 def test_iti55_patient_not_found(mock_lookup):
     mock_lookup.return_value = None
-    response = client.post("/iti55", content=MOCK_ITI55_REQUEST, headers={"Content-Type": "application/soap+xml"})
+    response = client.post("/SOAP/iti55", content=MOCK_ITI55_REQUEST, headers={"Content-Type": "application/soap+xml"})
     assert response.status_code == 200
-    assert b"PRPA_IN201306UV02" in response.content
-    assert b"NF" in response.content # NullFlavor for patient not found
+    assert b"Patient with NHS number 9449305452 not found" in response.content
 

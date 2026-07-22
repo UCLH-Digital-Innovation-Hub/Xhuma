@@ -314,13 +314,11 @@ async def medication(
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
     unit = (
-        substance_administration.doseQuantity.get("@unit", "").lower()
-        if substance_administration.doseQuantity
-        else ""
-    )
+        getattr(substance_administration.doseQuantity, "unit", "") or ""
+    ).lower() if substance_administration.doseQuantity else ""
 
     if substance_administration.doseQuantity:
-        blank_unit = not substance_administration.doseQuantity.get("@unit")
+        blank_unit = not getattr(substance_administration.doseQuantity, "unit", None)
         if unit in gp_units or blank_unit:
             # we only process doses for tablets or capsules.
 

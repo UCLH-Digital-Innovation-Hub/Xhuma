@@ -150,14 +150,27 @@ async def iti55(request: Request):
     content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
-        envelope = clean_soap(body)
+        try:
+            envelope = clean_soap(body)
+        except xmltodict.expat.ExpatError:
+            raise HTTPException(status_code=400, detail="Invalid XML format")
+        except Exception as e:
+            # Try to catch ElementTree.ParseError
+            import xml.etree.ElementTree as ET
+            if isinstance(e, ET.ParseError):
+                raise HTTPException(status_code=400, detail="Invalid XML format")
+            raise
         query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
             "queryByParameter"
         ]["parameterList"]
 
         nhsno = None
         try:
-            for param in query_params["livingSubjectId"]["value"]:
+            values = query_params["livingSubjectId"]["value"]
+            if not isinstance(values, list):
+                values = [values]
+            
+            for param in values:
                 if param["@root"] == "2.16.840.1.113883.2.1.4.1":
                     nhsno = param["@extension"]
                     # print(f"NHSNO: {nhsno}")
