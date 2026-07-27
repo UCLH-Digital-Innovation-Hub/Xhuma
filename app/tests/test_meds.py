@@ -620,6 +620,7 @@ async def test_medication_repeats_robustness():
     row = entry_with_row.row
     assert "Prescription 1 of 3 allowed repeats." in row[7]
 
+
 @pytest.mark.asyncio
 @patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
 async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
@@ -637,25 +638,26 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
             {
                 "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatusReason-1",
                 "extension": [
-                    {"url": "statusReason", "valueCodeableConcept": {"text": "Patient requested stop"}}
-                ]
+                    {
+                        "url": "statusReason",
+                        "valueCodeableConcept": {"text": "Patient requested stop"},
+                    }
+                ],
             },
             {
                 "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1",
                 "extension": [
-                    {"url": "numberOfRepeatPrescriptionsAllowed", "valuePositiveInt": 6},
-                    {"url": "numberOfRepeatPrescriptionsIssued", "valuePositiveInt": 1}
-                ]
-            }
+                    {
+                        "url": "numberOfRepeatPrescriptionsAllowed",
+                        "valuePositiveInt": 6,
+                    },
+                    {"url": "numberOfRepeatPrescriptionsIssued", "valuePositiveInt": 1},
+                ],
+            },
         ],
         "dispenseRequest": {
-            "quantity": {
-                "value": 30,
-                "unit": "tablets"
-            },
-            "validityPeriod": {
-                "end": "2026-02-21T00:00:00+00:00"
-            }
+            "quantity": {"value": 30, "unit": "tablets"},
+            "validityPeriod": {"end": "2026-02-21T00:00:00+00:00"},
         },
         "status": "stopped",
         "intent": "plan",
@@ -673,16 +675,15 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
         "effectivePeriod": {"start": "2026-01-21T00:00:00+00:00"},
         "subject": {"reference": "Patient/2"},
         "taken": "unk",
-        "note": [
-            {"text": "Note 4"},
-            {"text": "Note 5"}
-        ],
-        "dosage": [{"text": "take as directed"}]
+        "note": [{"text": "Note 4"}, {"text": "Note 5"}],
+        "dosage": [{"text": "take as directed"}],
     }
 
     index_dict = {
         "Medication/21": med,
-        "MedicationRequest/med-req-notes-1": medicationrequest.MedicationRequest(med_request_data),
+        "MedicationRequest/med-req-notes-1": medicationrequest.MedicationRequest(
+            med_request_data
+        ),
     }
 
     statement = medicationstatement.MedicationStatement(med_statement_data)
@@ -691,8 +692,10 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
     # Check that chronological order is preserved and duplicates are handled if any
     # Retrieve the structured XML notes from entry
     xml_dict = entry_with_row.entry
-    relationships = xml_dict.get("substanceAdministration", {}).get("entryRelationship", [])
-    
+    relationships = xml_dict.get("substanceAdministration", {}).get(
+        "entryRelationship", []
+    )
+
     # Find the comment activity (code 48767-8)
     comment_act = None
     for rel in relationships:
@@ -700,21 +703,28 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
         if act.get("code", {}).get("@code") == "48767-8":
             comment_act = act
             break
-            
+
     assert comment_act is not None, "Comment activity not found in entryRelationship"
-    
+
     xml_text = comment_act.get("text", {}).get("xmlText", "")
     br_notes = [n.strip() for n in xml_text.split("<br />") if n.strip()]
-    
+
     # Check that they exist and their relative order is correct
     idx_note1 = next(i for i, n in enumerate(br_notes) if "Note 1" in n)
     idx_note5 = next(i for i, n in enumerate(br_notes) if "Note 5" in n)
-    idx_repeats = next(i for i, n in enumerate(br_notes) if "Prescription 1 of 6 allowed repeats" in n)
-    idx_status = next(i for i, n in enumerate(br_notes) if "Medication status reason: Patient requested stop" in n)
-    idx_issued = next(i for i, n in enumerate(br_notes) if "Issued quantity: 30 tablets" in n)
-    
+    idx_repeats = next(
+        i for i, n in enumerate(br_notes) if "Prescription 1 of 6 allowed repeats" in n
+    )
+    idx_status = next(
+        i
+        for i, n in enumerate(br_notes)
+        if "Medication status reason: Patient requested stop" in n
+    )
+    idx_issued = next(
+        i for i, n in enumerate(br_notes) if "Issued quantity: 30 tablets" in n
+    )
+
     assert idx_note1 < idx_note5, "Base notes are out of chronological order!"
     assert idx_note5 < idx_status, "Extensions are out of order!"
     assert idx_status < idx_repeats, "Repeats are out of order!"
     assert idx_repeats < idx_issued, "Issued quantity is out of order!"
-
