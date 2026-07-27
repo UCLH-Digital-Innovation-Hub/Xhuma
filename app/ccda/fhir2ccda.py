@@ -470,11 +470,42 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         past = []
 
         for med in medications.entry:
-            print(med)
             referenced_med = index[med.item.reference]
-            # print(referenced_med)
+
+            # Check for explicitly stopped medications via MedicationRequest
+            is_stopped = False
+            if hasattr(referenced_med, "basedOn") and referenced_med.basedOn:
+                for request_ref in referenced_med.basedOn:
+                    if (
+                        hasattr(request_ref, "reference")
+                        and request_ref.reference in index
+                    ):
+                        med_request = index[request_ref.reference]
+
+                        # Check MedicationRequest status
+                        if (
+                            hasattr(med_request, "status")
+                            and med_request.status == "stopped"
+                        ):
+                            is_stopped = True
+                            break
+
+                        # Check MedicationStatusReason extension
+                        if hasattr(med_request, "extension") and med_request.extension:
+                            for ext in med_request.extension:
+                                if (
+                                    ext.url
+                                    == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatusReason-1"
+                                ):
+                                    is_stopped = True
+                                    break
+                    if is_stopped:
+                        break
+
+            if is_stopped:
+                past.append(med)
             # status active or end date in the future
-            if referenced_med.status == "active":
+            elif referenced_med.status == "active":
                 active.append(med)
             elif (
                 referenced_med.status == "completed"
