@@ -489,8 +489,8 @@ async def medication(
     text_instructions = (
         " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
     )
-    # make misc notes a set to avoid duplicates
-    misc_notes = list(set(misc_notes))
+    # use dict.fromkeys to avoid duplicates while preserving chronological insertion order
+    misc_notes = list(dict.fromkeys(misc_notes))
 
     misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
 
