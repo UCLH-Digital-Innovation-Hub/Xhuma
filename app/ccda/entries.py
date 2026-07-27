@@ -442,9 +442,9 @@ async def medication(
                         # print(f"Repeats Issued:{repeats_issued}")
                 if repeats_allowed is not None and repeats_issued is not None:
                     remaining_repeats = repeats_allowed - repeats_issued
-                    # misc_notes.append(
-                    #     f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
-                    # )
+                    misc_notes.append(
+                        f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                    )
                     prescription_information.append(
                         f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
                     )
@@ -472,7 +472,7 @@ async def medication(
                 ):
                     unit = ext.valueString
         issued_quantity = f"Issued quantity: {quantity.value} {unit}"
-        # misc_notes.append(issued_quantity)
+        misc_notes.append(issued_quantity)
         prescription_information.append(issued_quantity)
 
     # add br tags to prescription information with a join
@@ -489,8 +489,8 @@ async def medication(
     text_instructions = (
         " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
     )
-    # make misc notes a set to avoid duplicates
-    misc_notes = list(set(misc_notes))
+    # use dict.fromkeys to avoid duplicates while preserving chronological insertion order
+    misc_notes = list(dict.fromkeys(misc_notes))
 
     misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
 
