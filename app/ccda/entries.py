@@ -472,7 +472,7 @@ async def medication(
                 ):
                     unit = ext.valueString
         issued_quantity = f"Issued quantity: {quantity.value} {unit}"
-        # misc_notes.append(issued_quantity)
+        misc_notes.append(issued_quantity)
         prescription_information.append(issued_quantity)
 
     # add br tags to prescription information with a join
