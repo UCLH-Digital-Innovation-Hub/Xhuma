@@ -723,5 +723,9 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
 
     # Check that repeats and issued quantity were correctly moved to prescription_information (row[7])
     row = entry_with_row.row
-    assert "Prescription 1 of 6 allowed repeats." in row[7], "Repeats missing from prescription info"
-    assert "Issued quantity: 30 tablets" in row[7], "Issued quantity missing from prescription info"
+    assert "Prescription 1 of 6 allowed repeats." in row[7], (
+        "Repeats missing from prescription info"
+    )
+    assert "Issued quantity: 30 tablets" in row[7], (
+        "Issued quantity missing from prescription info"
+    )
