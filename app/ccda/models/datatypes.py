@@ -45,11 +45,25 @@ class TEL(URL):
     value: Optional[str] = Field(alias="@value", default=None)
 
 
+class AD(ANY):
+    resource_type: str = Field(
+        "AD",
+        description="Mailing and home or office addresses. A sequence of address parts.",
+    )
+    use: Optional[str] = Field(alias="@use", default=None)
+    streetAddressLine: Optional[List[str]] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    postalCode: Optional[str] = None
+    country: Optional[str] = None
+
+
 class ED(BIN):
     resource_type: str = Field(
         "ED",
         description="Data that is primarily intended for human interpretation or for "
         "further machine processing is outside the scope of HL7.",
+        alias="@xsi:type",
     )
     reference: Optional[TEL] = None
     thumbnail: Optional[str] = None  # thumbnail
