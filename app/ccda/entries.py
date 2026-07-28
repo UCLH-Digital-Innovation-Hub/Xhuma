@@ -73,10 +73,10 @@ async def medication(
     # check if any of the notes are contained in another one (e.g., preceded by "Prescriber Notes:")
     # if so delete the contained note
     misc_notes = [
-        text for text in unique_notes
+        text
+        for text in unique_notes
         if not any(
-            text in other_text and text != other_text
-            for other_text in unique_notes
+            text in other_text and text != other_text for other_text in unique_notes
         )
     ]
 
@@ -449,9 +449,6 @@ async def medication(
                         # print(f"Repeats Issued:{repeats_issued}")
                 if repeats_allowed is not None and repeats_issued is not None:
                     remaining_repeats = repeats_allowed - repeats_issued
-                    misc_notes.append(
-                        f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
-                    )
                     prescription_information.append(
                         f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
                     )
@@ -479,7 +476,6 @@ async def medication(
                 ):
                     unit = ext.valueString
         issued_quantity = f"Issued quantity: {quantity.value} {unit}"
-        misc_notes.append(issued_quantity)
         prescription_information.append(issued_quantity)
 
     # add br tags to prescription information with a join
