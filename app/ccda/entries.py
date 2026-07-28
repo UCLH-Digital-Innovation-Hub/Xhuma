@@ -73,10 +73,10 @@ async def medication(
     # check if any of the notes are contained in another one (e.g., preceded by "Prescriber Notes:")
     # if so delete the contained note
     misc_notes = [
-        text for text in unique_notes
+        text
+        for text in unique_notes
         if not any(
-            text in other_text and text != other_text
-            for other_text in unique_notes
+            text in other_text and text != other_text for other_text in unique_notes
         )
     ]
 
