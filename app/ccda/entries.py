@@ -56,29 +56,36 @@ async def medication(
     based_on_request: medicationrequest.MedicationRequest = index[
         entry.basedOn[0].reference
     ]
-    misc_notes = based_on_request.note if based_on_request.note else []
-    misc_notes += entry.note if entry.note else []
-    # check if any of the notes are container in another one preceeded by "Prescriber Notes:
-    # if so delete the contained note"
+    raw_notes = []
+    if based_on_request.note:
+        raw_notes.extend(based_on_request.note)
+    if entry.note:
+        raw_notes.extend(entry.note)
+
+    misc_notes = []
+    for n in raw_notes:
+        if hasattr(n, "text") and n.text:
+            misc_notes.append(n.text)
+
+    # Remove exact duplicates to avoid mutual annihilation during substring checks
+    unique_notes = list(dict.fromkeys(misc_notes))
+
+    # check if any of the notes are contained in another one (e.g., preceded by "Prescriber Notes:")
+    # if so delete the contained note
     misc_notes = [
-        note
-        for note in misc_notes
+        text
+        for text in unique_notes
         if not any(
-            note.text in other_note.text and note != other_note
-            for other_note in misc_notes
+            text in other_text and text != other_text for other_text in unique_notes
         )
     ]
+
     # append entry text if snomed code is 196421000000109
     for code in referenced_med.code.coding:
         if code.code == "196421000000109":
             misc_notes.append(
                 f"Transfer degraded medication text: {referenced_med.code.text}"
             )
-
-    for i, note in enumerate(misc_notes):
-        if hasattr(note, "text"):
-            # replace note with just the text
-            misc_notes[i] = note.text
     # request = index[entry.basedOn[0].reference]
     # dosage_instructions = request.dosageInstruction
     # for dose in dosage_instructions:
