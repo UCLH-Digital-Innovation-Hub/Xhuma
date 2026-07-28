@@ -22,9 +22,11 @@ from .models.base import (
     ResultObservation,
     ResultsOrganizer,
     SubstanceAdministration,
+    Act,
 )
 from .models.datatypes import (
     CD,
+    ED,
     IVL_INT,
     IVL_TS,
     PIVL_TS,
@@ -125,6 +127,7 @@ async def medication(
         #         },
         #     },
         # }
+        # TODO use proper PQ model instead of dict
         substance_administration.doseQuantity = {
             "@xsi:type": "PQ",
             "@value": entry.dosage[0].doseQuantity.value,
@@ -279,19 +282,18 @@ async def medication(
     if patient_instr_list:
         combined_patient_instructions = "; ".join(patient_instr_list)
         instruction_entry = EntryRelationship()
-        instruction_entry.act = {
-            "@classCode": "ACT",
-            "@moodCode": "INT",
-            "templateId": templateId(
+        instruction_entry.act = Act(
+            moodCode="INT",
+            templateId=templateId(
                 root="2.16.840.1.113883.10.20.22.4.200", extension="2014-06-09"
             ),
-            "code": {
-                "@code": "422037009",
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "@codeSystemName": "http://snomed.info/sct",
-            },
-            "text": combined_patient_instructions,
-        }
+            code=CD(
+                code="422037009",
+                codeSystem="2.16.840.1.113883.6.96",
+                codeSystemName="http://snomed.info/sct",
+            ),
+            text=ED(xmlText=combined_patient_instructions),
+        )
         substance_administration.entryRelationship.append(instruction_entry)
     # find effective time entry with operator of low
 
@@ -440,9 +442,9 @@ async def medication(
                         # print(f"Repeats Issued:{repeats_issued}")
                 if repeats_allowed is not None and repeats_issued is not None:
                     remaining_repeats = repeats_allowed - repeats_issued
-                    # misc_notes.append(
-                    #     f"Xhuma: Medication from prescription {repeats_issued} of {repeats_allowed} allowed repeats."
-                    # )
+                    misc_notes.append(
+                        f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                    )
                     prescription_information.append(
                         f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
                     )
@@ -470,7 +472,7 @@ async def medication(
                 ):
                     unit = ext.valueString
         issued_quantity = f"Issued quantity: {quantity.value} {unit}"
-        # misc_notes.append(issued_quantity)
+        misc_notes.append(issued_quantity)
         prescription_information.append(issued_quantity)
 
     # add br tags to prescription information with a join
@@ -487,20 +489,22 @@ async def medication(
     text_instructions = (
         " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
     )
-    # make misc notes a set to avoid duplicates
-    misc_notes = list(set(misc_notes))
+    # use dict.fromkeys to avoid duplicates while preserving chronological insertion order
+    misc_notes = list(dict.fromkeys(misc_notes))
 
     misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
 
     # misc_notes_text = {[f"{note} \n " for note in misc_notes if note]}
     # print(f"Misc notes text: {''.join(misc_notes_text)}")
     comment_activity = EntryRelationship()
-    comment_activity.act = {
-        "code": {
-            "@code": "48767-8",
-        },
-        "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
-    }
+    comment_activity.act = Act(
+        code=CD(
+            code="48767-8",
+        ),
+        text=ED(
+            xmlText="".join(misc_notes_text) if misc_notes_text else "",
+        ),
+    )
     substance_administration.entryRelationship.append(comment_activity)
 
     # add dispensing  request
@@ -824,6 +828,7 @@ def observation_entry(
     elif hasattr(entry, "valueString") and entry.valueString:
         obs.value = {"@xsi:type": "ST", "#text": entry.valueString}
     elif hasattr(entry, "valueQuantity") and entry.valueQuantity:
+        # TODO use formal pq model
         obs.value = {
             "@xsi:type": "PQ",
             "@value": entry.valueQuantity.value,
@@ -962,6 +967,7 @@ def result(entry, index: dict) -> dict:
                                 {"text": range.text}
                             )
                         if range.low:
+                            # TODO use proper model instead of dict
                             comp.referenceRange["observationRange"].append(
                                 {
                                     "value": {

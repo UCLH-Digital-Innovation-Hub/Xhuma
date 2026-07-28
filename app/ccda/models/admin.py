@@ -1,8 +1,8 @@
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from .datatypes import CE, CS, II, TEL, TS
+from .datatypes import AD, CE, CS, II, TEL, TS
 
 
 class Organization(BaseModel):
@@ -19,7 +19,7 @@ class Organization(BaseModel):
     id: Optional[List[II]] = None
     name: Optional[List[str]] = None
     telecom: Optional[List[TEL]] = None
-    address: Optional[List[Dict]] = None
+    address: Optional[List[AD]] = None
 
 
 class Person(BaseModel):
@@ -58,7 +58,7 @@ class AssignedAuthor(BaseModel):
     templateId: Optional[List[II]] = None
     id: List[II]
     code: Optional[CE] = None
-    address: Optional[List[Dict]] = None
+    address: Optional[List[AD]] = None
     telecom: Optional[List[TEL]] = None
     assignedPerson: Optional[Person] = None
     assignedAuthoringDevice: Optional[AuthoringDevice] = None

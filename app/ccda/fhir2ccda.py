@@ -209,10 +209,70 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             }
 
             async def parse_medications(references):
-                # run lookups concurrently (much faster than awaiting in a loop)
-                return await asyncio.gather(
-                    *(medication(entry, index) for entry in references)
+                # run lookups concurrently with return_exceptions=True so a single failure doesn't kill the section
+                results = await asyncio.gather(
+                    *(medication(entry, index) for entry in references),
+                    return_exceptions=True,
                 )
+                valid_items = []
+                for idx, res in enumerate(results):
+                    if isinstance(res, Exception):
+                        logging.error(
+                            f"Error parsing medication {getattr(references[idx], 'id', 'unknown')}: {res}"
+                        )
+                    else:
+                        valid_items.append(res)
+                return valid_items
+
+            def parse_allergies(lst):
+                valid_items = []
+                for entry in lst:
+                    try:
+                        if entry.__class__.__name__ == "AllergyIntolerance":
+                            valid_items.append(allergy(entry))
+                        else:
+                            valid_items.append(
+                                observation_entry(
+                                    entry, index, "Allergies and adverse reactions"
+                                )
+                            )
+                    except Exception as e:
+                        logging.error(
+                            f"Error parsing allergy {getattr(entry, 'id', 'unknown')}: {e}"
+                        )
+                return valid_items
+
+            def parse_problems(lst):
+                valid_items = []
+                for entry in lst:
+                    try:
+                        if entry.__class__.__name__ == "Condition":
+                            valid_items.append(problem(entry))
+                        else:
+                            valid_items.append(
+                                observation_entry(entry, index, "Problems")
+                            )
+                    except Exception as e:
+                        logging.error(
+                            f"Error parsing problem {getattr(entry, 'id', 'unknown')}: {e}"
+                        )
+                return valid_items
+
+            def parse_immunizations(lst):
+                valid_items = []
+                for entry in lst:
+                    try:
+                        if entry.__class__.__name__ == "Immunization":
+                            valid_items.append(immunization_entry(entry, index))
+                        else:
+                            valid_items.append(
+                                observation_entry(entry, index, "Immunisations")
+                            )
+                    except Exception as e:
+                        logging.error(
+                            f"Error parsing immunization {getattr(entry, 'id', 'unknown')}: {e}"
+                        )
+                return valid_items
 
             section_setup = {
                 "Allergies and adverse reactions": {
@@ -222,14 +282,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "Description",
                         "Reaction",
                     ],
-                    "parser": lambda lst: [
-                        allergy(entry)
-                        if entry.__class__.__name__ == "AllergyIntolerance"
-                        else observation_entry(
-                            entry, index, "Allergies and adverse reactions"
-                        )
-                        for entry in lst
-                    ],
+                    "parser": parse_allergies,
                 },
                 "Medications and medical devices": {
                     "section_headers": [
@@ -273,21 +326,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 },
                 "Problems": {
                     "section_headers": ["Date", "Status", "Condition"],
-                    "parser": lambda lst: [
-                        problem(entry)
-                        if entry.__class__.__name__ == "Condition"
-                        else observation_entry(entry, index, "Problems")
-                        for entry in lst
-                    ],
+                    "parser": parse_problems,
                 },
                 "Immunisations": {
                     "section_headers": ["Date", "Vaccine", "Lot Number", "Status"],
-                    "parser": lambda lst: [
-                        immunization_entry(entry, index)
-                        if entry.__class__.__name__ == "Immunization"
-                        else observation_entry(entry, index, "Immunisations")
-                        for entry in lst
-                    ],
+                    "parser": parse_immunizations,
                 },
             }
 
@@ -381,10 +424,18 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 entries = [i.entry for i in items]
                 rows = [i.row for i in items if i.row is not None]
                 table_rows = [create_row(row) for row in rows]
+
                 # if mediations sort rows by status then name of medication
                 if list.title == "Medications and medical devices":
                     table_rows.sort(key=lambda x: (x["td"][2], x["td"][4]))
+
                 comp["section"]["entry"] = entries
+
+                missing_count = len(references) - len(items)
+                warning_text = ""
+                if missing_count > 0:
+                    warning_text = f"CLINICAL WARNING: {missing_count} item(s) in this section could not be safely converted and have been omitted. Please refer directly to alternative systems for complete data.<br />"
+
                 comp["section"]["text"] = {
                     "paragraph": {
                         "@styleCode": "flagData",
@@ -392,18 +443,16 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "table": {"thead": headers, "tbody": {"tr": table_rows}},
                 }
 
-            if hasattr(list, "note") and list.note is not None:
-                # TODO changing to paragraph before text with stylecode flagData
-                # comp["section"]["text"]["list"] = {}
-                # comp["section"]["text"]["list"]["item"] = [
-                #     note.text for note in list.note
-                # ]
+                if warning_text:
+                    comp["section"]["text"]["paragraph"]["#text"] = warning_text
 
-                comp["section"]["text"]["paragraph"]["#text"] = [
-                    f"{note.text}<br />" for note in list.note
-                ]
-                comp["section"]["text"]["paragraph"]["#text"] = "".join(
+            if hasattr(list, "note") and list.note is not None:
+                note_text = "".join(
                     list.note[i].text + "<br />" for i in range(len(list.note))
+                )
+                existing_text = comp["section"]["text"]["paragraph"].get("#text", "")
+                comp["section"]["text"]["paragraph"]["#text"] = (
+                    existing_text + note_text
                 )
 
             return comp
