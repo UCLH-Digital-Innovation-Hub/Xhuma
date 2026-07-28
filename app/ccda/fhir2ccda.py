@@ -580,11 +580,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     )
 
     header_components = {
-        "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),
+        "templateId": templateId("2.16.840.1.113883.10.20.22.2.45", "2014-06-09"),
         "code": {
-            "@code": "X-DOCCMTADDL",
-            "@codeSystem": "1.2.840.114350.1.72.2",
-            "@displayName": "Additional Document Comments",
+            "@code": "69730-0",
+            "@codeSystem": "2.16.840.1.113883.6.1",
+            "@displayName": "Instructions",
         },
         "title": "Important Information",
         "text": {
