@@ -712,19 +712,20 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
     # Check that they exist and their relative order is correct
     idx_note1 = next(i for i, n in enumerate(br_notes) if "Note 1" in n)
     idx_note5 = next(i for i, n in enumerate(br_notes) if "Note 5" in n)
-    idx_repeats = next(
-        i for i, n in enumerate(br_notes) if "Prescription 1 of 6 allowed repeats" in n
-    )
     idx_status = next(
         i
         for i, n in enumerate(br_notes)
         if "Medication status reason: Patient requested stop" in n
     )
-    idx_issued = next(
-        i for i, n in enumerate(br_notes) if "Issued quantity: 30 tablets" in n
-    )
 
     assert idx_note1 < idx_note5, "Base notes are out of chronological order!"
     assert idx_note5 < idx_status, "Extensions are out of order!"
-    assert idx_status < idx_repeats, "Repeats are out of order!"
-    assert idx_repeats < idx_issued, "Issued quantity is out of order!"
+
+    # Check that repeats and issued quantity were correctly moved to prescription_information (row[7])
+    row = entry_with_row.row
+    assert "Prescription 1 of 6 allowed repeats." in row[7], (
+        "Repeats missing from prescription info"
+    )
+    assert "Issued quantity: 30 tablets" in row[7], (
+        "Issued quantity missing from prescription info"
+    )
