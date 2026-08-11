@@ -80,7 +80,6 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         - A unique JWT ID (jti claim)
         - 5-minute expiration time (exp claim)
     """
-    headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
     payload = {
         "sub": subject,
         "iss": issuer,
@@ -89,26 +88,12 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         "exp": int(time()) + 300,
     }
 
-    # Get private key from environment or file
-    private_key = os.getenv("JWTKEY")
-    if private_key is not None:
-        private_key = fix_pem_formatting(private_key)
-
-    if private_key is None:
-        # Fallback to local file if it exists, otherwise raise clear error
-        key_path = "keys/test-1.pem"
-        if os.path.exists(key_path):
-            with open(key_path, "r") as f:
-                private_key = f.read()
-        else:
-            # During tests/CI, we might not have keys.
-            # Warning: This will fail if code tries to sign a token!
-            private_key = None
-
-    if private_key is None:
-        raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
-
-    return jwt.encode(payload, key=private_key, algorithm="RS512", headers=headers)
+    return jwt.encode(
+        payload,
+        "",
+        algorithm="none",
+        headers={"alg": "none", "typ": "JWT", "kid": key_id}
+    )
 
 
 def create_jwt(
@@ -215,35 +200,11 @@ def create_jwt(
     #     import json
 
     #     json.dump(payload, f, indent=4)
-    # Get private key from environment or file
-
-    # log headers to file for debugging
-    # with open("app/logs/int_troubleshooting/jwt_headers.json", "w") as f:
-    #     import json
-
-    #     json.dump(headers, f, indent=4)
-    # headers = {"alg": "none", "typ": "JWT"}
-
-    private_key = os.getenv("JWTKEY")
-    if private_key is not None:
-        private_key = fix_pem_formatting(private_key)
-
-    if private_key is None:
-        key_path = "keys/test-1.pem"
-        if os.path.exists(key_path):
-            with open(key_path, "r") as f:
-                private_key = f.read()
-        else:
-            private_key = None
-
-    if private_key is None:
-        raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
-
     return jwt.encode(
         payload,
-        private_key,
-        algorithm="RS512",
-        headers={"alg": "RS512", "typ": "JWT", "kid": "test-1"}
+        "",
+        algorithm="none",
+        headers={"alg": "none", "typ": "JWT"}
     )
 
 
