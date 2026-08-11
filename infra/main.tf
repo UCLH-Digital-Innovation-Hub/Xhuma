@@ -223,6 +223,21 @@ resource "azurerm_linux_web_app" "app" {
     websockets_enabled     = true
     use_32_bit_worker      = true # Typically false for production but B1 is small
     vnet_route_all_enabled = true
+    
+    ip_restriction {
+      action      = "Allow"
+      name        = "AllowHSCN"
+      priority    = 100
+      # Placeholder for actual HSCN or Epic IP ranges
+      ip_address  = "192.168.0.0/16"
+    }
+
+    scm_ip_restriction {
+      action      = "Allow"
+      name        = "AllowVnet"
+      priority    = 100
+      virtual_network_subnet_id = azurerm_subnet.app_subnet.id
+    }
   }
 
   # Enable mTLS: Optional allows public endpoints/health checks while passing the cert to the app

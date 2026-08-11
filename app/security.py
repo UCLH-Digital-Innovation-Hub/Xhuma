@@ -12,6 +12,8 @@ The module provides two main JWT creation functions:
 All tokens are signed using RS512 algorithm and have a 5-minute expiration time.
 """
 
+from fastapi import Security, HTTPException, status
+from fastapi.security import APIKeyHeader
 import os
 import uuid
 from time import time
@@ -21,6 +23,17 @@ import jwt
 from .audit.models import SAMLAttributes
 
 JWTKEY = os.getenv("JWTKEY")
+API_KEY = os.getenv("API_KEY", "TEST_KEY")
+api_key_header_scheme = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+async def verify_api_key(api_key_header: str = Security(api_key_header_scheme)):
+    if api_key_header != API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key",
+        )
+    return api_key_header
+
 
 
 def fix_pem_formatting(pem_string: str) -> str:
@@ -226,9 +239,12 @@ def create_jwt(
     if private_key is None:
         raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
 
-    return jwt.encode(payload, headers={"alg": "none", "typ": "JWT"}, key=None)
-
-    # return jwt.encode(payload, private_key, algorithm="RS512", headers={"alg": "RS512", "typ": "JWT", "kid": "test-1"})
+    return jwt.encode(
+        payload,
+        private_key,
+        algorithm="RS512",
+        headers={"alg": "RS512", "typ": "JWT", "kid": "test-1"}
+    )
 
 
 if __name__ == "__main__":

@@ -10,14 +10,14 @@ import httpx
 
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
-from app.security import pds_jwt
+from app.security import verify_api_key, pds_jwt
 
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
 INT_BASE_PATH = "https://int.api.service.nhs.uk/"
 API_KEY = os.getenv("API_KEY", "TEST_KEY")
 
-router = fastapi.APIRouter(prefix="/pds")
+router = fastapi.APIRouter(prefix="/pds", dependencies=[fastapi.Depends(verify_api_key)])
 
 
 @router.get("/lookup_patient/{nhsno}")
