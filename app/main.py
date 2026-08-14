@@ -37,7 +37,7 @@ from .audit.models import _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
 from .security import verify_api_key
 from .middleware.mtls import MTLSMiddleware
-from .pds import pds
+
 from .redis_connect import redis_client
 from .relay import routes
 from .relay.hub import WebSocketHub
@@ -210,7 +210,7 @@ app.add_middleware(MTLSMiddleware)
 
 # Include routers for different service components
 app.include_router(soap.router)
-app.include_router(pds.router)
+
 
 # if using HSCN relay, set up WebSocket hub and routes
 if USE_RELAY:

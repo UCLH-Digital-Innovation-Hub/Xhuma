@@ -17,10 +17,6 @@ DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
 INT_BASE_PATH = "https://int.api.service.nhs.uk/"
 API_KEY = os.getenv("API_KEY", "TEST_KEY")
 
-router = fastapi.APIRouter(prefix="/pds", dependencies=[fastapi.Depends(verify_api_key)])
-
-
-@router.get("/lookup_patient/{nhsno}")
 async def lookup_patient(nhsno: int, request: fastapi.Request = None):
     def get_pds_token(kid: str):
         full_path = f"{INT_BASE_PATH}oauth2/token"
@@ -93,7 +89,6 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
     return patient_dict
 
 
-@router.get("/sds/{ods}")
 async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     """
     Function to get the SDS trace for an ODS code
