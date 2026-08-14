@@ -285,6 +285,7 @@ async def iti47(request: Request):
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
         secret = os.getenv("API_KEY", "TEST_KEY")
         from ..audit.models import _subject_ref_from_nhs_number
+
         hashed_nhs = _subject_ref_from_nhs_number(nhsno, secret)
         client.setex(ceid, 3600, hashed_nhs)
         # TODO add audit stuff here too
@@ -334,10 +335,16 @@ async def iti38(request: Request):
         # print(f"Received body: {body}")
         envelope = clean_soap(body)
         assertion = envelope["Header"]["Security"]["Assertion"]
-        
-        trusted_issuer = os.getenv("SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine")
+
+        trusted_issuer = os.getenv(
+            "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
+        )
         issuer_obj = assertion.get("Issuer")
-        issuer_str = issuer_obj.get("#text", "") if isinstance(issuer_obj, dict) else str(issuer_obj)
+        issuer_str = (
+            issuer_obj.get("#text", "")
+            if isinstance(issuer_obj, dict)
+            else str(issuer_obj)
+        )
         if issuer_str != trusted_issuer:
             raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
 
@@ -473,20 +480,30 @@ async def iti39(request: Request):
 
             # if there's not an anonymous address in the reply to header, send the response to that address
             reply_to = envelope["Header"]["ReplyTo"]["Address"]
-            if reply_to and reply_to != "http://www.w3.org/2005/08/addressing/anonymous":
+            if (
+                reply_to
+                and reply_to != "http://www.w3.org/2005/08/addressing/anonymous"
+            ):
                 # SSRF Protection
                 if not reply_to.startswith("https://"):
-                    raise HTTPException(status_code=400, detail="ReplyTo must use https")
-                
-                allowed_domains = os.getenv("ALLOWED_REPLY_TO_DOMAINS", ".nhs.uk").split(",")
+                    raise HTTPException(
+                        status_code=400, detail="ReplyTo must use https"
+                    )
+
+                allowed_domains = os.getenv(
+                    "ALLOWED_REPLY_TO_DOMAINS", ".nhs.uk"
+                ).split(",")
                 parsed_url = urllib.parse.urlparse(reply_to)
-                if not any(parsed_url.hostname and parsed_url.hostname.endswith(domain) for domain in allowed_domains):
-                    raise HTTPException(status_code=403, detail="ReplyTo domain not allowed")
-                    
-                print(
-                    f"Sending response to: {reply_to}"
-                )
-                
+                if not any(
+                    parsed_url.hostname and parsed_url.hostname.endswith(domain)
+                    for domain in allowed_domains
+                ):
+                    raise HTTPException(
+                        status_code=403, detail="ReplyTo domain not allowed"
+                    )
+
+                print(f"Sending response to: {reply_to}")
+
                 def send_post(url, payload, hdrs):
                     try:
                         httpx.post(url, data=payload, headers=hdrs, timeout=10.0)

@@ -26,6 +26,7 @@ JWTKEY = os.getenv("JWTKEY")
 API_KEY = os.getenv("API_KEY", "TEST_KEY")
 api_key_header_scheme = APIKeyHeader(name="X-API-Key", auto_error=True)
 
+
 async def verify_api_key(api_key_header: str = Security(api_key_header_scheme)):
     if api_key_header != API_KEY:
         raise HTTPException(
@@ -33,7 +34,6 @@ async def verify_api_key(api_key_header: str = Security(api_key_header_scheme)):
             detail="Invalid or missing API Key",
         )
     return api_key_header
-
 
 
 def fix_pem_formatting(pem_string: str) -> str:
@@ -92,7 +92,7 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         payload,
         "",
         algorithm="none",
-        headers={"alg": "none", "typ": "JWT", "kid": key_id}
+        headers={"alg": "none", "typ": "JWT", "kid": key_id},
     )
 
 
@@ -201,10 +201,7 @@ def create_jwt(
 
     #     json.dump(payload, f, indent=4)
     return jwt.encode(
-        payload,
-        "",
-        algorithm="none",
-        headers={"alg": "none", "typ": "JWT"}
+        payload, "", algorithm="none", headers={"alg": "none", "typ": "JWT"}
     )
 
 

@@ -183,7 +183,6 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
 soap.register_handlers(app)
 
 
-
 # 1) Trusted hosts
 allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "*")
 allowed_hosts = [h.strip() for h in allowed_hosts_str.split(",")]
@@ -259,9 +258,6 @@ async def health_check():
     return {"status": "ok"}
 
 
-
-
-
 @app.get("/jwk")
 async def get_jwk(request: Request):
     """
@@ -281,7 +277,11 @@ async def get_jwk(request: Request):
 # --- Dev-only audit viewer ---
 if os.getenv("ENV", "prod").lower() in ("dev", "local"):
 
-    @app.get("/_dev/audit", response_class=HTMLResponse, dependencies=[Depends(verify_api_key)])
+    @app.get(
+        "/_dev/audit",
+        response_class=HTMLResponse,
+        dependencies=[Depends(verify_api_key)],
+    )
     async def dev_audit_form():
         return HTMLResponse("""
             <html>
@@ -310,7 +310,11 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
             </html>
             """)
 
-    @app.post("/_dev/audit", response_class=HTMLResponse, dependencies=[Depends(verify_api_key)])
+    @app.post(
+        "/_dev/audit",
+        response_class=HTMLResponse,
+        dependencies=[Depends(verify_api_key)],
+    )
     async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
         # --- safety: dev only ---
         secret = os.getenv("API_KEY")

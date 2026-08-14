@@ -10,12 +10,13 @@ import httpx
 
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
-from app.security import verify_api_key, pds_jwt
+from app.security import pds_jwt
 
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
 INT_BASE_PATH = "https://int.api.service.nhs.uk/"
 API_KEY = os.getenv("API_KEY", "TEST_KEY")
+
 
 async def lookup_patient(nhsno: int, request: fastapi.Request = None):
     def get_pds_token(kid: str):

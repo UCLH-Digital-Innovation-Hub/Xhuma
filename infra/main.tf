@@ -223,7 +223,7 @@ resource "azurerm_linux_web_app" "app" {
     websockets_enabled     = true
     use_32_bit_worker      = true # Typically false for production but B1 is small
     vnet_route_all_enabled = true
-    
+
     ip_restriction {
       action      = "Allow"
       name        = "AllowHSCN"
