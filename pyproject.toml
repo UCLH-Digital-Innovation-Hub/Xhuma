@@ -29,6 +29,7 @@ dependencies = [
     "alembic",
     "psycopg[binary]",
     "azure-monitor-opentelemetry>=1.8.7",
+    "urllib3>=1.7.0",
 ]
 
 [tool.isort]
