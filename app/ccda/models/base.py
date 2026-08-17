@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union
+from typing import List, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Extra, Field, field_serializer
@@ -43,7 +43,7 @@ class Consumable(BaseModel):
 class EntryRelationshipAct(BaseModel):
     templateId: II
     code: CD
-    text: Dict
+    text: Optional[str] = None
     statusCode: Optional[CS] = None
     classCode: str = Field(alias="@classCode", default="ACT")
     moodCode: str = Field(alias="@moodCode", default="INT")
@@ -59,7 +59,7 @@ class Act(BaseModel):
     templateId: List[II] = Field(default_factory=list)
     id: Optional[List[II]] = Field(default_factory=list)
     code: Optional[CD] = None
-    text: Optional[str] = None
+    text: Optional[ED] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
 
@@ -81,6 +81,18 @@ class Observation(BaseModel):
     entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
 
 
+class ObservationRange(BaseModel):
+    classCode: str = Field(alias="@classCode", default="OBS")
+    moodCode: str = Field(alias="@moodCode", default="EVN.CRT")
+    text: Optional[str] = None
+    value: Optional[ANY] = None
+
+
+class ReferenceRange(BaseModel):
+    typeCode: str = Field(alias="@typeCode", default="REFV")
+    observationRange: ObservationRange
+
+
 class ResultObservation(Observation):
     """
     Representation of CDA model object Result Observation.
@@ -96,7 +108,7 @@ class ResultObservation(Observation):
             )
         ]
     )
-    referenceRange: Optional[Dict] = None
+    referenceRange: Optional[List[ReferenceRange]] = None
     value: Optional[PQ] = None  # PQ is used for numeric values
 
 
@@ -130,6 +142,18 @@ class InstructionObservation(Observation):
     )
 
 
+class Criterion(BaseModel):
+    classCode: str = Field(alias="@classCode", default="OBS")
+    moodCode: str = Field(alias="@moodCode", default="EVN")
+    code: Optional[CD] = None
+    value: Optional[ANY] = None
+
+
+class Precondition(BaseModel):
+    typeCode: str = Field(alias="@typeCode", default="PRCN")
+    criterion: Criterion
+
+
 class SubstanceAdministration(BaseModel):
     """
     Representation of CDA model object Substance Administration. Only contain relevant attributes.
@@ -157,18 +181,18 @@ class SubstanceAdministration(BaseModel):
     )
     consumable: Optional[Consumable] = None
     routeCode: Optional[CE] = None
-    doseQuantity: Optional[IVL_PQ] = None
-    rateQuantity: Optional[IVL_PQ] = None
+    doseQuantity: Optional[Union[IVL_PQ, PQ]] = None
+    rateQuantity: Optional[Union[IVL_PQ, PQ]] = None
     maxDoseQuantity: Optional[RTO_PQ_PQ] = None
     entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
     repeatNumber: Optional[IVL_INT] = None
     # TODO flesh out precondition model
-    precondition: Optional[Dict] = None
+    precondition: Optional[List[Precondition]] = None
 
     @field_serializer("effectiveTime")
     def serialize_effective_time(
         self, sxcm_ts_list: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]]
-    ) -> Dict:
+    ) -> List:
         """
         Takes a list of SXCM_TS objects and returns a dictionary with operator as key
         """
@@ -178,7 +202,9 @@ class SubstanceAdministration(BaseModel):
         for eff_time in sxcm_ts_list:
             # print(f"eff_time: {eff_time}")
             # print(isinstance(eff_time, SXCM_TS))
-            if eff_time.resource_type == "SXCM_TS":
+            if eff_time.resource_type == "SXCM_TS" and getattr(
+                eff_time, "operator", None
+            ):
                 # add the operator to the dictionary
                 sxcm[eff_time.operator] = {"@value": eff_time.value}
             else:

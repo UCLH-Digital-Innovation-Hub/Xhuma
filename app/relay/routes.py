@@ -43,14 +43,20 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
     cert_header = os.getenv("RELAY_CLIENT_CERT_HEADER", "X-Relay-ClientCert")
     cert_value = websocket.headers.get(cert_header)
+
     if not cert_value:
+        print(
+            f"Relay Auth failed: Client certificate ({cert_header}) required",
+            flush=True,
+        )
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
-            reason=f"Client certificate required in header: {cert_header}",
+            reason=f"Client certificate ({cert_header}) required",
         )
 
     cert = _parse_client_cert_from_header(cert_value)
     if cert is None:
+        print("Relay mTLS failed: Invalid client certificate format", flush=True)
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Invalid client certificate format",
@@ -62,6 +68,10 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
     fingerprint = cert.fingerprint(hashes.SHA256()).hex()
     if fingerprint not in allowed:
+        print(
+            f"Relay mTLS failed: Relay client certificate {fingerprint} is not allow-listed",
+            flush=True,
+        )
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Relay client certificate is not allow-listed",
@@ -70,15 +80,33 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
 @router.websocket("/ws/{client_id}")
 async def relay_ws(websocket: WebSocket, client_id: str):
-    _enforce_relay_mtls(websocket)
-    hub = websocket.app.state.relay_hub
     await websocket.accept()
+    try:
+        _enforce_relay_mtls(websocket)
+    except WebSocketException as e:
+        await websocket.close(code=e.code, reason=e.reason)
+        return
+
+    import asyncio
+    from opentelemetry import trace
+
+    hub = websocket.app.state.relay_hub
     await hub.register(websocket)
+    tracer = trace.get_tracer(__name__)
     try:
         while True:
-            # Agent sends RelayResponse JSON
-            data = await websocket.receive_text()
-            hub.fulfill(json.loads(data))
+            with tracer.start_as_current_span("websocket.receive") as span:
+                span.set_attribute("client_id", client_id)
+                try:
+                    # Agent sends RelayResponse JSON
+                    data = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=30.0
+                    )
+                    hub.fulfill(json.loads(data))
+                except asyncio.TimeoutError:
+                    # Expected idle wait, log it so Azure knows we are healthy
+                    span.set_attribute("status", "idle_keepalive")
+                    continue
     except WebSocketDisconnect:
         pass
     finally:

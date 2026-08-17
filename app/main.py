@@ -79,7 +79,10 @@ async def lifespan(app: FastAPI):
 
             private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
             public_jwk = jwk.JWK.from_pem(private_pem)
-            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+            jwk_dict = public_jwk.export_public(as_dict=True)
+            jwk_dict["alg"] = "RS512"
+            jwk_dict["use"] = "sig"
+            app.state.jwk_json = jwk_dict
         except Exception as e:
             print(f"Warning: Failed to load JWTKEY from environment: {e}")
     elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile(
@@ -92,7 +95,10 @@ async def lifespan(app: FastAPI):
         with open("keys/test-1.pem", "rb") as pemfile:
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
-            app.state.jwk_json = public_jwk.export_public(as_dict=True)
+            jwk_dict = public_jwk.export_public(as_dict=True)
+            jwk_dict["alg"] = "RS512"
+            jwk_dict["use"] = "sig"
+            app.state.jwk_json = jwk_dict
     else:
         print(
             "Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error."
@@ -131,6 +137,48 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+# Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
+if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        from opentelemetry.instrumentation.logging import LoggingInstrumentor
+        from opentelemetry.instrumentation.redis import RedisInstrumentor
+
+        # Ensure the root logger captures INFO logs so they are exported
+        import logging
+
+        logging.getLogger().setLevel(logging.INFO)
+
+        FastAPIInstrumentor.instrument_app(app)
+        HTTPXClientInstrumentor().instrument()
+        LoggingInstrumentor().instrument(set_logging_format=True)
+        RedisInstrumentor().instrument()
+        print(
+            "Application Insights OpenTelemetry instrumentation enabled successfully."
+        )
+    except Exception as telemetry_err:
+        print(
+            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
+        )
+
+# Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
+if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        from opentelemetry.instrumentation.logging import LoggingInstrumentor
+
+        FastAPIInstrumentor.instrument_app(app)
+        HTTPXClientInstrumentor().instrument()
+        LoggingInstrumentor().instrument(set_logging_format=True)
+        print(
+            "Application Insights OpenTelemetry instrumentation enabled successfully."
+        )
+    except Exception as telemetry_err:
+        print(
+            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
+        )
 
 # register soap error handler
 soap.register_handlers(app)
@@ -206,6 +254,14 @@ async def root():
     """
 
 
+@app.get("/health")
+async def health_check():
+    """
+    Public health check endpoint.
+    """
+    return {"status": "ok"}
+
+
 @app.get("/demo/{nhsno}")
 async def demo(nhsno: int, request: Request):
     """
@@ -270,10 +326,10 @@ async def get_jwk(request: Request):
     trust with the service.
 
     Returns:
-        dict: JSON Web Key in dictionary format.
+        dict: JSON Web Key Set in dictionary format.
     """
     if hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
-        return request.app.state.jwk_json
+        return {"keys": [request.app.state.jwk_json]}
     return {"error": "JWK not configured on this server"}
 
 

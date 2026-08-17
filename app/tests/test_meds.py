@@ -7,8 +7,10 @@ from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import medication, medicationrequest, medicationstatement
 
+from app.ccda.entries import immunization_entry as immunization_entry_func
 from app.ccda.entries import medication as medication_entry
 from app.ccda.models.dmd import DMDConcept, VPIProperty
+from fhirclient.models import immunization
 
 med = medication.Medication(
     {
@@ -488,3 +490,242 @@ async def test_new_structured_detail(mock_dmd_lookup):
     assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"
     assert substance_administration["doseQuantity"]["@value"] == 100
     assert substance_administration["doseQuantity"]["@unit"] == "mg"
+
+
+@pytest.mark.asyncio
+async def test_immunization_entry_with_notes():
+    # Test case 1.9 style immunization with note & explanation reason
+    imm_data = {
+        "resourceType": "Immunization",
+        "id": "imm-1",
+        "status": "completed",
+        "primarySource": True,
+        "notGiven": False,
+        "patient": {"reference": "Patient/2"},
+        "date": "2026-03-12T10:00:00Z",
+        "vaccineCode": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "1119349007",
+                    "display": "Comirnaty Omicron XBB.1.5 injection",
+                }
+            ]
+        },
+        "lotNumber": "LOT123",
+        "note": [{"text": "Notes on adminstration of vaccine"}],
+        "explanation": {
+            "reason": [
+                {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "171279008",
+                            "display": "Immunisation due",
+                        }
+                    ]
+                }
+            ]
+        },
+    }
+    imm_resource = immunization.Immunization(imm_data)
+    entry_with_row = immunization_entry_func(imm_resource, {})
+    entry = entry_with_row.entry
+    row = entry_with_row.row
+
+    assert entry["templateId"][0]["@root"] == "2.16.840.1.113883.10.20.22.4.52"
+    assert entry["statusCode"]["@code"] == "completed"
+    assert len(entry["entryRelationship"]) == 1
+    assert entry["entryRelationship"][0]["act"]["code"]["@code"] == "48767-8"
+    assert (
+        "Notes on adminstration of vaccine"
+        in entry["entryRelationship"][0]["act"]["text"]["xmlText"]["BR"][0]
+    )
+    assert (
+        "Reason: Immunisation due"
+        in entry["entryRelationship"][0]["act"]["text"]["xmlText"]["BR"][1]
+    )
+
+    # Check narrative row formatting
+    assert row[0] == "12/03/2026"
+    assert "Comirnaty Omicron XBB.1.5 injection" in row[1]
+    assert "Notes on adminstration of vaccine" in row[1]
+    assert "Reason: Immunisation due" in row[1]
+    assert row[2] == "LOT123"
+    assert row[3] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_medication_repeats_robustness():
+    # Test case 2.4 style repeats using valuePositiveInt instead of valueUnsignedInt for repeats issued
+    med_request_data = {
+        "resourceType": "MedicationRequest",
+        "id": "med-req-1",
+        "identifier": [
+            {
+                "system": "https://EMISWeb/A82038",
+                "value": "7DC1C5D8540B4A7C8E19CBD3426A8CC62E352BA68F87479BBC8041494027F2E6",
+            }
+        ],
+        "extension": [
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1",
+                "extension": [
+                    {
+                        "url": "numberOfRepeatPrescriptionsAllowed",
+                        "valuePositiveInt": 3,
+                    },
+                    {
+                        "url": "numberOfRepeatPrescriptionsIssued",
+                        "valuePositiveInt": 1,
+                    },
+                ],
+            }
+        ],
+        "status": "active",
+        "intent": "plan",
+        "medicationReference": {"reference": "Medication/21"},
+        "subject": {"reference": "Patient/2"},
+    }
+
+    med_statement_data = {
+        "resourceType": "MedicationStatement",
+        "id": "med-stat-1",
+        "identifier": [
+            {
+                "system": "https://fhir.nhs.uk/Id/cross-care-setting-identifier",
+                "value": "398c49aa-1933-11f0-b9fc-00505692d4aa",
+            }
+        ],
+        "basedOn": [{"reference": "MedicationRequest/med-req-1"}],
+        "status": "active",
+        "medicationReference": {"reference": "Medication/21"},
+        "effectivePeriod": {"start": "2026-01-21T00:00:00+00:00"},
+        "subject": {"reference": "Patient/2"},
+        "taken": "unk",
+        "dosage": [{"text": "take as directed"}],
+    }
+
+    index_dict = {
+        "Medication/21": med,
+        "MedicationRequest/med-req-1": medicationrequest.MedicationRequest(
+            med_request_data
+        ),
+    }
+
+    statement = medicationstatement.MedicationStatement(med_statement_data)
+    entry_with_row = await medication_entry(statement, index_dict)
+
+    # Check that Prescription repeat information was parsed and added to prescription_information (row[7])
+    row = entry_with_row.row
+    assert "Prescription 1 of 3 allowed repeats." in row[7]
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
+    # Setup mock data to test chronological order of notes and that issued quantity / repeats are included in XML
+    med_request_data = {
+        "resourceType": "MedicationRequest",
+        "id": "med-req-notes-1",
+        "identifier": [{"system": "system", "value": "val"}],
+        "note": [
+            {"text": "Note 1"},
+            {"text": "Note 2"},
+            {"text": "Note 3"},
+        ],
+        "extension": [
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatusReason-1",
+                "extension": [
+                    {
+                        "url": "statusReason",
+                        "valueCodeableConcept": {"text": "Patient requested stop"},
+                    }
+                ],
+            },
+            {
+                "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1",
+                "extension": [
+                    {
+                        "url": "numberOfRepeatPrescriptionsAllowed",
+                        "valuePositiveInt": 6,
+                    },
+                    {"url": "numberOfRepeatPrescriptionsIssued", "valuePositiveInt": 1},
+                ],
+            },
+        ],
+        "dispenseRequest": {
+            "quantity": {"value": 30, "unit": "tablets"},
+            "validityPeriod": {"end": "2026-02-21T00:00:00+00:00"},
+        },
+        "status": "stopped",
+        "intent": "plan",
+        "medicationReference": {"reference": "Medication/21"},
+        "subject": {"reference": "Patient/2"},
+    }
+
+    med_statement_data = {
+        "resourceType": "MedicationStatement",
+        "id": "med-stat-notes-1",
+        "identifier": [{"system": "system", "value": "val"}],
+        "basedOn": [{"reference": "MedicationRequest/med-req-notes-1"}],
+        "status": "active",
+        "medicationReference": {"reference": "Medication/21"},
+        "effectivePeriod": {"start": "2026-01-21T00:00:00+00:00"},
+        "subject": {"reference": "Patient/2"},
+        "taken": "unk",
+        "note": [{"text": "Note 4"}, {"text": "Note 5"}],
+        "dosage": [{"text": "take as directed"}],
+    }
+
+    index_dict = {
+        "Medication/21": med,
+        "MedicationRequest/med-req-notes-1": medicationrequest.MedicationRequest(
+            med_request_data
+        ),
+    }
+
+    statement = medicationstatement.MedicationStatement(med_statement_data)
+    entry_with_row = await medication_entry(statement, index_dict)
+
+    # Check that chronological order is preserved and duplicates are handled if any
+    # Retrieve the structured XML notes from entry
+    xml_dict = entry_with_row.entry
+    relationships = xml_dict.get("substanceAdministration", {}).get(
+        "entryRelationship", []
+    )
+
+    # Find the comment activity (code 48767-8)
+    comment_act = None
+    for rel in relationships:
+        act = rel.get("act", {})
+        if act.get("code", {}).get("@code") == "48767-8":
+            comment_act = act
+            break
+
+    assert comment_act is not None, "Comment activity not found in entryRelationship"
+
+    xml_text = comment_act.get("text", {}).get("xmlText", "")
+    br_notes = [n.strip() for n in xml_text.split("<br />") if n.strip()]
+
+    # Check that they exist and their relative order is correct
+    idx_note1 = next(i for i, n in enumerate(br_notes) if "Note 1" in n)
+    idx_note5 = next(i for i, n in enumerate(br_notes) if "Note 5" in n)
+    idx_status = next(
+        i
+        for i, n in enumerate(br_notes)
+        if "Medication status reason: Patient requested stop" in n
+    )
+
+    assert idx_note1 < idx_note5, "Base notes are out of chronological order!"
+    assert idx_note5 < idx_status, "Extensions are out of order!"
+
+    # Check that repeats and issued quantity were correctly moved to prescription_information (row[7])
+    row = entry_with_row.row
+    assert "Prescription 1 of 6 allowed repeats." in row[7], (
+        "Repeats missing from prescription info"
+    )
+    assert "Issued quantity: 30 tablets" in row[7], (
+        "Issued quantity missing from prescription info"
+    )

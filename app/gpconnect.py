@@ -24,6 +24,7 @@ from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
 from .gp_connect_config import GP_CONNECT_PARAMETERS
+from .logging import record_application_failure
 
 # from app.metrics.metric_utils import classify_error, now
 
@@ -139,7 +140,7 @@ async def gpconnect(
     # 2) PDS lookup (consider caching in future)
     # t = now()
     try:
-        pds_search = await lookup_patient(nhsno)
+        pds_search = await lookup_patient(nhsno, request=request)
         await _attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -158,6 +159,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -200,6 +202,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -226,6 +229,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -244,6 +248,7 @@ async def gpconnect(
                 nhsmhsparty = item.get("value")
     except Exception as e:
         msg = f"Unable to parse SDS trace response: {e}"
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -288,6 +293,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -324,6 +330,14 @@ async def gpconnect(
         "accept": "application/fhir+json",
         "Content-Type": "application/fhir+json",
     }
+
+    # Inject OpenTelemetry traceparent context into headers for Relay propagation
+    try:
+        from opentelemetry.propagate import inject
+
+        inject(headers)
+    except ImportError:
+        pass
     body = {
         "resourceType": "Parameters",
         "parameter": [
@@ -455,6 +469,7 @@ async def gpconnect(
             error_code="502",
             detail={"exception": str(e)},
         )
+        record_application_failure(e)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -514,6 +529,7 @@ async def gpconnect(
         fhir_bundle = bundle.Bundle(scr_bundle)
     except Exception as e:
         msg = f"Failed to parse FHIR Bundle from GP Connect response: {e}"
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -529,11 +545,20 @@ async def gpconnect(
         except Exception:
             pass
 
-    try:
-        xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+    import time
+    from opentelemetry import trace
 
+    tracer = trace.get_tracer(__name__)
+    start_time = time.perf_counter()
+    try:
+        with tracer.start_as_current_span("FHIR2CCDA.convert_bundle"):
+            xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logging.info(f"FHIR2CCDA conversion completed in {duration_ms:.2f}ms")
     except Exception as e:
         msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
+        record_application_failure(e)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -571,7 +596,7 @@ async def gpconnect(
 if __name__ == "__main__":
     import asyncio
 
-    xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9690937278^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
+    xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
     saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 
     # result = await gpconnect(9690937278, audit_dict)

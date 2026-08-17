@@ -21,7 +21,7 @@ API_KEY = os.getenv("API_KEY", "TEST_KEY")
 PDS_CACHE_HOURS = int(os.getenv("PDS_CACHE_HOURS", 24))
 SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
 
-router = fastapi.APIRouter(prefix="/pds")
+# router = fastapi.APIRouter(prefix="/pds")
 
 
 def pds_cache_key(nhsno: int, secret: str = None) -> str:
@@ -40,8 +40,8 @@ def sds_cache_key(ods: str, endpoint: bool = False, partykey: str = None) -> str
     return f"{key}:{partykey}" if endpoint else key
 
 
-@router.get("/lookup_patient/{nhsno}")
-async def lookup_patient(nhsno: int):
+# @router.get("/lookup_patient/{nhsno}")
+async def lookup_patient(nhsno: int, request: fastapi.Request = None):
     cache_key = pds_cache_key(nhsno)
     cached_patient = redis_client.get(cache_key)
     if cached_patient:
@@ -52,9 +52,9 @@ async def lookup_patient(nhsno: int):
 
     logging.info("Cache miss for PDS patient query. Fetching from PDS API.")
 
-    def get_pds_token():
+    def get_pds_token(kid: str):
         full_path = f"{INT_BASE_PATH}oauth2/token"
-        jwt_token = pds_jwt(API_KEY, API_KEY, full_path, "test-1")
+        jwt_token = pds_jwt(API_KEY, API_KEY, full_path, kid)
         # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {
@@ -65,19 +65,37 @@ async def lookup_patient(nhsno: int):
         r = httpx.post(full_path, data=oauth_params)
 
         response_dict = json.loads(r.text)
-        # print(response_dict)
+        if "access_token" not in response_dict:
+            error_msg = (
+                f"Failed to retrieve PDS access token. NHS API Response: {r.text}"
+            )
+            logging.error(error_msg)
+            print(
+                f"CRITICAL NHS AUTH ERROR: {error_msg}", flush=True
+            )  # Print directly to Azure logs
+            raise fastapi.HTTPException(
+                status_code=500, detail="NHS API Authentication Failed"
+            )
+
         nhs_token = response_dict["access_token"]
 
         redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
-        return nhs_token
-
         return nhs_token
 
     # if nhs token expired or not request, get one and cache
 
     if not redis_client.exists("access_token"):
         logging.info("NHS token expired or not found, getting new one")
-        nhs_token = get_pds_token()
+        # Extract dynamically generated Key ID, fallback to 'test-1'
+        kid = "test-1"
+        if (
+            request
+            and hasattr(request.app.state, "jwk_json")
+            and request.app.state.jwk_json
+        ):
+            kid = request.app.state.jwk_json.get("kid", "test-1")
+
+        nhs_token = get_pds_token(kid)
     else:
         logging.info("NHS token found in cache")
         nhs_token = redis_client.get("access_token").decode("utf-8")
@@ -101,12 +119,11 @@ async def lookup_patient(nhsno: int):
         r = await client.get(url, headers=headers)
 
     patient_dict = json.loads(r.text)
-    redis_client.setex(cache_key, PDS_CACHE_HOURS * 60 * 60, json.dumps(patient_dict))
 
     return patient_dict
 
 
-@router.get("/sds/{ods}")
+# @router.get("/sds/{ods}")
 async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     """
     Function to get the SDS trace for an ODS code

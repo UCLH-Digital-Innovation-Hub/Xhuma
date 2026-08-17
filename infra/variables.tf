@@ -163,9 +163,9 @@ variable "allowed_hosts" {
 }
 
 variable "require_mtls" {
-  description = "Enforce mTLS validation in the application"
+  description = "Whether to enforce mTLS globally in the FastAPI app"
   type        = string
-  default     = "false"
+  default     = "true"
 }
 
 variable "external_relay_url" {
@@ -179,4 +179,3 @@ variable "external_relay_client_id" {
   type        = string
   default     = "client1"
 }
-

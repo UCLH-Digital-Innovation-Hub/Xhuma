@@ -54,8 +54,8 @@ def log_info(req_body, res_body, client_ip, method, url, status_code):
         status_code: The response status code
     """
     logging.info(f"Client IP: {client_ip}, Method: {method}, URL: {url}")
-    logging.info(f"Request Body: {req_body}")
-    logging.info(f"Response Body: {res_body}")
+    logging.info("Request Body: [REDACTED FOR PHI SECURITY]")
+    logging.info("Response Body: [REDACTED FOR PHI SECURITY]")
     logging.info(f"Status Code: {status_code}")
 
 
@@ -76,13 +76,12 @@ class LoggingRoute(APIRoute):
 
         async def custom_route_handler(request: Request) -> Response:
             logging.info(f"Handling request for {request.url}")
-            req_body = await request.body()
             client_ip = request.headers.get("x-forwarded-for") or request.client.host
-            logging.info(f"Time: {datetime.now()}")
             method = request.method
+            logging.info(f"Time: {datetime.now()}")
             logging.info(f"Method: {method}")
             logging.info(f"Client IP: {client_ip}")
-            logging.info(f"Request Body: {req_body}")
+            logging.info("Request Body: [REDACTED FOR PHI SECURITY]")
             return await original_route_handler(request)
 
         return custom_route_handler
@@ -166,6 +165,20 @@ async def iti55(request: Request):
         except Exception:
             nhsno = None
 
+        # OpenTelemetry trace propagation
+        message_id = envelope.get("Header", {}).get("MessageID")
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            if message_id:
+                span.set_attribute("soap.message_id", message_id)
+            if nhsno:
+                import hashlib
+
+                hashed_nhs = hashlib.sha256(str(nhsno).encode("utf-8")).hexdigest()
+                span.set_attribute("patient.nhs_number_hashed", hashed_nhs)
+
         if not nhsno:
             data = await iti_55_error(
                 envelope["Header"]["MessageID"],
@@ -176,7 +189,7 @@ async def iti55(request: Request):
             )
             return Response(content=data, media_type="application/soap+xml")
 
-        patient = await lookup_patient(nhsno)
+        patient = await lookup_patient(nhsno, request=request)
         # TODO implement checking of demographics
 
         if (not patient) or (
@@ -270,7 +283,7 @@ async def iti47(request: Request):
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
         client.set(ceid, nhsno)
         # TODO add audit stuff here too
-        patient = await lookup_patient(nhsno)
+        patient = await lookup_patient(nhsno, request=request)
         print(f"Patient: {patient}")
         if not patient:
             print("Patient not found")
@@ -337,6 +350,26 @@ async def iti38(request: Request):
         )
 
         print(f"Patient ID: {patient_id}")
+
+        # OpenTelemetry trace propagation
+        message_id = envelope.get("Header", {}).get("MessageID")
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            if message_id:
+                span.set_attribute("soap.message_id", message_id)
+            if query_id:
+                span.set_attribute("soap.query_id", query_id)
+            try:
+                poss_nhs = re.search(r"[0-9]{10}", patient_id).group(0)
+                if poss_nhs:
+                    import hashlib
+
+                    hashed_nhs = hashlib.sha256(poss_nhs.encode("utf-8")).hexdigest()
+                    span.set_attribute("patient.nhs_number_hashed", hashed_nhs)
+            except Exception:
+                pass
         # TODO rewrite this pattern if we don't need to map CEID to NHSNO
         if not validateNHSnumber(patient_id):
             try:
@@ -394,6 +427,16 @@ async def iti39(request: Request):
             ]["DocumentUniqueId"]
         except Exception:
             raise HTTPException(status_code=404, detail="DocumentUniqueId not found")
+
+        # OpenTelemetry trace propagation
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            if message_id:
+                span.set_attribute("soap.message_id", message_id)
+            if document_id:
+                span.set_attribute("soap.document_id", document_id)
 
         document = client.get(document_id)
 
