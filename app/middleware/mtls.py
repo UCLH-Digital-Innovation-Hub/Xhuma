@@ -12,6 +12,12 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
     try:
         der_cert = base64.b64decode(client_cert_b64)
         client_cert = x509.load_der_x509_certificate(der_cert)
+        try:
+            from cryptography.hazmat.primitives import hashes
+            fingerprint = client_cert.fingerprint(hashes.SHA256()).hex().lower()
+            print(f"Epic CA Verification: Intercepted client cert fingerprint '{fingerprint}'", flush=True)
+        except Exception:
+            pass
     except Exception as e:
         print(
             f"Epic CA Verification: Failed to decode client cert. Error: {str(e)}",
