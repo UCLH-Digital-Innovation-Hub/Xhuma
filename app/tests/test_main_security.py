@@ -1,5 +1,3 @@
-import pytest
-import os
 from fastapi.testclient import TestClient
 
 def test_dev_audit_requires_api_key(monkeypatch):
