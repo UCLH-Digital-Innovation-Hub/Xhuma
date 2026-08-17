@@ -334,14 +334,6 @@ async def iti38(request: Request):
 
         # for item in envelope["Header"]["Security"]["Assertion"].items():
         #     print(f"{item[0]}: {item[1]}")
-        try:
-            issuer = envelope["Header"]["Security"]["Assertion"]["Issuer"]
-            if isinstance(issuer, dict):
-                issuer = issuer.get("#text", str(issuer))
-            print(f"ITI-38 SAML Verification: Intercepted issuer '{issuer}'", flush=True)
-        except Exception:
-            pass
-
         saml_attrs = process_saml_attributes(
             envelope["Header"]["Security"]["Assertion"]["AttributeStatement"]
             # envelope["Header"]["Security"]["AttributeStatement"]
