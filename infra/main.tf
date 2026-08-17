@@ -256,6 +256,11 @@ resource "azurerm_linux_web_app" "app" {
     "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
     "EPIC_CA_CERT"      = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.local_kv.name};SecretName=epic-ca-cert)"
+    
+    # New Security Mitigations
+    "MTLS_TRUSTED_THUMBPRINTS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=mtls-trusted-thumbprints)"
+    "SAML_TRUSTED_ISSUER"      = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=saml-trusted-issuer)"
+    "ALLOWED_REPLY_TO_DOMAINS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=allowed-reply-to-domains)"
 
     "REGISTRY_ID"    = var.registry_id
     "REDIS_HOST"     = azurerm_redis_cache.redis.hostname
