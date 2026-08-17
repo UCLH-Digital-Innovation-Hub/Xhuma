@@ -289,10 +289,16 @@ async def test_substance_administration():
 
 
 @pytest.mark.asyncio
-async def test_structured_dosage():
+@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+async def test_structured_dosage(mock_dmd_lookup):
     """
     Test the structured dosage
     """
+    mock_dmd_lookup.return_value = DMDConcept(
+        concept_id=1,
+        valueString="Mock dm+d concept",
+    )
+
     with open("app/tests/fixtures/bundles/9690937472.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
@@ -332,7 +338,13 @@ async def test_structured_dosage():
 
 
 @pytest.mark.asyncio
-async def test_structured_detail():
+@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+async def test_structured_detail(mock_dmd_lookup):
+    mock_dmd_lookup.return_value = DMDConcept(
+        concept_id=1,
+        valueString="Mock dm+d concept",
+    )
+
     index_dict = {
         "Medication/A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7": structured_med,
         "MedicationStatement/9": structured_med,

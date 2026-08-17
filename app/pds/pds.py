@@ -120,6 +120,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
 
     patient_dict = json.loads(r.text)
 
+    redis_client.setex(cache_key, PDS_CACHE_HOURS * 60 * 60, json.dumps(patient_dict))
     return patient_dict
 
 
