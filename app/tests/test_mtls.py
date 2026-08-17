@@ -45,3 +45,124 @@ def test_mtls_public_paths(monkeypatch):
     # / is in public_paths
     response = client.get("/")
     assert response.status_code == 200
+
+
+def test_mtls_accepts_valid_thumbprint(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    import datetime as dt
+    import base64
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1))
+        .not_valid_after(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=30))
+        .sign(private_key=key, algorithm=hashes.SHA256())
+    )
+    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode(
+        "ascii"
+    )
+    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+
+    # The actual implementation calls `_verify_epic_cert` internally, so let's import it
+    from app.middleware.mtls import _verify_epic_cert
+
+    # Mock EPIC_CA_CERT so it doesn't fail on CA load
+    monkeypatch.setenv(
+        "EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    )
+
+    # Set the allowlist to exactly our fingerprint
+    monkeypatch.setenv("MTLS_TRUSTED_THUMBPRINTS", fingerprint)
+
+    assert _verify_epic_cert(der_b64) is True
+
+
+def test_mtls_rejects_invalid_thumbprint(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    import datetime as dt
+    import base64
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1))
+        .not_valid_after(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=30))
+        .sign(private_key=key, algorithm=hashes.SHA256())
+    )
+    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode(
+        "ascii"
+    )
+
+    from app.middleware.mtls import _verify_epic_cert
+
+    monkeypatch.setenv(
+        "EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    )
+    monkeypatch.setenv(
+        "MTLS_TRUSTED_THUMBPRINTS", "1234567890abcdef"
+    )  # Invalid thumbprint
+
+    assert _verify_epic_cert(der_b64) is False
+
+
+def test_mtls_lenient_thumbprint_formatting(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    import datetime as dt
+    import base64
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1))
+        .not_valid_after(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=30))
+        .sign(private_key=key, algorithm=hashes.SHA256())
+    )
+    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode(
+        "ascii"
+    )
+
+    # Original fingerprint is pure hex lowercase (e.g. b12f5a...)
+    fingerprint = cert.fingerprint(hashes.SHA256()).hex()
+
+    # Format it with colons and uppercase: B1:2F:5A...
+    formatted_fingerprint = ":".join(
+        fingerprint[i : i + 2] for i in range(0, len(fingerprint), 2)
+    ).upper()
+
+    from app.middleware.mtls import _verify_epic_cert
+
+    monkeypatch.setenv(
+        "EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    )
+    monkeypatch.setenv(
+        "MTLS_TRUSTED_THUMBPRINTS",
+        f"other_thumbprint, {formatted_fingerprint} , another_one",
+    )
+
+    # Should still match
+    assert _verify_epic_cert(der_b64) is True
