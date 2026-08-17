@@ -364,8 +364,7 @@ async def iti38(request: Request):
 
         if issuer_str != trusted_issuer:
             print(
-                f"ITI-38 SAML Verification: Rejected issuer '{issuer_str}' (expected '{trusted_issuer}')",
-                "ITI-38 SAML Verification: Rejected issuer",
+                f"ITI-38 SAML Verification: Rejected issuer '{issuer_str}'",
                 flush=True,
             )
             raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
