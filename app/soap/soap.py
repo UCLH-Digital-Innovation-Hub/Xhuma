@@ -334,20 +334,38 @@ async def iti38(request: Request):
         print("-" * 40)
         # print(f"Received body: {body}")
         envelope = clean_soap(body)
-        assertion = envelope["Header"]["Security"]["Assertion"]
+
+        # Safely extract assertion (prevent unhandled KeyError)
+        try:
+            assertion = envelope["Header"]["Security"]["Assertion"]
+            if isinstance(assertion, list):
+                assertion = assertion[0]
+        except (KeyError, TypeError):
+            assertion = {}
 
         trusted_issuer = os.getenv(
             "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
         )
+
         issuer_obj = assertion.get("Issuer")
+        if isinstance(issuer_obj, list):
+            issuer_obj = issuer_obj[0]
+
         issuer_str = (
             issuer_obj.get("#text", "")
             if isinstance(issuer_obj, dict)
             else str(issuer_obj)
+            if issuer_obj is not None
+            else ""
         )
+
+        # Prevent log injection (CWE-117)
+        issuer_str = issuer_str.replace("\n", "").replace("\r", "")
+
         if issuer_str != trusted_issuer:
             print(
                 f"ITI-38 SAML Verification: Rejected issuer '{issuer_str}' (expected '{trusted_issuer}')",
+                "ITI-38 SAML Verification: Rejected issuer",
                 flush=True,
             )
             raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
