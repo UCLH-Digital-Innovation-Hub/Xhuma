@@ -346,6 +346,10 @@ async def iti38(request: Request):
             else str(issuer_obj)
         )
         if issuer_str != trusted_issuer:
+            print(
+                f"ITI-38 SAML Verification: Rejected issuer '{issuer_str}' (expected '{trusted_issuer}')",
+                flush=True,
+            )
             raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
 
         saml_attrs = process_saml_attributes(assertion["AttributeStatement"])
@@ -498,6 +502,10 @@ async def iti39(request: Request):
                     parsed_url.hostname and parsed_url.hostname.endswith(domain)
                     for domain in allowed_domains
                 ):
+                    print(
+                        f"ITI-39 SSRF Protection: Rejected ReplyTo domain '{parsed_url.hostname}' (allowed: {allowed_domains})",
+                        flush=True,
+                    )
                     raise HTTPException(
                         status_code=403, detail="ReplyTo domain not allowed"
                     )
