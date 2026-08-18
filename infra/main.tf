@@ -225,17 +225,17 @@ resource "azurerm_linux_web_app" "app" {
     vnet_route_all_enabled = true
 
     ip_restriction {
-      action      = "Allow"
-      name        = "AllowHSCN"
-      priority    = 100
+      action   = "Allow"
+      name     = "AllowHSCN"
+      priority = 100
       # Placeholder for actual HSCN or Epic IP ranges
-      ip_address  = "192.168.0.0/16"
+      ip_address = "192.168.0.0/16"
     }
 
     scm_ip_restriction {
-      action      = "Allow"
-      name        = "AllowVnet"
-      priority    = 100
+      action                    = "Allow"
+      name                      = "AllowVnet"
+      priority                  = 100
       virtual_network_subnet_id = azurerm_subnet.app_subnet.id
     }
   }
@@ -256,7 +256,7 @@ resource "azurerm_linux_web_app" "app" {
     "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
     "EPIC_CA_CERT"      = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.local_kv.name};SecretName=epic-ca-cert)"
-    
+
     # New Security Mitigations
     "MTLS_TRUSTED_THUMBPRINTS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=mtls-trusted-thumbprints)"
     "SAML_TRUSTED_ISSUER"      = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=saml-trusted-issuer)"
