@@ -88,12 +88,28 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         "exp": int(time()) + 300,
     }
 
-    return jwt.encode(
-        payload,
-        "",
-        algorithm="none",
-        headers={"alg": "none", "typ": "JWT", "kid": key_id},
-    )
+    headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
+
+    # Get private key from environment or file
+    private_key = os.getenv("JWTKEY")
+    if private_key is not None:
+        private_key = fix_pem_formatting(private_key)
+
+    if private_key is None:
+        # Fallback to local file if it exists, otherwise raise clear error
+        key_path = "keys/test-1.pem"
+        if os.path.exists(key_path):
+            with open(key_path, "r") as f:
+                private_key = f.read()
+        else:
+            # During tests/CI, we might not have keys.
+            # Warning: This will fail if code tries to sign a token!
+            private_key = None
+
+    if private_key is None:
+        raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
+
+    return jwt.encode(payload, private_key, algorithm="RS512", headers=headers)
 
 
 def create_jwt(
@@ -200,9 +216,7 @@ def create_jwt(
     #     import json
 
     #     json.dump(payload, f, indent=4)
-    return jwt.encode(
-        payload, "", algorithm="none", headers={"alg": "none", "typ": "JWT"}
-    )
+    return jwt.encode(payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"})
 
 
 if __name__ == "__main__":
