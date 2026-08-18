@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -16,12 +18,40 @@ BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
 INT_BASE_PATH = "https://int.api.service.nhs.uk/"
 API_KEY = os.getenv("API_KEY", "TEST_KEY")
+PDS_CACHE_HOURS = int(os.getenv("PDS_CACHE_HOURS", 24))
+SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
 
-router = fastapi.APIRouter(prefix="/pds")
+# router = fastapi.APIRouter(prefix="/pds")
 
 
-@router.get("/lookup_patient/{nhsno}")
+def pds_cache_key(nhsno: int, secret: str = None) -> str:
+    """Return a deterministic, pseudonymous Redis key for a patient lookup."""
+    secret = secret or os.getenv("PDS_CACHE_HMAC_SECRET") or API_KEY
+    digest = hmac.new(
+        secret.encode("utf-8"), str(nhsno).encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    return f"pds:patient:{digest}"
+
+
+def sds_cache_key(ods: str, endpoint: bool = False, partykey: str = None) -> str:
+    """Return the deterministic Redis key for an SDS query."""
+    resource = "endpoint" if endpoint else "device"
+    key = f"pds:sds:{resource}:{ods.upper()}"
+    return f"{key}:{partykey}" if endpoint else key
+
+
+# @router.get("/lookup_patient/{nhsno}")
 async def lookup_patient(nhsno: int, request: fastapi.Request = None):
+    cache_key = pds_cache_key(nhsno)
+    cached_patient = redis_client.get(cache_key)
+    if cached_patient:
+        logging.info("Cache hit for PDS patient query")
+        if isinstance(cached_patient, bytes):
+            cached_patient = cached_patient.decode("utf-8")
+        return json.loads(cached_patient)
+
+    logging.info("Cache miss for PDS patient query. Fetching from PDS API.")
+
     def get_pds_token(kid: str):
         full_path = f"{INT_BASE_PATH}oauth2/token"
         jwt_token = pds_jwt(API_KEY, API_KEY, full_path, kid)
@@ -90,10 +120,11 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
 
     patient_dict = json.loads(r.text)
 
+    redis_client.setex(cache_key, PDS_CACHE_HOURS * 60 * 60, json.dumps(patient_dict))
     return patient_dict
 
 
-@router.get("/sds/{ods}")
+# @router.get("/sds/{ods}")
 async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     """
     Function to get the SDS trace for an ODS code
@@ -105,9 +136,19 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     returns:
     fhir bundle of the SDS trace
     """
+    partykey = kwargs.get("mhsparty")
+    cache_key = sds_cache_key(ods, endpoint, partykey)
+    cached_trace = redis_client.get(cache_key)
+    if cached_trace:
+        logging.info("Cache hit for SDS query %s", cache_key)
+        if isinstance(cached_trace, bytes):
+            cached_trace = cached_trace.decode("utf-8")
+        return json.loads(cached_trace)
+
+    logging.info("Cache miss for SDS query %s. Fetching from SDS API.", cache_key)
+
     if endpoint:
         suffix = "Endpoint"
-        partykey = kwargs.get("mhsparty")
         identifier = [
             "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
             f"https://fhir.nhs.uk/Id/nhsMhsPartyKey|{partykey}",
@@ -139,7 +180,9 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     if r.status_code != 200:
         raise Exception(f"{r.status_code}: {r.text}")
 
-    return json.loads(r.text)
+    trace = json.loads(r.text)
+    redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
+    return trace
 
 
 if __name__ == "__main__":

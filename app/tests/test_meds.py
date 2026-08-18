@@ -1,5 +1,6 @@
 import json
 import pprint
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -8,6 +9,7 @@ from fhirclient.models import list as fhirlist
 from fhirclient.models import medication, medicationrequest, medicationstatement
 
 from app.ccda.entries import immunization_entry as immunization_entry_func
+from app.ccda.entries import _cda_period_from_repeat, _event_timing_warning
 from app.ccda.entries import medication as medication_entry
 from app.ccda.models.dmd import DMDConcept, VPIProperty
 from fhirclient.models import immunization
@@ -262,6 +264,83 @@ structured_statement = medicationstatement.MedicationStatement(
 )
 
 
+@pytest.mark.parametrize(
+    ("repeat", "expected_low", "expected_high"),
+    [
+        (
+            SimpleNamespace(
+                frequency=1, frequencyMax=None, period=2, periodMax=3, periodUnit="h"
+            ),
+            2,
+            3,
+        ),
+        (
+            SimpleNamespace(
+                frequency=3, frequencyMax=4, period=1, periodMax=None, periodUnit="d"
+            ),
+            0.25,
+            1 / 3,
+        ),
+        (
+            SimpleNamespace(
+                frequency=None,
+                frequencyMax=4,
+                period=1,
+                periodMax=None,
+                periodUnit="d",
+            ),
+            0.25,
+            1,
+        ),
+        (
+            SimpleNamespace(
+                frequency=2, frequencyMax=4, period=1, periodMax=2, periodUnit="d"
+            ),
+            0.25,
+            1,
+        ),
+    ],
+)
+def test_cda_period_from_variable_fhir_timing(repeat, expected_low, expected_high):
+    period = _cda_period_from_repeat(repeat).model_dump(
+        by_alias=True, exclude_none=True
+    )
+
+    assert period["@xsi:type"] == "IVL_PQ"
+    assert period["low"] == {
+        "@xsi:type": "IVXB_PQ",
+        "@unit": repeat.periodUnit,
+        "@value": pytest.approx(expected_low),
+    }
+    assert period["high"] == {
+        "@xsi:type": "IVXB_PQ",
+        "@unit": repeat.periodUnit,
+        "@value": pytest.approx(expected_high),
+    }
+
+
+@pytest.mark.parametrize(
+    ("repeat", "expected"),
+    [
+        (
+            SimpleNamespace(when=["MORN", "AC"], offset=30),
+            "Xhuma warning: Event-based medication timing: Morning (MORN); "
+            "Before a meal (AC). Offset: 30 minutes.",
+        ),
+        (
+            SimpleNamespace(when=["WAKE"], offset=None),
+            "Xhuma warning: Event-based medication timing: Upon waking (WAKE).",
+        ),
+        (
+            SimpleNamespace(when=["CUSTOM"], offset=None),
+            "Xhuma warning: Event-based medication timing: Unknown event (CUSTOM).",
+        ),
+    ],
+)
+def test_event_timing_warning_uses_fhir_event_timing_valueset(repeat, expected):
+    assert _event_timing_warning(repeat) == expected
+
+
 # write tests to check if the pydantic models are working correctly
 # @patch("app.ccda.entries.medication.referenced_med", return_value=med)
 @pytest.mark.asyncio
@@ -289,10 +368,16 @@ async def test_substance_administration():
 
 
 @pytest.mark.asyncio
-async def test_structured_dosage():
+@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+async def test_structured_dosage(mock_dmd_lookup):
     """
     Test the structured dosage
     """
+    mock_dmd_lookup.return_value = DMDConcept(
+        concept_id=1,
+        valueString="Mock dm+d concept",
+    )
+
     with open("app/tests/fixtures/bundles/9690937472.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
@@ -332,7 +417,13 @@ async def test_structured_dosage():
 
 
 @pytest.mark.asyncio
-async def test_structured_detail():
+@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+async def test_structured_detail(mock_dmd_lookup):
+    mock_dmd_lookup.return_value = DMDConcept(
+        concept_id=1,
+        valueString="Mock dm+d concept",
+    )
+
     index_dict = {
         "Medication/A37EA2D2-69D6-43C9-BB6F-66CF8D9D50F7": structured_med,
         "MedicationStatement/9": structured_med,
@@ -357,6 +448,15 @@ async def test_structured_detail():
     )
     assert substance_administration["effectiveTime"][1]["period"]["@value"] == 1.0
     assert substance_administration["effectiveTime"][1]["period"]["@unit"] == "d"
+    comment_text = next(
+        relationship["act"]["text"]["xmlText"]
+        for relationship in substance_administration["entryRelationship"]
+        if relationship.get("act", {}).get("code", {}).get("@code") == "48767-8"
+    )
+    assert (
+        "Xhuma warning: Event-based medication timing: Morning (MORN); "
+        "Before a meal (AC). Offset: 30 minutes."
+    ) in comment_text
     assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"
     assert substance_administration["doseQuantity"]["translation"]["@value"] == 1
     assert (

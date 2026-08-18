@@ -11,7 +11,9 @@ integrating with Redis for caching and implementing NHS number validation.
 """
 
 import logging
+import os
 import re
+import urllib.parse
 import uuid
 from datetime import datetime
 from email import charset
@@ -281,7 +283,11 @@ async def iti47(request: Request):
                 status_code=400, detail="Invalid request, no care everywhere id found"
             )
         print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
-        client.set(ceid, nhsno)
+        secret = os.getenv("API_KEY", "TEST_KEY")
+        from ..audit.models import _subject_ref_from_nhs_number
+
+        hashed_nhs = _subject_ref_from_nhs_number(nhsno, secret)
+        client.setex(ceid, 3600, hashed_nhs)
         # TODO add audit stuff here too
         patient = await lookup_patient(nhsno, request=request)
         print(f"Patient: {patient}")
@@ -328,16 +334,42 @@ async def iti38(request: Request):
         print("-" * 40)
         # print(f"Received body: {body}")
         envelope = clean_soap(body)
-        # print(f"Envelope: {envelope["Header"]["Security"]["Assertion"]}")
-        # for key, value in envelope["Header"]["Security"]["Assertion"].items():
-        #     print(f"{key}: {value}")
 
-        # for item in envelope["Header"]["Security"]["Assertion"].items():
-        #     print(f"{item[0]}: {item[1]}")
-        saml_attrs = process_saml_attributes(
-            envelope["Header"]["Security"]["Assertion"]["AttributeStatement"]
-            # envelope["Header"]["Security"]["AttributeStatement"]
+        # Safely extract assertion (prevent unhandled KeyError)
+        try:
+            assertion = envelope["Header"]["Security"]["Assertion"]
+            if isinstance(assertion, list):
+                assertion = assertion[0]
+        except (KeyError, TypeError):
+            assertion = {}
+
+        trusted_issuer = os.getenv(
+            "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
         )
+
+        issuer_obj = assertion.get("Issuer")
+        if isinstance(issuer_obj, list):
+            issuer_obj = issuer_obj[0]
+
+        issuer_str = (
+            issuer_obj.get("#text", "")
+            if isinstance(issuer_obj, dict)
+            else str(issuer_obj)
+            if issuer_obj is not None
+            else ""
+        )
+
+        # Prevent log injection (CWE-117)
+        issuer_str = issuer_str.replace("\n", "").replace("\r", "")
+
+        if issuer_str != trusted_issuer:
+            print(
+                f"ITI-38 SAML Verification: Rejected issuer '{issuer_str}'",
+                flush=True,
+            )
+            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
+
+        saml_attrs = process_saml_attributes(assertion["AttributeStatement"])
 
         soap_body = envelope["Body"]
         slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
@@ -468,23 +500,46 @@ async def iti39(request: Request):
             headers = {"Content-Type": f'multipart/related; boundary="{boundary}"'}
 
             # if there's not an anonymous address in the reply to header, send the response to that address
+            reply_to = envelope["Header"]["ReplyTo"]["Address"]
             if (
-                envelope["Header"]["ReplyTo"]["Address"]
-                and envelope["Header"]["ReplyTo"]["Address"]
-                != "http://www.w3.org/2005/08/addressing/anonymous"
+                reply_to
+                and reply_to != "http://www.w3.org/2005/08/addressing/anonymous"
             ):
-                print(
-                    f"Sending response to: {envelope['Header']['ReplyTo']['Address']}"
-                )
+                # SSRF Protection
+                if not reply_to.startswith("https://"):
+                    raise HTTPException(
+                        status_code=400, detail="ReplyTo must use https"
+                    )
+
+                allowed_domains = os.getenv(
+                    "ALLOWED_REPLY_TO_DOMAINS", ".nhs.uk"
+                ).split(",")
+                parsed_url = urllib.parse.urlparse(reply_to)
+                if not any(
+                    parsed_url.hostname and parsed_url.hostname.endswith(domain)
+                    for domain in allowed_domains
+                ):
+                    print(
+                        f"ITI-39 SSRF Protection: Rejected ReplyTo domain '{parsed_url.hostname}' (allowed: {allowed_domains})",
+                        flush=True,
+                    )
+                    raise HTTPException(
+                        status_code=403, detail="ReplyTo domain not allowed"
+                    )
+
+                print(f"Sending response to: {reply_to}")
+
+                def send_post(url, payload, hdrs):
+                    try:
+                        httpx.post(url, data=payload, headers=hdrs, timeout=10.0)
+                    except Exception as e:
+                        print(f"Failed to send async response: {e}", flush=True)
+
                 return Response(
                     content=mime_string.encode("utf-8"),
                     headers=headers,
                     background=BackgroundTask(
-                        lambda: httpx.post(
-                            envelope["Header"]["ReplyTo"]["Address"],
-                            data=mime_string.encode("utf-8"),
-                            headers=headers,
-                        )
+                        send_post, reply_to, mime_string.encode("utf-8"), headers
                     ),
                 )
 

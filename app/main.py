@@ -9,36 +9,35 @@ The service implements a stateless architecture with Redis caching and supports 
 profiles for healthcare interoperability.
 """
 
-import base64
-import json
 import os
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
-from fastapi import FastAPI, Form, Request, Response
+from fastapi import FastAPI, Form, Request
 
 # Configure Azure Monitor OpenTelemetry if connection string is present
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor()
+from fastapi import Depends
 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse
 from jwcrypto import jwk
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from sqlmodel import select
-from starlette.middleware.trustedhost import TrustedHostMiddleware
-
+from sqlalchemy import select
 
 from .audit.db_models import AuditEventRow
-from .audit.models import SAMLAttributes, _subject_ref_from_nhs_number
+from .audit.models import _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
-from .gpconnect import gpconnect
-from .pds import pds
+from .security import verify_api_key
+from .middleware.mtls import MTLSMiddleware
+
 from .redis_connect import redis_client
 from .relay import routes
 from .relay.hub import WebSocketHub
@@ -183,7 +182,6 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
 # register soap error handler
 soap.register_handlers(app)
 
-from app.middleware.mtls import MTLSMiddleware  # noqa: E402
 
 # 1) Trusted hosts
 allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "*")
@@ -211,7 +209,7 @@ app.add_middleware(MTLSMiddleware)
 
 # Include routers for different service components
 app.include_router(soap.router)
-app.include_router(pds.router)
+
 
 # if using HSCN relay, set up WebSocket hub and routes
 if USE_RELAY:
@@ -247,8 +245,6 @@ async def root():
             <h4>Endpoints</h4>
             <p>/pds/lookuppatient/nhsno will perform a pds lookup and return the fhir response.
                <a href="pds/lookup_patient/9449306680">Example</a></p>
-            <p>For the purposes of the internet facing demo /demo/nhsno will return the
-               mime encoded ccda. <a href="/demo/9690937278">Example</a></p>
         </body>
     </html>
     """
@@ -260,61 +256,6 @@ async def health_check():
     Public health check endpoint.
     """
     return {"status": "ok"}
-
-
-@app.get("/demo/{nhsno}")
-async def demo(nhsno: int, request: Request):
-    """
-    Demo endpoint that retrieves and returns a CCDA document for a given NHS number.
-
-    Args:
-        nhsno (int): NHS number to retrieve the CCDA document for.
-
-    Returns:
-        bytes: MIME encoded CCDA document retrieved from Redis cache.
-    """
-    audit_dict = SAMLAttributes(
-        subject_id="CONE, Stephen",
-        organization="UCLH - University College London Hospitals - TST",
-        organization_id="urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        home_community_id="urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        role={
-            "@codeSystem": "2.16.840.1.113883.6.96",
-            "@code": "224608005",
-            "@codeSystemName": "SNOMED_CT",
-            "@displayName": "Administrative healthcare staff",
-            "@xmlns": "urn:hl7-org:v3",
-            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-            "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-        },
-        purpose_of_use={
-            "@xsi:type": "CE",
-            "@code": "TREATMENT",
-            "@codeSystem": "2.16.840.1.113883.3.18.7.1",
-            "@codeSystemName": "nhin-purpose",
-            "@displayName": "Treatment",
-            "@xmlns": "urn:hl7-org:v3",
-            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-            "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-        },
-        resource_id="9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
-    )
-
-    bundle_id = await gpconnect(nhsno, audit_dict, request=request)
-    response = json.loads(bundle_id.body)  # validate json
-    # if success then retrieve from redis and return
-    if response["success"]:
-        ccda = redis_client.get(response["document_id"])
-        # if ccda decode from base64 and return xml
-        if ccda:
-            ccda_decoded = base64.b64decode(ccda).decode("utf-8")
-            return Response(content=ccda_decoded, media_type="application/xml")
-
-    # decode jsonresponse
-
-    # gpcon_response = json.loads(bundle_id)  # validate json
-    # document_id = gpcon_response.get("document_id")
-    return bundle_id
 
 
 @app.get("/jwk")
@@ -336,7 +277,11 @@ async def get_jwk(request: Request):
 # --- Dev-only audit viewer ---
 if os.getenv("ENV", "prod").lower() in ("dev", "local"):
 
-    @app.get("/_dev/audit", response_class=HTMLResponse)
+    @app.get(
+        "/_dev/audit",
+        response_class=HTMLResponse,
+        dependencies=[Depends(verify_api_key)],
+    )
     async def dev_audit_form():
         return HTMLResponse("""
             <html>
@@ -365,7 +310,11 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
             </html>
             """)
 
-    @app.post("/_dev/audit", response_class=HTMLResponse)
+    @app.post(
+        "/_dev/audit",
+        response_class=HTMLResponse,
+        dependencies=[Depends(verify_api_key)],
+    )
     async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
         # --- safety: dev only ---
         secret = os.getenv("API_KEY")

@@ -41,10 +41,97 @@ Cell = str
 Row = List[Cell]
 
 
+# http://hl7.org/fhir/ValueSet/event-timing|4.0.1
+EVENT_TIMING_LABELS = {
+    "MORN": "Morning",
+    "MORN.early": "Early morning",
+    "MORN.late": "Late morning",
+    "NOON": "Noon",
+    "AFT": "Afternoon",
+    "AFT.early": "Early afternoon",
+    "AFT.late": "Late afternoon",
+    "EVE": "Evening",
+    "EVE.early": "Early evening",
+    "EVE.late": "Late evening",
+    "NIGHT": "Night",
+    "PHS": "After sleep",
+    "HS": "Before sleep",
+    "WAKE": "Upon waking",
+    "C": "At a meal",
+    "CM": "At breakfast",
+    "CD": "At lunch",
+    "CV": "At dinner",
+    "AC": "Before a meal",
+    "ACM": "Before breakfast",
+    "ACD": "Before lunch",
+    "ACV": "Before dinner",
+    "PC": "After a meal",
+    "PCM": "After breakfast",
+    "PCD": "After lunch",
+    "PCV": "After dinner",
+}
+
+
 @dataclass(frozen=True)
 class EntryWithRow:
     entry: Any  # C-CDA entry section
     row: Optional[Row]  # row data for summary table in section
+
+
+def _event_timing_warning(
+    repeat: Any, dosage_number: Optional[int] = None
+) -> Optional[str]:
+    when = getattr(repeat, "when", None)
+    if not when:
+        return None
+
+    timings = []
+    for code in when:
+        label = EVENT_TIMING_LABELS.get(code)
+        timings.append(f"{label} ({code})" if label else f"Unknown event ({code})")
+
+    dosage_label = f" for dosage {dosage_number}" if dosage_number is not None else ""
+    warning = f"Xhuma warning: Event-based medication timing{dosage_label}: "
+    warning += "; ".join(timings)
+
+    offset = getattr(repeat, "offset", None)
+    if offset is not None:
+        warning += f". Offset: {offset} minutes"
+
+    return f"{warning}."
+
+
+def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
+    """Convert a FHIR Timing.repeat into a C-CDA periodic interval."""
+    period = getattr(repeat, "period", None)
+    if period is None:
+        return None
+
+    frequency = getattr(repeat, "frequency", None)
+    frequency_max = getattr(repeat, "frequencyMax", None)
+    period_max = getattr(repeat, "periodMax", None)
+    period_unit = getattr(repeat, "periodUnit", None)
+
+    # FHIR defines a missing frequency as one occurrence per period.
+    frequency = frequency if frequency is not None else 1
+
+    if frequency <= 0 or (frequency_max is not None and frequency_max <= 0):
+        return None
+
+    dose_period = period / frequency
+    if frequency_max is None and period_max is None:
+        return PQ(**{"@value": dose_period, "@unit": period_unit})
+
+    # A higher frequency shortens the interval, whereas a higher period lengthens
+    # it. Using the outer values also handles schedules that contain both maxima.
+    shortest_period = period / (frequency_max or frequency)
+    longest_period = (period_max if period_max is not None else period) / frequency
+    low_period, high_period = sorted((shortest_period, longest_period))
+
+    return IVL_PQ(
+        low=IVXB_PQ(**{"@value": low_period, "@unit": period_unit}),
+        high=IVXB_PQ(**{"@value": high_period, "@unit": period_unit}),
+    )
 
 
 async def medication(
@@ -86,6 +173,15 @@ async def medication(
             misc_notes.append(
                 f"Transfer degraded medication text: {referenced_med.code.text}"
             )
+
+    multiple_dosages = len(entry.dosage) > 1
+    for index, dosage in enumerate(entry.dosage, start=1):
+        repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
+        warning = _event_timing_warning(
+            repeat, dosage_number=index if multiple_dosages else None
+        )
+        if warning:
+            misc_notes.append(warning)
     # request = index[entry.basedOn[0].reference]
     # dosage_instructions = request.dosageInstruction
     # for dose in dosage_instructions:
@@ -189,41 +285,22 @@ async def medication(
             }
 
     if entry.dosage[0].timing:
+        repeat = entry.dosage[0].timing.repeat
+        frequency = getattr(repeat, "frequency", None)
+        frequency_max = getattr(repeat, "frequencyMax", None)
         pivl = PIVL_TS(
             **{
                 "@xsi:type": "PIVL_TS",
                 "@operator": "A",
                 "@institutionSpecified": (
-                    "true" if entry.dosage[0].timing.repeat.frequency else None
+                    "true"
+                    if frequency is not None or frequency_max is not None
+                    else None
                 ),
             }
         )
 
-        # check frequency has period and frequency
-        repeat = entry.dosage[0].timing.repeat
-        period = getattr(repeat, "period", None)
-        frequency = getattr(repeat, "frequency", None)
-        period_max = getattr(repeat, "periodMax", None)
-        period_unit = getattr(repeat, "periodUnit", None)
-        # make sure frequency and period are not None
-        if period is not None and frequency is not None:
-            # if period and frequency:
-            if period_max is not None:
-                low_period = period / frequency
-                high_period = period_max / frequency
-                pivl.period = IVL_PQ(
-                    low=IVXB_PQ(**{"@value": low_period, "@unit": period_unit}),
-                    high=IVXB_PQ(**{"@value": high_period, "@unit": period_unit}),
-                )
-
-            else:
-                # frequency is the occurrence per period. C-CDA has a single period between doses hence division
-                dose_period = period / frequency
-
-                pivl.period = {
-                    "@value": dose_period,
-                    "@unit": period_unit,
-                }
+        pivl.period = _cda_period_from_repeat(repeat)
 
         substance_administration.effectiveTime.append(pivl)
 
@@ -255,8 +332,6 @@ async def medication(
 
     patient_instr_list = []
     text_instr_list = []
-
-    multiple_dosages = len(entry.dosage) > 1
 
     for i, dosage in enumerate(entry.dosage):
         prefix = f"{i + 1}. " if multiple_dosages else ""
