@@ -1,5 +1,6 @@
 import logging
 import sys
+import re
 
 import httpx
 
@@ -53,8 +54,11 @@ async def log_request(request: httpx.Request):
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     traceparent = request.headers.get("traceparent", "N/A")
 
+    # Scrub any 10-digit NHS numbers from the URL path
+    safe_url = re.sub(r"(?<!\d)\d{10}(?!\d)", "[REDACTED_NHS_NUMBER]", str(request.url))
+
     logger.info(f"[req_trace:{correlation_id}] Outgoing Request:")
-    logger.info(f"[req_trace:{correlation_id}] {request.method} {request.url}")
+    logger.info(f"[req_trace:{correlation_id}] {request.method} {safe_url}")
     logger.info(
         f"[req_trace:{correlation_id}] Headers: {_scrub_headers(request.headers)}"
     )

@@ -381,8 +381,6 @@ async def iti38(request: Request):
             if x["@name"] == "$XDSDocumentEntryPatientId"
         )
 
-        print(f"Patient ID: {patient_id}")
-
         # OpenTelemetry trace propagation
         message_id = envelope.get("Header", {}).get("MessageID")
         from opentelemetry import trace

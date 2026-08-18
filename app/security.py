@@ -216,7 +216,9 @@ def create_jwt(
     #     import json
 
     #     json.dump(payload, f, indent=4)
-    return jwt.encode(payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"})
+    return jwt.encode(
+        payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"}
+    )
 
 
 if __name__ == "__main__":
