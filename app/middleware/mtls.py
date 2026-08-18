@@ -18,6 +18,29 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
             flush=True,
         )
         return False
+    try:
+        from cryptography.hazmat.primitives import hashes
+
+        fingerprint = client_cert.fingerprint(hashes.SHA256()).hex().lower()
+        trusted_thumbprints = os.getenv("MTLS_TRUSTED_THUMBPRINTS", "")
+        if trusted_thumbprints:
+            allowed = {
+                t.strip().lower().replace(":", "")
+                for t in trusted_thumbprints.split(",")
+                if t.strip()
+            }
+            if allowed and fingerprint not in allowed:
+                print(
+                    f"Epic CA Verification: Client cert fingerprint {fingerprint} not in allowlist",
+                    flush=True,
+                )
+                return False
+    except Exception as e:
+        print(
+            f"Epic CA Verification: Failed to check fingerprint. Error: {str(e)}",
+            flush=True,
+        )
+        return False
 
     epic_ca_pem = os.getenv("EPIC_CA_CERT")
     if not epic_ca_pem:
@@ -113,7 +136,7 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
 
 class MTLSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        require_mtls = os.getenv("REQUIRE_MTLS", "false").lower() == "true"
+        require_mtls = os.getenv("REQUIRE_MTLS", "true").lower() == "true"
 
         # Public paths that don't need mTLS
         public_paths = [
@@ -121,7 +144,6 @@ class MTLSMiddleware(BaseHTTPMiddleware):
             "/openapi.json",
             "/jwk",
             "/health",
-            "/_dev/audit",
             "/favicon.ico",
             "/robots",
         ]

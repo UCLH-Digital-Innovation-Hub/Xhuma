@@ -223,6 +223,21 @@ resource "azurerm_linux_web_app" "app" {
     websockets_enabled     = true
     use_32_bit_worker      = true # Typically false for production but B1 is small
     vnet_route_all_enabled = true
+
+    ip_restriction {
+      action   = "Allow"
+      name     = "AllowHSCN"
+      priority = 100
+      # Placeholder for actual HSCN or Epic IP ranges
+      ip_address = "192.168.0.0/16"
+    }
+
+    scm_ip_restriction {
+      action                    = "Allow"
+      name                      = "AllowVnet"
+      priority                  = 100
+      virtual_network_subnet_id = azurerm_subnet.app_subnet.id
+    }
   }
 
   # Enable mTLS: Optional allows public endpoints/health checks while passing the cert to the app
@@ -241,6 +256,11 @@ resource "azurerm_linux_web_app" "app" {
     "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
     "EPIC_CA_CERT"      = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.local_kv.name};SecretName=epic-ca-cert)"
+
+    # New Security Mitigations
+    "MTLS_TRUSTED_THUMBPRINTS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=mtls-trusted-thumbprints)"
+    "SAML_TRUSTED_ISSUER"      = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=saml-trusted-issuer)"
+    "ALLOWED_REPLY_TO_DOMAINS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=allowed-reply-to-domains)"
 
     "REGISTRY_ID"    = var.registry_id
     "REDIS_HOST"     = azurerm_redis_cache.redis.hostname

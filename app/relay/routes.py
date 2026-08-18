@@ -80,6 +80,7 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
 @router.websocket("/ws/{client_id}")
 async def relay_ws(websocket: WebSocket, client_id: str):
+    # TODO(Finding 7): Authenticate the handshake (mTLS or a per-agent signed token bound to client_id) and authorize before accept()
     await websocket.accept()
     try:
         _enforce_relay_mtls(websocket)
