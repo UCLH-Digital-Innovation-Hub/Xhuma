@@ -294,6 +294,21 @@ sequenceDiagram
     end
 ```
 
+## Security, Governance & Data Minimization
+
+Xhuma implements strict data governance controls to align with NHS Information Governance (IG) frameworks and the National Data Sharing Arrangement (NDSA).
+
+### Role-Based Access Control (RBAC) & Break The Glass
+Xhuma relies on Epic Care Everywhere as the authoritative system of record for identity and access management. 
+- **RBAC:** Only authorised clinicians with appropriate Epic security classes can initiate Xhuma queries.
+- **Break The Glass:** Epic's native 'Break The Glass' functionality is enforced prior to Xhuma retrieving GP Connect data, requiring clinicians to explicitly state their reason for accessing outside records. This decision is cryptographically audited and passed back to the NHS via SAML assertions.
+
+### Hardcoded Purpose of Use
+Xhuma strictly enforces the `directcare` purpose. The middleware explicitly blocks any attempts to query the GP Connect API for research, secondary uses, or population health analytics.
+
+### Data Minimization Scope
+To adhere to data minimization principles, Xhuma scopes its GP Connect structured record retrieval strictly to `patient/*.read`. It only requests the specific clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations), explicitly excluding sensitive or unnecessary administrative data where possible.
+
 ### Delta Summary & Assumptions
 
 **Changes from previous version:**

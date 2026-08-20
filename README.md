@@ -4,7 +4,7 @@
 
 ## Overview
 
-Xhuma is a stateless middleware service that facilitates the conversion of GP Connect structured records into CCDA (Consolidated Clinical Document Architecture) format. The service implements IHE ITI profiles for interoperability and uses Redis for efficient caching of responses.
+Xhuma is a highly secure, stateless middleware service designed to integrate NHS GP Connect structured records seamlessly into **Epic Care Everywhere**. It acts as a real-time translation layer, fetching primary care data and converting it into CCDA (Consolidated Clinical Document Architecture) format for native viewing by treating clinicians under a strict **Direct Care** mandate.
 
 ### Key Features
 
@@ -13,6 +13,8 @@ Xhuma is a stateless middleware service that facilitates the conversion of GP Co
   - Memory management and persistence
   - Connection pooling and automatic retry
   - Comprehensive monitoring
+- Native **Epic Care Everywhere** integration acting as a virtual Epic site
+- Strict Information Governance controls (SAML identity propagation, Break the Glass auditing)
 - IHE ITI profile implementation (ITI-55, ITI-38, ITI-39)
 - FHIR to CCDA conversion
 - JWT-based authentication for NHS Digital services
@@ -44,10 +46,10 @@ sequenceDiagram
     end
 
 
-    EHR->>Fast API: ITI 47 Request
+    EHR->>Fast API: ITI 55 Request
     Fast API->>PDS: FHIR PDS lookup
     PDS->>Fast API: PDS response
-    Fast API->>EHR: ITI 47 Response
+    Fast API->>EHR: ITI 55 Response
     Fast API->>Redis: Check for cached SDS lookup
     opt if no cached SDS lookup
     Fast API--)SDS: ASID Lookup
