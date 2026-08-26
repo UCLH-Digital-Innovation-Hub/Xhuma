@@ -189,7 +189,9 @@ async def iti55(request: Request):
         if not nhsno:
             q_param = {}
             try:
-                q_param = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"]["queryByParameter"]
+                q_param = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                    "queryByParameter"
+                ]
             except (KeyError, TypeError):
                 pass
 
