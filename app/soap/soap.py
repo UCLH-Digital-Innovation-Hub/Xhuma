@@ -153,19 +153,24 @@ async def iti55(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
-        query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-            "queryByParameter"
-        ]["parameterList"]
+
+        # Safely extract query params to handle fuzzing/malformed payloads
+        try:
+            query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                "queryByParameter"
+            ]["parameterList"]
+        except (KeyError, TypeError):
+            query_params = None
 
         nhsno = None
-        try:
-            for param in query_params["livingSubjectId"]["value"]:
-                if param["@root"] == "2.16.840.1.113883.2.1.4.1":
-                    nhsno = param["@extension"]
-                    # print(f"NHSNO: {nhsno}")
-
-        except Exception:
-            nhsno = None
+        if query_params:
+            try:
+                for param in query_params["livingSubjectId"]["value"]:
+                    if param["@root"] == "2.16.840.1.113883.2.1.4.1":
+                        nhsno = param["@extension"]
+                        # print(f"NHSNO: {nhsno}")
+            except Exception:
+                nhsno = None
 
         # OpenTelemetry trace propagation
         message_id = envelope.get("Header", {}).get("MessageID")
@@ -182,12 +187,18 @@ async def iti55(request: Request):
                 span.set_attribute("patient.nhs_number_hashed", hashed_nhs)
 
         if not nhsno:
-            data = await iti_55_error(
-                envelope["Header"]["MessageID"],
-                "No NHS number found in request",
-                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+            q_param = {}
+            try:
+                q_param = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
                     "queryByParameter"
-                ],
+                ]
+            except (KeyError, TypeError):
+                pass
+
+            data = await iti_55_error(
+                message_id or "Unknown",
+                "No NHS number found in request",
+                q_param,
             )
             return Response(content=data, media_type="application/soap+xml")
 
