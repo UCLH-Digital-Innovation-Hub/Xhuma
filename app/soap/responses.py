@@ -438,7 +438,7 @@ async def iti_38_response(
             # print(f"iti_38_error: {e}")
             r = {
                 "success": False,
-                "error": f"Internal error retrieving structured record for NHS number {nhsno}. error: {e}",
+                "error": f"Internal error retrieving structured record for patient. error: {e}",
             }
             body["AdhocQueryResponse"]["@status"] = (
                 "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
@@ -447,7 +447,7 @@ async def iti_38_response(
                 "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 "RegistryError": {
                     "@errorCode": "XDSRegistryError",
-                    "@codeContext": f"Unable to locate SCR with NHS number {nhsno}",
+                    "@codeContext": "Unable to locate SCR for patient",
                     "@location": "",
                     "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 },
