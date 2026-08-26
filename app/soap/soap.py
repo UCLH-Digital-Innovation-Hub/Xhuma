@@ -383,17 +383,26 @@ async def iti38(request: Request):
             )
             raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
 
-        saml_attrs = process_saml_attributes(assertion["AttributeStatement"])
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
 
-        soap_body = envelope["Body"]
-        slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
-        query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
+        soap_body = envelope.get("Body", {})
+        
+        # Support both AdhocQueryRequest and CrossGatewayQuery root elements
+        adhoc_query = soap_body.get("AdhocQueryRequest", soap_body.get("CrossGatewayQuery", {})).get("AdhocQuery", {})
+        
+        slots = adhoc_query.get("Slot", [])
+        if not isinstance(slots, list):
+            slots = [slots]
+            
+        query_id = adhoc_query.get("@id", "unknown")
 
-        patient_id = next(
-            x["ValueList"]["Value"]
-            for x in slots
-            if x["@name"] == "$XDSDocumentEntryPatientId"
-        )
+        patient_id = None
+        for x in slots:
+            if isinstance(x, dict) and x.get("@name") == "$XDSDocumentEntryPatientId":
+                val = x.get("ValueList", {}).get("Value")
+                # Handle single or multiple values safely
+                patient_id = val[0] if isinstance(val, list) else val
+                break
 
         # OpenTelemetry trace propagation
         message_id = envelope.get("Header", {}).get("MessageID")
