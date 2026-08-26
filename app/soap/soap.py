@@ -373,8 +373,8 @@ async def iti38(request: Request):
             else ""
         )
 
-        # Prevent log injection (CWE-117)
-        issuer_str = issuer_str.replace("\n", "").replace("\r", "")
+        # Prevent log injection (CWE-117) and strip whitespace
+        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
 
         if issuer_str != trusted_issuer:
             print(
