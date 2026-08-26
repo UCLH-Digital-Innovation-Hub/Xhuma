@@ -165,9 +165,12 @@ async def iti55(request: Request):
         nhsno = None
         if query_params:
             try:
-                for param in query_params["livingSubjectId"]["value"]:
-                    if param["@root"] == "2.16.840.1.113883.2.1.4.1":
-                        nhsno = param["@extension"]
+                values = query_params["livingSubjectId"]["value"]
+                if not isinstance(values, list):
+                    values = [values]
+                for param in values:
+                    if param.get("@root") == "2.16.840.1.113883.2.1.4.1":
+                        nhsno = param.get("@extension")
                         # print(f"NHSNO: {nhsno}")
             except Exception:
                 nhsno = None
@@ -196,9 +199,9 @@ async def iti55(request: Request):
                 pass
 
             data = await iti_55_error(
-                message_id or "Unknown",
-                "No NHS number found in request",
-                q_param,
+                message_id=message_id or "Unknown",
+                error_text="No NHS number found in request",
+                query=q_param,
             )
             return Response(content=data, media_type="application/soap+xml")
 
@@ -209,9 +212,9 @@ async def iti55(request: Request):
             "resourceType" in patient and patient["resourceType"] == "OperationOutcome"
         ):
             data = await iti_55_error(
-                envelope["Header"]["MessageID"],
-                f"Patient with NHS number {nhsno} not found",
-                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                message_id=envelope["Header"]["MessageID"],
+                error_text=f"Patient with NHS number {nhsno} not found",
+                query=envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
                     "queryByParameter"
                 ],
             )
@@ -230,9 +233,9 @@ async def iti55(request: Request):
 
         if security_code != "U":
             data = await iti_55_error(
-                envelope["Header"]["MessageID"],
-                "Patient record has restricted access",
-                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                message_id=envelope["Header"]["MessageID"],
+                error_text="Patient record has restricted access",
+                query=envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
                     "queryByParameter"
                 ],
             )
@@ -370,8 +373,8 @@ async def iti38(request: Request):
             else ""
         )
 
-        # Prevent log injection (CWE-117)
-        issuer_str = issuer_str.replace("\n", "").replace("\r", "")
+        # Prevent log injection (CWE-117) and strip whitespace
+        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
 
         if issuer_str != trusted_issuer:
             print(
