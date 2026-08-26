@@ -162,9 +162,10 @@ async def iti55(request: Request):
         except (KeyError, TypeError):
             assertion = {}
 
-        trusted_issuer = os.getenv(
+        trusted_issuers_env = os.getenv(
             "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
         )
+        trusted_issuers = [i.strip() for i in trusted_issuers_env.split("|")]
 
         issuer_obj = assertion.get("Issuer")
         if isinstance(issuer_obj, list):
@@ -181,7 +182,7 @@ async def iti55(request: Request):
         # Prevent log injection (CWE-117) and strip whitespace
         issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
 
-        if issuer_str != trusted_issuer:
+        if issuer_str not in trusted_issuers:
             print(
                 f"ITI-55 SAML Verification: Rejected issuer '{issuer_str}'",
                 flush=True,
@@ -322,9 +323,10 @@ async def iti47(request: Request):
         except (KeyError, TypeError):
             assertion = {}
 
-        trusted_issuer = os.getenv(
+        trusted_issuers_env = os.getenv(
             "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
         )
+        trusted_issuers = [i.strip() for i in trusted_issuers_env.split("|")]
 
         issuer_obj = assertion.get("Issuer")
         if isinstance(issuer_obj, list):
@@ -341,7 +343,7 @@ async def iti47(request: Request):
         # Prevent log injection (CWE-117) and strip whitespace
         issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
 
-        if issuer_str != trusted_issuer:
+        if issuer_str not in trusted_issuers:
             print(
                 f"ITI-47 SAML Verification: Rejected issuer '{issuer_str}'",
                 flush=True,
@@ -425,9 +427,10 @@ async def iti38(request: Request):
         except (KeyError, TypeError):
             assertion = {}
 
-        trusted_issuer = os.getenv(
+        trusted_issuers_env = os.getenv(
             "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
         )
+        trusted_issuers = [i.strip() for i in trusted_issuers_env.split("|")]
 
         issuer_obj = assertion.get("Issuer")
         if isinstance(issuer_obj, list):
@@ -444,7 +447,7 @@ async def iti38(request: Request):
         # Prevent log injection (CWE-117) and strip whitespace
         issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
 
-        if issuer_str != trusted_issuer:
+        if issuer_str not in trusted_issuers:
             print(
                 f"ITI-38 SAML Verification: Rejected issuer '{issuer_str}'",
                 flush=True,
@@ -552,9 +555,10 @@ async def iti39(request: Request):
         except (KeyError, TypeError):
             assertion = {}
 
-        trusted_issuer = os.getenv(
+        trusted_issuers_env = os.getenv(
             "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
         )
+        trusted_issuers = [i.strip() for i in trusted_issuers_env.split("|")]
 
         issuer_obj = assertion.get("Issuer")
         if isinstance(issuer_obj, list):
@@ -571,7 +575,7 @@ async def iti39(request: Request):
         # Prevent log injection (CWE-117) and strip whitespace
         issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
 
-        if issuer_str != trusted_issuer:
+        if issuer_str not in trusted_issuers:
             print(
                 f"ITI-39 SAML Verification: Rejected issuer '{issuer_str}'",
                 flush=True,
