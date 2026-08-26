@@ -432,9 +432,6 @@ async def iti38(request: Request):
                 poss_nhs = re.search(pattern, str(patient_id)).group(0)
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
-                    data = await iti_38_response(
-                        request, patient_id, "NOCEID", query_id, saml_attrs
-                    )
                 else:
                     raise AttributeError("Invalid NHS number checksum")
             except (AttributeError, TypeError):
@@ -443,10 +440,10 @@ async def iti38(request: Request):
                 raise HTTPException(
                     status_code=400, detail="Invalid NHS number format in request"
                 )
-        else:
-            data = await iti_38_response(
-                request, patient_id, "NOCEID", query_id, saml_attrs
-            )
+
+        data = await iti_38_response(
+            request, patient_id, "NOCEID", query_id, saml_attrs
+        )
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(
