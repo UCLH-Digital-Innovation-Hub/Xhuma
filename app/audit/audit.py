@@ -23,8 +23,10 @@ def process_saml_attributes(saml_header: dict) -> SAMLAttributes:
     raw: Dict[str, Any] = {}
 
     attributes = saml_header.get("Attribute", [])
-    if not isinstance(attributes, list):
-        raise ValueError("Invalid SAML header: Attribute must be a list")
+    if isinstance(attributes, dict):
+        attributes = [attributes]
+    elif not isinstance(attributes, list):
+        attributes = []
 
     for attribute in attributes:
         urn = attribute.get("@Name")
