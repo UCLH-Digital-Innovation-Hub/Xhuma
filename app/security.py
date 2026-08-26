@@ -171,10 +171,10 @@ def create_jwt(
                 },
                 {
                     "system": "2.16.840.1.113883.2.1.4",
-                    "value": audit.organization_id,
+                    "value": audit.organization_id or "Unknown",
                 },
             ],
-            "name": audit.organization,
+            "name": audit.organization or "Unknown Organization",
         },
         "requesting_practitioner": {
             "resourceType": "Practitioner",
@@ -189,7 +189,7 @@ def create_jwt(
                     "value": "UNK",  # As per NHS spec when not using NHS smartcard
                 },
                 {
-                    "system": audit.organization,
+                    "system": audit.organization or "Unknown Organization",
                     "value": subject_id_str,
                 },
             ],
@@ -207,8 +207,8 @@ def create_jwt(
     # audit_role.pop("nullFlavor", None)  # Remove null flavor if present
 
     audit_role = {
-        "system": audit.role.codeSystemName,
-        "value": audit.role.code,
+        "system": audit.role.codeSystemName if audit.role else "Unknown",
+        "value": audit.role.code if audit.role else "Unknown",
     }
 
     # print("Adding role to JWT payload:", audit_role)
