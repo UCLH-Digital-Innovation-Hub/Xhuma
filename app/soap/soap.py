@@ -165,9 +165,12 @@ async def iti55(request: Request):
         nhsno = None
         if query_params:
             try:
-                for param in query_params["livingSubjectId"]["value"]:
-                    if param["@root"] == "2.16.840.1.113883.2.1.4.1":
-                        nhsno = param["@extension"]
+                values = query_params["livingSubjectId"]["value"]
+                if not isinstance(values, list):
+                    values = [values]
+                for param in values:
+                    if param.get("@root") == "2.16.840.1.113883.2.1.4.1":
+                        nhsno = param.get("@extension")
                         # print(f"NHSNO: {nhsno}")
             except Exception:
                 nhsno = None
