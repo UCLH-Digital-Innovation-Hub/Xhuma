@@ -154,6 +154,40 @@ async def iti55(request: Request):
         body = await request.body()
         envelope = clean_soap(body)
 
+        # Safely extract assertion (prevent unhandled KeyError)
+        try:
+            assertion = envelope["Header"]["Security"]["Assertion"]
+            if isinstance(assertion, list):
+                assertion = assertion[0]
+        except (KeyError, TypeError):
+            assertion = {}
+
+        trusted_issuer = os.getenv(
+            "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
+        )
+
+        issuer_obj = assertion.get("Issuer")
+        if isinstance(issuer_obj, list):
+            issuer_obj = issuer_obj[0]
+
+        issuer_str = (
+            issuer_obj.get("#text", "")
+            if isinstance(issuer_obj, dict)
+            else str(issuer_obj)
+            if issuer_obj is not None
+            else ""
+        )
+
+        # Prevent log injection (CWE-117) and strip whitespace
+        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
+
+        if issuer_str != trusted_issuer:
+            print(
+                f"ITI-55 SAML Verification: Rejected issuer '{issuer_str}'",
+                flush=True,
+            )
+            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
+
         # Safely extract query params to handle fuzzing/malformed payloads
         try:
             query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
@@ -279,6 +313,40 @@ async def iti47(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
+
+        # Safely extract assertion (prevent unhandled KeyError)
+        try:
+            assertion = envelope["Header"]["Security"]["Assertion"]
+            if isinstance(assertion, list):
+                assertion = assertion[0]
+        except (KeyError, TypeError):
+            assertion = {}
+
+        trusted_issuer = os.getenv(
+            "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
+        )
+
+        issuer_obj = assertion.get("Issuer")
+        if isinstance(issuer_obj, list):
+            issuer_obj = issuer_obj[0]
+
+        issuer_str = (
+            issuer_obj.get("#text", "")
+            if isinstance(issuer_obj, dict)
+            else str(issuer_obj)
+            if issuer_obj is not None
+            else ""
+        )
+
+        # Prevent log injection (CWE-117) and strip whitespace
+        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
+
+        if issuer_str != trusted_issuer:
+            print(
+                f"ITI-47 SAML Verification: Rejected issuer '{issuer_str}'",
+                flush=True,
+            )
+            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
 
         query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
             "queryByParameter"
@@ -475,6 +543,40 @@ async def iti39(request: Request):
         body = await request.body()
         soap = extract_soap_request(body.decode("utf-8"))
         envelope = clean_soap(soap)
+
+        # Safely extract assertion (prevent unhandled KeyError)
+        try:
+            assertion = envelope["Header"]["Security"]["Assertion"]
+            if isinstance(assertion, list):
+                assertion = assertion[0]
+        except (KeyError, TypeError):
+            assertion = {}
+
+        trusted_issuer = os.getenv(
+            "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
+        )
+
+        issuer_obj = assertion.get("Issuer")
+        if isinstance(issuer_obj, list):
+            issuer_obj = issuer_obj[0]
+
+        issuer_str = (
+            issuer_obj.get("#text", "")
+            if isinstance(issuer_obj, dict)
+            else str(issuer_obj)
+            if issuer_obj is not None
+            else ""
+        )
+
+        # Prevent log injection (CWE-117) and strip whitespace
+        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
+
+        if issuer_str != trusted_issuer:
+            print(
+                f"ITI-39 SAML Verification: Rejected issuer '{issuer_str}'",
+                flush=True,
+            )
+            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
         message_id = envelope["Header"]["MessageID"]
         try:
             document_id = envelope["Body"]["RetrieveDocumentSetRequest"][
