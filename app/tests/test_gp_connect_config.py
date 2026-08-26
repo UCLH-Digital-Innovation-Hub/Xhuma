@@ -60,16 +60,18 @@ def test_build_gp_connect_parameters():
         },
     ]
 
+
 # ---------------------------------------------------------------------------
 # Clinical safety hazard XH-040 (DCB0129 hazard log) / Test Register T-24
 # ---------------------------------------------------------------------------
 # We must ensure that core structured data (Allergies, Medications, Problems)
 # is never silently filtered by date/time, as this suppresses clinical entries.
-# However, this test is specifically scoped to those high-risk domains. 
-# It intentionally does NOT block time-boxing for high-volume domains 
+# However, this test is specifically scoped to those high-risk domains.
+# It intentionally does NOT block time-boxing for high-volume domains
 # (like Investigations) which may require date filters in the future to prevent timeouts.
-# It also does not enforce valueBoolean=False for inclusions, as fetching 
+# It also does not enforce valueBoolean=False for inclusions, as fetching
 # resolved allergies (valueBoolean=True) is a clinically valid expansion of data.
+
 
 def test_xh_040_core_domains_unfiltered():
     """XH-040: Assert core GP Connect domains carry no date/status filters."""
@@ -81,9 +83,18 @@ def test_xh_040_core_domains_unfiltered():
 
     # The domains that must NEVER have a date/status filter applied
     core_domains = {"includeAllergies", "includeMedication", "includeProblems"}
-    
+
     # Substrings that would indicate a silent filter
-    filter_tokens = ("timeperiod", "searchfrom", "searchto", "fromdate", "todate", "date", "period", "status")
+    filter_tokens = (
+        "timeperiod",
+        "searchfrom",
+        "searchto",
+        "fromdate",
+        "todate",
+        "date",
+        "period",
+        "status",
+    )
 
     for param in parameters:
         param_name = param.get("name", "")
