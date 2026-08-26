@@ -438,8 +438,8 @@ async def iti38(request: Request):
                 else:
                     raise AttributeError("Invalid NHS number checksum")
             except (AttributeError, TypeError):
-                print(f"No valid NHS number found in patient ID's {patient_id}")
-                logging.info(f"No valid NHS number found in patient ID's {patient_id}")
+                print("No valid NHS number found in patient ID field")
+                logging.info("No valid NHS number found in patient ID field")
                 raise HTTPException(
                     status_code=400, detail="Invalid NHS number format in request"
                 )
