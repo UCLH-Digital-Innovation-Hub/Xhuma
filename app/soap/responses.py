@@ -431,7 +431,7 @@ async def iti_38_response(
             r = await gpconnect(nhsno, saml_attrs, request=request)
 
             # print("-" * 40)
-            logging.info(f"no cached ccda, used internal call for {nhsno}")
+            logging.info("no cached ccda, used internal call for patient")
             r = json.loads(r.body)
         except Exception as e:
             logging.error(f"Error: {e}")
@@ -454,7 +454,7 @@ async def iti_38_response(
             }
 
         if not r.get("success"):
-            logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
+            logging.warning(f"gpconnect failed for patient: {r.get('error')}")
             body["AdhocQueryResponse"]["@status"] = (
                 "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
             )

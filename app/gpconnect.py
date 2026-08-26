@@ -182,10 +182,10 @@ async def gpconnect(
             outcome=AuditOutcome.fail,
             error_code="403",
         )
-        logging.error(f"{nhsno} is restricted")
+        logging.error("Patient is restricted")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(f"{nhsno} is restricted\n")
+                f.write("Patient is restricted\n")
         return JSONResponse(status_code=403, content={"success": False, "error": msg})
 
     # 4) Resolve ODS → ASID + PartyKey
