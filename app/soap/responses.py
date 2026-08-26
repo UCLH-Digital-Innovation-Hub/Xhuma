@@ -189,11 +189,13 @@ async def iti_55_response(message_id, patient, query):
                 },
             },
             "queryAck": {
-                "queryId": query["queryId"],
+                "queryId": query.get("queryId", {"@root": "unknown"})
+                if isinstance(query, dict)
+                else {"@root": "unknown"},
                 "queryResponseCode": {"@code": "OK"},
                 "statusCode": {"@code": "deliveredResponse"},
             },
-            "queryByParameter": query,
+            "queryByParameter": query if query else {},
         },
     }
     header = create_header(
