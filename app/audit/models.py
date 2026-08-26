@@ -45,56 +45,56 @@ class AuditOutcome(str, Enum):
 
 
 class SAMLAttributes(BaseModel):
-    subject_id: Optional[str]
-    organization: Optional[str]
-    organization_id: Optional[str]
-    home_community_id: Optional[str]
+    subject_id: Optional[str] = None
+    organization: Optional[str] = None
+    organization_id: Optional[str] = None
+    home_community_id: Optional[str] = None
 
-    role: Optional[CD]
-    purpose_of_use: Optional[CD]
+    role: Optional[CD] = None
+    purpose_of_use: Optional[CD] = None
 
     # XACML resource-id (contains patient identifier)
-    resource_id: Optional[str]
+    resource_id: Optional[str] = None
 
     model_config = {"extra": "forbid"}
 
 
 class OrganisationRef(BaseModel):
-    name: Optional[str]
-    id: Optional[str]
-    home_community_id: Optional[str]
+    name: Optional[str] = None
+    id: Optional[str] = None
+    home_community_id: Optional[str] = None
 
 
 class UserIdentity(BaseModel):
-    user_id: Optional[str]
-    name: Optional[str]
-    role_profile: Optional[CD]
-    organisation: Optional[OrganisationRef]
-    urp_id: Optional[str]
-    purpose_of_use: Optional[Dict[str, Any]]  # keep structured
+    user_id: Optional[str] = None
+    name: Optional[str] = None
+    role_profile: Optional[CD] = None
+    organisation: Optional[OrganisationRef] = None
+    urp_id: Optional[str] = None
+    purpose_of_use: Optional[Dict[str, Any]] = None  # keep structured
 
 
 class AuthorityIdentity(BaseModel):
-    id: Optional[str]
-    name: Optional[str]
+    id: Optional[str] = None
+    name: Optional[str] = None
 
 
 class DeviceInfo(BaseModel):
-    ip: Optional[str]
-    user_agent: Optional[str]
-    host: Optional[str]
+    ip: Optional[str] = None
+    user_agent: Optional[str] = None
+    host: Optional[str] = None
 
 
 class EventDataRefs(BaseModel):
     # subject_ref: Optional[str]
-    message_id: Optional[str]
-    document_id: Optional[str]
+    message_id: Optional[str] = None
+    document_id: Optional[str] = None
 
 
 class AuditEventDetail(BaseModel):
     action: str
     outcome: AuditOutcome
-    error_code: Optional[str]
+    error_code: Optional[str] = None
     data_refs: EventDataRefs = Field(default_factory=EventDataRefs)
     detail: Dict[str, Any] = Field(default_factory=dict)
 
@@ -126,8 +126,8 @@ class AuditEvent(BaseModel):
     organisation: str
 
     # Correlation
-    request_id: Optional[str]
-    trace_id: Optional[str]
+    request_id: Optional[str] = None
+    trace_id: Optional[str] = None
 
     # SAML attributes
     saml: SAMLAttributes
@@ -136,7 +136,7 @@ class AuditEvent(BaseModel):
     event: AuditEventDetail
 
     # Device (SHOULD)
-    device: Optional[DeviceInfo]
+    device: Optional[DeviceInfo] = None
 
     # user id from saml
     @computed_field  # type: ignore[misc]
