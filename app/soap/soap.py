@@ -429,17 +429,20 @@ async def iti38(request: Request):
         if not validateNHSnumber(patient_id):
             try:
                 pattern = r"[0-9]{10}"
-                poss_nhs = re.search(pattern, patient_id).group(0)
-                # print(f"Possible NHS number: {poss_nhs}")
-                # print(validateNHSnumber(poss_nhs))
+                poss_nhs = re.search(pattern, str(patient_id)).group(0)
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
                     data = await iti_38_response(
                         request, patient_id, "NOCEID", query_id, saml_attrs
                     )
-            except AttributeError:
-                print(f"No valid NHS number found in patient ID's {patient_id}")
-                logging.info(f"No valid NHS number found in patient ID's {patient_id}")
+                else:
+                    raise AttributeError("Invalid NHS number checksum")
+            except (AttributeError, TypeError):
+                print("No valid NHS number found in patient ID field")
+                logging.info("No valid NHS number found in patient ID field")
+                raise HTTPException(
+                    status_code=400, detail="Invalid NHS number format in request"
+                )
         else:
             data = await iti_38_response(
                 request, patient_id, "NOCEID", query_id, saml_attrs
