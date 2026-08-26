@@ -136,10 +136,16 @@ def create_jwt(
 
     """
     created_time = int(time())
-    family, given = audit.subject_id.split(", ")
+    
+    subject_id_str = audit.subject_id or "Unknown, User"
+    try:
+        family, given = subject_id_str.split(", ", 1)
+    except ValueError:
+        family, given = subject_id_str, "User"
+        
     payload = {
         "iss": "http://int.apis.ptl.api.platform.nhs.uk/Device/EA2027FD-B486-4033-B48C-E87222F6FA1C",
-        "sub": audit.subject_id,
+        "sub": subject_id_str,
         "aud": audience,
         "iat": created_time,
         "exp": created_time + 300,
@@ -172,7 +178,7 @@ def create_jwt(
         },
         "requesting_practitioner": {
             "resourceType": "Practitioner",
-            "id": audit.subject_id,
+            "id": subject_id_str,
             "identifier": [
                 {
                     "system": "https://fhir.nhs.uk/Id/sds-user-id",
@@ -184,7 +190,7 @@ def create_jwt(
                 },
                 {
                     "system": audit.organization,
-                    "value": audit.subject_id,
+                    "value": subject_id_str,
                 },
             ],
             "name": [
