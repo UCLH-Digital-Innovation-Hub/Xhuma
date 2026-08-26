@@ -386,14 +386,16 @@ async def iti38(request: Request):
         saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
 
         soap_body = envelope.get("Body", {})
-        
+
         # Support both AdhocQueryRequest and CrossGatewayQuery root elements
-        adhoc_query = soap_body.get("AdhocQueryRequest", soap_body.get("CrossGatewayQuery", {})).get("AdhocQuery", {})
-        
+        adhoc_query = soap_body.get(
+            "AdhocQueryRequest", soap_body.get("CrossGatewayQuery", {})
+        ).get("AdhocQuery", {})
+
         slots = adhoc_query.get("Slot", [])
         if not isinstance(slots, list):
             slots = [slots]
-            
+
         query_id = adhoc_query.get("@id", "unknown")
 
         patient_id = None
