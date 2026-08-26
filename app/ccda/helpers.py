@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List
-from xml.etree import ElementTree
+from defusedxml import ElementTree
 
 import xmltodict
 from fhirclient.models import coding, organization, period
