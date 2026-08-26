@@ -8,6 +8,8 @@ from fhirclient.models import coding, organization, period
 from .models.admin import AssignedAuthor, AuthorParticipation
 from .models.datatypes import CD, SXCM_TS
 
+from fastapi import HTTPException
+
 
 def validateNHSnumber(number: int) -> bool:
     """validates NHS number
@@ -167,15 +169,18 @@ def clean_soap(
     Returns
         - Soap envelope as dict
     """
-    dom = ElementTree.fromstring(soap_request)
-    # root = dom.getroot()
+    try:
+        dom = ElementTree.fromstring(soap_request)
+        # root = dom.getroot()
 
-    xmldict = xmltodict.parse(
-        ElementTree.tostring(dom),
-        process_namespaces=True,
-        namespaces=namespaces,
-    )
-    return xmldict["Envelope"]
+        xmldict = xmltodict.parse(
+            ElementTree.tostring(dom),
+            process_namespaces=True,
+            namespaces=namespaces,
+        )
+        return xmldict["Envelope"]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Malformed XML in request body")
 
 
 def extract_soap_request(message):
