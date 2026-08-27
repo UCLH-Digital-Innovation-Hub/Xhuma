@@ -38,7 +38,7 @@ def test_iti38_accepts_valid_saml_issuer(monkeypatch):
 def test_iti39_rejects_ssrf_reply_to(monkeypatch):
     monkeypatch.setenv("REQUIRE_MTLS", "false")
     monkeypatch.setattr("app.soap.soap.client.get", lambda x: b"dummy")
-    ssrf_soap_xml = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="http://www.w3.org/2005/08/addressing"><s:Header><wsa:MessageID>urn:uuid:12345678</wsa:MessageID><wsa:ReplyTo><wsa:Address>http://internal-metadata-server.local/pwned</wsa:Address></wsa:ReplyTo></s:Header><s:Body><RetrieveDocumentSetRequest><DocumentRequest><DocumentUniqueId>123</DocumentUniqueId></DocumentRequest></RetrieveDocumentSetRequest></s:Body></s:Envelope>"""
+    ssrf_soap_xml = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="http://www.w3.org/2005/08/addressing"><s:Header><wsa:MessageID>urn:uuid:12345678</wsa:MessageID><wsa:ReplyTo><wsa:Address>http://internal-metadata-server.local/pwned</wsa:Address></wsa:ReplyTo><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:Issuer>urn:nhs:names:services:spine</saml2:Issuer></saml2:Assertion></wsse:Security></s:Header><s:Body><RetrieveDocumentSetRequest><DocumentRequest><DocumentUniqueId>123</DocumentUniqueId></DocumentRequest></RetrieveDocumentSetRequest></s:Body></s:Envelope>"""
     response = client.post(
         "/SOAP/iti39",
         content=ssrf_soap_xml,
@@ -51,7 +51,7 @@ def test_iti39_rejects_ssrf_reply_to(monkeypatch):
 def test_iti39_accepts_valid_reply_to(monkeypatch):
     monkeypatch.setenv("REQUIRE_MTLS", "false")
     monkeypatch.setattr("app.soap.soap.client.get", lambda x: b"dummy")
-    valid_soap_xml = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="http://www.w3.org/2005/08/addressing"><s:Header><wsa:MessageID>urn:uuid:12345678</wsa:MessageID><wsa:ReplyTo><wsa:Address>https://allowed-domain.nhs.uk/callback</wsa:Address></wsa:ReplyTo></s:Header><s:Body><RetrieveDocumentSetRequest><DocumentRequest><DocumentUniqueId>123</DocumentUniqueId></DocumentRequest></RetrieveDocumentSetRequest></s:Body></s:Envelope>"""
+    valid_soap_xml = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="http://www.w3.org/2005/08/addressing"><s:Header><wsa:MessageID>urn:uuid:12345678</wsa:MessageID><wsa:ReplyTo><wsa:Address>https://allowed-domain.nhs.uk/callback</wsa:Address></wsa:ReplyTo><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:Issuer>urn:nhs:names:services:spine</saml2:Issuer></saml2:Assertion></wsse:Security></s:Header><s:Body><RetrieveDocumentSetRequest><DocumentRequest><DocumentUniqueId>123</DocumentUniqueId></DocumentRequest></RetrieveDocumentSetRequest></s:Body></s:Envelope>"""
     response = client.post(
         "/SOAP/iti39",
         content=valid_soap_xml,
