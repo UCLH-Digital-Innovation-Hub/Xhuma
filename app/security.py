@@ -136,13 +136,13 @@ def create_jwt(
 
     """
     created_time = int(time())
-    
+
     subject_id_str = audit.subject_id or "Unknown, User"
     try:
         family, given = subject_id_str.split(", ", 1)
     except ValueError:
         family, given = subject_id_str, "User"
-        
+
     payload = {
         "iss": "http://int.apis.ptl.api.platform.nhs.uk/Device/EA2027FD-B486-4033-B48C-E87222F6FA1C",
         "sub": subject_id_str,
