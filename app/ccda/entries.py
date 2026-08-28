@@ -861,7 +861,6 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         # CRITICAL: Epic's C-CDA parser swallows text preceding a <br/> tag in structured `xmlText` nodes.
         # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the 
         # HTML <br /> tags exclusively for the narrative `immunization_row` table view.
-        misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
         structured_notes_text = "\n".join(misc_notes)
         
         comment_activity = EntryRelationship()
@@ -935,7 +934,6 @@ def observation_entry(
         # CRITICAL: Epic's C-CDA parser swallows text preceding a <br/> tag in structured `xmlText` nodes.
         # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the 
         # HTML <br /> tags exclusively for the narrative table view.
-        obs_notes_text = [f"{note} <br />" for note in obs_notes if note]
         structured_obs_notes = "\n".join(obs_notes)
         
         comment_activity = EntryRelationship()
