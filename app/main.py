@@ -24,7 +24,11 @@ from fastapi import Depends
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+import logging
+import traceback
+import uuid
+from fhirclient.models.operationoutcome import OperationOutcome, OperationOutcomeIssue
 from jwcrypto import jwk
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
@@ -181,6 +185,48 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
 
 # register soap error handler
 soap.register_handlers(app)
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    trace_id = str(uuid.uuid4())
+    logging.error(
+        f"Unhandled Exception [TraceID: {trace_id}] at {request.url.path}: {exc}\n{traceback.format_exc()}"
+    )
+
+    path = request.url.path
+    if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
+        fault_xml = f"""<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+    <env:Body>
+        <env:Fault>
+            <env:Code><env:Value>env:Receiver</env:Value></env:Code>
+            <env:Reason><env:Text xml:lang="en">Internal Server Error (TraceID: {trace_id})</env:Text></env:Reason>
+        </env:Fault>
+    </env:Body>
+</env:Envelope>"""
+        return Response(
+            content=fault_xml, status_code=500, media_type="application/soap+xml"
+        )
+
+    elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
+        issue = OperationOutcomeIssue()
+        issue.severity = "fatal"
+        issue.code = "exception"
+        issue.diagnostics = f"An internal error occurred. TraceID: {trace_id}"
+        outcome = OperationOutcome()
+        outcome.issue = [issue]
+        return JSONResponse(status_code=500, content=outcome.as_json())
+
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "type": "about:blank",
+                "title": "Internal Server Error",
+                "status": 500,
+                "detail": f"An unexpected error occurred. TraceID: {trace_id}",
+            },
+        )
 
 
 # 1) Trusted hosts

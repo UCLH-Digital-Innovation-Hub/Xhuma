@@ -53,6 +53,8 @@ dev = [
     "azure-identity",
     "azure-keyvault-secrets",
     "pytest-cov>=7.1.0",
+    "schemathesis>=4.25.2",
+    "hypothesis>=6.165.10",
 ]
 
 [tool.uv]
