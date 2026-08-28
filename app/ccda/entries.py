@@ -571,7 +571,7 @@ async def medication(
     misc_notes = list(dict.fromkeys(misc_notes))
 
     # CRITICAL: Epic's C-CDA parser swallows text preceding a <br/> tag in structured `xmlText` nodes.
-    # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the 
+    # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the
     # HTML <br /> tags exclusively for the narrative `entry_row` table view.
     misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
     structured_notes_text = "\n".join(misc_notes) if misc_notes else ""
@@ -859,10 +859,10 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
 
     if misc_notes:
         # CRITICAL: Epic's C-CDA parser swallows text preceding a <br/> tag in structured `xmlText` nodes.
-        # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the 
+        # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the
         # HTML <br /> tags exclusively for the narrative `immunization_row` table view.
         structured_notes_text = "\n".join(misc_notes)
-        
+
         comment_activity = EntryRelationship()
         comment_activity.act = {
             "code": {
@@ -932,10 +932,10 @@ def observation_entry(
 
     if obs_notes:
         # CRITICAL: Epic's C-CDA parser swallows text preceding a <br/> tag in structured `xmlText` nodes.
-        # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the 
+        # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the
         # HTML <br /> tags exclusively for the narrative table view.
         structured_obs_notes = "\n".join(obs_notes)
-        
+
         comment_activity = EntryRelationship()
         comment_activity.act = {
             "code": {
