@@ -130,7 +130,13 @@ def register_handlers(app: FastAPI):
         )
 
 
-@router.post("/iti55")
+@router.post(
+    "/iti55",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+    },
+)
 async def iti55(request: Request):
     """
     Handles ITI-55 (Cross Gateway Patient Discovery) requests.
@@ -290,7 +296,13 @@ async def iti55(request: Request):
         )
 
 
-@router.post("/iti47")
+@router.post(
+    "/iti47",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+    },
+)
 async def iti47(request: Request):
     """
     Handles ITI-47 (Patient Demographics Query) requests.
@@ -392,7 +404,13 @@ async def iti47(request: Request):
         )
 
 
-@router.post("/iti38")
+@router.post(
+    "/iti38",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+    },
+)
 async def iti38(request: Request):
     """
     Handles ITI-38 (Cross Gateway Query) requests.
@@ -522,7 +540,15 @@ async def iti38(request: Request):
         )
 
 
-@router.post("/iti39")
+@router.post(
+    "/iti39",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+    },
+)
 async def iti39(request: Request):
     """
     Handles ITI-39 (Cross Gateway Retrieve) requests.

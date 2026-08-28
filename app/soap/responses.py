@@ -259,7 +259,9 @@ async def iti_55_error(message_id, query, error_text):
             "queryAck": {
                 # todo: handle missing queryId
                 "queryId": (
-                    query["queryId"] if "queryId" in query else "can't find queryID"
+                    query.get("queryId", "can't find queryID")
+                    if isinstance(query, dict)
+                    else "can't find queryID"
                 ),
                 "queryResponseCode": {"@code": "AE"},
                 "statusCode": {"@code": "aborted"},
@@ -396,7 +398,9 @@ async def iti_47_response(message_id, patient, ceid, query):
                 },
             },
             "queryAck": {
-                "queryId": query["queryId"],
+                "queryId": query.get("queryId", {"@root": "unknown"})
+                if isinstance(query, dict)
+                else {"@root": "unknown"},
                 "queryResponseCode": {"@code": "OK"},
                 "statusCode": {"@code": "deliveredResponse"},
             },
