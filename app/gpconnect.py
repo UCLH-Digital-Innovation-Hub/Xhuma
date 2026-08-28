@@ -120,9 +120,17 @@ httpx_logger.setLevel(logging.WARNING)
 
 @router.get("/gpconnect/{nhsno}")
 async def gpconnect(
-    nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
+    nhsno: int, saml_attrs: SAMLAttributes, request: Request = None
 ) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
+    return await _fetch_gpconnect_record(
+        nhsno, saml_attrs, log_dir=None, request=request
+    )
+
+
+async def _fetch_gpconnect_record(
+    nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
+) -> JSONResponse:
 
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
