@@ -6,11 +6,12 @@ from app.ccda.entries import medication as medication_entry
 # Strategy to generate random strings, or None
 random_string_or_none = st.one_of(st.text(), st.none())
 
+
 @given(st.text())
 def test_medication_entry_fuzzing(random_text):
     """
-    Fuzz test for medication_entry mapper to ensure it handles 
-    malformed FHIR input gracefully without raising unhandled exceptions 
+    Fuzz test for medication_entry mapper to ensure it handles
+    malformed FHIR input gracefully without raising unhandled exceptions
     other than expected validation/type errors.
     """
     # Create a minimal valid structure to prevent fhirclient from rejecting it immediately,
@@ -22,9 +23,9 @@ def test_medication_entry_fuzzing(random_text):
         "taken": "y",
         "subject": {"reference": "Patient/1"},
         "medicationReference": {"reference": "Medication/1"},
-        "note": [{"text": random_text}]
+        "note": [{"text": random_text}],
     }
-    
+
     med_request_dict = {
         "resourceType": "MedicationRequest",
         "id": "2",
@@ -32,9 +33,9 @@ def test_medication_entry_fuzzing(random_text):
         "intent": "order",
         "subject": {"reference": "Patient/1"},
         "medicationReference": {"reference": "Medication/1"},
-        "dosageInstruction": [{"text": random_text}]
+        "dosageInstruction": [{"text": random_text}],
     }
-    
+
     med_dict = {
         "resourceType": "Medication",
         "id": "1",
@@ -43,22 +44,22 @@ def test_medication_entry_fuzzing(random_text):
                 {
                     "system": "http://snomed.info/sct",
                     "code": random_text,
-                    "display": random_text
+                    "display": random_text,
                 }
             ]
-        }
+        },
     }
-    
+
     # We don't expect the mapper to succeed with garbage data,
     # but we want to ensure it doesn't raise unexpected AttributeError/KeyError.
     try:
         med_statement = medicationstatement.MedicationStatement(med_statement_dict)
         med_req = medicationrequest.MedicationRequest(med_request_dict)
         med_obj = medication.Medication(med_dict)
-        
+
         # Call our mapper
         result = medication_entry(med_statement, med_req, med_obj, None)
-        
+
         # If it returns a result, ensure it's a valid string (XML snippet)
         assert isinstance(result, str)
     except (ValueError, TypeError, KeyError, AttributeError):

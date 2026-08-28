@@ -10,14 +10,17 @@ os.environ["USE_RELAY"] = "false"
 from app.main import app
 from app.security import verify_api_key
 
+
 def mock_verify_api_key():
     return True
+
 
 # Override the API key dependency
 app.dependency_overrides[verify_api_key] = mock_verify_api_key
 
 # Load OpenAPI schema directly from the ASGI app
 schema = schemathesis.openapi.from_asgi("/openapi.json", app)
+
 
 @schema.parametrize()
 def test_api(case):
