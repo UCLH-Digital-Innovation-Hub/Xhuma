@@ -574,7 +574,8 @@ async def _fetch_gpconnect_record(
         return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     if log_dir:
-        with open(os.path.join(log_dir, f"{nhsno}.xml"), "w") as output:
+        safe_nhsno = os.path.basename(str(nhsno))
+        with open(os.path.join(log_dir, f"{safe_nhsno}.xml"), "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     xop = base64_xml(xml_ccda)
