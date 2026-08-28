@@ -172,9 +172,7 @@ async def iti_55_response(message_id, patient, query):
                                 },
                                 "administrativeGenderCode": {"@code": gender},
                                 # birthTime is ISO 8601 format
-                                "birthTime": {
-                                    "@value": patient["birthDate"].replace("-", "")
-                                },
+                                "birthTime": {"@value": patient["birthDate"].replace("-", "")},
                             },
                             "providerOrganization": {
                                 "@classCode": "ORG",
@@ -198,9 +196,7 @@ async def iti_55_response(message_id, patient, query):
             "queryByParameter": query if query else {},
         },
     }
-    header = create_header(
-        "urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery", message_id
-    )
+    header = create_header("urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery", message_id)
 
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
@@ -259,9 +255,7 @@ async def iti_55_error(message_id, query, error_text):
             "queryAck": {
                 # todo: handle missing queryId
                 "queryId": (
-                    query.get("queryId", "can't find queryID")
-                    if isinstance(query, dict)
-                    else "can't find queryID"
+                    query.get("queryId", "can't find queryID") if isinstance(query, dict) else "can't find queryID"
                 ),
                 "queryResponseCode": {"@code": "AE"},
                 "statusCode": {"@code": "aborted"},
@@ -269,9 +263,7 @@ async def iti_55_error(message_id, query, error_text):
             "queryByParameter": query,
         },
     }
-    header = create_header(
-        "urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery", message_id
-    )
+    header = create_header("urn:hl7-org:v3:PRPA_IN201306UV02:CrossGatewayPatientDiscovery", message_id)
 
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
@@ -376,9 +368,7 @@ async def iti_47_response(message_id, patient, ceid, query):
                                 },
                                 "administrativeGenderCode": {"@code": gender},
                                 # birthTime is ISO 8601 format
-                                "birthTime": {
-                                    "@value": patient["birthDate"].replace("-", "")
-                                },
+                                "birthTime": {"@value": patient["birthDate"].replace("-", "")},
                                 # "birthTime": {"@value": patient["birthDate"]},
                                 "addr": {
                                     "streetAddressLine": address["line"],
@@ -412,9 +402,7 @@ async def iti_47_response(message_id, patient, ceid, query):
     return xmltodict.unparse(create_envelope(header, body), pretty=True)
 
 
-async def iti_38_response(
-    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes
-):
+async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes):
 
     body = {}
     body["AdhocQueryResponse"] = {
@@ -444,9 +432,7 @@ async def iti_38_response(
                 "success": False,
                 "error": f"Internal error retrieving structured record for patient. error: {e}",
             }
-            body["AdhocQueryResponse"]["@status"] = (
-                "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-            )
+            body["AdhocQueryResponse"]["@status"] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
             body["AdhocQueryResponse"]["RegistryErrorList"] = {
                 "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 "RegistryError": {
@@ -459,9 +445,7 @@ async def iti_38_response(
 
         if not r.get("success"):
             logging.warning(f"gpconnect failed for patient: {r.get('error')}")
-            body["AdhocQueryResponse"]["@status"] = (
-                "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-            )
+            body["AdhocQueryResponse"]["@status"] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
             body["AdhocQueryResponse"]["RegistryErrorList"] = {
                 "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 "RegistryError": {
@@ -573,9 +557,7 @@ async def iti_38_response(
                         "@id": docid,
                         "@registryObject": object_id,
                         "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier",
-                        "Name": {
-                            "LocalizedString": {"@value": "XDSDocumentEntry.uniqueId"}
-                        },
+                        "Name": {"LocalizedString": {"@value": "XDSDocumentEntry.uniqueId"}},
                     },
                     {
                         "@identificationScheme": "urn:uuid:58a6f841-87b3-4a3e-92fd-a8ffeff98427",
@@ -583,9 +565,7 @@ async def iti_38_response(
                         "@id": f"PID-{nhsno}",
                         "@registryObject": object_id,
                         "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier",
-                        "Name": {
-                            "LocalizedString": {"@value": "XDSDocumentEntry.patientId"}
-                        },
+                        "Name": {"LocalizedString": {"@value": "XDSDocumentEntry.patientId"}},
                     },
                 ],
             },
@@ -594,9 +574,7 @@ async def iti_38_response(
     else:
         body["AdhocQueryResponse"]["RegistryObjectList"] = {}
 
-    soap_response = create_envelope(
-        create_header("urn:ihe:iti:2007:CrossGatewayQueryResponse", queryid), body
-    )
+    soap_response = create_envelope(create_header("urn:ihe:iti:2007:CrossGatewayQueryResponse", queryid), body)
 
     return xmltodict.unparse(soap_response, pretty=True)
 
@@ -625,9 +603,7 @@ async def iti_39_response(message_id: str, document_id: str, document):
         },
     }
 
-    soap_response = create_envelope(
-        create_header("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id), body
-    )
+    soap_response = create_envelope(create_header("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id), body)
 
     print(f"ITI39 response: {soap_response}")
 

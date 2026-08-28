@@ -19,12 +19,12 @@ from .audit.store import insert_audit_event
 from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
+from .gp_connect_config import GP_CONNECT_PARAMETERS
+from .logging import record_application_failure
 from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
-from .gp_connect_config import GP_CONNECT_PARAMETERS
-from .logging import record_application_failure
 
 # from app.metrics.metric_utils import classify_error, now
 
@@ -119,13 +119,9 @@ httpx_logger.setLevel(logging.WARNING)
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(
-    nhsno: int, saml_attrs: SAMLAttributes, request: Request = None
-) -> JSONResponse:
+async def gpconnect(nhsno: int, saml_attrs: SAMLAttributes, request: Request = None) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
-    return await _fetch_gpconnect_record(
-        nhsno, saml_attrs, log_dir=None, request=request
-    )
+    return await _fetch_gpconnect_record(nhsno, saml_attrs, log_dir=None, request=request)
 
 
 async def _fetch_gpconnect_record(
@@ -247,9 +243,7 @@ async def _fetch_gpconnect_record(
     asid = None
     nhsmhsparty = None
     try:
-        for item in (
-            asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
-        ):
+        for item in asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", []):
             if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
                 asid = item.get("value")
             elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
@@ -395,9 +389,9 @@ async def _fetch_gpconnect_record(
         }
 
         from .settings import (
-            EXTERNAL_RELAY_URL,
             EXTERNAL_RELAY_CLIENT_ID,
             EXTERNAL_RELAY_TOKEN,
+            EXTERNAL_RELAY_URL,
         )
 
         if EXTERNAL_RELAY_URL:
@@ -406,17 +400,11 @@ async def _fetch_gpconnect_record(
                 req_headers["Authorization"] = f"Bearer {EXTERNAL_RELAY_TOKEN}"
 
             async with httpx.AsyncClient(timeout=httpx.Timeout(75.0)) as client:
-                relay_target = (
-                    f"{EXTERNAL_RELAY_URL.rstrip('/')}/send/{EXTERNAL_RELAY_CLIENT_ID}"
-                )
+                relay_target = f"{EXTERNAL_RELAY_URL.rstrip('/')}/send/{EXTERNAL_RELAY_CLIENT_ID}"
                 try:
-                    ext_resp = await client.post(
-                        relay_target, headers=req_headers, json=relay_req
-                    )
+                    ext_resp = await client.post(relay_target, headers=req_headers, json=relay_req)
                     if ext_resp.status_code != 200:
-                        raise HTTPException(
-                            502, f"External relay error: {ext_resp.text}"
-                        )
+                        raise HTTPException(502, f"External relay error: {ext_resp.text}")
                     resp = ext_resp.json()
                 except Exception as e:
                     raise HTTPException(502, f"Failed to call external relay: {e}")
@@ -459,9 +447,7 @@ async def _fetch_gpconnect_record(
             resp = await _direct_http_call(url, headers, body)
 
         if log_dir:
-            with open(
-                os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
-            ) as f:
+            with open(os.path.join(log_dir, f"{resp.status_code}_response.json"), "w") as f:
                 f.write(resp.text)
         logging.info(f"GP Connect request successful with status {resp.status_code}")
 
@@ -508,9 +494,7 @@ async def _fetch_gpconnect_record(
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(
-            status_code=resp.status_code, content={"success": False, "error": msg}
-        )
+        return JSONResponse(status_code=resp.status_code, content={"success": False, "error": msg})
 
     # audit successful response
     await _attempt_audit(
@@ -554,6 +538,7 @@ async def _fetch_gpconnect_record(
             pass
 
     import time
+
     from opentelemetry import trace
 
     tracer = trace.get_tracer(__name__)
@@ -586,7 +571,7 @@ async def _fetch_gpconnect_record(
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
-        with open(f"{str(int(nhsno))}.xml", "w") as output:
+        with open(f"{int(nhsno)!s}.xml", "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     await _attempt_audit(
@@ -598,9 +583,7 @@ async def _fetch_gpconnect_record(
         document_id=doc_uuid,
     )
 
-    return JSONResponse(
-        status_code=200, content={"success": True, "document_id": doc_uuid}
-    )
+    return JSONResponse(status_code=200, content={"success": True, "document_id": doc_uuid})
 
 
 if __name__ == "__main__":

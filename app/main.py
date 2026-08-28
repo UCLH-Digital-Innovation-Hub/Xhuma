@@ -20,14 +20,14 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor()
-from fastapi import Depends
-
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
 import logging
 import traceback
 import uuid
+
+from fastapi import Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fhirclient.models.operationoutcome import OperationOutcome, OperationOutcomeIssue
 from jwcrypto import jwk
 from opentelemetry import metrics
@@ -39,12 +39,11 @@ from sqlalchemy import select
 from .audit.db_models import AuditEventRow
 from .audit.models import _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
-from .security import verify_api_key
 from .middleware.mtls import MTLSMiddleware
-
 from .redis_connect import redis_client
 from .relay import routes
 from .relay.hub import WebSocketHub
+from .security import verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 
@@ -88,13 +87,9 @@ async def lifespan(app: FastAPI):
             app.state.jwk_json = jwk_dict
         except Exception as e:
             print(f"Warning: Failed to load JWTKEY from environment: {e}")
-    elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile(
-        "keys/test-1.pem"
-    ):
+    elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
         # Local development fallback
-        print(
-            "Warning: Falling back to local keys/test-1.pem key. Not for use in production."
-        )
+        print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
         with open("keys/test-1.pem", "rb") as pemfile:
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
@@ -103,14 +98,10 @@ async def lifespan(app: FastAPI):
             jwk_dict["use"] = "sig"
             app.state.jwk_json = jwk_dict
     else:
-        print(
-            "Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error."
-        )
+        print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
 
     # Set up OpenTelemetry metrics
-    otlp_endpoint = os.getenv(
-        "OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"
-    )
+    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
     metric_exporter = OTLPMetricExporter(
         endpoint=otlp_endpoint.replace("http://", "").replace("https://", ""),
         insecure=True,
@@ -143,13 +134,13 @@ app = FastAPI(
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     try:
+        # Ensure the root logger captures INFO logs so they are exported
+        import logging
+
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.logging import LoggingInstrumentor
         from opentelemetry.instrumentation.redis import RedisInstrumentor
-
-        # Ensure the root logger captures INFO logs so they are exported
-        import logging
 
         logging.getLogger().setLevel(logging.INFO)
 
@@ -157,13 +148,9 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         HTTPXClientInstrumentor().instrument()
         LoggingInstrumentor().instrument(set_logging_format=True)
         RedisInstrumentor().instrument()
-        print(
-            "Application Insights OpenTelemetry instrumentation enabled successfully."
-        )
+        print("Application Insights OpenTelemetry instrumentation enabled successfully.")
     except Exception as telemetry_err:
-        print(
-            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
-        )
+        print(f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}")
 
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
@@ -175,13 +162,9 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         FastAPIInstrumentor.instrument_app(app)
         HTTPXClientInstrumentor().instrument()
         LoggingInstrumentor().instrument(set_logging_format=True)
-        print(
-            "Application Insights OpenTelemetry instrumentation enabled successfully."
-        )
+        print("Application Insights OpenTelemetry instrumentation enabled successfully.")
     except Exception as telemetry_err:
-        print(
-            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
-        )
+        print(f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}")
 
 # register soap error handler
 soap.register_handlers(app)
@@ -190,9 +173,7 @@ soap.register_handlers(app)
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     trace_id = str(uuid.uuid4())
-    logging.error(
-        f"Unhandled Exception [TraceID: {trace_id}] at {request.url.path}: {exc}\n{traceback.format_exc()}"
-    )
+    logging.error(f"Unhandled Exception [TraceID: {trace_id}] at {request.url.path}: {exc}\n{traceback.format_exc()}")
 
     path = request.url.path
     if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
@@ -204,9 +185,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         </env:Fault>
     </env:Body>
 </env:Envelope>"""
-        return Response(
-            content=fault_xml, status_code=500, media_type="application/soap+xml"
-        )
+        return Response(content=fault_xml, status_code=500, media_type="application/soap+xml")
 
     elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
         issue = OperationOutcomeIssue()
@@ -415,8 +394,7 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
         # --- render ---
         out: list[str] = []
         out.append(
-            "<html><head><title>Dev Audit Results</title></head>"
-            "<body style='font-family:sans-serif;margin:2rem;'>"
+            "<html><head><title>Dev Audit Results</title></head><body style='font-family:sans-serif;margin:2rem;'>"
         )
         out.append("<a href='/_dev/audit'>← back</a>")
         out.append("<h2>Audit results</h2>")

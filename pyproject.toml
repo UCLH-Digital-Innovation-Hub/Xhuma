@@ -72,3 +72,11 @@ paths=[
     "alembic"]
 deps-file="pyproject.toml"
 sections=["project.dependencies"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501"]
+

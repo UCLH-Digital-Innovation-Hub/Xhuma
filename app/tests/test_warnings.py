@@ -27,9 +27,7 @@ async def test_warnings_handling():
     #     output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     # check note is present in the medications section
-    medications_section = xml_ccda["ClinicalDocument"]["component"]["structuredBody"][
-        "component"
-    ]
+    medications_section = xml_ccda["ClinicalDocument"]["component"]["structuredBody"]["component"]
     # for section in medications_section:
     #     print(section)
 

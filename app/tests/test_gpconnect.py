@@ -77,9 +77,7 @@ async def test_gpconnect_with_nhs_data(
     mock_client.post.return_value = mock_response
     mock_async_client.return_value.__aenter__.return_value = mock_client
 
-    mock_convert_bundle.return_value = {
-        "ClinicalDocument": {"title": "Mocked CCDA document"}
-    }
+    mock_convert_bundle.return_value = {"ClinicalDocument": {"title": "Mocked CCDA document"}}
 
     mock_base64_xml.return_value = "mocked_base64_doc"
 

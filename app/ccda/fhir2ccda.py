@@ -4,31 +4,22 @@ import json
 import logging
 import os
 from copy import deepcopy
-from typing import List
 
 import xmltodict
-from fhirclient.models import bundle
+from fhirclient.models import bundle, patient
 from fhirclient.models import list as fhirlist
-from fhirclient.models import patient
+
+from app.gp_connect_config import get_gp_connect_inclusions
 
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
 from .helpers import date_helper, templateId
-from app.gp_connect_config import get_gp_connect_inclusions
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.1.15.html
-    lists = [
-        entry.resource
-        for entry in bundle.entry
-        if isinstance(entry.resource, fhirlist.List)
-    ]
+    lists = [entry.resource for entry in bundle.entry if isinstance(entry.resource, fhirlist.List)]
 
-    subject = [
-        entry.resource
-        for entry in bundle.entry
-        if isinstance(entry.resource, patient.Patient)
-    ]
+    subject = [entry.resource for entry in bundle.entry if isinstance(entry.resource, patient.Patient)]
 
     ccda = {}
     ccda["ClinicalDocument"] = {
@@ -39,9 +30,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         "realmCode": {"@code": "GB"},
         "typeId": {"@root": "2.16.840.1.113883.1.3", "@extension": "POCD_HD000040"},
     }
-    ccda["ClinicalDocument"]["templateId"] = templateId(
-        "2.16.840.1.113883.10.20.22.1.2", "2015-08-01"
-    )
+    ccda["ClinicalDocument"]["templateId"] = templateId("2.16.840.1.113883.10.20.22.1.2", "2015-08-01")
 
     # code
     ccda["ClinicalDocument"]["code"] = {
@@ -50,13 +39,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     }
 
     # document level effective time, use local time
-    ccda["ClinicalDocument"]["effectiveTime"] = {
-        "@value": datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    }
+    ccda["ClinicalDocument"]["effectiveTime"] = {"@value": datetime.datetime.now().strftime("%Y%m%d%H%M%S")}
 
-    ccda["ClinicalDocument"]["title"] = {
-        "#text": "GP Connect: Access Record Structured"
-    }
+    ccda["ClinicalDocument"]["title"] = {"#text": "GP Connect: Access Record Structured"}
 
     # patient
     # TODO refine address parsing as may have multiple
@@ -217,9 +202,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 valid_items = []
                 for idx, res in enumerate(results):
                     if isinstance(res, Exception):
-                        logging.error(
-                            f"Error parsing medication {getattr(references[idx], 'id', 'unknown')}: {res}"
-                        )
+                        logging.error(f"Error parsing medication {getattr(references[idx], 'id', 'unknown')}: {res}")
                     else:
                         valid_items.append(res)
                 return valid_items
@@ -231,15 +214,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         if entry.__class__.__name__ == "AllergyIntolerance":
                             valid_items.append(allergy(entry))
                         else:
-                            valid_items.append(
-                                observation_entry(
-                                    entry, index, "Allergies and adverse reactions"
-                                )
-                            )
+                            valid_items.append(observation_entry(entry, index, "Allergies and adverse reactions"))
                     except Exception as e:
-                        logging.error(
-                            f"Error parsing allergy {getattr(entry, 'id', 'unknown')}: {e}"
-                        )
+                        logging.error(f"Error parsing allergy {getattr(entry, 'id', 'unknown')}: {e}")
                 return valid_items
 
             def parse_problems(lst):
@@ -249,13 +226,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         if entry.__class__.__name__ == "Condition":
                             valid_items.append(problem(entry))
                         else:
-                            valid_items.append(
-                                observation_entry(entry, index, "Problems")
-                            )
+                            valid_items.append(observation_entry(entry, index, "Problems"))
                     except Exception as e:
-                        logging.error(
-                            f"Error parsing problem {getattr(entry, 'id', 'unknown')}: {e}"
-                        )
+                        logging.error(f"Error parsing problem {getattr(entry, 'id', 'unknown')}: {e}")
                 return valid_items
 
             def parse_immunizations(lst):
@@ -265,13 +238,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         if entry.__class__.__name__ == "Immunization":
                             valid_items.append(immunization_entry(entry, index))
                         else:
-                            valid_items.append(
-                                observation_entry(entry, index, "Immunisations")
-                            )
+                            valid_items.append(observation_entry(entry, index, "Immunisations"))
                     except Exception as e:
-                        logging.error(
-                            f"Error parsing immunization {getattr(entry, 'id', 'unknown')}: {e}"
-                        )
+                        logging.error(f"Error parsing immunization {getattr(entry, 'id', 'unknown')}: {e}")
                 return valid_items
 
             section_setup = {
@@ -393,9 +362,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "tbody": {
                             "tr": {
                                 "td": {
-                                    "@colspan": len(
-                                        section_setup[list.title]["section_headers"]
-                                    ),
+                                    "@colspan": len(section_setup[list.title]["section_headers"]),
                                     "#text": "No Information Available",
                                 }
                             }
@@ -447,17 +414,13 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     comp["section"]["text"]["paragraph"]["#text"] = warning_text
 
             if hasattr(list, "note") and list.note is not None:
-                note_text = "".join(
-                    list.note[i].text + "<br />" for i in range(len(list.note))
-                )
+                note_text = "".join(list.note[i].text + "<br />" for i in range(len(list.note)))
                 existing_text = comp["section"]["text"]["paragraph"].get("#text", "")
-                comp["section"]["text"]["paragraph"]["#text"] = (
-                    existing_text + note_text
-                )
+                comp["section"]["text"]["paragraph"]["#text"] = existing_text + note_text
 
             return comp
 
-    def split_medications(medications: fhirlist.List) -> List[dict]:
+    def split_medications(medications: fhirlist.List) -> list[dict]:
         """Splits medications into active and past based on status
 
         Args:
@@ -474,9 +437,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             referenced_med = index[med.item.reference]
             # print(referenced_med)
             # status active or end date in the future
-            if referenced_med.status == "active":
-                active.append(med)
-            elif (
+            if referenced_med.status == "active" or (
                 referenced_med.status == "completed"
                 and hasattr(referenced_med, "endDate")
                 and referenced_med.endDate is not None
@@ -503,32 +464,20 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             try:
                 active, past = split_medications(list_obj)
                 # print(f"active medications: {len(active)}, past medications: {len(past)}")
-                active_section = await create_section(
-                    clone_list(list_obj, "Active Medications", active)
-                )
+                active_section = await create_section(clone_list(list_obj, "Active Medications", active))
 
                 if active:
                     # delete the third column for acute medications as we don't have status for active medications and it is always active
-                    for entry in active_section["section"]["text"]["table"]["tbody"][
-                        "tr"
-                    ]:
+                    for entry in active_section["section"]["text"]["table"]["tbody"]["tr"]:
                         del entry["td"][2]
                     # delete the third column from the header too
-                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][
-                        2
-                    ]
+                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
                 else:
                     # active is empty, adjust the header and colspan of the empty row td
-                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][
-                        2
-                    ]
-                    active_section["section"]["text"]["table"]["tbody"]["tr"]["td"][
-                        "@colspan"
-                    ] = 7
+                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
+                    active_section["section"]["text"]["table"]["tbody"]["tr"]["td"]["@colspan"] = 7
 
-                past_section = await create_section(
-                    clone_list(list_obj, "Past Medications", past)
-                )
+                past_section = await create_section(clone_list(list_obj, "Past Medications", past))
                 bundle_components.append(active_section)
                 bundle_components.append(past_section)
             except Exception as e:
@@ -557,12 +506,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         "include_immunisations": "Immunisations",
     }
 
-    included_sections = [
-        name for key, name in section_mapping.items() if inclusions.get(key, False)
-    ]
-    omitted_sections = [
-        name for key, name in section_mapping.items() if not inclusions.get(key, False)
-    ]
+    included_sections = [name for key, name in section_mapping.items() if inclusions.get(key, False)]
+    omitted_sections = [name for key, name in section_mapping.items() if not inclusions.get(key, False)]
 
     included_str = ", ".join(included_sections) if included_sections else "None"
 
@@ -575,9 +520,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         omitted_str = ", ".join(omitted_sections)
         disclaimer_text += f"All other clinical information (such as {omitted_str}) should be sought elsewhere. "
 
-    disclaimer_text += (
-        f"Information added to the record in the last {caching_period} may be missing."
-    )
+    disclaimer_text += f"Information added to the record in the last {caching_period} may be missing."
 
     header_components = {
         "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),
@@ -589,17 +532,14 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         "title": "Important Information",
         "text": {
             "#text": disclaimer_text,
-            "footnote": "C-CDA generated by Xhuma from GP Connect on "
-            + datetime.datetime.now().strftime("%d-%m-%Y"),
+            "footnote": "C-CDA generated by Xhuma from GP Connect on " + datetime.datetime.now().strftime("%d-%m-%Y"),
         },
     }
     bundle_components.insert(0, {"section": header_components})
 
     ccda["ClinicalDocument"]["component"] = {}
     ccda["ClinicalDocument"]["component"]["structuredBody"] = {}
-    ccda["ClinicalDocument"]["component"]["structuredBody"]["component"] = (
-        bundle_components
-    )
+    ccda["ClinicalDocument"]["component"]["structuredBody"]["component"] = bundle_components
 
     return ccda
 
@@ -626,9 +566,7 @@ if __name__ == "__main__":
             address = f"{entry.resource.resource_type}/{entry.resource.id}"
             bundle_index[address] = entry.resource
         except Exception:
-            logging.error(
-                f"Could not index resource {entry.resource} with id {entry.resource.id}"
-            )
+            logging.error(f"Could not index resource {entry.resource} with id {entry.resource.id}")
 
     # ccda = await convert_bundle(fhir_bundle, bundle_index)
     ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))

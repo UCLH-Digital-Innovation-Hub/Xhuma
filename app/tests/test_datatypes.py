@@ -1,5 +1,3 @@
-from typing import List
-
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
@@ -52,7 +50,7 @@ def test_ii_alias_population():
 
 
 class TestII(BaseModel):
-    template_Id: List[II] = Field(default_factory=list)
+    template_Id: list[II] = Field(default_factory=list)
 
 
 def test_templateId():
@@ -72,7 +70,7 @@ def test_templateID_inclass():
     root = "2.16.840.1.113883."
     extension = "2014-06-09"
     # test_instance = TestII(templateId=templateId(root, extension))
-    test_instance = TestII(**{"template_Id": templateId(root, extension)})
+    test_instance = TestII(template_Id=templateId(root, extension))
 
     assert len(test_instance.template_Id) == 2
     assert test_instance.template_Id[0].root == root

@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+
 from app.main import app
 
 client = TestClient(app)
@@ -22,9 +23,7 @@ def test_iti38_accepts_valid_saml_issuer(monkeypatch):
 
     monkeypatch.setattr(
         "app.soap.soap.process_saml_attributes",
-        lambda x: (_ for _ in ()).throw(
-            HTTPException(status_code=200, detail="Success")
-        ),
+        lambda x: (_ for _ in ()).throw(HTTPException(status_code=200, detail="Success")),
     )
     valid_soap_xml = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:Issuer>urn:nhs:names:services:spine</saml2:Issuer><saml2:AttributeStatement><saml2:Attribute Name="foo"><saml2:AttributeValue>bar</saml2:AttributeValue></saml2:Attribute><saml2:Attribute Name="baz"><saml2:AttributeValue>qux</saml2:AttributeValue></saml2:Attribute></saml2:AttributeStatement></saml2:Assertion></wsse:Security></s:Header><s:Body><query:CrossGatewayQuery xmlns:query="urn:ihe:iti:xds-b:2007"/></s:Body></s:Envelope>"""
     response = client.post(

@@ -7,7 +7,7 @@ import os
 import ssl
 import time
 from functools import wraps
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
 import redis
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
@@ -90,9 +90,7 @@ class RedisClient:
             kwargs["ssl"] = True
             kwargs["ssl_cert_reqs"] = REDIS_SSL_CERT_REQS
             if REDIS_SSL_CERT_REQS == ssl.CERT_NONE:
-                logger.warning(
-                    "REDIS_SSL_CERT_REQS is set to 'none'; SSL certificate validation is disabled"
-                )
+                logger.warning("REDIS_SSL_CERT_REQS is set to 'none'; SSL certificate validation is disabled")
 
         logger.warning(
             "Initializing Redis client connecting to %s:%s (SSL: %s)",
@@ -108,12 +106,12 @@ class RedisClient:
         return bool(self._client.ping())
 
     @retry_on_connection_error()
-    def get(self, key: str) -> Optional[bytes]:
+    def get(self, key: str) -> bytes | None:
         """Get value for key with automatic retry."""
         return self._client.get(key)
 
     @retry_on_connection_error()
-    def setex(self, key: str, time: int, value: Union[str, bytes]) -> bool:
+    def setex(self, key: str, time: int, value: str | bytes) -> bool:
         """Set key-value pair with expiry time."""
         return bool(self._client.setex(key, time, value))
 
@@ -128,7 +126,7 @@ class RedisClient:
         return self._client.keys(pattern)
 
     @retry_on_connection_error()
-    def info(self) -> Dict[str, Any]:
+    def info(self) -> dict[str, Any]:
         """Get Redis server information."""
         return self._client.info()
 
@@ -153,9 +151,7 @@ class RedisClient:
                 "total_keys": total_keys,
                 "memory_used": memory_used,
                 "memory_limit": total_memory,
-                "memory_usage_percent": (
-                    (memory_used / total_memory * 100) if total_memory else 0
-                ),
+                "memory_usage_percent": ((memory_used / total_memory * 100) if total_memory else 0),
                 "connected_clients": info.get("connected_clients", 0),
                 "hit_rate": hits / total_lookups if total_lookups else 0,
             }
@@ -184,7 +180,7 @@ redis_connect = redis_client
 snomed_client = RedisClient(db=2)
 
 
-def get_cached_data(key: str) -> Optional[bytes]:
+def get_cached_data(key: str) -> bytes | None:
     """Retrieve cached data for a given key."""
     try:
         return redis_client.get(key)
@@ -193,7 +189,7 @@ def get_cached_data(key: str) -> Optional[bytes]:
         return None
 
 
-def cache_data(key: str, value: Union[str, bytes], expiry: int = 3600) -> bool:
+def cache_data(key: str, value: str | bytes, expiry: int = 3600) -> bool:
     """Cache data with expiry time."""
     try:
         return redis_client.setex(key, expiry, value)

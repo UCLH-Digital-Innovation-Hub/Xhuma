@@ -1,8 +1,10 @@
 import os
 
 os.environ["REQUIRE_MTLS"] = "false"
-from fastapi.testclient import TestClient
 from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
 from app.main import app
 
 client = TestClient(app, raise_server_exceptions=False)

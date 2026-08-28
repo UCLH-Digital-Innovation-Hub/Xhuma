@@ -1,11 +1,16 @@
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any, List, Optional, Union
+from typing import Any
 
-from fhirclient.models import allergyintolerance, condition, immunization
+from fhirclient.models import (
+    allergyintolerance,
+    condition,
+    immunization,
+    medicationrequest,
+    medicationstatement,
+)
 from fhirclient.models import medication as fhirmed
-from fhirclient.models import medicationrequest, medicationstatement
 
 from .dmd import dmd_lookup
 from .helpers import (
@@ -18,27 +23,27 @@ from .helpers import (
     templateId,
 )
 from .models.base import (
+    Act,
     EntryRelationship,
     ResultObservation,
     ResultsOrganizer,
     SubstanceAdministration,
-    Act,
 )
 from .models.datatypes import (
     CD,
     ED,
     IVL_INT,
+    IVL_PQ,
     IVL_TS,
+    IVXB_PQ,
+    IVXB_TS,
     PIVL_TS,
     PQ,
-    IVL_PQ,
-    IVXB_PQ,
     SXCM_TS,
-    IVXB_TS,
 )
 
 Cell = str
-Row = List[Cell]
+Row = list[Cell]
 
 
 # http://hl7.org/fhir/ValueSet/event-timing|4.0.1
@@ -75,12 +80,10 @@ EVENT_TIMING_LABELS = {
 @dataclass(frozen=True)
 class EntryWithRow:
     entry: Any  # C-CDA entry section
-    row: Optional[Row]  # row data for summary table in section
+    row: Row | None  # row data for summary table in section
 
 
-def _event_timing_warning(
-    repeat: Any, dosage_number: Optional[int] = None
-) -> Optional[str]:
+def _event_timing_warning(repeat: Any, dosage_number: int | None = None) -> str | None:
     when = getattr(repeat, "when", None)
     if not when:
         return None
@@ -101,7 +104,7 @@ def _event_timing_warning(
     return f"{warning}."
 
 
-def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
+def _cda_period_from_repeat(repeat: Any) -> PQ | IVL_PQ | None:
     """Convert a FHIR Timing.repeat into a C-CDA periodic interval."""
     period = getattr(repeat, "period", None)
     if period is None:
@@ -134,15 +137,11 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
     )
 
 
-async def medication(
-    entry: medicationstatement.MedicationStatement, index: dict
-) -> EntryWithRow:
+async def medication(entry: medicationstatement.MedicationStatement, index: dict) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
-    based_on_request: medicationrequest.MedicationRequest = index[
-        entry.basedOn[0].reference
-    ]
+    based_on_request: medicationrequest.MedicationRequest = index[entry.basedOn[0].reference]
     raw_notes = []
     if based_on_request.note:
         raw_notes.extend(based_on_request.note)
@@ -162,24 +161,18 @@ async def medication(
     misc_notes = [
         text
         for text in unique_notes
-        if not any(
-            text in other_text and text != other_text for other_text in unique_notes
-        )
+        if not any(text in other_text and text != other_text for other_text in unique_notes)
     ]
 
     # append entry text if snomed code is 196421000000109
     for code in referenced_med.code.coding:
         if code.code == "196421000000109":
-            misc_notes.append(
-                f"Transfer degraded medication text: {referenced_med.code.text}"
-            )
+            misc_notes.append(f"Transfer degraded medication text: {referenced_med.code.text}")
 
     multiple_dosages = len(entry.dosage) > 1
     for index, dosage in enumerate(entry.dosage, start=1):
         repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
-        warning = _event_timing_warning(
-            repeat, dosage_number=index if multiple_dosages else None
-        )
+        warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
         if warning:
             misc_notes.append(warning)
     # request = index[entry.basedOn[0].reference]
@@ -201,9 +194,7 @@ async def medication(
         effectiveTime=effective_time_helper(entry.effectivePeriod),
         consumable={
             "manufacturedProduct": {
-                "templateId": templateId(
-                    root="2.16.840.1.113883.10.20.22.4.23", extension="2014-06-09"
-                ),
+                "templateId": templateId(root="2.16.840.1.113883.10.20.22.4.23", extension="2014-06-09"),
                 "id": {
                     "@root": referenced_med.id,
                 },
@@ -236,9 +227,7 @@ async def medication(
             "@value": entry.dosage[0].doseQuantity.value,
         }
         if entry.dosage[0].doseQuantity.unit:
-            substance_administration.doseQuantity["@unit"] = entry.dosage[
-                0
-            ].doseQuantity.unit
+            substance_administration.doseQuantity["@unit"] = entry.dosage[0].doseQuantity.unit
 
         # if there is a code add a translation
         if entry.dosage[0].doseQuantity.code:
@@ -256,9 +245,7 @@ async def medication(
         substance_administration.precondition = {
             "@typeCode": "PRCN",
             "criterion": {
-                "templateId": templateId(
-                    root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"
-                ),
+                "templateId": templateId(root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"),
                 "code": {
                     "@code": "ASSERTION",
                     "@codeSystem": "2.16.840.1.113883.5.4",
@@ -270,12 +257,8 @@ async def medication(
             substance_administration.precondition["criterion"]["value"] = {
                 "@xsi:type": "CD",
                 "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
-                "@displayName": entry.dosage[0]
-                .asNeededCodeableConcept.coding[0]
-                .display,
-                "@codeSystemName": entry.dosage[0]
-                .asNeededCodeableConcept.coding[0]
-                .value,
+                "@displayName": entry.dosage[0].asNeededCodeableConcept.coding[0].display,
+                "@codeSystemName": entry.dosage[0].asNeededCodeableConcept.coding[0].value,
             }
         else:
             # if no asNeededCodeableConcept, use NI
@@ -292,11 +275,7 @@ async def medication(
             **{
                 "@xsi:type": "PIVL_TS",
                 "@operator": "A",
-                "@institutionSpecified": (
-                    "true"
-                    if frequency is not None or frequency_max is not None
-                    else None
-                ),
+                "@institutionSpecified": ("true" if frequency is not None or frequency_max is not None else None),
             }
         )
 
@@ -322,13 +301,10 @@ async def medication(
                 }
             except Exception as e:
                 logging.error(f"Error processing maxDosePerPeriod: {e}")
-                pass
 
     #   check if route is in dosage
     if entry.dosage[0].method:
-        substance_administration.routeCode = code_with_translations(
-            entry.dosage[0].method.coding
-        )
+        substance_administration.routeCode = code_with_translations(entry.dosage[0].method.coding)
 
     patient_instr_list = []
     text_instr_list = []
@@ -366,9 +342,7 @@ async def medication(
         instruction_entry = EntryRelationship()
         instruction_entry.act = Act(
             moodCode="INT",
-            templateId=templateId(
-                root="2.16.840.1.113883.10.20.22.4.200", extension="2014-06-09"
-            ),
+            templateId=templateId(root="2.16.840.1.113883.10.20.22.4.200", extension="2014-06-09"),
             code=CD(
                 code="422037009",
                 codeSystem="2.16.840.1.113883.6.96",
@@ -379,16 +353,8 @@ async def medication(
         substance_administration.entryRelationship.append(instruction_entry)
     # find effective time entry with operator of low
 
-    low_time = [
-        et.value
-        for et in substance_administration.effectiveTime
-        if getattr(et, "operator", None) == "low"
-    ]
-    high_time = [
-        et.value
-        for et in substance_administration.effectiveTime
-        if getattr(et, "operator", None) == "high"
-    ]
+    low_time = [et.value for et in substance_administration.effectiveTime if getattr(et, "operator", None) == "low"]
+    high_time = [et.value for et in substance_administration.effectiveTime if getattr(et, "operator", None) == "high"]
     med_name = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
 
     # check if snomed code is in cache and if so add to med name
@@ -396,9 +362,7 @@ async def medication(
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
     unit = (
-        substance_administration.doseQuantity.get("@unit", "").lower()
-        if substance_administration.doseQuantity
-        else ""
+        substance_administration.doseQuantity.get("@unit", "").lower() if substance_administration.doseQuantity else ""
     )
 
     if substance_administration.doseQuantity:
@@ -411,19 +375,16 @@ async def medication(
                 # only process dose if a single dosage instruction
                 if len(entry.dosage) == 1:
                     if dmd_data.vpi and substance_administration.doseQuantity:
-                        processed_dose = (
-                            dmd_data.vpi.value
-                            * substance_administration.doseQuantity["@value"]
-                        )
+                        processed_dose = dmd_data.vpi.value * substance_administration.doseQuantity["@value"]
 
                         # clean number to remove trailing .0 if whole number
                         processed_dose = clean_number(processed_dose)
 
                         substance_administration.doseQuantity["@value"] = processed_dose
-                        substance_administration.doseQuantity["@unit"] = (
-                            dmd_data.vpi.unit
+                        substance_administration.doseQuantity["@unit"] = dmd_data.vpi.unit
+                        warning_text = (
+                            f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
                         )
-                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
                         # print(warning_text)
                         misc_notes.append(warning_text)
 
@@ -436,21 +397,13 @@ async def medication(
                     if substance_administration.routeCode.displayName == "Take":
                         # take often used with capsules. replace with dmd route.
                         if dmd_data.route:
-                            substance_administration.routeCode.displayName = (
-                                dmd_data.route.displayName
-                            )
-                            substance_administration.routeCode.code = (
-                                dmd_data.route.code
-                            )
-                            substance_administration.routeCode.codeSystem = (
-                                "2.16.840.1.113883.6.96"
-                            )
+                            substance_administration.routeCode.displayName = dmd_data.route.displayName
+                            substance_administration.routeCode.code = dmd_data.route.code
+                            substance_administration.routeCode.codeSystem = "2.16.840.1.113883.6.96"
                             # substance_administration.routeCode.codeSystem = (
                             #     "2.16.840.1.113883.3.26.1.1"
                             # )
-                            substance_administration.routeCode.codeSystemName = (
-                                dmd_data.route.codeSystemName
-                            )
+                            substance_administration.routeCode.codeSystemName = dmd_data.route.codeSystemName
                             # route_translation = CD()
                             # route_translation["@code"] = dmd_data.route.code
                             # route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
@@ -459,18 +412,13 @@ async def medication(
                             # )
 
             except Exception as e:
-                logging.error(
-                    f"Error looking up DMD data for SNOMED code {snomed_code}: {e}"
-                )
+                logging.error(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
                 print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
-                pass
 
         if "- unit of product usage" in unit:
             # strip overly verbose snomed unit description to just unit
             substance_administration.doseQuantity["@unit"] = (
-                substance_administration.doseQuantity["@unit"]
-                .replace("- unit of product usage", "")
-                .strip()
+                substance_administration.doseQuantity["@unit"].replace("- unit of product usage", "").strip()
             )
 
     # check for prescribing agency and last issued date extensions
@@ -479,28 +427,20 @@ async def medication(
     if entry.extension:
         for ext in entry.extension:
             # print(ext.url)
-            if (
-                ext.url
-                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1"
-            ):
+            if ext.url == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1":
                 prescribing_agency = ext.valueCodeableConcept.coding[0].display
                 prescription_information.append(prescribing_agency)
             if (
                 ext.url
                 == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
             ):
-                last_issued_date = readable_date(
-                    date_helper(ext.valueDateTime.isostring)
-                )
+                last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
                 prescription_information.append(f"Last issued date: {last_issued_date}")
 
     # look for prescription type in medication request
     if based_on_request.extension:
         for ext in based_on_request.extension:
-            if (
-                ext.url
-                == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1"
-            ):
+            if ext.url == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1":
                 prescription_type = ext.valueCodeableConcept.coding[0].display
             if (
                 ext.url
@@ -554,19 +494,11 @@ async def medication(
         prescription_information.append(issued_quantity)
 
     # add br tags to prescription information with a join
-    prescription_information = (
-        "<br />".join(prescription_information) if prescription_information else ""
-    )
+    prescription_information = "<br />".join(prescription_information) if prescription_information else ""
     # prescription_information = [f"{info} <br />" for info in prescription_information]
 
-    patient_instructions = (
-        "Patient Instructions: " + "<br />".join(patient_instr_list)
-        if patient_instr_list
-        else ""
-    )
-    text_instructions = (
-        " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
-    )
+    patient_instructions = "Patient Instructions: " + "<br />".join(patient_instr_list) if patient_instr_list else ""
+    text_instructions = " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
     # use dict.fromkeys to avoid duplicates while preserving chronological insertion order
     misc_notes = list(dict.fromkeys(misc_notes))
 
@@ -592,19 +524,11 @@ async def medication(
         supply_order.substanceAdministration.moodCode = "EVN"
         if based_on_request.dispenseRequest.validityPeriod.end:
             supply_order.substanceAdministration.effectiveTime = [
-                IVL_TS(
-                    high={
-                        "@value": date_helper(
-                            based_on_request.dispenseRequest.validityPeriod.end.isostring
-                        )
-                    }
-                )
+                IVL_TS(high={"@value": date_helper(based_on_request.dispenseRequest.validityPeriod.end.isostring)})
             ]
 
         if remaining_repeats is not None:
-            supply_order.substanceAdministration.repeatNumber = IVL_INT(
-                value=remaining_repeats
-            )
+            supply_order.substanceAdministration.repeatNumber = IVL_INT(value=remaining_repeats)
         substance_administration.entryRelationship.append(supply_order)
 
     # entry_row = [
@@ -630,11 +554,7 @@ async def medication(
     ]
 
     return EntryWithRow(
-        entry={
-            "substanceAdministration": substance_administration.model_dump(
-                by_alias=True, exclude_none=True
-            )
-        },
+        entry={"substanceAdministration": substance_administration.model_dump(by_alias=True, exclude_none=True)},
         row=entry_row,
     )
 
@@ -648,23 +568,17 @@ def problem(entry: condition.Condition) -> EntryWithRow:
         }
     }
 
-    prob["act"]["templateId"] = templateId(
-        "2.16.840.1.113883.10.20.22.4.3", "2015-08-01"
-    )
+    prob["act"]["templateId"] = templateId("2.16.840.1.113883.10.20.22.4.3", "2015-08-01")
     prob["act"]["id"] = {"@root": uuid.uuid4()}
     prob["act"]["code"] = {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"}
 
     prob["act"]["statusCode"] = {"@code": entry.clinicalStatus}
-    prob["act"]["effectiveTime"] = {
-        "low": {"@value": date_helper(entry.assertedDate.isostring)}
-    }
+    prob["act"]["effectiveTime"] = {"low": {"@value": date_helper(entry.assertedDate.isostring)}}
     prob["act"]["entryRelationship"] = {"@typeCode": "SUBJ"}
 
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.4.html
     observation = {"@classCode": "OBS", "@moodCode": "EVN"}
-    observation["templateId"] = templateId(
-        "2.16.840.1.113883.10.20.22.4.4", "2015-08-01"
-    )
+    observation["templateId"] = templateId("2.16.840.1.113883.10.20.22.4.4", "2015-08-01")
     observation["id"] = {"@root": uuid.uuid4()}
     observation["code"] = [
         {
@@ -681,9 +595,7 @@ def problem(entry: condition.Condition) -> EntryWithRow:
         },
     ]
     observation["statusCode"] = {"@code": "completed"}
-    observation["effectiveTime"] = {
-        "low": {"@value": date_helper(entry.assertedDate.isostring)}
-    }
+    observation["effectiveTime"] = {"low": {"@value": date_helper(entry.assertedDate.isostring)}}
     observation["value"] = {
         "@xsi:type": "CD",
         "@code": entry.code.coding[0].code,
@@ -711,24 +623,18 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "@moodCode": "EVN",
         }
     }
-    all["act"]["templateId"] = templateId(
-        "2.16.840.1.113883.10.20.22.4.30", "2015-08-01"
-    )
+    all["act"]["templateId"] = templateId("2.16.840.1.113883.10.20.22.4.30", "2015-08-01")
     all["act"]["id"] = {"@root": uuid.uuid4()}
     all["act"]["code"] = {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"}
 
     # may need to be made dynamic if force to query old allergies
     all["act"]["statusCode"] = {"@code": "active"}
-    all["act"]["effectiveTime"] = {
-        "low": {"@value": date_helper(entry.assertedDate.isostring)}
-    }
+    all["act"]["effectiveTime"] = {"low": {"@value": date_helper(entry.assertedDate.isostring)}}
     all["act"]["entryRelationship"] = {"@typeCode": "SUBJ"}
 
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.7.html
     observation = {"@classCode": "OBS", "@moodCode": "EVN"}
-    observation["templateId"] = templateId(
-        "2.16.840.1.113883.10.20.22.4.7", "2014-06-09"
-    )
+    observation["templateId"] = templateId("2.16.840.1.113883.10.20.22.4.7", "2014-06-09")
     observation["id"] = {"@root": uuid.uuid4()}
     observation["code"] = {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"}
     observation["statusCode"] = {"@code": "completed"}
@@ -746,9 +652,7 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "@classCode": "MANU",
             "playingEntity": {
                 "@classCode": "MMAT",
-                "code": code_with_translations(entry.code.coding).model_dump(
-                    by_alias=True, exclude_none=True
-                ),
+                "code": code_with_translations(entry.code.coding).model_dump(by_alias=True, exclude_none=True),
             },
         },
     }
@@ -760,21 +664,14 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "observation": {
                 "@classCode": "OBS",
                 "@moodCode": "EVN",
-                "templateId": templateId(
-                    "2.16.840.1.113883.10.20.22.4.9", "2014-06-09"
-                ),
+                "templateId": templateId("2.16.840.1.113883.10.20.22.4.9", "2014-06-09"),
                 "id": {"@root": uuid.uuid4()},
                 "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
-                "effectiveTime": {
-                    "low": {"@value": date_helper(entry.assertedDate.isostring)}
-                },
+                "effectiveTime": {"low": {"@value": date_helper(entry.assertedDate.isostring)}},
                 "value": {
                     "@xsi:type": "CD",
                     "@code": entry.reaction[0].manifestation[0].coding[0].code,
-                    "@displayName": entry.reaction[0]
-                    .manifestation[0]
-                    .coding[0]
-                    .display,
+                    "@displayName": entry.reaction[0].manifestation[0].coding[0].display,
                     "@codeSystemName": "SNOMED CT",
                     "@codeSystem": "2.16.840.1.113883.6.96",
                 },
@@ -786,9 +683,7 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     allergy_row = [
         readable_date(all["act"]["effectiveTime"].get("low", {}).get("@value", "")),
         all["act"]["statusCode"].get("@code", ""),
-        observation["participant"]["participantRole"]["playingEntity"]["code"][
-            "@displayName"
-        ],
+        observation["participant"]["participantRole"]["playingEntity"]["code"]["@displayName"],
     ]
 
     return EntryWithRow(entry=all, row=allergy_row)
@@ -801,14 +696,10 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
         id=[{"@root": entry.id}],
         statusCode={"@code": entry.status},
-        effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))]
-        if entry.date
-        else [],
+        effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))] if entry.date else [],
         consumable={
             "manufacturedProduct": {
-                "templateId": templateId(
-                    "2.16.840.1.113883.10.20.22.4.54", "2014-06-09"
-                ),
+                "templateId": templateId("2.16.840.1.113883.10.20.22.4.54", "2014-06-09"),
                 "manufacturedMaterial": {
                     "code": code_with_translations(entry.vaccineCode.coding),
                     "lotNumberText": entry.lotNumber,
@@ -835,24 +726,13 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
             for reason in entry.explanation.reason:
                 if hasattr(reason, "text") and reason.text:
                     misc_notes.append(f"Reason: {reason.text}")
-                elif (
-                    hasattr(reason, "coding")
-                    and reason.coding
-                    and reason.coding[0].display
-                ):
+                elif hasattr(reason, "coding") and reason.coding and reason.coding[0].display:
                     misc_notes.append(f"Reason: {reason.coding[0].display}")
-        if (
-            hasattr(entry.explanation, "reasonNotGiven")
-            and entry.explanation.reasonNotGiven
-        ):
+        if hasattr(entry.explanation, "reasonNotGiven") and entry.explanation.reasonNotGiven:
             for reason in entry.explanation.reasonNotGiven:
                 if hasattr(reason, "text") and reason.text:
                     misc_notes.append(f"Reason not given: {reason.text}")
-                elif (
-                    hasattr(reason, "coding")
-                    and reason.coding
-                    and reason.coding[0].display
-                ):
+                elif hasattr(reason, "coding") and reason.coding and reason.coding[0].display:
                     misc_notes.append(f"Reason not given: {reason.coding[0].display}")
 
     if misc_notes:
@@ -867,11 +747,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         immunization_entry.entryRelationship.append(comment_activity)
 
     date_val = readable_date(date_helper(entry.date.isostring)) if entry.date else ""
-    vaccine_val = (
-        entry.vaccineCode.coding[0].display
-        if (entry.vaccineCode and entry.vaccineCode.coding)
-        else ""
-    )
+    vaccine_val = entry.vaccineCode.coding[0].display if (entry.vaccineCode and entry.vaccineCode.coding) else ""
     if misc_notes:
         vaccine_val = f"{vaccine_val}<br />Notes: " + "<br />".join(misc_notes)
 
@@ -886,9 +762,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     )
 
 
-def observation_entry(
-    entry, index: dict, section_name: Union[str, int]
-) -> EntryWithRow:
+def observation_entry(entry, index: dict, section_name: str | int) -> EntryWithRow:
     from .models.base import Observation
 
     obs = Observation(
@@ -937,25 +811,13 @@ def observation_entry(
 
     date_val = "N/A"
     if hasattr(entry, "effectiveDateTime") and entry.effectiveDateTime:
-        obs.effectiveTime = IVL_TS(
-            **{"@value": date_helper(entry.effectiveDateTime.isostring)}
-        )
+        obs.effectiveTime = IVL_TS(**{"@value": date_helper(entry.effectiveDateTime.isostring)})
         date_val = readable_date(date_helper(entry.effectiveDateTime.isostring))
-    elif (
-        hasattr(entry, "effectivePeriod")
-        and entry.effectivePeriod
-        and entry.effectivePeriod.start
-    ):
-        obs.effectiveTime = IVL_TS(
-            low=IVXB_TS(
-                **{"@value": date_helper(entry.effectivePeriod.start.isostring)}
-            )
-        )
+    elif hasattr(entry, "effectivePeriod") and entry.effectivePeriod and entry.effectivePeriod.start:
+        obs.effectiveTime = IVL_TS(low=IVXB_TS(**{"@value": date_helper(entry.effectivePeriod.start.isostring)}))
         date_val = readable_date(date_helper(entry.effectivePeriod.start.isostring))
     elif hasattr(entry, "effectiveInstant") and entry.effectiveInstant:
-        obs.effectiveTime = IVL_TS(
-            **{"@value": date_helper(entry.effectiveInstant.isostring)}
-        )
+        obs.effectiveTime = IVL_TS(**{"@value": date_helper(entry.effectiveInstant.isostring)})
         date_val = readable_date(date_helper(entry.effectiveInstant.isostring))
 
     name_val = "N/A"
@@ -980,16 +842,13 @@ def observation_entry(
         row = [date_val, name_val]
         row_len = (
             int(section_name)
-            if isinstance(section_name, int)
-            or (isinstance(section_name, str) and section_name.isdigit())
+            if isinstance(section_name, int) or (isinstance(section_name, str) and section_name.isdigit())
             else 3
         )
         while len(row) < row_len:
             row.append("N/A")
 
-    return EntryWithRow(
-        entry={"observation": obs.model_dump(by_alias=True, exclude_none=True)}, row=row
-    )
+    return EntryWithRow(entry={"observation": obs.model_dump(by_alias=True, exclude_none=True)}, row=row)
 
 
 def result(entry, index: dict) -> dict:
@@ -1029,21 +888,14 @@ def result(entry, index: dict) -> dict:
                         }
                     ),
                 )
-                if (
-                    hasattr(related_resource, "interpretation")
-                    and related_resource.interpretation
-                ):
-                    comp.interpretationCode = code_with_translations(
-                        related_resource.interpretation.coding
-                    )
+                if hasattr(related_resource, "interpretation") and related_resource.interpretation:
+                    comp.interpretationCode = code_with_translations(related_resource.interpretation.coding)
 
                 if related_resource.referenceRange:
                     comp.referenceRange = {"observationRange": []}
                     for range in related_resource.referenceRange:
                         if range.text:
-                            comp.referenceRange["observationRange"].append(
-                                {"text": range.text}
-                            )
+                            comp.referenceRange["observationRange"].append({"text": range.text})
                         if range.low:
                             # TODO use proper model instead of dict
                             comp.referenceRange["observationRange"].append(
@@ -1070,7 +922,7 @@ def result(entry, index: dict) -> dict:
         return organizer.model_dump(by_alias=True, exclude_none=True)
 
 
-def empty_entry(title: str) -> List[dict]:
+def empty_entry(title: str) -> list[dict]:
     """Generates an empty C-CDA entry with nullFlavor="NI" for empty sections."""
     entry_id = str(uuid.uuid4())
     if title == "Allergies and adverse reactions":
@@ -1079,9 +931,7 @@ def empty_entry(title: str) -> List[dict]:
                 "act": {
                     "@classCode": "ACT",
                     "@moodCode": "EVN",
-                    "templateId": templateId(
-                        "2.16.840.1.113883.10.20.22.4.30", "2015-08-01"
-                    ),
+                    "templateId": templateId("2.16.840.1.113883.10.20.22.4.30", "2015-08-01"),
                     "id": [{"@root": entry_id}],
                     "code": {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"},
                     "statusCode": {"@code": "active"},
@@ -1092,9 +942,7 @@ def empty_entry(title: str) -> List[dict]:
                             "observation": {
                                 "@classCode": "OBS",
                                 "@moodCode": "EVN",
-                                "templateId": templateId(
-                                    "2.16.840.1.113883.10.20.22.4.7", "2014-06-09"
-                                ),
+                                "templateId": templateId("2.16.840.1.113883.10.20.22.4.7", "2014-06-09"),
                                 "id": [{"@root": str(uuid.uuid4())}],
                                 "code": {
                                     "@code": "ASSERTION",
@@ -1114,9 +962,7 @@ def empty_entry(title: str) -> List[dict]:
                 "act": {
                     "@classCode": "ACT",
                     "@moodCode": "EVN",
-                    "templateId": templateId(
-                        "2.16.840.1.113883.10.20.22.4.3", "2015-08-01"
-                    ),
+                    "templateId": templateId("2.16.840.1.113883.10.20.22.4.3", "2015-08-01"),
                     "id": [{"@root": entry_id}],
                     "code": {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"},
                     "statusCode": {"@code": "active"},
@@ -1127,9 +973,7 @@ def empty_entry(title: str) -> List[dict]:
                             "observation": {
                                 "@classCode": "OBS",
                                 "@moodCode": "EVN",
-                                "templateId": templateId(
-                                    "2.16.840.1.113883.10.20.22.4.4", "2015-08-01"
-                                ),
+                                "templateId": templateId("2.16.840.1.113883.10.20.22.4.4", "2015-08-01"),
                                 "id": [{"@root": str(uuid.uuid4())}],
                                 "code": [
                                     {
@@ -1164,9 +1008,7 @@ def empty_entry(title: str) -> List[dict]:
                 "substanceAdministration": {
                     "@classCode": "SBADM",
                     "@moodCode": "EVN",
-                    "templateId": templateId(
-                        "2.16.840.1.113883.10.20.22.4.16", "2014-06-09"
-                    ),
+                    "templateId": templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
                     "id": [{"@root": entry_id}],
                     "statusCode": {"@code": "active"},
                     "effectiveTime": [{"@nullFlavor": "NI"}],
@@ -1188,17 +1030,13 @@ def empty_entry(title: str) -> List[dict]:
                 "substanceAdministration": {
                     "@classCode": "SBADM",
                     "@moodCode": "EVN",
-                    "templateId": templateId(
-                        "2.16.840.1.113883.10.20.22.4.52", "2014-06-09"
-                    ),
+                    "templateId": templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
                     "id": [{"@root": entry_id}],
                     "statusCode": {"@code": "completed"},
                     "effectiveTime": [{"@nullFlavor": "NI"}],
                     "consumable": {
                         "manufacturedProduct": {
-                            "templateId": templateId(
-                                "2.16.840.1.113883.10.20.22.4.54", "2014-06-09"
-                            ),
+                            "templateId": templateId("2.16.840.1.113883.10.20.22.4.54", "2014-06-09"),
                             "manufacturedMaterial": {"code": {"@nullFlavor": "NI"}},
                         }
                     },
@@ -1211,9 +1049,7 @@ def empty_entry(title: str) -> List[dict]:
                 "organizer": {
                     "@classCode": "BATTERY",
                     "@moodCode": "EVN",
-                    "templateId": templateId(
-                        "2.16.840.1.113883.10.20.22.4.1", "2015-08-01"
-                    ),
+                    "templateId": templateId("2.16.840.1.113883.10.20.22.4.1", "2015-08-01"),
                     "id": [{"@root": entry_id}],
                     "code": {"@nullFlavor": "NI"},
                     "statusCode": {"@code": "completed"},
@@ -1221,9 +1057,7 @@ def empty_entry(title: str) -> List[dict]:
                         "observation": {
                             "@classCode": "OBS",
                             "@moodCode": "EVN",
-                            "templateId": templateId(
-                                "2.16.840.1.113883.10.20.22.4.2", "2015-08-01"
-                            ),
+                            "templateId": templateId("2.16.840.1.113883.10.20.22.4.2", "2015-08-01"),
                             "id": [{"@root": str(uuid.uuid4())}],
                             "code": {"@nullFlavor": "NI"},
                             "statusCode": {"@code": "completed"},

@@ -1,6 +1,6 @@
 import logging
-import sys
 import re
+import sys
 
 import httpx
 
@@ -59,9 +59,7 @@ async def log_request(request: httpx.Request):
 
     logger.info(f"[req_trace:{correlation_id}] Outgoing Request:")
     logger.info(f"[req_trace:{correlation_id}] {request.method} {safe_url}")
-    logger.info(
-        f"[req_trace:{correlation_id}] Headers: {_scrub_headers(request.headers)}"
-    )
+    logger.info(f"[req_trace:{correlation_id}] Headers: {_scrub_headers(request.headers)}")
     logger.info(f"[req_trace:{correlation_id}] traceparent: {traceparent}")
     logger.info(f"[req_trace:{correlation_id}] Body: [REDACTED FOR PHI SECURITY]")
     logger.info("-----")
@@ -72,8 +70,6 @@ async def log_response(response: httpx.Response):
 
     logger.info(f"[res_trace:{correlation_id}] Incoming Response:")
     logger.info(f"[res_trace:{correlation_id}] Status Code: {response.status_code}")
-    logger.info(
-        f"[res_trace:{correlation_id}] Headers: {_scrub_headers(response.headers)}"
-    )
+    logger.info(f"[res_trace:{correlation_id}] Headers: {_scrub_headers(response.headers)}")
     logger.info(f"[res_trace:{correlation_id}] Body: [REDACTED FOR PHI SECURITY]")
     logger.info("=====")

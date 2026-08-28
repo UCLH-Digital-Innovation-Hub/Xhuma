@@ -1,6 +1,7 @@
-from hypothesis import given, strategies as st
-
 from fhirclient.models import medication, medicationrequest, medicationstatement
+from hypothesis import given
+from hypothesis import strategies as st
+
 from app.ccda.entries import medication as medication_entry
 
 # Strategy to generate random strings, or None

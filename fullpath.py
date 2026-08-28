@@ -43,9 +43,9 @@ if __name__ == "__main__":
 
         dict_38 = xmltodict.parse(r.text)
         # pprint.pprint(dict_38)
-        docid = dict_38["s:Envelope"]["s:Body"]["AdhocQueryResponse"][
-            "RegistryObjectList"
-        ]["ExtrinsicObject"]["ExternalIdentifier"][0]["@value"]
+        docid = dict_38["s:Envelope"]["s:Body"]["AdhocQueryResponse"]["RegistryObjectList"]["ExtrinsicObject"][
+            "ExternalIdentifier"
+        ][0]["@value"]
         with open("iti38.xml", "w") as output:
             output.write(r.text)
         print(r.status_code)
@@ -73,9 +73,7 @@ if __name__ == "__main__":
         )
         # pprint.pprint(xmldict)
         query = xmldict["Envelope"]
-        query["Body"]["RetrieveDocumentSetRequest"]["DocumentRequest"][
-            "DocumentUniqueId"
-        ] = docid
+        query["Body"]["RetrieveDocumentSetRequest"]["DocumentRequest"]["DocumentUniqueId"] = docid
 
         pprint.pprint(query)
 
