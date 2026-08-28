@@ -1,7 +1,6 @@
 from hypothesis import given, strategies as st
-from unittest.mock import AsyncMock
 
-from fhirclient.models import medication, medicationrequest, medicationstatement, bundle
+from fhirclient.models import medication, medicationrequest, medicationstatement
 from app.ccda.entries import medication as medication_entry
 
 # Strategy to generate random strings, or None
