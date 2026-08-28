@@ -310,7 +310,7 @@ async def iti47(request: Request):
     Raises:
         HTTPException: For invalid content type, missing NHS number, or missing CEID
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
@@ -412,7 +412,7 @@ async def iti38(request: Request):
     Raises:
         HTTPException: For invalid content type
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         print("-" * 40)
@@ -541,7 +541,7 @@ async def iti39(request: Request):
     Raises:
         HTTPException: For invalid content type, missing document ID, or document not found
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         soap = extract_soap_request(body.decode("utf-8"))
