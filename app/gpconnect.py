@@ -586,7 +586,7 @@ async def _fetch_gpconnect_record(
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
-        with open(f"{nhsno}.xml", "w") as output:
+        with open(f"{str(int(nhsno))}.xml", "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     await _attempt_audit(
