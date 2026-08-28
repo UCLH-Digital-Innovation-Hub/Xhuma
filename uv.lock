@@ -2460,6 +2460,7 @@ requires-dist = [
     { name = "asyncpg" },
     { name = "azure-monitor-opentelemetry", specifier = ">=1.8.7" },
     { name = "cryptography", specifier = ">=48.0.1" },
+    { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "fastapi", specifier = ">=0.140" },
     { name = "fhirclient", specifier = "~=3.0.0" },
     { name = "grpcio" },
