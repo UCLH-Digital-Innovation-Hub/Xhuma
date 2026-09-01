@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import List, Optional, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Extra, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from .admin import AuthorParticipation
 from .datatypes import (
@@ -216,7 +216,8 @@ class SubstanceAdministration(BaseModel):
         # print(time_list)
 
 
-class EntryRelationship(BaseModel, extra=Extra.allow):
+class EntryRelationship(BaseModel):
+    model_config = ConfigDict(extra="allow")
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
@@ -249,8 +250,7 @@ class Section(BaseModel):
     text: Optional[str] = None
     entry: List[Entry] = Field(default_factory=list)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ResultsOrganizer(BaseModel):
