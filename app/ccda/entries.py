@@ -3,9 +3,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, List, Optional, Union
 
-from fhirclient.models import allergyintolerance, condition, immunization
+from fhirclient.models import condition, immunization
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationrequest, medicationstatement
+from app.fhir.allergies import AllergyIntolerance
 
 from .dmd import dmd_lookup
 from .helpers import (
@@ -703,7 +704,7 @@ def problem(entry: condition.Condition) -> EntryWithRow:
     return EntryWithRow(entry=prob, row=problem_row)
 
 
-def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
+def allergy(entry: AllergyIntolerance) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.30.html
     all = {
         "act": {
@@ -720,7 +721,7 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     # may need to be made dynamic if force to query old allergies
     all["act"]["statusCode"] = {"@code": "active"}
     all["act"]["effectiveTime"] = {
-        "low": {"@value": date_helper(entry.assertedDate.isostring)}
+        "low": {"@value": date_helper(entry.assertedDate)}
     }
     all["act"]["entryRelationship"] = {"@typeCode": "SUBJ"}
 
@@ -766,7 +767,7 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
                 "id": {"@root": uuid.uuid4()},
                 "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
                 "effectiveTime": {
-                    "low": {"@value": date_helper(entry.assertedDate.isostring)}
+                    "low": {"@value": date_helper(entry.assertedDate)}
                 },
                 "value": {
                     "@xsi:type": "CD",

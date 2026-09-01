@@ -52,7 +52,9 @@ def generate_code(coding: coding.Coding) -> dict:
     return code
 
 
-def code_with_translations(codings: List[coding.Coding]) -> CD:
+from typing import Any, List
+
+def code_with_translations(codings: List[Any]) -> CD:
     """
     Takes a list of coding objects and returns a CD object with translations
     Args:
