@@ -111,11 +111,13 @@ def date_helper(isodate):
     return new_date
 
 
-def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
+def effective_time_helper(effective_period: Any) -> List[SXCM_TS]:
     """
     Takes a FHIR effective period and returns a list of SXCM_TS objects
     """
-    # effective_period = effective_period.as_json()
+    if not effective_period:
+        return []
+    
     start = effective_period.start
     # end = effective_period.get("end")
     # print(effective_period.as_json())
@@ -125,13 +127,13 @@ def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
     sxcm_ts_list = []
     if start:
         low_value = SXCM_TS(operator="low")
-        low_value.value = date_helper(start.isostring)
+        low_value.value = date_helper(start.isostring if hasattr(start, "isostring") else start)
         sxcm_ts_list.append(low_value)
     if effective_period.end:
         high_value = SXCM_TS(operator="high")
-        high_value.value = date_helper(effective_period.end.isostring)
+        end_val = effective_period.end.isostring if hasattr(effective_period.end, "isostring") else effective_period.end
+        high_value.value = date_helper(end_val)
         sxcm_ts_list.append(high_value)
-        # sxcm_ts_list.append(SXCM_TS(operator="high", value=date_helper(effective_period.end.isostring)))
     # Example usage of as_dict
     return sxcm_ts_list
 

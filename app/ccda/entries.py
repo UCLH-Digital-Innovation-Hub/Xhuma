@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Any, List, Optional, Union
 
 from fhirclient.models import condition, immunization
-from fhirclient.models import medication as fhirmed
-from fhirclient.models import medicationrequest, medicationstatement
+from app.fhir.medications import MedicationRequest, MedicationStatement
+from app.fhir.medications import Medication as FHIRMedication
 from app.fhir.allergies import AllergyIntolerance
 
 from .dmd import dmd_lookup
@@ -136,12 +136,12 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
 
 
 async def medication(
-    entry: medicationstatement.MedicationStatement, index: dict
+    entry: MedicationStatement, index: dict
 ) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
-    referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
-    based_on_request: medicationrequest.MedicationRequest = index[
+    referenced_med: FHIRMedication = index[entry.medicationReference.reference]
+    based_on_request: MedicationRequest = index[
         entry.basedOn[0].reference
     ]
     raw_notes = []
