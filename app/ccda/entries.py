@@ -7,6 +7,7 @@ from fhirclient.models import condition, immunization
 from app.fhir.medications import MedicationRequest, MedicationStatement
 from app.fhir.medications import Medication as FHIRMedication
 from app.fhir.allergies import AllergyIntolerance
+from app.fhir.labs import Observation as FHIRObservation, DiagnosticReport
 
 from .dmd import dmd_lookup
 from .helpers import (
@@ -138,12 +139,21 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
 async def medication(
     entry: MedicationStatement, index: dict
 ) -> EntryWithRow:
+    if not isinstance(entry, MedicationStatement):
+        entry_dict = entry if isinstance(entry, dict) else entry.as_json()
+        entry = MedicationStatement.model_validate(entry_dict)
+        
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
-    referenced_med: FHIRMedication = index[entry.medicationReference.reference]
-    based_on_request: MedicationRequest = index[
-        entry.basedOn[0].reference
-    ]
+    referenced_med = index[entry.medicationReference.reference]
+    if not isinstance(referenced_med, FHIRMedication):
+        ref_med_dict = referenced_med if isinstance(referenced_med, dict) else referenced_med.as_json()
+        referenced_med = FHIRMedication.model_validate(ref_med_dict)
+
+    based_on_request = index[entry.basedOn[0].reference]
+    if not isinstance(based_on_request, MedicationRequest):
+        req_dict = based_on_request if isinstance(based_on_request, dict) else based_on_request.as_json()
+        based_on_request = MedicationRequest.model_validate(req_dict)
     raw_notes = []
     if based_on_request.note:
         raw_notes.extend(based_on_request.note)
@@ -705,6 +715,10 @@ def problem(entry: condition.Condition) -> EntryWithRow:
 
 
 def allergy(entry: AllergyIntolerance) -> EntryWithRow:
+    if not isinstance(entry, AllergyIntolerance):
+        entry_dict = entry if isinstance(entry, dict) else entry.as_json()
+        entry = AllergyIntolerance.model_validate(entry_dict)
+
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.30.html
     all = {
         "act": {
@@ -888,8 +902,11 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
 
 
 def observation_entry(
-    entry, index: dict, section_name: Union[str, int]
+    entry: FHIRObservation, index: dict, section_name: Union[str, int]
 ) -> EntryWithRow:
+    if not isinstance(entry, FHIRObservation):
+        entry_dict = entry if isinstance(entry, dict) else entry.as_json()
+        entry = FHIRObservation.model_validate(entry_dict)
     from .models.base import Observation
 
     obs = Observation(
@@ -993,7 +1010,10 @@ def observation_entry(
     )
 
 
-def result(entry, index: dict) -> dict:
+def result(entry: FHIRObservation, index: dict) -> dict:
+    if not isinstance(entry, FHIRObservation):
+        entry_dict = entry if isinstance(entry, dict) else entry.as_json()
+        entry = FHIRObservation.model_validate(entry_dict)
     """
     Entry for results section. Entries are defined by lists that contain the related type has-member indicating results groups
     """
