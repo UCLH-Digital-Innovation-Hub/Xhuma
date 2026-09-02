@@ -85,7 +85,7 @@ class ObservationRange(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN.CRT")
     text: Optional[str] = None
-    value: Optional[ANY] = None
+    value: Optional[IVL_PQ] = None
 
 
 class ReferenceRange(BaseModel):

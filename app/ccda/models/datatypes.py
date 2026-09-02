@@ -4,7 +4,7 @@ Contains CDA datatype objects with pydantic validation
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, ClassVar
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -12,44 +12,31 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class ANY(BaseModel):
-    resource_type: str = Field(
-        "Any",
-        description="This field provides a description for each date type",
-        alias="@xsi:type",
-    )
+    resource_type: ClassVar[str] = "ANY"
+    xsi_type: Optional[str] = Field(default="ANY", alias="@xsi:type")
     nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)  # enumeration
 
 
 class BIN(ANY):
-    resource_type: str = Field("BIN", description="Binary data.")
+    resource_type: ClassVar[str] = "BIN"
     mixed: Optional[Dict] = None
     representation: Optional[str] = None  # enumeration B64 or TXT
 
 
 class URL(ANY):
-    resource_type: str = Field("URL", description="URL data.")
+    resource_type: ClassVar[str] = "URL"
     value: Optional[str] = None
 
 
 class TEL(URL):
-    resource_type: str = Field(
-        "TEL",
-        description="A telephone number, e-mail address, or other "
-        "locator for a resource mediated by telecommunication equipment. "
-        "The address is specified as a URL qualified by time specification "
-        "and use codes that help in deciding which address to use for a "
-        "given time and purpose.",
-    )
+    resource_type: ClassVar[str] = "TEL"
     usablePeriod: Optional[List[SXCM_TS]] = None
-    use: Optional[List[str]] = Field(alias="@use", default=None)
+    use: Optional[str] = Field(alias="@use", default=None)
     value: Optional[str] = Field(alias="@value", default=None)
 
 
 class AD(ANY):
-    resource_type: str = Field(
-        "AD",
-        description="Mailing and home or office addresses. A sequence of address parts.",
-    )
+    resource_type: ClassVar[str] = "AD"
     use: Optional[str] = Field(alias="@use", default=None)
     streetAddressLine: Optional[List[str]] = None
     city: Optional[str] = None
@@ -59,12 +46,8 @@ class AD(ANY):
 
 
 class ED(BIN):
-    resource_type: str = Field(
-        "ED",
-        description="Data that is primarily intended for human interpretation or for "
-        "further machine processing is outside the scope of HL7.",
-        alias="@xsi:type",
-    )
+    resource_type: ClassVar[str] = "ED"
+    xsi_type: Optional[str] = Field(default="ED", alias="@xsi:type")
     reference: Optional[TEL] = None
     thumbnail: Optional[str] = None  # thumbnail
     compression: Optional[str] = None  # enum
@@ -76,23 +59,11 @@ class ED(BIN):
 
 
 class QTY(ANY):
-    resource_type: str = Field(
-        "QTY",
-        description="The quantity data type is an abstract generalization for all data "
-        "types (1) whose value set has an order relation (less-or-equal) "
-        "and (2) where difference is defined in all of the data type's "
-        "totally ordered value subsets. The quantity type abstraction is "
-        "needed in defining certain other types, such as the interval and "
-        "the probability distribution.",
-    )
+    resource_type: ClassVar[str] = "QTY"
 
 
 class II(ANY):
-    resource_type: str = Field(
-        "II",
-        description="An identifier that uniquely identifies a thing or object.",
-        alias="@xsi:type",
-    )
+    resource_type: ClassVar[str] = "II"
     assigningAuthorityName: Optional[str] = Field(
         alias="@assigningAuthorityName", default=None
     )
@@ -119,15 +90,9 @@ CODE_SYSTEM_NAMES = {
 
 
 class CD(ANY):
-    resource_type: str = Field(
-        "CD",
-        description="A concept descriptor represents any kind of concept usually by giving a "
-        "code defined in a code system. A concept descriptor can contain the "
-        "original text or phrase that served as the basis of the coding and one "
-        "or more translations into different coding systems.",
-        alias="@xsi:type",
-    )
-    code: str = Field(alias="@code")
+    resource_type: ClassVar[str] = "CD"
+    xsi_type: Optional[str] = Field(default="CD", alias="@xsi:type")
+    code: Optional[str] = Field(alias="@code", default=None)
     codeSystem: Optional[str] = Field(alias="@codeSystem", default=None)
     codeSystemName: Optional[str] = Field(alias="@codeSystemName", default=None)
     displayName: Optional[str] = Field(alias="@displayName", default=None)
@@ -135,14 +100,21 @@ class CD(ANY):
     translation: Optional[List["CD"]] = None  # Forward reference
 
     @model_validator(mode="before")
-    def set_code_system_from_name(cls, values):
+    def validate_cd(cls, values):
         cs = values.get("codeSystemName")
-        if cs and not values.get("codeSystem"):
+        if cs and not values.get("codeSystem") and not values.get("@codeSystem"):
             values["codeSystem"] = CODE_SYSTEM_NAMES.get(cs)
 
         # if codesystem is not in code_system_names, print an alert to console
-        if cs and not values.get("codeSystem"):
+        if cs and not values.get("codeSystem") and not values.get("@codeSystem"):
             print(f"Warning🚨: Code system '{cs}' not found in CODE_SYSTEM_NAMES.")
+
+        code = values.get("code") or values.get("@code")
+        null_flavor = values.get("nullFlavor") or values.get("@nullFlavor")
+
+        if not code and not null_flavor:
+            raise ValueError("CD must have either a code or a nullFlavor")
+
         return values
 
     model_config = {
@@ -154,59 +126,33 @@ CD.model_rebuild()
 
 
 class CE(CD):
-    resource_type: str = Field(
-        "CE",
-        description="Coded data, consists of a coded value (CV) and, optionally, "
-        "coded value(s) from other coding systems that identify the same "
-        "concept. Used when alternative codes may exist.",
-        alias="@xsi:type",
-    )
+    resource_type: ClassVar[str] = "CE"
+    xsi_type: Optional[str] = Field(default="CE", alias="@xsi:type")
 
 
 class CV(CE):
-    resource_type: str = Field(
-        "CV",
-        description="Coded data, consists of a code, display name, code system, "
-        "and original text. Used when a single code value must be sent.",
-    )
+    resource_type: ClassVar[str] = "CV"
 
 
 class PQR(CV):
-    resource_type: str = Field(
-        "PQR",
-        description="A representation of a physical quantity in a unit from any code "
-        "system. Used to show alternative representation for a physical "
-        "quantity.",
-    )
+    resource_type: ClassVar[str] = "PQR"
     value: Optional[float] = Field(alias="@value", default=None)
 
 
 class CS(CV):
-    resource_type: str = Field(
-        "CS",
-        description="Coded data, consists of a code, display name, code system, and original "
-        "text. Used when a single code value must be sent.",
-        alias="@xsi:type",
-    )
+    resource_type: ClassVar[str] = "CS"
 
 
 class PQ(QTY):
-    resource_type: str = Field(
-        "PQ",
-        description="A dimensioned quantity expressing the result of a measurement act.",
-        alias="@xsi:type",
-    )
+    resource_type: ClassVar[str] = "PQ"
+    xsi_type: Optional[str] = Field(default="PQ", alias="@xsi:type")
     translation: Optional[List[PQR]] = None
     unit: Optional[str] = Field(alias="@unit", default=None)
     value: Optional[float] = Field(alias="@value", default=None)
 
 
 class TS(QTY):
-    resource_type: str = Field(
-        "TS",
-        description="A quantity specifying a point on the axis of natural time. A point "
-        "in time is most often represented as a calendar expression.",
-    )
+    resource_type: ClassVar[str] = "TS"
     value: Optional[str] = Field(
         alias="@value",
         default=None,
@@ -215,7 +161,8 @@ class TS(QTY):
 
 
 class SXCM_TS(TS):
-    resource_type: str = Field("SXCM_TS", description="", alias="@xsi:type")
+    resource_type: ClassVar[str] = "SXCM_TS"
+    xsi_type: Optional[str] = Field(default="SXCM_TS", alias="@xsi:type")
     operator: Optional[str] = Field(alias="@operator", default=None)
     model_config = {
         "populate_by_name": True,
@@ -223,29 +170,30 @@ class SXCM_TS(TS):
 
 
 class SXCM_PQ(PQ):
-    resource_type: str = Field("SXCM_PQ", description="", alias="@xsi:type")
+    resource_type: ClassVar[str] = "SXCM_PQ"
+    xsi_type: Optional[str] = Field(default="SXCM_PQ", alias="@xsi:type")
     operator: Optional[str] = None  # enumeration
 
 
 class IVXB_TS(SXCM_TS):
-    resource_type: str = Field("IVXB_TS", description="", alias="@xsi:type")
+    resource_type: ClassVar[str] = "IVXB_TS"
+    xsi_type: Optional[str] = Field(default="IVXB_TS", alias="@xsi:type")
     inclusive: Optional[bool] = Field(
         None, description="Specifies whether the limit is included in the interval."
     )
 
 
 class IVXB_PQ(PQ):
-    resource_type: str = Field("IVXB_PQ", description="", alias="@xsi:type")
+    resource_type: ClassVar[str] = "IVXB_PQ"
+    xsi_type: Optional[str] = Field(default="IVXB_PQ", alias="@xsi:type")
     inclusive: Optional[bool] = Field(
         None, description="Specifies whether the limit is included in the interval."
     )
 
 
 class IVL_PQ(ANY):
-    resource_type: str = Field(
-        "IVL_PQ",
-        alias="@xsi:type",
-    )
+    resource_type: ClassVar[str] = "IVL_PQ"
+    xsi_type: Optional[str] = Field(default="IVL_PQ", alias="@xsi:type")
     unit: Optional[CS] = Field(alias="@unit", default=None)
     value: Optional[PQ] = Field(alias="@value", default=None)
     operator: Optional[CS] = Field(alias="@operator", default=None)
@@ -259,9 +207,8 @@ class IVL_PQ(ANY):
 
 
 class IVL_TS(IVXB_TS):
-    resource_type: str = Field(
-        "IVL_TS", description="Time interval.", alias="@xsi:type"
-    )
+    resource_type: ClassVar[str] = "IVL_TS"
+    xsi_type: Optional[str] = Field(default="IVL_TS", alias="@xsi:type")
     low: Optional[IVXB_TS] = None
     center: Optional[TS] = None
     width: Optional[PQ] = None
@@ -272,9 +219,7 @@ class IVL_TS(IVXB_TS):
 
 
 class IVL_INT(ANY):
-    resource_type: str = Field(
-        "IVL_INT", description="Interval of integers.", alias="@xsi:type"
-    )
+    resource_type: ClassVar[str] = "IVL_INT"
     nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)
     value: Optional[int] = Field(alias="@value", default=None)
     operator: Optional[str] = Field(alias="@operator", default=None)
@@ -288,7 +233,8 @@ class IVL_INT(ANY):
 
 
 class PIVL_TS(SXCM_TS):
-    resource_type: str = Field("PIVL_TS", description="", alias="@xsi:type")
+    resource_type: ClassVar[str] = "PIVL_TS"
+    xsi_type: Optional[str] = Field(default="PIVL_TS", alias="@xsi:type")
     phase: Optional[IVL_TS] = None
     period: Optional[Union[IVL_PQ, PQ]] = None
     alignment: Optional[CalendarCycle] = Field(alias="@alignment", default=None)
@@ -301,7 +247,8 @@ class PIVL_TS(SXCM_TS):
 
 
 class EIVL_TS(SXCM_TS):
-    resource_type: str = Field("EIVL_TS", description="", alias="@xsi:type")
+    resource_type: ClassVar[str] = "EIVL_TS"
+    xsi_type: Optional[str] = Field(default="EIVL_TS", alias="@xsi:type")
     event: Optional[CE] = None
     offset: Optional[IVL_PQ] = None
     model_config = {
@@ -310,15 +257,12 @@ class EIVL_TS(SXCM_TS):
 
 
 class CalendarCycle(ANY):
-    resource_type: str = Field("CalendarCycle", description="", alias="@xsi:type")
+    resource_type: ClassVar[str] = "CalendarCycle"
     name: Optional[str] = None
 
 
 class RTO_PQ_PQ(QTY):
-    resource_type: str = Field(
-        "RTO_PQ_PQ",
-        description="A ratio of two physical quantities.",
-        alias="@xsi:type",
-    )
+    resource_type: ClassVar[str] = "RTO_PQ_PQ"
+    xsi_type: Optional[str] = Field(default="RTO_PQ_PQ", alias="@xsi:type")
     numerator: Optional[PQ] = None
     denominator: Optional[PQ] = None

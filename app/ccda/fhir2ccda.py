@@ -12,7 +12,12 @@ from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
 
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
-from .helpers import date_helper, templateId
+from .helpers import (
+    date_helper,
+    templateId,
+    contact_point_to_cda_tel,
+    address_to_cda_ad,
+)
 from app.gp_connect_config import get_gp_connect_inclusions
 
 
@@ -68,15 +73,12 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             break
 
     gender = subject[0].gender
-    admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1"}
     if gender == "male":
-        admin_gender["@code"] = "M"
+        admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1", "@code": "M"}
     elif gender == "female":
-        admin_gender["@code"] = "F"
-    elif gender == "other":
-        admin_gender["@code"] = "UN"
+        admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1", "@code": "F"}
     else:
-        admin_gender["@nullFlavor"] = "UNK"
+        admin_gender = {"@nullFlavor": "UNK"}
 
     patient_dict = {
         "patientRole": {
@@ -98,36 +100,16 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     }
 
     if subject[0].address:
-        patient_dict["patientRole"]["addr"] = {
-            "@use": "HP",
-            "streetAddressLine": [x for x in subject[0].address[0].line],
-            "city": {"#text": subject[0].address[0].city},
-            "postalCode": {"#text": subject[0].address[0].postalCode},
-        }
+        patient_dict["patientRole"]["addr"] = address_to_cda_ad(
+            subject[0].address[0]
+        ).model_dump(by_alias=True, exclude_none=True)
 
     if subject[0].telecom:
         telecoms = []
         for t in subject[0].telecom:
-            # simple mapping of FHIR telecom to CDA telecom format (tel: / mailto:)
-            prefix = (
-                "tel:"
-                if t.system in ["phone", "fax", "pager"]
-                else "mailto:"
-                if t.system == "email"
-                else ""
-            )
-            use_map = {
-                "home": "HP",
-                "work": "WP",
-                "temp": "TMP",
-                "old": "BAD",
-                "mobile": "MC",
-            }
-            use_code = use_map.get(t.use)
-            tel_dict = {"@value": f"{prefix}{t.value}"}
-            if use_code:
-                tel_dict["@use"] = use_code
-            telecoms.append(tel_dict)
+            tel = contact_point_to_cda_tel(t)
+            if tel:
+                telecoms.append(tel.model_dump(by_alias=True, exclude_none=True))
         patient_dict["patientRole"]["telecom"] = telecoms
 
     gp_organization = subject[0].managingOrganization.reference

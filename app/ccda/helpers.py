@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from xml.etree import ElementTree
 
 import xmltodict
@@ -195,6 +195,67 @@ def extract_soap_request(message):
     raise ValueError("SOAP envelope not found in the message.")
 
 
+TELECOM_USE_MAP = {
+    "home": "HP",
+    "work": "WP",
+    "temp": "TMP",
+    "old": "BAD",
+    "mobile": "MC",
+}
+
+
+def contact_point_to_cda_tel(contact) -> Optional[TEL]:
+    if not contact.value:
+        return None
+
+    value = contact.value
+    system = contact.system
+
+    if system == "phone":
+        value = f"tel:{value}"
+    elif system == "fax":
+        value = f"x-text-fax:{value}"
+    elif system == "email":
+        value = f"mailto:{value}"
+    elif system == "pager":
+        value = f"tel:{value}"
+
+    use = TELECOM_USE_MAP.get(contact.use) if contact.use else None
+
+    kwargs = {"@value": value}
+    if use:
+        kwargs["@use"] = use
+
+    return TEL(**kwargs)
+
+
+ADDRESS_USE_MAP = {
+    "home": "HP",
+    "work": "WP",
+    "temp": "TMP",
+    "old": "BAD",
+    "billing": "BIL",
+}
+
+
+def address_to_cda_ad(address) -> AD:
+    kwargs = {}
+    if address.use and address.use in ADDRESS_USE_MAP:
+        kwargs["@use"] = ADDRESS_USE_MAP[address.use]
+
+    kwargs["streetAddressLine"] = list(address.line or [])
+    if address.city:
+        kwargs["city"] = address.city
+    if address.state:
+        kwargs["state"] = address.state
+    if address.postalCode:
+        kwargs["postalCode"] = address.postalCode
+    if address.country:
+        kwargs["country"] = address.country
+
+    return AD(**kwargs)
+
+
 def organization_to_author(
     organization: organization.Organization,
 ) -> AuthorParticipation:
@@ -215,22 +276,17 @@ def organization_to_author(
         author.representedOrganization = Organization(**{"name": [organization.name]})
 
     if organization.telecom:
-        author.telecom = [
-            TEL(
-                **{
-                    "@use": telecom.use,
-                    "@value": telecom.value,
-                }
-            )
-            for telecom in organization.telecom
-        ]
+        author.telecom = []
+        for telecom in organization.telecom:
+            tel = contact_point_to_cda_tel(telecom)
+            if tel:
+                author.telecom.append(tel)
+
     if organization.address:
         author.address = []
         for addr in organization.address:
-            ad_dict = addr.as_json()
-            if "line" in ad_dict:
-                ad_dict["streetAddressLine"] = ad_dict.pop("line")
-            author.address.append(AD(**ad_dict))
+            author.address.append(address_to_cda_ad(addr))
+
     org = AuthorParticipation(assignedAuthor=author)
 
     return org

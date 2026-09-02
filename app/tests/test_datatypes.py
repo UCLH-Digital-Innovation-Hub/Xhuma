@@ -4,7 +4,7 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 
 from app.ccda.helpers import templateId
-from app.ccda.models.datatypes import II
+from app.ccda.models.datatypes import II, CD, IVL_PQ, IVXB_PQ
 
 
 def test_ii_valid_data():
@@ -86,3 +86,26 @@ def test_templateID_inclass():
     assert dumped["template_Id"][1]["@root"] == root
     assert dumped["template_Id"][1]["@extension"] == extension
     assert dumped["template_Id"][0].get("@extension") is None
+
+
+def test_resource_type_absence_in_serialization():
+    cd = CD(**{"@code": "123", "@codeSystemName": "LOINC"})
+    dumped = cd.model_dump(by_alias=True, exclude_none=True)
+    assert "resource_type" not in dumped
+    assert dumped["@xsi:type"] == "CD"
+    assert dumped["@code"] == "123"
+
+
+def test_ivl_pq_serialization():
+    ivl = IVL_PQ(
+        low=IVXB_PQ(**{"@value": 1.0, "@unit": "mg"}),
+        high=IVXB_PQ(**{"@value": 2.0, "@unit": "mg"}),
+    )
+    dumped = ivl.model_dump(by_alias=True, exclude_none=True)
+
+    assert "resource_type" not in dumped
+    assert dumped["@xsi:type"] == "IVL_PQ"
+
+    assert "resource_type" not in dumped["low"]
+    assert dumped["low"]["@xsi:type"] == "IVXB_PQ"
+    assert dumped["low"]["@value"] == 1.0
