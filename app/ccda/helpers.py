@@ -225,8 +225,12 @@ def organization_to_author(
             for telecom in organization.telecom
         ]
     if organization.address:
-        author.address = [AD(**addr.as_json()) for addr in organization.address]
-
+        author.address = []
+        for addr in organization.address:
+            ad_dict = addr.as_json()
+            if "line" in ad_dict:
+                ad_dict["streetAddressLine"] = ad_dict.pop("line")
+            author.address.append(AD(**ad_dict))
     org = AuthorParticipation(assignedAuthor=author)
 
     return org

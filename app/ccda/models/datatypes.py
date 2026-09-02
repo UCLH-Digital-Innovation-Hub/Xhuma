@@ -17,7 +17,7 @@ class ANY(BaseModel):
         description="This field provides a description for each date type",
         alias="@xsi:type",
     )
-    nullFlavor: Optional[str] = None  # enumeration
+    nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)  # enumeration
 
 
 class BIN(ANY):
@@ -41,7 +41,7 @@ class TEL(URL):
         "given time and purpose.",
     )
     usablePeriod: Optional[List[SXCM_TS]] = None
-    use: Optional[List[str]] = None
+    use: Optional[List[str]] = Field(alias="@use", default=None)
     value: Optional[str] = Field(alias="@value", default=None)
 
 

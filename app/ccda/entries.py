@@ -269,17 +269,13 @@ async def medication(
                 "@displayName": entry.dosage[0]
                 .asNeededCodeableConcept.coding[0]
                 .display,
-                "@codeSystemName": entry.dosage[0]
-                .asNeededCodeableConcept.coding[0]
-                .value,
+                "@codeSystem": entry.dosage[0].asNeededCodeableConcept.coding[0].system,
             }
         else:
-            # this handles 'as directed' PRN without a clear indication
+            # PRN without a stated indication
             precondition_kwargs["criterion"]["value"] = {
                 "@xsi:type": "CD",
-                "@code": "ASSERTION",
-                "@displayName": "As Directed",
-                "@codeSystemName": "2.16.840.1.113883.5.4",
+                "@nullFlavor": "NI",
             }
         substance_administration.precondition = [Precondition(**precondition_kwargs)]
 
@@ -1001,11 +997,19 @@ def result(entry, index: dict) -> dict:
     Entry for results section. Entries are defined by lists that contain the related type has-member indicating results groups
     """
 
+    status_map = {
+        "final": "completed",
+        "preliminary": "active",
+        "entered-in-error": "aborted",
+    }
+
     # check if entry is group
     if hasattr(entry, "related") and entry.related:
         organizer = ResultsOrganizer()
         organizer.code = code_with_translations(entry.code.coding)
-        organizer.statusCode = CS(**{"@code": entry.status})
+        organizer.statusCode = CS(
+            **{"@code": status_map.get(entry.status, entry.status)}
+        )
         performer = index.get(entry.performer[0].reference)
         organizer.author = organization_to_author(performer)
         organizer.id = [
@@ -1026,7 +1030,13 @@ def result(entry, index: dict) -> dict:
                 comp = ResultObservation(
                     id=[II(**{"@root": related_resource.id})],
                     code=code_with_translations(related_resource.code.coding),
-                    status=CS(**{"@code": related_resource.status}),
+                    statusCode=CS(
+                        **{
+                            "@code": status_map.get(
+                                related_resource.status, related_resource.status
+                            )
+                        }
+                    ),
                     # effectiveDateTime=IVL_TS(value=entry.issued.isostring),
                     value=PQ(
                         **{

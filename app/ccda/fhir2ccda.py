@@ -67,28 +67,31 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             official_name = name
             break
 
+    gender = subject[0].gender
+    admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1"}
+    if gender == "male":
+        admin_gender["@code"] = "M"
+    elif gender == "female":
+        admin_gender["@code"] = "F"
+    elif gender == "other":
+        admin_gender["@code"] = "UN"
+    else:
+        admin_gender["@nullFlavor"] = "UNK"
+
     patient_dict = {
         "patientRole": {
-            "id": {
-                "@extension": subject[0].identifier[0].value,
-                "@root": "2.16.840.1.113883.2.1.4.1",
-            },
+            "id": [
+                {
+                    "@root": "2.16.840.1.113883.2.1.4.1",
+                    "@extension": subject[0].identifier[0].value,
+                },
+            ],
             "patient": {
                 "name": {
-                    "@use": "L",
-                    "given": {"#text": " ".join(official_name.given)},
+                    "given": [{"#text": x} for x in official_name.given],
                     "family": {"#text": official_name.family},
                 },
-                "administrativeGenderCode": {
-                    "@code": (
-                        "M"
-                        if subject[0].gender == "male"
-                        else "F"
-                        if subject[0].gender == "female"
-                        else "UN"
-                    ),
-                    "@codeSystem": "2.16.840.1.113883.5.1",
-                },
+                "administrativeGenderCode": admin_gender,
                 "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
             },
         }
@@ -113,14 +116,18 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 if t.system == "email"
                 else ""
             )
-            telecoms.append(
-                {
-                    "@value": f"{prefix}{t.value}",
-                    "@use": (
-                        "HP" if t.use == "home" else "WP" if t.use == "work" else "MC"
-                    ),
-                }
-            )
+            use_map = {
+                "home": "HP",
+                "work": "WP",
+                "temp": "TMP",
+                "old": "BAD",
+                "mobile": "MC",
+            }
+            use_code = use_map.get(t.use)
+            tel_dict = {"@value": f"{prefix}{t.value}"}
+            if use_code:
+                tel_dict["@use"] = use_code
+            telecoms.append(tel_dict)
         patient_dict["patientRole"]["telecom"] = telecoms
 
     gp_organization = subject[0].managingOrganization.reference
@@ -611,10 +618,14 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     )
 
     # Append GP name from patient demographics
-    gp_org_ref = bundle.entry[0].resource.managingOrganization.reference
-    gp = index.get(gp_org_ref)
-    if gp and gp.name:
-        disclaimer_text += f"Registered GP: {gp.name}."
+    gp_org_ref = (
+        subject[0].managingOrganization.reference
+        if subject and subject[0].managingOrganization
+        else None
+    )
+    gp_org = index.get(gp_org_ref) if gp_org_ref else None
+    if gp_org and gp_org.name:
+        disclaimer_text += f"Registered GP: {gp_org.name}."
 
     header_components = {
         "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),

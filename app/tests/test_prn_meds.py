@@ -232,14 +232,8 @@ async def test_prn_medication_statement():
         == "ASSERTION"
     )
     assert (
-        substance_administration["precondition"][0]["criterion"]["value"]["@code"]
-        == "ASSERTION"
-    )
-    assert (
-        substance_administration["precondition"][0]["criterion"]["value"][
-            "@displayName"
-        ]
-        == "As Directed"
+        substance_administration["precondition"][0]["criterion"]["value"]["@nullFlavor"]
+        == "NI"
     )
     # Check the medication details
 
