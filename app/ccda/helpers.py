@@ -20,7 +20,7 @@ def validateNHSnumber(number: int) -> bool:
     Returns:
         Boolean if NHS number is valid or not
     """
-    if len(str(number)) != 10:
+    if len(str(number)) != 10 or not str(number).isdigit():
         return False
 
     numbers = [int(c) for c in str(number)]
