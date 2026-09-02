@@ -3,11 +3,10 @@ from __future__ import annotations
 from typing import List, Optional, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Extra, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from .admin import AuthorParticipation
 from .datatypes import (
-    ANY,
     CD,
     CE,
     CS,
@@ -19,6 +18,7 @@ from .datatypes import (
     IVL_TS,
     PIVL_TS,
     PQ,
+    ST,
     SXCM_TS,
     RTO_PQ_PQ,
 )
@@ -32,7 +32,7 @@ class ManufacturedMaterial(BaseModel):
 class ManufacturedProduct(BaseModel):
     manufacturedMaterial: ManufacturedMaterial
     templateId: List[II] = Field(default_factory=list)
-    id: II = {"@root": str(uuid4())}
+    id: II = Field(default_factory=lambda: II(**{"@root": str(uuid4())}))
     classCode: str = Field(default="MANU", alias="@classCode")
 
 
@@ -77,7 +77,7 @@ class Observation(BaseModel):
     text: Optional[str] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
-    value: Optional[ANY] = None
+    value: Optional[Union[CD, ST, PQ]] = None
     entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
 
 
@@ -85,7 +85,7 @@ class ObservationRange(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN.CRT")
     text: Optional[str] = None
-    value: Optional[ANY] = None
+    value: Optional[IVL_PQ] = None
 
 
 class ReferenceRange(BaseModel):
@@ -145,8 +145,9 @@ class InstructionObservation(Observation):
 class Criterion(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN")
+    templateId: Optional[List[II]] = None
     code: Optional[CD] = None
-    value: Optional[ANY] = None
+    value: Optional[CD] = None
 
 
 class Precondition(BaseModel):
@@ -216,7 +217,8 @@ class SubstanceAdministration(BaseModel):
         # print(time_list)
 
 
-class EntryRelationship(BaseModel, extra=Extra.allow):
+class EntryRelationship(BaseModel):
+    model_config = ConfigDict(extra="allow")
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
@@ -249,8 +251,7 @@ class Section(BaseModel):
     text: Optional[str] = None
     entry: List[Entry] = Field(default_factory=list)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ResultsOrganizer(BaseModel):

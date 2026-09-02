@@ -1,12 +1,13 @@
+import logging
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from xml.etree import ElementTree
 
 import xmltodict
 from fhirclient.models import coding, organization, period
 
-from .models.admin import AssignedAuthor, AuthorParticipation
-from .models.datatypes import CD, SXCM_TS
+from .models.admin import AssignedAuthor, AuthorParticipation, Organization
+from .models.datatypes import CD, SXCM_TS, II, TEL, AD
 
 
 def validateNHSnumber(number: int) -> bool:
@@ -52,41 +53,129 @@ def generate_code(coding: coding.Coding) -> dict:
     return code
 
 
-def code_with_translations(codings: List[coding.Coding]) -> CD:
+class FHIRValidationError(Exception):
+    pass
+
+
+def _snomed_description_display(coding) -> Optional[str]:
+    if not getattr(coding, "extension", None):
+        return None
+    for ext in coding.extension:
+        if ext.url in (
+            "https://fhir.hl7.org.uk/STU3/StructureDefinition/Extension-coding-sctdescid",
+            "http://fhir.hl7.org.uk/STU3/StructureDefinition/Extension-coding-sctdescid",
+            "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-coding-sctdescid",
+        ):
+            if getattr(ext, "extension", None):
+                for sub_ext in ext.extension:
+                    if sub_ext.url == "descriptionDisplay":
+                        return getattr(sub_ext, "valueString", None)
+    return None
+
+
+def extract_original_term(concept) -> Optional[str]:
     """
-    Takes a list of coding objects and returns a CD object with translations
-    Args:
-        codings: List of fhir coding objects
-    Returns:
-        CD object with translations if more than one coding is provided
+    Extracts the original clinical term from a CodeableConcept following GP Connect 1.6.2 precedence.
+    Priority:
+    1. CodeableConcept.text
+    2. SNOMED description display extension (subject to userSelected)
+    3. Coding.display (subject to userSelected)
     """
-    # Check if the list is empty
-    if not codings:
+    if not concept:
         return None
 
-    # sort for SNOMED first
-    # codings.sort(key=lambda x: x.get("system") == "http://snomed.info/sct")
+    if concept.text:
+        return concept.text
 
-    codings.sort(key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
+    if not concept.coding:
+        return None
 
-    # Create the CD object
-    cd = CD(
-        code=codings[0].code,
-        codeSystemName=codings[0].system,
-        displayName=codings[0].display,
-    )
-    # Add translations for each coding
-    if len(codings) > 1:
-        cd.translation = [
-            CD(
-                code=coding.code,
-                codeSystemName=coding.system,
-                displayName=coding.display,
+    user_selected_codings = [
+        c for c in concept.coding if getattr(c, "userSelected", False)
+    ]
+
+    if user_selected_codings:
+        codings_to_check = user_selected_codings
+    elif len(concept.coding) == 1:
+        codings_to_check = concept.coding
+    else:
+        # Multiple codings, none userSelected, no text -> Cannot safely determine original term
+        return None
+
+    # First pass: check for SNOMED descriptionDisplay extension
+    for c in codings_to_check:
+        desc_display = _snomed_description_display(c)
+        if desc_display:
+            return desc_display
+
+    # Second pass: check for coding.display
+    for c in codings_to_check:
+        if getattr(c, "display", None):
+            return c.display
+
+    return None
+
+
+def convert_codeable_concept(
+    concept, *, degradation_code: Optional[CD] = None
+) -> Optional[CD]:
+    """
+    Takes a CodeableConcept and returns a CD object, safely degrading if terminology is unsupported.
+    """
+    if not concept:
+        return None
+
+    original_text = extract_original_term(concept)
+    if not original_text:
+        raise FHIRValidationError(
+            "Cannot safely determine original term from CodeableConcept"
+        )
+
+    from .models.datatypes import CODE_SYSTEM_NAMES
+
+    supported_codings = [
+        c
+        for c in (concept.coding or [])
+        if c.system in CODE_SYSTEM_NAMES and getattr(c, "code", None)
+    ]
+
+    if supported_codings:
+        supported_codings.sort(
+            key=lambda x: x.system == "http://snomed.info/sct", reverse=True
+        )
+        primary = supported_codings[0]
+
+        cd = CD(
+            code=primary.code,
+            codeSystemName=primary.system,
+            displayName=primary.display,
+            originalText=original_text,
+        )
+
+        if len(supported_codings) > 1:
+            cd.translation = [
+                CD(
+                    code=c.code,
+                    codeSystemName=c.system,
+                    displayName=c.display,
+                )
+                for c in supported_codings[1:]
+            ]
+        return cd
+    else:
+        if getattr(concept, "coding", None):
+            logging.warning(
+                f"Unsupported coding system(s) safely degraded: {[c.system for c in concept.coding]}"
             )
-            for coding in codings[1:]
-        ]
-
-    return cd
+        if degradation_code:
+            return CD(
+                code=degradation_code.code,
+                codeSystem=degradation_code.codeSystem,
+                codeSystemName=degradation_code.codeSystemName,
+                displayName=degradation_code.displayName,
+                originalText=original_text,
+            )
+        return CD(nullFlavor="OTH", originalText=original_text)
 
 
 def templateId(root: str, extension: str) -> list:
@@ -195,6 +284,80 @@ def extract_soap_request(message):
     raise ValueError("SOAP envelope not found in the message.")
 
 
+TELECOM_USE_MAP = {
+    "home": "HP",
+    "work": "WP",
+    "temp": "TMP",
+    "old": "BAD",
+    "mobile": "MC",
+}
+
+
+def contact_point_to_cda_tel(contact) -> Optional[TEL]:
+    if not contact.value:
+        return None
+
+    value = contact.value
+    system = contact.system
+
+    use = None
+
+    if system == "phone":
+        value = f"tel:{value}"
+    elif system == "fax":
+        value = f"x-text-fax:{value}"
+    elif system == "email":
+        value = f"mailto:{value}"
+    elif system == "url":
+        if value.startswith("http://") or value.startswith("https://"):
+            value = value
+        else:
+            logging.warning("Malformed URL telecom omitted")
+            return None
+    elif system == "pager":
+        value = f"tel:{value}"
+        use = "PG"
+    else:
+        logging.warning(f"Unsupported telecom system encountered and omitted: {system}")
+        return None
+
+    if not use and contact.use:
+        use = TELECOM_USE_MAP.get(contact.use)
+
+    kwargs = {"@value": value}
+    if use:
+        kwargs["@use"] = use
+
+    return TEL(**kwargs)
+
+
+ADDRESS_USE_MAP = {
+    "home": "HP",
+    "work": "WP",
+    "temp": "TMP",
+    "old": "BAD",
+    "billing": "BIL",
+}
+
+
+def address_to_cda_ad(address) -> AD:
+    kwargs = {}
+    if address.use and address.use in ADDRESS_USE_MAP:
+        kwargs["@use"] = ADDRESS_USE_MAP[address.use]
+
+    kwargs["streetAddressLine"] = list(address.line or [])
+    if address.city:
+        kwargs["city"] = address.city
+    if address.state:
+        kwargs["state"] = address.state
+    if address.postalCode:
+        kwargs["postalCode"] = address.postalCode
+    if address.country:
+        kwargs["country"] = address.country
+
+    return AD(**kwargs)
+
+
 def organization_to_author(
     organization: organization.Organization,
 ) -> AuthorParticipation:
@@ -207,23 +370,24 @@ def organization_to_author(
     """
     author = AssignedAuthor(
         id=[
-            {"@root": ident.system, "@extension": ident.value}
+            II(**{"@root": ident.system, "@extension": ident.value})
             for ident in organization.identifier
         ],
     )
     if organization.name:
-        author.representedOrganization = {"name": organization.name}
+        author.representedOrganization = Organization(**{"name": [organization.name]})
 
     if organization.telecom:
-        author.telecom = [
-            {
-                "@use": telecom.use,
-                "@value": telecom.value,
-            }
-            for telecom in organization.telecom
-        ]
+        author.telecom = []
+        for telecom in organization.telecom:
+            tel = contact_point_to_cda_tel(telecom)
+            if tel:
+                author.telecom.append(tel)
+
     if organization.address:
-        author.address = [addr.as_json() for addr in organization.address]
+        author.address = []
+        for addr in organization.address:
+            author.address.append(address_to_cda_ad(addr))
 
     org = AuthorParticipation(assignedAuthor=author)
 

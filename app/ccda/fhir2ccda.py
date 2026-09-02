@@ -12,7 +12,12 @@ from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
 
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
-from .helpers import date_helper, templateId
+from .helpers import (
+    date_helper,
+    templateId,
+    contact_point_to_cda_tel,
+    address_to_cda_ad,
+)
 from app.gp_connect_config import get_gp_connect_inclusions
 
 
@@ -67,30 +72,47 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             official_name = name
             break
 
+    gender = getattr(subject[0], "gender", None)
+    if gender == "male":
+        admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1", "@code": "M"}
+    elif gender == "female":
+        admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1", "@code": "F"}
+    elif gender == "other":
+        admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1", "@code": "UN"}
+    else:
+        admin_gender = {"@nullFlavor": "UNK"}
+
     patient_dict = {
         "patientRole": {
-            "id": {
-                "@extension": subject[0].identifier[0].value,
-                "@root": "2.16.840.1.113883.2.1.4.1",
-            },
+            "id": [
+                {
+                    "@root": "2.16.840.1.113883.2.1.4.1",
+                    "@extension": subject[0].identifier[0].value,
+                },
+            ],
             "patient": {
                 "name": {
-                    "@use": "L",
-                    "given": {"#text": " ".join(official_name.given)},
+                    "given": [{"#text": x} for x in official_name.given],
                     "family": {"#text": official_name.family},
                 },
+                "administrativeGenderCode": admin_gender,
                 "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
             },
         }
     }
 
     if subject[0].address:
-        patient_dict["patientRole"]["addr"] = {
-            "@use": "HP",
-            "streetAddressLine": [x for x in subject[0].address[0].line],
-            "city": {"#text": subject[0].address[0].city},
-            "postalCode": {"#text": subject[0].address[0].postalCode},
-        }
+        patient_dict["patientRole"]["addr"] = address_to_cda_ad(
+            subject[0].address[0]
+        ).model_dump(by_alias=True, exclude_none=True)
+
+    if subject[0].telecom:
+        telecoms = []
+        for t in subject[0].telecom:
+            tel = contact_point_to_cda_tel(t)
+            if tel:
+                telecoms.append(tel.model_dump(by_alias=True, exclude_none=True))
+        patient_dict["patientRole"]["telecom"] = telecoms
 
     gp_organization = subject[0].managingOrganization.reference
     gp = index[gp_organization]
@@ -576,8 +598,18 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         disclaimer_text += f"All other clinical information (such as {omitted_str}) should be sought elsewhere. "
 
     disclaimer_text += (
-        f"Information added to the record in the last {caching_period} may be missing."
+        f"Information added to the record in the last {caching_period} may be missing. "
     )
+
+    # Append GP name from patient demographics
+    gp_org_ref = (
+        subject[0].managingOrganization.reference
+        if subject and subject[0].managingOrganization
+        else None
+    )
+    gp_org = index.get(gp_org_ref) if gp_org_ref else None
+    if gp_org and gp_org.name:
+        disclaimer_text += f"Registered GP: {gp_org.name}."
 
     header_components = {
         "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),

@@ -10,7 +10,8 @@ from fhirclient.models import medicationrequest, medicationstatement
 from .dmd import dmd_lookup
 from .helpers import (
     clean_number,
-    code_with_translations,
+    convert_codeable_concept,
+    FHIRValidationError,
     date_helper,
     effective_time_helper,
     organization_to_author,
@@ -22,6 +23,9 @@ from .models.base import (
     ResultObservation,
     ResultsOrganizer,
     SubstanceAdministration,
+    Precondition,
+    ReferenceRange,
+    ObservationRange,
     Act,
 )
 from .models.datatypes import (
@@ -31,14 +35,39 @@ from .models.datatypes import (
     IVL_TS,
     PIVL_TS,
     PQ,
+    PQR,
+    RTO_PQ_PQ,
     IVL_PQ,
     IVXB_PQ,
     SXCM_TS,
     IVXB_TS,
+    II,
+    CS,
 )
 
 Cell = str
 Row = List[Cell]
+
+
+FHIR_TO_CDA_RESULT_STATUS = {
+    "registered": "active",
+    "preliminary": "active",
+    "final": "completed",
+    "amended": "completed",
+    "corrected": "completed",
+    "cancelled": "cancelled",
+    "entered-in-error": "aborted",
+}
+
+
+def observation_status_to_cda(status: str) -> CS:
+    try:
+        code = FHIR_TO_CDA_RESULT_STATUS[status]
+    except KeyError as exc:
+        raise FHIRValidationError(
+            f"Unsupported Observation status: {status!r}"
+        ) from exc
+    return CS(**{"@code": code})
 
 
 # http://hl7.org/fhir/ValueSet/event-timing|4.0.1
@@ -208,7 +237,7 @@ async def medication(
                     "@root": referenced_med.id,
                 },
                 "manufacturedMaterial": {
-                    "code": code_with_translations(referenced_med.code.coding),
+                    "code": convert_codeable_concept(referenced_med.code),
                 },
             }
         },
@@ -216,45 +245,36 @@ async def medication(
     )
     # if dose quantiy is in dosage
     if entry.dosage[0].doseQuantity:
-        # assumption that all structuered dosage will be snomed
-        # substance_administration.doseQuantity = {
-        #     "value": {
-        #         "@xsi:type": "PQ",
-        #         "@nullFlavor": "OTH",
-        #         "translation": {
-        #             "@value": entry.dosage[0].doseQuantity.value,
-        #             "@code": entry.dosage[0].doseQuantity.code,
-        #             "@codeSystemName": entry.dosage[0].doseQuantity.system,
-        #             "@codeSystem": "2.16.840.1.113883.6.96",
-        #             "originalText": entry.dosage[0].doseQuantity.unit,
-        #         },
-        #     },
-        # }
         # TODO use proper PQ model instead of dict
-        substance_administration.doseQuantity = {
-            "@xsi:type": "PQ",
-            "@value": entry.dosage[0].doseQuantity.value,
-        }
+        substance_administration.doseQuantity = PQ(
+            **{"@value": entry.dosage[0].doseQuantity.value}
+        )
         if entry.dosage[0].doseQuantity.unit:
-            substance_administration.doseQuantity["@unit"] = entry.dosage[
+            substance_administration.doseQuantity.unit = entry.dosage[
                 0
             ].doseQuantity.unit
 
         # if there is a code add a translation
         if entry.dosage[0].doseQuantity.code:
-            substance_administration.doseQuantity["translation"] = {
-                "@value": entry.dosage[0].doseQuantity.value,
-                "@code": entry.dosage[0].doseQuantity.code,
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "originalText": entry.dosage[0].doseQuantity.unit,
-            }
+            substance_administration.doseQuantity.translation = [
+                PQR(
+                    **{
+                        "@value": entry.dosage[0].doseQuantity.value,
+                        "@code": entry.dosage[0].doseQuantity.code,
+                        "@codeSystem": "2.16.840.1.113883.6.96",
+                        "originalText": entry.dosage[0].doseQuantity.unit,
+                    }
+                )
+            ]
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
     # check if dosage has as needed boolean of true
 
-    if entry.dosage[0].asNeededBoolean:
+    if getattr(entry.dosage[0], "asNeededBoolean", False) or getattr(
+        entry.dosage[0], "asNeededCodeableConcept", None
+    ):
         # populate precondition
-        substance_administration.precondition = {
-            "@typeCode": "PRCN",
+        precondition_kwargs = {
+            "typeCode": "PRCN",
             "criterion": {
                 "templateId": templateId(
                     root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"
@@ -265,24 +285,19 @@ async def medication(
                 },
             },
         }
-        # if there is a asNeededCodeableConcept, use it
         if entry.dosage[0].asNeededCodeableConcept:
-            substance_administration.precondition["criterion"]["value"] = {
-                "@xsi:type": "CD",
-                "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
-                "@displayName": entry.dosage[0]
-                .asNeededCodeableConcept.coding[0]
-                .display,
-                "@codeSystemName": entry.dosage[0]
-                .asNeededCodeableConcept.coding[0]
-                .value,
-            }
+            value = convert_codeable_concept(
+                entry.dosage[0].asNeededCodeableConcept
+            ).model_dump(by_alias=True, exclude_none=True)
+            value["@xsi:type"] = "CD"
+            precondition_kwargs["criterion"]["value"] = value
         else:
-            # if no asNeededCodeableConcept, use NI
-            substance_administration.precondition["criterion"]["value"] = {
+            # PRN without a stated indication
+            precondition_kwargs["criterion"]["value"] = {
                 "@xsi:type": "CD",
                 "@nullFlavor": "NI",
             }
+        substance_administration.precondition = [Precondition(**precondition_kwargs)]
 
     if entry.dosage[0].timing:
         repeat = entry.dosage[0].timing.repeat
@@ -309,25 +324,26 @@ async def medication(
         denominator = entry.dosage[0].maxDosePerPeriod.denominator
         if numerator and denominator:
             try:
-                substance_administration.maxDoseQuantity = {
-                    "@xsi:type": "RTO_PQ_PQ",
-                    "numerator": {
-                        "@value": numerator.value,
-                        "@unit": numerator.unit,
-                    },
-                    "denominator": {
-                        "@value": denominator.value,
-                        "@unit": denominator.unit,
-                    },
-                }
+                substance_administration.maxDoseQuantity = RTO_PQ_PQ(
+                    **{
+                        "numerator": {
+                            "@value": numerator.value,
+                            "@unit": numerator.unit,
+                        },
+                        "denominator": {
+                            "@value": denominator.value,
+                            "@unit": denominator.unit,
+                        },
+                    }
+                )
             except Exception as e:
                 logging.error(f"Error processing maxDosePerPeriod: {e}")
                 pass
 
     #   check if route is in dosage
     if entry.dosage[0].method:
-        substance_administration.routeCode = code_with_translations(
-            entry.dosage[0].method.coding
+        substance_administration.routeCode = convert_codeable_concept(
+            entry.dosage[0].method
         )
 
     patient_instr_list = []
@@ -389,74 +405,84 @@ async def medication(
         for et in substance_administration.effectiveTime
         if getattr(et, "operator", None) == "high"
     ]
-    med_name = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
+    med_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code
+    med_name = getattr(med_code, "displayName", None) or getattr(
+        med_code, "originalText", ""
+    )
 
     # check if snomed code is in cache and if so add to med name
-    snomed_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
+    snomed_code = (
+        med_code.code
+        if getattr(med_code, "codeSystem", None) == "2.16.840.1.113883.6.96"
+        else None
+    )
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
     unit = (
-        substance_administration.doseQuantity.get("@unit", "").lower()
+        substance_administration.doseQuantity.unit.lower()
         if substance_administration.doseQuantity
+        and substance_administration.doseQuantity.unit
         else ""
     )
 
     if substance_administration.doseQuantity:
-        blank_unit = not substance_administration.doseQuantity.get("@unit")
+        blank_unit = not substance_administration.doseQuantity.unit
         if unit in gp_units or blank_unit:
             # we only process doses for tablets or capsules.
-
+            dmd_data = None
             try:
-                dmd_data = await dmd_lookup(int(snomed_code))
-                # only process dose if a single dosage instruction
-                if len(entry.dosage) == 1:
-                    if dmd_data.vpi and substance_administration.doseQuantity:
-                        processed_dose = (
-                            dmd_data.vpi.value
-                            * substance_administration.doseQuantity["@value"]
-                        )
+                if snomed_code:
+                    dmd_data = await dmd_lookup(int(snomed_code))
+                    # only process dose if a single dosage instruction
+                    if len(entry.dosage) == 1:
+                        if dmd_data.vpi and substance_administration.doseQuantity:
+                            processed_dose = (
+                                dmd_data.vpi.value
+                                * substance_administration.doseQuantity.value
+                            )
 
-                        # clean number to remove trailing .0 if whole number
-                        processed_dose = clean_number(processed_dose)
+                            # clean number to remove trailing .0 if whole number
+                            processed_dose = clean_number(processed_dose)
 
-                        substance_administration.doseQuantity["@value"] = processed_dose
-                        substance_administration.doseQuantity["@unit"] = (
-                            dmd_data.vpi.unit
-                        )
-                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
-                        # print(warning_text)
-                        misc_notes.append(warning_text)
+                            substance_administration.doseQuantity.value = processed_dose
+                            substance_administration.doseQuantity.unit = (
+                                dmd_data.vpi.unit
+                            )
+                            warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
+                            # print(warning_text)
+                            misc_notes.append(warning_text)
 
                 elif len(entry.dosage) > 1:
                     # multiple dosage instrutions so add warning to medication name instead of processing dose
                     warning_text = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
                     misc_notes.append(warning_text)
 
-                if substance_administration.routeCode:
-                    if substance_administration.routeCode.displayName == "Take":
-                        # take often used with capsules. replace with dmd route.
-                        if dmd_data.route:
-                            substance_administration.routeCode.displayName = (
-                                dmd_data.route.displayName
-                            )
-                            substance_administration.routeCode.code = (
-                                dmd_data.route.code
-                            )
-                            substance_administration.routeCode.codeSystem = (
-                                "2.16.840.1.113883.6.96"
-                            )
-                            # substance_administration.routeCode.codeSystem = (
-                            #     "2.16.840.1.113883.3.26.1.1"
-                            # )
-                            substance_administration.routeCode.codeSystemName = (
-                                dmd_data.route.codeSystemName
-                            )
-                            # route_translation = CD()
-                            # route_translation["@code"] = dmd_data.route.code
-                            # route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
-                            # substance_administration.routeCode.translation = (
-                            #     route_translation
-                            # )
+                if (
+                    dmd_data
+                    and substance_administration.routeCode
+                    and substance_administration.routeCode.displayName == "Take"
+                    and getattr(dmd_data, "route", None)
+                ):
+                    # take often used with capsules. replace with dmd route.
+                    substance_administration.routeCode.displayName = (
+                        dmd_data.route.displayName
+                    )
+                    substance_administration.routeCode.code = dmd_data.route.code
+                    substance_administration.routeCode.codeSystem = (
+                        "2.16.840.1.113883.6.96"
+                    )
+                    # substance_administration.routeCode.codeSystem = (
+                    #     "2.16.840.1.113883.3.26.1.1"
+                    # )
+                    substance_administration.routeCode.codeSystemName = (
+                        dmd_data.route.codeSystemName
+                    )
+                    # route_translation = CD()
+                    # route_translation["@code"] = dmd_data.route.code
+                    # route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
+                    # substance_administration.routeCode.translation = (
+                    #     route_translation
+                    # )
 
             except Exception as e:
                 logging.error(
@@ -465,12 +491,15 @@ async def medication(
                 print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
                 pass
 
-        if "- unit of product usage" in unit:
+        if (
+            substance_administration.doseQuantity.unit
+            and "- unit of product usage" in substance_administration.doseQuantity.unit
+        ):
             # strip overly verbose snomed unit description to just unit
-            substance_administration.doseQuantity["@unit"] = (
-                substance_administration.doseQuantity["@unit"]
-                .replace("- unit of product usage", "")
-                .strip()
+            substance_administration.doseQuantity.unit = (
+                substance_administration.doseQuantity.unit.replace(
+                    "- unit of product usage", ""
+                ).strip()
             )
 
     # check for prescribing agency and last issued date extensions
@@ -684,20 +713,20 @@ def problem(entry: condition.Condition) -> EntryWithRow:
     observation["effectiveTime"] = {
         "low": {"@value": date_helper(entry.assertedDate.isostring)}
     }
-    observation["value"] = {
-        "@xsi:type": "CD",
-        "@code": entry.code.coding[0].code,
-        "@displayName": entry.code.coding[0].display,
-        "@codeSystemName": "SNOMED CT",
-        "@codeSystem": "2.16.840.1.113883.6.96",
-    }
+    converted_val = convert_codeable_concept(entry.code)
+    if converted_val:
+        observation["value"] = converted_val.model_dump(
+            by_alias=True, exclude_none=True
+        )
+        observation["value"]["@xsi:type"] = "CD"
 
     prob["act"]["entryRelationship"]["observation"] = observation
 
     problem_row = [
         readable_date(prob["act"]["effectiveTime"].get("low", {}).get("@value", "")),
         prob["act"]["statusCode"].get("@code", ""),
-        observation["value"].get("@displayName", ""),
+        observation.get("value", {}).get("@displayName", "")
+        or observation.get("value", {}).get("originalText", ""),
     ]
 
     return EntryWithRow(entry=prob, row=problem_row)
@@ -746,7 +775,7 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "@classCode": "MANU",
             "playingEntity": {
                 "@classCode": "MMAT",
-                "code": code_with_translations(entry.code.coding).model_dump(
+                "code": convert_codeable_concept(entry.code).model_dump(
                     by_alias=True, exclude_none=True
                 ),
             },
@@ -754,41 +783,40 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     }
     # if there is a reaction, add manifestation as entryRelationship
     if entry.reaction and entry.reaction[0].manifestation:
-        observation["entryRelationship"] = {
-            "@typeCode": "MFST",
-            "@inversionInd": "true",
-            "observation": {
-                "@classCode": "OBS",
-                "@moodCode": "EVN",
-                "templateId": templateId(
-                    "2.16.840.1.113883.10.20.22.4.9", "2014-06-09"
-                ),
-                "id": {"@root": uuid.uuid4()},
-                "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
-                "effectiveTime": {
-                    "low": {"@value": date_helper(entry.assertedDate.isostring)}
+        manifestation_val = convert_codeable_concept(entry.reaction[0].manifestation[0])
+        if manifestation_val:
+            value_dict = manifestation_val.model_dump(by_alias=True, exclude_none=True)
+            value_dict["@xsi:type"] = "CD"
+            observation["entryRelationship"] = {
+                "@typeCode": "MFST",
+                "@inversionInd": "true",
+                "observation": {
+                    "@classCode": "OBS",
+                    "@moodCode": "EVN",
+                    "templateId": templateId(
+                        "2.16.840.1.113883.10.20.22.4.9", "2014-06-09"
+                    ),
+                    "id": {"@root": uuid.uuid4()},
+                    "code": {
+                        "@code": "ASSERTION",
+                        "@codeSystem": "2.16.840.1.113883.5.4",
+                    },
+                    "effectiveTime": {
+                        "low": {"@value": date_helper(entry.assertedDate.isostring)}
+                    },
+                    "value": value_dict,
                 },
-                "value": {
-                    "@xsi:type": "CD",
-                    "@code": entry.reaction[0].manifestation[0].coding[0].code,
-                    "@displayName": entry.reaction[0]
-                    .manifestation[0]
-                    .coding[0]
-                    .display,
-                    "@codeSystemName": "SNOMED CT",
-                    "@codeSystem": "2.16.840.1.113883.6.96",
-                },
-            },
-        }
+            }
 
     all["act"]["entryRelationship"]["observation"] = observation
 
+    allergy_code = observation["participant"]["participantRole"]["playingEntity"][
+        "code"
+    ]
     allergy_row = [
         readable_date(all["act"]["effectiveTime"].get("low", {}).get("@value", "")),
         all["act"]["statusCode"].get("@code", ""),
-        observation["participant"]["participantRole"]["playingEntity"]["code"][
-            "@displayName"
-        ],
+        allergy_code.get("@displayName") or allergy_code.get("originalText") or "",
     ]
 
     return EntryWithRow(entry=all, row=allergy_row)
@@ -799,18 +827,18 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
 
     immunization_entry = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
-        id=[{"@root": entry.id}],
-        statusCode={"@code": entry.status},
-        effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))]
-        if entry.date
-        else [],
+        id=[II(**{"@root": entry.id})],
+        statusCode=CS(**{"@code": entry.status}),
+        effectiveTime=(
+            [SXCM_TS(value=date_helper(entry.date.isostring))] if entry.date else []
+        ),
         consumable={
             "manufacturedProduct": {
                 "templateId": templateId(
                     "2.16.840.1.113883.10.20.22.4.54", "2014-06-09"
                 ),
                 "manufacturedMaterial": {
-                    "code": code_with_translations(entry.vaccineCode.coding),
+                    "code": convert_codeable_concept(entry.vaccineCode),
                     "lotNumberText": entry.lotNumber,
                 },
             }
@@ -819,7 +847,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     )
 
     if entry.route:
-        immunization_entry.route = code_with_translations(entry.route.coding)
+        immunization_entry.route = convert_codeable_concept(entry.route)
 
     # Parse additional information
     misc_notes = []
@@ -858,12 +886,14 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     if misc_notes:
         misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
         comment_activity = EntryRelationship()
-        comment_activity.act = {
-            "code": {
-                "@code": "48767-8",
-            },
-            "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
-        }
+        comment_activity.act = Act(
+            **{
+                "code": {
+                    "@code": "48767-8",
+                },
+                "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
+            }
+        )
         immunization_entry.entryRelationship.append(comment_activity)
 
     date_val = readable_date(date_helper(entry.date.isostring)) if entry.date else ""
@@ -898,11 +928,11 @@ def observation_entry(
     )
 
     if hasattr(entry, "code") and entry.code:
-        obs.code = code_with_translations(entry.code.coding)
+        obs.code = convert_codeable_concept(entry.code)
 
     # Map value if present
     if hasattr(entry, "valueCodeableConcept") and entry.valueCodeableConcept:
-        obs.value = code_with_translations(entry.valueCodeableConcept.coding)
+        obs.value = convert_codeable_concept(entry.valueCodeableConcept)
     elif hasattr(entry, "valueString") and entry.valueString:
         obs.value = {"@xsi:type": "ST", "#text": entry.valueString}
     elif hasattr(entry, "valueQuantity") and entry.valueQuantity:
@@ -1000,15 +1030,17 @@ def result(entry, index: dict) -> dict:
     # check if entry is group
     if hasattr(entry, "related") and entry.related:
         organizer = ResultsOrganizer()
-        organizer.code = code_with_translations(entry.code.coding)
-        organizer.statusCode = {"@code": entry.status}
+        organizer.code = convert_codeable_concept(entry.code)
+        organizer.statusCode = observation_status_to_cda(entry.status)
         performer = index.get(entry.performer[0].reference)
         organizer.author = organization_to_author(performer)
         organizer.id = [
-            {
-                "@root": ident.system,
-                "@extension": ident.value,
-            }
+            II(
+                **{
+                    "@root": ident.system,
+                    "@extension": ident.value,
+                }
+            )
             for ident in entry.identifier
         ]
         # effective_time = entry.issued
@@ -1018,9 +1050,9 @@ def result(entry, index: dict) -> dict:
             if related.type == "has-member":
                 related_resource = index.get(related.target.reference)
                 comp = ResultObservation(
-                    id=[{"@root": related_resource.id}],
-                    code=code_with_translations(related_resource.code.coding),
-                    status={"@code": related_resource.status},
+                    id=[II(**{"@root": related_resource.id})],
+                    code=convert_codeable_concept(related_resource.code),
+                    statusCode=observation_status_to_cda(related_resource.status),
                     # effectiveDateTime=IVL_TS(value=entry.issued.isostring),
                     value=PQ(
                         **{
@@ -1033,34 +1065,51 @@ def result(entry, index: dict) -> dict:
                     hasattr(related_resource, "interpretation")
                     and related_resource.interpretation
                 ):
-                    comp.interpretationCode = code_with_translations(
-                        related_resource.interpretation.coding
+                    comp.interpretationCode = convert_codeable_concept(
+                        related_resource.interpretation[0]
+                        if isinstance(related_resource.interpretation, list)
+                        else related_resource.interpretation
                     )
 
                 if related_resource.referenceRange:
-                    comp.referenceRange = {"observationRange": []}
+                    comp.referenceRange = []
                     for range in related_resource.referenceRange:
+                        obs_range_kwargs = {}
                         if range.text:
-                            comp.referenceRange["observationRange"].append(
-                                {"text": range.text}
-                            )
+                            obs_range_kwargs["text"] = range.text
+
+                        interval_kwargs = {}
+
+                        # Use unit from bound if available, fallback to valueQuantity unit
+                        fallback_unit = (
+                            related_resource.valueQuantity.unit
+                            if related_resource.valueQuantity
+                            else None
+                        )
+
                         if range.low:
-                            # TODO use proper model instead of dict
-                            comp.referenceRange["observationRange"].append(
-                                {
-                                    "value": {
-                                        "@xsi:type": "IVL_PQ",
-                                        "low": {
-                                            "@value": range.low.value,
-                                            "@unit": related_resource.valueQuantity.unit,
-                                        },
-                                        "high": {
-                                            "@value": range.high.value,
-                                            "@unit": related_resource.valueQuantity.unit,
-                                        },
-                                    }
+                            interval_kwargs["low"] = IVXB_PQ(
+                                **{
+                                    "@value": range.low.value,
+                                    "@unit": range.low.unit or fallback_unit,
                                 }
                             )
+
+                        if range.high:
+                            interval_kwargs["high"] = IVXB_PQ(
+                                **{
+                                    "@value": range.high.value,
+                                    "@unit": range.high.unit or fallback_unit,
+                                }
+                            )
+
+                        if interval_kwargs:
+                            obs_range_kwargs["value"] = IVL_PQ(**interval_kwargs)
+                        comp.referenceRange.append(
+                            ReferenceRange(
+                                observationRange=ObservationRange(**obs_range_kwargs)
+                            )
+                        )
                 components.append(comp)
 
         organizer.component = components
