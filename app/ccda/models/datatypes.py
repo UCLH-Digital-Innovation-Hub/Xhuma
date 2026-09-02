@@ -116,10 +116,6 @@ class CD(ANY):
         if cs and not values.get("codeSystem") and not values.get("@codeSystem"):
             values["codeSystem"] = CODE_SYSTEM_NAMES.get(cs)
 
-        # if codesystem is not in code_system_names, print an alert to console
-        if cs and not values.get("codeSystem") and not values.get("@codeSystem"):
-            print(f"Warning🚨: Code system '{cs}' not found in CODE_SYSTEM_NAMES.")
-
         code = values.get("code") or values.get("@code")
         null_flavor = values.get("nullFlavor") or values.get("@nullFlavor")
 

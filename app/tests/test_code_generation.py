@@ -98,5 +98,7 @@ def test_no_safe_original_term_raises_error():
         }
     ]
     concept = codeableconcept.CodeableConcept({"coding": codings})
-    with pytest.raises(FHIRValidationError, match="without original text"):
+    with pytest.raises(
+        FHIRValidationError, match="Cannot safely determine original term"
+    ):
         convert_codeable_concept(concept)

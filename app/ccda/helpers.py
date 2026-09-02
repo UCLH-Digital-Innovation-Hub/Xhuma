@@ -57,6 +57,21 @@ class FHIRValidationError(Exception):
     pass
 
 
+def _snomed_description_display(coding) -> Optional[str]:
+    if not getattr(coding, "extension", None):
+        return None
+    for ext in coding.extension:
+        if (
+            ext.url
+            == "https://fhir.hl7.org.uk/STU3/StructureDefinition/Extension-coding-sctdescid"
+        ):
+            if getattr(ext, "extension", None):
+                for sub_ext in ext.extension:
+                    if sub_ext.url == "descriptionDisplay":
+                        return getattr(sub_ext, "valueString", None)
+    return None
+
+
 def extract_original_term(concept) -> Optional[str]:
     """
     Extracts the original clinical term from a CodeableConcept following GP Connect 1.6.2 precedence.
@@ -64,7 +79,6 @@ def extract_original_term(concept) -> Optional[str]:
     1. CodeableConcept.text
     2. SNOMED description display extension (subject to userSelected)
     3. Coding.display (subject to userSelected)
-    4. First available coding display (if only one coding or no userSelected present)
     """
     if not concept:
         return None
@@ -75,22 +89,28 @@ def extract_original_term(concept) -> Optional[str]:
     if not concept.coding:
         return None
 
-    user_selected_codings = [c for c in concept.coding if c.userSelected]
-    codings_to_check = (
-        user_selected_codings if user_selected_codings else concept.coding
-    )
+    user_selected_codings = [
+        c for c in concept.coding if getattr(c, "userSelected", False)
+    ]
 
-    # SNOMED extension check would normally go here if modeled in fhirclient,
-    # but for now we check coding displays.
+    if user_selected_codings:
+        codings_to_check = user_selected_codings
+    elif len(concept.coding) == 1:
+        codings_to_check = concept.coding
+    else:
+        # Multiple codings, none userSelected, no text -> Cannot safely determine original term
+        return None
+
+    # First pass: check for SNOMED descriptionDisplay extension
     for c in codings_to_check:
-        if c.display:
-            return c.display
+        desc_display = _snomed_description_display(c)
+        if desc_display:
+            return desc_display
 
-    # Fallback to first available display if no userSelected has a display
-    if not user_selected_codings:
-        for c in concept.coding:
-            if c.display:
-                return c.display
+    # Second pass: check for coding.display
+    for c in codings_to_check:
+        if getattr(c, "display", None):
+            return c.display
 
     return None
 
@@ -105,26 +125,17 @@ def convert_codeable_concept(
         return None
 
     original_text = extract_original_term(concept)
-
-    if not concept.coding:
-        if original_text:
-            if degradation_code:
-                return CD(
-                    code=degradation_code.code,
-                    codeSystem=degradation_code.codeSystem,
-                    codeSystemName=degradation_code.codeSystemName,
-                    displayName=degradation_code.displayName,
-                    originalText=original_text,
-                )
-            return CD(nullFlavor="OTH", originalText=original_text)
+    if not original_text:
         raise FHIRValidationError(
-            "No coding and no original text found in CodeableConcept"
+            "Cannot safely determine original term from CodeableConcept"
         )
 
     from .models.datatypes import CODE_SYSTEM_NAMES
 
     supported_codings = [
-        c for c in concept.coding if c.system in CODE_SYSTEM_NAMES and c.code
+        c
+        for c in (concept.coding or [])
+        if c.system in CODE_SYSTEM_NAMES and getattr(c, "code", None)
     ]
 
     if supported_codings:
@@ -151,23 +162,19 @@ def convert_codeable_concept(
             ]
         return cd
     else:
-        if original_text:
+        if getattr(concept, "coding", None):
             logging.warning(
                 f"Unsupported coding system(s) safely degraded: {[c.system for c in concept.coding]}"
             )
-            if degradation_code:
-                return CD(
-                    code=degradation_code.code,
-                    codeSystem=degradation_code.codeSystem,
-                    codeSystemName=degradation_code.codeSystemName,
-                    displayName=degradation_code.displayName,
-                    originalText=original_text,
-                )
-            return CD(nullFlavor="OTH", originalText=original_text)
-        else:
-            raise FHIRValidationError(
-                f"Unsupported coding system(s) without original text: {[c.system for c in concept.coding]}"
+        if degradation_code:
+            return CD(
+                code=degradation_code.code,
+                codeSystem=degradation_code.codeSystem,
+                codeSystemName=degradation_code.codeSystemName,
+                displayName=degradation_code.displayName,
+                originalText=original_text,
             )
+        return CD(nullFlavor="OTH", originalText=original_text)
 
 
 def templateId(root: str, extension: str) -> list:
@@ -304,7 +311,7 @@ def contact_point_to_cda_tel(contact) -> Optional[TEL]:
         if value.startswith("http://") or value.startswith("https://"):
             value = value
         else:
-            logging.warning(f"Malformed URL telecom value omitted: {value}")
+            logging.warning("Malformed URL telecom omitted")
             return None
     elif system == "pager":
         value = f"tel:{value}"

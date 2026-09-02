@@ -87,7 +87,15 @@ def test_result_observation_status():
         "resourceType": "Observation",
         "id": "obs1",
         "status": "final",
-        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "123"}]},
+        "code": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "123",
+                    "display": "Test obs",
+                }
+            ]
+        },
         "valueQuantity": {"value": 1.0, "unit": "mg"},
         "issued": "2023-01-01T00:00:00Z",
     }
@@ -96,7 +104,15 @@ def test_result_observation_status():
         "resourceType": "Observation",
         "id": "org1",
         "status": "preliminary",
-        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "456"}]},
+        "code": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "456",
+                    "display": "Test org",
+                }
+            ]
+        },
         "performer": [{"reference": "Organization/1"}],
         "identifier": [{"system": "sys", "value": "val"}],
         "related": [
@@ -145,7 +161,15 @@ def test_result_reference_range():
         "resourceType": "Observation",
         "id": "org1",
         "status": "final",
-        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "456"}]},
+        "code": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "456",
+                    "display": "Test org",
+                }
+            ]
+        },
         "performer": [{"reference": "Organization/1"}],
         "identifier": [{"system": "sys", "value": "val"}],
         "related": [
@@ -157,7 +181,15 @@ def test_result_reference_range():
         "resourceType": "Observation",
         "id": "obs1",
         "status": "final",
-        "code": {"coding": [{"system": "http://snomed.info/sct", "code": "123"}]},
+        "code": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "123",
+                    "display": "Test obs",
+                }
+            ]
+        },
         "valueQuantity": {"value": 1.0, "unit": "mg"},
         "referenceRange": [
             {"low": {"value": 0.5, "unit": "mg"}, "high": {"value": 2.0, "unit": "mg"}},
