@@ -1,6 +1,5 @@
 import pytest
 import xmltodict
-import defusedxml.ElementTree as ET
 from app.ccda.fhir2ccda import convert_bundle
 import json
 
@@ -24,9 +23,9 @@ async def test_xml_serialization_no_xsi_type_any():
 
     xml = xmltodict.unparse(ccda_dict)
 
-    # Assert it parses back into valid XML
-    root = ET.fromstring(xml)
-    assert root is not None
+    # Assert it parses back into valid XML without using standard library xml.etree to avoid SAST warnings
+    parsed = xmltodict.parse(xml)
+    assert parsed is not None
 
     # Check for leaked xsi:type="ANY"
     assert 'xsi:type="ANY"' not in xml
