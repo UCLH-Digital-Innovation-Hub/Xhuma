@@ -269,7 +269,9 @@ async def medication(
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
     # check if dosage has as needed boolean of true
 
-    if getattr(entry.dosage[0], "asNeededBoolean", False) or getattr(entry.dosage[0], "asNeededCodeableConcept", None):
+    if getattr(entry.dosage[0], "asNeededBoolean", False) or getattr(
+        entry.dosage[0], "asNeededCodeableConcept", None
+    ):
         # populate precondition
         precondition_kwargs = {
             "typeCode": "PRCN",

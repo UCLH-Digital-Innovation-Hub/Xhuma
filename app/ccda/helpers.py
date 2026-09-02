@@ -76,9 +76,11 @@ def extract_original_term(concept) -> Optional[str]:
         return None
 
     user_selected_codings = [c for c in concept.coding if c.userSelected]
-    codings_to_check = user_selected_codings if user_selected_codings else concept.coding
+    codings_to_check = (
+        user_selected_codings if user_selected_codings else concept.coding
+    )
 
-    # SNOMED extension check would normally go here if modeled in fhirclient, 
+    # SNOMED extension check would normally go here if modeled in fhirclient,
     # but for now we check coding displays.
     for c in codings_to_check:
         if c.display:
@@ -121,7 +123,9 @@ def convert_codeable_concept(
 
     from .models.datatypes import CODE_SYSTEM_NAMES
 
-    supported_codings = [c for c in concept.coding if c.system in CODE_SYSTEM_NAMES and c.code]
+    supported_codings = [
+        c for c in concept.coding if c.system in CODE_SYSTEM_NAMES and c.code
+    ]
 
     if supported_codings:
         supported_codings.sort(
