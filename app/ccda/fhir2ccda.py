@@ -80,8 +80,12 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "family": {"#text": official_name.family},
                 },
                 "administrativeGenderCode": {
-                    "@code": "M" if subject[0].gender == "male" else "F" if subject[0].gender == "female" else "UN",
-                    "@codeSystem": "2.16.840.1.113883.5.1"
+                    "@code": (
+                        "M"
+                        if subject[0].gender == "male"
+                        else "F" if subject[0].gender == "female" else "UN"
+                    ),
+                    "@codeSystem": "2.16.840.1.113883.5.1",
                 },
                 "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
             },
@@ -100,8 +104,19 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         telecoms = []
         for t in subject[0].telecom:
             # simple mapping of FHIR telecom to CDA telecom format (tel: / mailto:)
-            prefix = "tel:" if t.system in ["phone", "fax", "pager"] else "mailto:" if t.system == "email" else ""
-            telecoms.append({"@value": f"{prefix}{t.value}", "@use": "HP" if t.use == "home" else "WP" if t.use == "work" else "MC"})
+            prefix = (
+                "tel:"
+                if t.system in ["phone", "fax", "pager"]
+                else "mailto:" if t.system == "email" else ""
+            )
+            telecoms.append(
+                {
+                    "@value": f"{prefix}{t.value}",
+                    "@use": (
+                        "HP" if t.use == "home" else "WP" if t.use == "work" else "MC"
+                    ),
+                }
+            )
         patient_dict["patientRole"]["telecom"] = telecoms
 
     gp_organization = subject[0].managingOrganization.reference
@@ -615,9 +630,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     ccda["ClinicalDocument"]["component"] = {}
     ccda["ClinicalDocument"]["component"]["structuredBody"] = {}
-    ccda["ClinicalDocument"]["component"]["structuredBody"]["component"] = (
-        bundle_components
-    )
+    ccda["ClinicalDocument"]["component"]["structuredBody"][
+        "component"
+    ] = bundle_components
 
     return ccda
 

@@ -189,9 +189,11 @@ async def iti_55_response(message_id, patient, query):
                 },
             },
             "queryAck": {
-                "queryId": query.get("queryId", {"@root": "unknown"})
-                if isinstance(query, dict)
-                else {"@root": "unknown"},
+                "queryId": (
+                    query.get("queryId", {"@root": "unknown"})
+                    if isinstance(query, dict)
+                    else {"@root": "unknown"}
+                ),
                 "queryResponseCode": {"@code": "OK"},
                 "statusCode": {"@code": "deliveredResponse"},
             },
@@ -440,9 +442,9 @@ async def iti_38_response(
                 "success": False,
                 "error": f"Internal error retrieving structured record for NHS number {nhsno}. error: {e}",
             }
-            body["AdhocQueryResponse"]["@status"] = (
-                "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-            )
+            body["AdhocQueryResponse"][
+                "@status"
+            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
             body["AdhocQueryResponse"]["RegistryErrorList"] = {
                 "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 "RegistryError": {
@@ -455,9 +457,9 @@ async def iti_38_response(
 
         if not r.get("success"):
             logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
-            body["AdhocQueryResponse"]["@status"] = (
-                "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-            )
+            body["AdhocQueryResponse"][
+                "@status"
+            ] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
             body["AdhocQueryResponse"]["RegistryErrorList"] = {
                 "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 "RegistryError": {

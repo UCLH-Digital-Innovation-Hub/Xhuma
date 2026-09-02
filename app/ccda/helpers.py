@@ -216,10 +216,12 @@ def organization_to_author(
 
     if organization.telecom:
         author.telecom = [
-            TEL(**{
-                "@use": telecom.use,
-                "@value": telecom.value,
-            })
+            TEL(
+                **{
+                    "@use": telecom.use,
+                    "@value": telecom.value,
+                }
+            )
             for telecom in organization.telecom
         ]
     if organization.address:

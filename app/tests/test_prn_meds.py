@@ -222,7 +222,9 @@ async def test_prn_medication_statement():
     assert "precondition" in substance_administration
     assert substance_administration["precondition"][0]["@typeCode"] == "PRCN"
     assert (
-        substance_administration["precondition"][0]["criterion"]["templateId"][0]["@root"]
+        substance_administration["precondition"][0]["criterion"]["templateId"][0][
+            "@root"
+        ]
         == "2.16.840.1.113883.10.20.22.4.25"
     )
     assert (
@@ -234,7 +236,9 @@ async def test_prn_medication_statement():
         == "ASSERTION"
     )
     assert (
-        substance_administration["precondition"][0]["criterion"]["value"]["@displayName"]
+        substance_administration["precondition"][0]["criterion"]["value"][
+            "@displayName"
+        ]
         == "As Directed"
     )
     # Check the medication details
