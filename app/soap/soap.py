@@ -365,7 +365,9 @@ async def iti38(request: Request):
         issuer_str = (
             issuer_obj.get("#text", "")
             if isinstance(issuer_obj, dict)
-            else str(issuer_obj) if issuer_obj is not None else ""
+            else str(issuer_obj)
+            if issuer_obj is not None
+            else ""
         )
 
         # Prevent log injection (CWE-117)

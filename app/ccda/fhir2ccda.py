@@ -83,7 +83,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "@code": (
                         "M"
                         if subject[0].gender == "male"
-                        else "F" if subject[0].gender == "female" else "UN"
+                        else "F"
+                        if subject[0].gender == "female"
+                        else "UN"
                     ),
                     "@codeSystem": "2.16.840.1.113883.5.1",
                 },
@@ -107,7 +109,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             prefix = (
                 "tel:"
                 if t.system in ["phone", "fax", "pager"]
-                else "mailto:" if t.system == "email" else ""
+                else "mailto:"
+                if t.system == "email"
+                else ""
             )
             telecoms.append(
                 {
@@ -630,9 +634,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     ccda["ClinicalDocument"]["component"] = {}
     ccda["ClinicalDocument"]["component"]["structuredBody"] = {}
-    ccda["ClinicalDocument"]["component"]["structuredBody"][
-        "component"
-    ] = bundle_components
+    ccda["ClinicalDocument"]["component"]["structuredBody"]["component"] = (
+        bundle_components
+    )
 
     return ccda
 

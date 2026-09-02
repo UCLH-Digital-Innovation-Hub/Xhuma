@@ -389,14 +389,10 @@ async def medication(
         for et in substance_administration.effectiveTime
         if getattr(et, "operator", None) == "high"
     ]
-    med_name = (
-        substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
-    )
+    med_name = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
 
     # check if snomed code is in cache and if so add to med name
-    snomed_code = (
-        substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
-    )
+    snomed_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
     unit = (
