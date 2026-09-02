@@ -78,6 +78,7 @@ class RedisClient:
             "max_connections": POOL_MAX_CONNECTIONS,
             "socket_timeout": SOCKET_TIMEOUT,
             "socket_connect_timeout": SOCKET_CONNECT_TIMEOUT,
+            "retry_on_timeout": True,
             "decode_responses": False,  # Keep as bytes for MIME data
             "protocol": 2,  # Use RESP2 protocol for better compatibility
         }
