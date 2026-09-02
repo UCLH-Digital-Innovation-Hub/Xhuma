@@ -118,3 +118,30 @@ def test_extract_original_term_f_multiple_codings_no_user_selected_no_text_fails
     assert extract_original_term(concept) is None
     with pytest.raises(FHIRValidationError):
         convert_codeable_concept(concept)
+
+
+def test_extract_original_term_http_snomed_ext_wins():
+    concept = codeableconcept.CodeableConcept(
+        {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "123",
+                    "display": "Coding Display",
+                    "userSelected": True,
+                    "extension": [
+                        {
+                            "url": "http://fhir.hl7.org.uk/STU3/StructureDefinition/Extension-coding-sctdescid",
+                            "extension": [
+                                {
+                                    "url": "descriptionDisplay",
+                                    "valueString": "HTTP Extension Display",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    assert extract_original_term(concept) == "HTTP Extension Display"

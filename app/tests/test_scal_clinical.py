@@ -242,3 +242,87 @@ def test_result_reference_range():
     range4 = ranges[3]["observationRange"]
     assert range4["text"] == "Normal range"
     assert "value" not in range4
+
+
+def test_problem_non_snomed_coding():
+    from app.ccda.entries import problem
+    from fhirclient.models import condition
+
+    prob_dict = {
+        "resourceType": "Condition",
+        "id": "1",
+        "clinicalStatus": "active",
+        "code": {
+            "coding": [
+                {
+                    "system": "http://read.info/readv2",
+                    "code": "1234",
+                    "display": "Read code condition",
+                }
+            ]
+        },
+        "assertedDate": "2023-01-01",
+        "subject": {"reference": "Patient/1"},
+    }
+    cond = condition.Condition(prob_dict)
+    res = problem(cond)
+    entry = res.entry
+
+    val = entry["act"]["entryRelationship"]["observation"]["value"]
+    assert val["@xsi:type"] == "CD"
+    assert val["@code"] == "1234"
+    assert val["@displayName"] == "Read code condition"
+    assert val["@codeSystemName"] == "http://read.info/readv2"
+    assert val["@codeSystem"] == "2.16.840.1.113883.2.1.6.2"
+    assert val["@codeSystem"] != "2.16.840.1.113883.6.96"  # explicitly not SNOMED OID
+
+
+def test_allergy_manifestation_non_snomed():
+    from app.ccda.entries import allergy
+    from fhirclient.models import allergyintolerance
+
+    all_dict = {
+        "resourceType": "AllergyIntolerance",
+        "id": "2",
+        "clinicalStatus": "active",
+        "code": {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "123",
+                    "display": "Allergy",
+                }
+            ]
+        },
+        "assertedDate": "2023-01-01",
+        "patient": {"reference": "Patient/1"},
+        "verificationStatus": "confirmed",
+        "reaction": [
+            {
+                "manifestation": [
+                    {
+                        "coding": [
+                            {
+                                "system": "http://read.info/readv2",
+                                "code": "5678",
+                                "display": "Read code manifestation",
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
+    }
+    alg = allergyintolerance.AllergyIntolerance(all_dict)
+    res = allergy(alg)
+    entry = res.entry
+
+    mfst = entry["act"]["entryRelationship"]["observation"]["entryRelationship"][
+        "observation"
+    ]["value"]
+    assert mfst["@xsi:type"] == "CD"
+    assert mfst["@code"] == "5678"
+    assert mfst["@displayName"] == "Read code manifestation"
+    assert mfst["@codeSystemName"] == "http://read.info/readv2"
+    assert mfst["@codeSystem"] == "2.16.840.1.113883.2.1.6.2"
+    assert mfst["@codeSystem"] != "2.16.840.1.113883.6.96"  # explicitly not SNOMED OID

@@ -61,9 +61,9 @@ def _snomed_description_display(coding) -> Optional[str]:
     if not getattr(coding, "extension", None):
         return None
     for ext in coding.extension:
-        if (
-            ext.url
-            == "https://fhir.hl7.org.uk/STU3/StructureDefinition/Extension-coding-sctdescid"
+        if ext.url in (
+            "https://fhir.hl7.org.uk/STU3/StructureDefinition/Extension-coding-sctdescid",
+            "http://fhir.hl7.org.uk/STU3/StructureDefinition/Extension-coding-sctdescid",
         ):
             if getattr(ext, "extension", None):
                 for sub_ext in ext.extension:

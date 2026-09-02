@@ -702,20 +702,20 @@ def problem(entry: condition.Condition) -> EntryWithRow:
     observation["effectiveTime"] = {
         "low": {"@value": date_helper(entry.assertedDate.isostring)}
     }
-    observation["value"] = {
-        "@xsi:type": "CD",
-        "@code": entry.code.coding[0].code,
-        "@displayName": entry.code.coding[0].display,
-        "@codeSystemName": "SNOMED CT",
-        "@codeSystem": "2.16.840.1.113883.6.96",
-    }
+    converted_val = convert_codeable_concept(entry.code)
+    if converted_val:
+        observation["value"] = converted_val.model_dump(
+            by_alias=True, exclude_none=True
+        )
+        observation["value"]["@xsi:type"] = "CD"
 
     prob["act"]["entryRelationship"]["observation"] = observation
 
     problem_row = [
         readable_date(prob["act"]["effectiveTime"].get("low", {}).get("@value", "")),
         prob["act"]["statusCode"].get("@code", ""),
-        observation["value"].get("@displayName", ""),
+        observation.get("value", {}).get("@displayName", "")
+        or observation.get("value", {}).get("originalText", ""),
     ]
 
     return EntryWithRow(entry=prob, row=problem_row)
@@ -772,32 +772,30 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
     }
     # if there is a reaction, add manifestation as entryRelationship
     if entry.reaction and entry.reaction[0].manifestation:
-        observation["entryRelationship"] = {
-            "@typeCode": "MFST",
-            "@inversionInd": "true",
-            "observation": {
-                "@classCode": "OBS",
-                "@moodCode": "EVN",
-                "templateId": templateId(
-                    "2.16.840.1.113883.10.20.22.4.9", "2014-06-09"
-                ),
-                "id": {"@root": uuid.uuid4()},
-                "code": {"@code": "ASSERTION", "@codeSystem": "2.16.840.1.113883.5.4"},
-                "effectiveTime": {
-                    "low": {"@value": date_helper(entry.assertedDate.isostring)}
+        manifestation_val = convert_codeable_concept(entry.reaction[0].manifestation[0])
+        if manifestation_val:
+            value_dict = manifestation_val.model_dump(by_alias=True, exclude_none=True)
+            value_dict["@xsi:type"] = "CD"
+            observation["entryRelationship"] = {
+                "@typeCode": "MFST",
+                "@inversionInd": "true",
+                "observation": {
+                    "@classCode": "OBS",
+                    "@moodCode": "EVN",
+                    "templateId": templateId(
+                        "2.16.840.1.113883.10.20.22.4.9", "2014-06-09"
+                    ),
+                    "id": {"@root": uuid.uuid4()},
+                    "code": {
+                        "@code": "ASSERTION",
+                        "@codeSystem": "2.16.840.1.113883.5.4",
+                    },
+                    "effectiveTime": {
+                        "low": {"@value": date_helper(entry.assertedDate.isostring)}
+                    },
+                    "value": value_dict,
                 },
-                "value": {
-                    "@xsi:type": "CD",
-                    "@code": entry.reaction[0].manifestation[0].coding[0].code,
-                    "@displayName": entry.reaction[0]
-                    .manifestation[0]
-                    .coding[0]
-                    .display,
-                    "@codeSystemName": "SNOMED CT",
-                    "@codeSystem": "2.16.840.1.113883.6.96",
-                },
-            },
-        }
+            }
 
     all["act"]["entryRelationship"]["observation"] = observation
 
