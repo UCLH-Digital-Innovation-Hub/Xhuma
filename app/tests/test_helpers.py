@@ -104,5 +104,22 @@ class TestEffectiveTimeHelper(TestCase):
         self.assertEqual(result[0].value, expected_start.value)
 
 
+def test_malformed_telecom_url_logging(caplog):
+    import logging
+    from app.ccda.helpers import contact_point_to_cda_tel
+    from fhirclient.models.contactpoint import ContactPoint
+
+    # A malformed URL with a highly distinctive PHI-like value (doesn't start with http/https)
+    cp = ContactPoint(
+        {"system": "url", "value": "invalid://example.com/patient/SECRET_PHI_123"}
+    )
+
+    with caplog.at_level(logging.WARNING):
+        contact_point_to_cda_tel(cp)
+
+    assert "Malformed URL telecom omitted" in caplog.text
+    assert "SECRET_PHI_123" not in caplog.text
+
+
 if __name__ == "__main__":
     unittest.main()

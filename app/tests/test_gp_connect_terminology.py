@@ -145,3 +145,30 @@ def test_extract_original_term_http_snomed_ext_wins():
         }
     )
     assert extract_original_term(concept) == "HTTP Extension Display"
+
+
+def test_extract_original_term_nhs_snomed_ext_wins():
+    concept = codeableconcept.CodeableConcept(
+        {
+            "coding": [
+                {
+                    "system": "http://snomed.info/sct",
+                    "code": "123",
+                    "display": "Coding Display",
+                    "userSelected": True,
+                    "extension": [
+                        {
+                            "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-coding-sctdescid",
+                            "extension": [
+                                {
+                                    "url": "descriptionDisplay",
+                                    "valueString": "NHS Extension Display",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    assert extract_original_term(concept) == "NHS Extension Display"

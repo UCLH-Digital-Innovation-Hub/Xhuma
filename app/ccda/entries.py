@@ -405,10 +405,17 @@ async def medication(
         for et in substance_administration.effectiveTime
         if getattr(et, "operator", None) == "high"
     ]
-    med_name = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
+    med_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code
+    med_name = getattr(med_code, "displayName", None) or getattr(
+        med_code, "originalText", ""
+    )
 
     # check if snomed code is in cache and if so add to med name
-    snomed_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
+    snomed_code = (
+        med_code.code
+        if getattr(med_code, "codeSystem", None) == "2.16.840.1.113883.6.96"
+        else None
+    )
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
     unit = (
@@ -424,23 +431,26 @@ async def medication(
             # we only process doses for tablets or capsules.
 
             try:
-                dmd_data = await dmd_lookup(int(snomed_code))
-                # only process dose if a single dosage instruction
-                if len(entry.dosage) == 1:
-                    if dmd_data.vpi and substance_administration.doseQuantity:
-                        processed_dose = (
-                            dmd_data.vpi.value
-                            * substance_administration.doseQuantity.value
-                        )
+                if snomed_code:
+                    dmd_data = await dmd_lookup(int(snomed_code))
+                    # only process dose if a single dosage instruction
+                    if len(entry.dosage) == 1:
+                        if dmd_data.vpi and substance_administration.doseQuantity:
+                            processed_dose = (
+                                dmd_data.vpi.value
+                                * substance_administration.doseQuantity.value
+                            )
 
-                        # clean number to remove trailing .0 if whole number
-                        processed_dose = clean_number(processed_dose)
+                            # clean number to remove trailing .0 if whole number
+                            processed_dose = clean_number(processed_dose)
 
-                        substance_administration.doseQuantity.value = processed_dose
-                        substance_administration.doseQuantity.unit = dmd_data.vpi.unit
-                        warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
-                        # print(warning_text)
-                        misc_notes.append(warning_text)
+                            substance_administration.doseQuantity.value = processed_dose
+                            substance_administration.doseQuantity.unit = (
+                                dmd_data.vpi.unit
+                            )
+                            warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
+                            # print(warning_text)
+                            misc_notes.append(warning_text)
 
                 elif len(entry.dosage) > 1:
                     # multiple dosage instrutions so add warning to medication name instead of processing dose
@@ -799,12 +809,13 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
 
     all["act"]["entryRelationship"]["observation"] = observation
 
+    allergy_code = observation["participant"]["participantRole"]["playingEntity"][
+        "code"
+    ]
     allergy_row = [
         readable_date(all["act"]["effectiveTime"].get("low", {}).get("@value", "")),
         all["act"]["statusCode"].get("@code", ""),
-        observation["participant"]["participantRole"]["playingEntity"]["code"][
-            "@displayName"
-        ],
+        allergy_code.get("@displayName") or allergy_code.get("originalText") or "",
     ]
 
     return EntryWithRow(entry=all, row=allergy_row)

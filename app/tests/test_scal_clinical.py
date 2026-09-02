@@ -326,3 +326,104 @@ def test_allergy_manifestation_non_snomed():
     assert mfst["@codeSystemName"] == "http://read.info/readv2"
     assert mfst["@codeSystem"] == "2.16.840.1.113883.2.1.6.2"
     assert mfst["@codeSystem"] != "2.16.840.1.113883.6.96"  # explicitly not SNOMED OID
+
+
+def test_allergy_degradation_narrative_row():
+    from app.ccda.entries import allergy
+    from fhirclient.models import allergyintolerance
+
+    all_dict = {
+        "resourceType": "AllergyIntolerance",
+        "id": "3",
+        "clinicalStatus": "active",
+        "code": {
+            "text": "Unsupported Text Allergy",
+            "coding": [{"system": "http://unknown.system", "code": "999"}],
+        },
+        "assertedDate": "2023-01-01",
+        "patient": {"reference": "Patient/1"},
+        "verificationStatus": "confirmed",
+    }
+    alg = allergyintolerance.AllergyIntolerance(all_dict)
+    res = allergy(alg)
+    entry = res.entry
+    row = res.row
+
+    allergy_code = entry["act"]["entryRelationship"]["observation"]["participant"][
+        "participantRole"
+    ]["playingEntity"]["code"]
+
+    # Assert safe degradation
+    assert allergy_code["@nullFlavor"] == "OTH"
+    assert allergy_code["originalText"] == "Unsupported Text Allergy"
+    assert "@displayName" not in allergy_code
+
+    # Assert row generation preserved the text
+    assert row[2] == "Unsupported Text Allergy"
+
+
+@pytest.mark.asyncio
+async def test_medication_non_snomed_no_dmd(monkeypatch):
+    from app.ccda.entries import medication
+    from fhirclient.models.medicationstatement import MedicationStatement
+    from fhirclient.models.medicationrequest import MedicationRequest
+    from fhirclient.models.medication import Medication
+
+    # Mock dmd_lookup to fail the test if it's called
+    async def mock_dmd_lookup(*args, **kwargs):
+        pytest.fail(
+            "dmd_lookup was called but should have been skipped for non-SNOMED code"
+        )
+
+    monkeypatch.setattr("app.ccda.entries.dmd_lookup", mock_dmd_lookup)
+
+    med_statement_dict = {
+        "resourceType": "MedicationStatement",
+        "id": "medst-1",
+        "status": "active",
+        "medicationReference": {"reference": "Medication/med-1"},
+        "basedOn": [{"reference": "MedicationRequest/medreq-1"}],
+        "identifier": [{"system": "sys", "value": "val"}],
+        "effectivePeriod": {"start": "2023-01-01"},
+        "subject": {"reference": "Patient/1"},
+        "taken": "y",
+        "dosage": [
+            {
+                "doseQuantity": {"value": 1.0, "unit": "tablet"},
+                "timing": {"repeat": {"frequency": 1, "period": 1, "periodUnit": "d"}},
+            }
+        ],
+    }
+
+    med_dict = {
+        "resourceType": "Medication",
+        "id": "med-1",
+        "code": {
+            "coding": [
+                {
+                    "system": "http://read.info/readv2",
+                    "code": "1234",
+                    "display": "Non-SNOMED Med",
+                }
+            ]
+        },
+    }
+
+    req_dict = {
+        "resourceType": "MedicationRequest",
+        "id": "medreq-1",
+        "status": "active",
+        "intent": "order",
+        "subject": {"reference": "Patient/1"},
+        "medicationReference": {"reference": "Medication/med-1"},
+    }
+
+    index = {
+        "Medication/med-1": Medication(med_dict),
+        "MedicationRequest/medreq-1": MedicationRequest(req_dict),
+    }
+
+    entry_with_row = await medication(MedicationStatement(med_statement_dict), index)
+
+    # Verify row text degradation fallback (displayName -> originalText -> "")
+    assert entry_with_row.row[4] == "Non-SNOMED Med"
