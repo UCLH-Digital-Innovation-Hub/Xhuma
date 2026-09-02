@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from typing import List, Optional
 from xml.etree import ElementTree
@@ -51,43 +52,90 @@ def generate_code(coding: coding.Coding) -> dict:
 
     return code
 
+class FHIRValidationError(Exception):
+    pass
 
-def code_with_translations(codings: List[coding.Coding]) -> CD:
+
+def extract_original_term(concept) -> Optional[str]:
     """
-    Takes a list of coding objects and returns a CD object with translations
-    Args:
-        codings: List of fhir coding objects
-    Returns:
-        CD object with translations if more than one coding is provided
+    Extracts the original clinical term from a CodeableConcept.
+    Priority:
+    1. CodeableConcept.text
+    2. Coding.display (if available)
     """
-    # Check if the list is empty
-    if not codings:
+    if not concept:
+        return None
+    if concept.text:
+        return concept.text
+    if concept.coding:
+        for c in concept.coding:
+            if c.display:
+                return c.display
+    return None
+
+
+def convert_codeable_concept(concept, *, degradation_code: Optional[CD] = None) -> Optional[CD]:
+    """
+    Takes a CodeableConcept and returns a CD object, safely degrading if terminology is unsupported.
+    """
+    if not concept:
         return None
 
-    # sort for SNOMED first
-    # codings.sort(key=lambda x: x.get("system") == "http://snomed.info/sct")
+    original_text = extract_original_term(concept)
 
-    codings.sort(key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
+    if not concept.coding:
+        if original_text:
+            if degradation_code:
+                return CD(
+                    code=degradation_code.code,
+                    codeSystem=degradation_code.codeSystem,
+                    codeSystemName=degradation_code.codeSystemName,
+                    displayName=degradation_code.displayName,
+                    originalText=original_text
+                )
+            return CD(nullFlavor="OTH", originalText=original_text)
+        raise FHIRValidationError("No coding and no original text found in CodeableConcept")
 
-    # Create the CD object
-    cd = CD(
-        code=codings[0].code,
-        codeSystemName=codings[0].system,
-        displayName=codings[0].display,
-    )
-    # Add translations for each coding
-    if len(codings) > 1:
-        cd.translation = [
-            CD(
-                code=coding.code,
-                codeSystemName=coding.system,
-                displayName=coding.display,
+    from .models.datatypes import CODE_SYSTEM_NAMES
+    supported_codings = [c for c in concept.coding if c.system in CODE_SYSTEM_NAMES]
+
+    if supported_codings:
+        supported_codings.sort(key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
+        primary = supported_codings[0]
+
+        cd = CD(
+            code=primary.code,
+            codeSystemName=primary.system,
+            displayName=primary.display,
+            originalText=original_text,
+        )
+
+        if len(supported_codings) > 1:
+            cd.translation = [
+                CD(
+                    code=c.code,
+                    codeSystemName=c.system,
+                    displayName=c.display,
+                )
+                for c in supported_codings[1:]
+            ]
+        return cd
+    else:
+        if original_text:
+            logging.warning(f"Unsupported coding system(s) safely degraded: {[c.system for c in concept.coding]}")
+            if degradation_code:
+                return CD(
+                    code=degradation_code.code,
+                    codeSystem=degradation_code.codeSystem,
+                    codeSystemName=degradation_code.codeSystemName,
+                    displayName=degradation_code.displayName,
+                    originalText=original_text
+                )
+            return CD(nullFlavor="OTH", originalText=original_text)
+        else:
+            raise FHIRValidationError(
+                f"Unsupported coding system(s) without original text: {[c.system for c in concept.coding]}"
             )
-            for coding in codings[1:]
-        ]
-
-    return cd
-
 
 def templateId(root: str, extension: str) -> list:
     """
@@ -211,16 +259,25 @@ def contact_point_to_cda_tel(contact) -> Optional[TEL]:
     value = contact.value
     system = contact.system
 
+    use = None
+
     if system == "phone":
         value = f"tel:{value}"
     elif system == "fax":
         value = f"x-text-fax:{value}"
     elif system == "email":
         value = f"mailto:{value}"
+    elif system == "url":
+        value = f"http:{value}"
     elif system == "pager":
         value = f"tel:{value}"
+        use = "PG"
+    else:
+        logging.warning(f"Unsupported telecom system encountered and omitted: {system}")
+        return None
 
-    use = TELECOM_USE_MAP.get(contact.use) if contact.use else None
+    if not use and contact.use:
+        use = TELECOM_USE_MAP.get(contact.use)
 
     kwargs = {"@value": value}
     if use:

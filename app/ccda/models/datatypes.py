@@ -13,8 +13,14 @@ from pydantic import BaseModel, Field, model_validator
 
 class ANY(BaseModel):
     resource_type: ClassVar[str] = "ANY"
-    xsi_type: Optional[str] = Field(default="ANY", alias="@xsi:type")
+    xsi_type: Optional[str] = Field(default=None, alias="@xsi:type")
     nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)  # enumeration
+
+
+class ST(ANY):
+    resource_type: ClassVar[str] = "ST"
+    xsi_type: Optional[str] = Field(default="ST", alias="@xsi:type")
+    text: Optional[str] = Field(alias="#text", default=None)
 
 
 class BIN(ANY):
@@ -101,6 +107,8 @@ class CD(ANY):
 
     @model_validator(mode="before")
     def validate_cd(cls, values):
+        if not isinstance(values, dict):
+            return values
         cs = values.get("codeSystemName")
         if cs and not values.get("codeSystem") and not values.get("@codeSystem"):
             values["codeSystem"] = CODE_SYSTEM_NAMES.get(cs)
@@ -127,7 +135,7 @@ CD.model_rebuild()
 
 class CE(CD):
     resource_type: ClassVar[str] = "CE"
-    xsi_type: Optional[str] = Field(default="CE", alias="@xsi:type")
+    xsi_type: Optional[str] = Field(default=None, alias="@xsi:type")
 
 
 class CV(CE):

@@ -109,3 +109,42 @@ def test_ivl_pq_serialization():
     assert "resource_type" not in dumped["low"]
     assert dumped["low"]["@xsi:type"] == "IVXB_PQ"
     assert dumped["low"]["@value"] == 1.0
+
+
+def test_no_xsi_type_inheritance():
+    from app.ccda.models.datatypes import II, TEL, CS, AD
+    
+    ii = II(**{"@root": "1.2.3"})
+    assert "@xsi:type" not in ii.model_dump(by_alias=True, exclude_none=True)
+    
+    tel = TEL(**{"@value": "tel:123"})
+    assert "@xsi:type" not in tel.model_dump(by_alias=True, exclude_none=True)
+    
+    cs = CS(**{"@code": "xyz"})
+    assert "@xsi:type" not in cs.model_dump(by_alias=True, exclude_none=True)
+    
+    ad = AD(**{"city": "London"})
+    assert "@xsi:type" not in ad.model_dump(by_alias=True, exclude_none=True)
+
+def test_recursive_no_any_xsi_type():
+    from app.ccda.models.base import Observation
+    from app.ccda.models.datatypes import ANY, CD, ST, PQ
+    
+    obs = Observation(
+        code=CD(code="123", codeSystem="1.2.3"),
+        value=ST(text="Some text")
+    )
+    dumped = obs.model_dump(by_alias=True, exclude_none=True)
+    
+    def walk(obj):
+        if isinstance(obj, dict):
+            assert obj.get("@xsi:type") != "ANY", "Accidental ANY xsi:type leaked"
+            assert "resource_type" not in obj, "Accidental resource_type leaked"
+            for k, v in obj.items():
+                walk(v)
+        elif isinstance(obj, list):
+            for i in obj:
+                walk(i)
+                
+    walk(dumped)
+

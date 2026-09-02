@@ -19,6 +19,7 @@ from .datatypes import (
     IVL_TS,
     PIVL_TS,
     PQ,
+    ST,
     SXCM_TS,
     RTO_PQ_PQ,
 )
@@ -77,7 +78,7 @@ class Observation(BaseModel):
     text: Optional[str] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
-    value: Optional[ANY] = None
+    value: Optional[Union[CD, ST, PQ]] = None
     entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
 
 
@@ -147,7 +148,7 @@ class Criterion(BaseModel):
     moodCode: str = Field(alias="@moodCode", default="EVN")
     templateId: Optional[List[II]] = None
     code: Optional[CD] = None
-    value: Optional[Union[CD, ANY]] = None
+    value: Optional[CD] = None
 
 
 class Precondition(BaseModel):

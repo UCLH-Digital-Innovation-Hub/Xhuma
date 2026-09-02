@@ -10,7 +10,8 @@ from fhirclient.models import medicationrequest, medicationstatement
 from .dmd import dmd_lookup
 from .helpers import (
     clean_number,
-    code_with_translations,
+    convert_codeable_concept,
+    FHIRValidationError,
     date_helper,
     effective_time_helper,
     organization_to_author,
@@ -46,10 +47,6 @@ from .models.datatypes import (
 
 Cell = str
 Row = List[Cell]
-
-
-class FHIRValidationError(Exception):
-    pass
 
 
 FHIR_TO_CDA_RESULT_STATUS = {
@@ -240,7 +237,7 @@ async def medication(
                     "@root": referenced_med.id,
                 },
                 "manufacturedMaterial": {
-                    "code": code_with_translations(referenced_med.code.coding),
+                    "code": convert_codeable_concept(referenced_med.code),
                 },
             }
         },
@@ -287,8 +284,8 @@ async def medication(
             },
         }
         if entry.dosage[0].asNeededCodeableConcept:
-            value = code_with_translations(
-                list(entry.dosage[0].asNeededCodeableConcept.coding)
+            value = convert_codeable_concept(
+                list(entry.dosage[0].asNeededCodeableConcept)
             ).model_dump(by_alias=True, exclude_none=True)
             value["@xsi:type"] = "CD"
             precondition_kwargs["criterion"]["value"] = value
@@ -343,8 +340,8 @@ async def medication(
 
     #   check if route is in dosage
     if entry.dosage[0].method:
-        substance_administration.routeCode = code_with_translations(
-            entry.dosage[0].method.coding
+        substance_administration.routeCode = convert_codeable_concept(
+            entry.dosage[0].method
         )
 
     patient_instr_list = []
@@ -765,7 +762,7 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
             "@classCode": "MANU",
             "playingEntity": {
                 "@classCode": "MMAT",
-                "code": code_with_translations(entry.code.coding).model_dump(
+                "code": convert_codeable_concept(entry.code).model_dump(
                     by_alias=True, exclude_none=True
                 ),
             },
@@ -829,7 +826,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
                     "2.16.840.1.113883.10.20.22.4.54", "2014-06-09"
                 ),
                 "manufacturedMaterial": {
-                    "code": code_with_translations(entry.vaccineCode.coding),
+                    "code": convert_codeable_concept(entry.vaccineCode),
                     "lotNumberText": entry.lotNumber,
                 },
             }
@@ -838,7 +835,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     )
 
     if entry.route:
-        immunization_entry.route = code_with_translations(entry.route.coding)
+        immunization_entry.route = convert_codeable_concept(entry.route)
 
     # Parse additional information
     misc_notes = []
@@ -919,11 +916,11 @@ def observation_entry(
     )
 
     if hasattr(entry, "code") and entry.code:
-        obs.code = code_with_translations(entry.code.coding)
+        obs.code = convert_codeable_concept(entry.code)
 
     # Map value if present
     if hasattr(entry, "valueCodeableConcept") and entry.valueCodeableConcept:
-        obs.value = code_with_translations(entry.valueCodeableConcept.coding)
+        obs.value = convert_codeable_concept(entry.valueCodeableConcept)
     elif hasattr(entry, "valueString") and entry.valueString:
         obs.value = {"@xsi:type": "ST", "#text": entry.valueString}
     elif hasattr(entry, "valueQuantity") and entry.valueQuantity:
@@ -1021,7 +1018,7 @@ def result(entry, index: dict) -> dict:
     # check if entry is group
     if hasattr(entry, "related") and entry.related:
         organizer = ResultsOrganizer()
-        organizer.code = code_with_translations(entry.code.coding)
+        organizer.code = convert_codeable_concept(entry.code)
         organizer.statusCode = observation_status_to_cda(entry.status)
         performer = index.get(entry.performer[0].reference)
         organizer.author = organization_to_author(performer)
@@ -1042,7 +1039,7 @@ def result(entry, index: dict) -> dict:
                 related_resource = index.get(related.target.reference)
                 comp = ResultObservation(
                     id=[II(**{"@root": related_resource.id})],
-                    code=code_with_translations(related_resource.code.coding),
+                    code=convert_codeable_concept(related_resource.code),
                     statusCode=observation_status_to_cda(related_resource.status),
                     # effectiveDateTime=IVL_TS(value=entry.issued.isostring),
                     value=PQ(
@@ -1056,8 +1053,8 @@ def result(entry, index: dict) -> dict:
                     hasattr(related_resource, "interpretation")
                     and related_resource.interpretation
                 ):
-                    comp.interpretationCode = code_with_translations(
-                        related_resource.interpretation.coding
+                    comp.interpretationCode = convert_codeable_concept(
+                        related_resource.interpretation[0] if isinstance(related_resource.interpretation, list) else related_resource.interpretation
                     )
 
                 if related_resource.referenceRange:
