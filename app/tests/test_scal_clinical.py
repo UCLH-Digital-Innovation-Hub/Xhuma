@@ -391,6 +391,15 @@ async def test_medication_non_snomed_no_dmd(monkeypatch):
             {
                 "doseQuantity": {"value": 1.0, "unit": "tablet"},
                 "timing": {"repeat": {"frequency": 1, "period": 1, "periodUnit": "d"}},
+                "method": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "123",
+                            "display": "Take",
+                        }
+                    ]
+                },
             }
         ],
     }
@@ -427,3 +436,17 @@ async def test_medication_non_snomed_no_dmd(monkeypatch):
 
     # Verify row text degradation fallback (displayName -> originalText -> "")
     assert entry_with_row.row[4] == "Non-SNOMED Med"
+
+    # Verify the source medication code was preserved and not overridden by dm+d
+    manufactured_material = entry_with_row.entry["substanceAdministration"][
+        "consumable"
+    ]["manufacturedProduct"]["manufacturedMaterial"]
+    assert manufactured_material["code"]["@code"] == "1234"
+    assert (
+        manufactured_material["code"]["@codeSystem"] == "2.16.840.1.113883.2.1.6.2"
+    )  # Read V2 OID
+
+    # Verify that the route was not silently substituted
+    route_code = entry_with_row.entry["substanceAdministration"]["routeCode"]
+    assert route_code["@code"] == "123"
+    assert route_code["@displayName"] == "Take"

@@ -429,7 +429,7 @@ async def medication(
         blank_unit = not substance_administration.doseQuantity.unit
         if unit in gp_units or blank_unit:
             # we only process doses for tablets or capsules.
-
+            dmd_data = None
             try:
                 if snomed_code:
                     dmd_data = await dmd_lookup(int(snomed_code))
@@ -457,31 +457,32 @@ async def medication(
                     warning_text = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
                     misc_notes.append(warning_text)
 
-                if substance_administration.routeCode:
-                    if substance_administration.routeCode.displayName == "Take":
-                        # take often used with capsules. replace with dmd route.
-                        if dmd_data.route:
-                            substance_administration.routeCode.displayName = (
-                                dmd_data.route.displayName
-                            )
-                            substance_administration.routeCode.code = (
-                                dmd_data.route.code
-                            )
-                            substance_administration.routeCode.codeSystem = (
-                                "2.16.840.1.113883.6.96"
-                            )
-                            # substance_administration.routeCode.codeSystem = (
-                            #     "2.16.840.1.113883.3.26.1.1"
-                            # )
-                            substance_administration.routeCode.codeSystemName = (
-                                dmd_data.route.codeSystemName
-                            )
-                            # route_translation = CD()
-                            # route_translation["@code"] = dmd_data.route.code
-                            # route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
-                            # substance_administration.routeCode.translation = (
-                            #     route_translation
-                            # )
+                if (
+                    dmd_data
+                    and substance_administration.routeCode
+                    and substance_administration.routeCode.displayName == "Take"
+                    and getattr(dmd_data, "route", None)
+                ):
+                    # take often used with capsules. replace with dmd route.
+                    substance_administration.routeCode.displayName = (
+                        dmd_data.route.displayName
+                    )
+                    substance_administration.routeCode.code = dmd_data.route.code
+                    substance_administration.routeCode.codeSystem = (
+                        "2.16.840.1.113883.6.96"
+                    )
+                    # substance_administration.routeCode.codeSystem = (
+                    #     "2.16.840.1.113883.3.26.1.1"
+                    # )
+                    substance_administration.routeCode.codeSystemName = (
+                        dmd_data.route.codeSystemName
+                    )
+                    # route_translation = CD()
+                    # route_translation["@code"] = dmd_data.route.code
+                    # route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
+                    # substance_administration.routeCode.translation = (
+                    #     route_translation
+                    # )
 
             except Exception as e:
                 logging.error(
