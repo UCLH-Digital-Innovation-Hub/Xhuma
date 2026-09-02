@@ -1054,7 +1054,9 @@ def result(entry, index: dict) -> dict:
                     and related_resource.interpretation
                 ):
                     comp.interpretationCode = convert_codeable_concept(
-                        related_resource.interpretation[0] if isinstance(related_resource.interpretation, list) else related_resource.interpretation
+                        related_resource.interpretation[0]
+                        if isinstance(related_resource.interpretation, list)
+                        else related_resource.interpretation
                     )
 
                 if related_resource.referenceRange:

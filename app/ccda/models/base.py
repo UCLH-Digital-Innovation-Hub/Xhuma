@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from .admin import AuthorParticipation
 from .datatypes import (
-    ANY,
     CD,
     CE,
     CS,

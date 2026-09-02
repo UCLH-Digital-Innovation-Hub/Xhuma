@@ -52,6 +52,7 @@ def generate_code(coding: coding.Coding) -> dict:
 
     return code
 
+
 class FHIRValidationError(Exception):
     pass
 
@@ -74,7 +75,9 @@ def extract_original_term(concept) -> Optional[str]:
     return None
 
 
-def convert_codeable_concept(concept, *, degradation_code: Optional[CD] = None) -> Optional[CD]:
+def convert_codeable_concept(
+    concept, *, degradation_code: Optional[CD] = None
+) -> Optional[CD]:
     """
     Takes a CodeableConcept and returns a CD object, safely degrading if terminology is unsupported.
     """
@@ -91,16 +94,21 @@ def convert_codeable_concept(concept, *, degradation_code: Optional[CD] = None) 
                     codeSystem=degradation_code.codeSystem,
                     codeSystemName=degradation_code.codeSystemName,
                     displayName=degradation_code.displayName,
-                    originalText=original_text
+                    originalText=original_text,
                 )
             return CD(nullFlavor="OTH", originalText=original_text)
-        raise FHIRValidationError("No coding and no original text found in CodeableConcept")
+        raise FHIRValidationError(
+            "No coding and no original text found in CodeableConcept"
+        )
 
     from .models.datatypes import CODE_SYSTEM_NAMES
+
     supported_codings = [c for c in concept.coding if c.system in CODE_SYSTEM_NAMES]
 
     if supported_codings:
-        supported_codings.sort(key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
+        supported_codings.sort(
+            key=lambda x: x.system == "http://snomed.info/sct", reverse=True
+        )
         primary = supported_codings[0]
 
         cd = CD(
@@ -122,20 +130,23 @@ def convert_codeable_concept(concept, *, degradation_code: Optional[CD] = None) 
         return cd
     else:
         if original_text:
-            logging.warning(f"Unsupported coding system(s) safely degraded: {[c.system for c in concept.coding]}")
+            logging.warning(
+                f"Unsupported coding system(s) safely degraded: {[c.system for c in concept.coding]}"
+            )
             if degradation_code:
                 return CD(
                     code=degradation_code.code,
                     codeSystem=degradation_code.codeSystem,
                     codeSystemName=degradation_code.codeSystemName,
                     displayName=degradation_code.displayName,
-                    originalText=original_text
+                    originalText=original_text,
                 )
             return CD(nullFlavor="OTH", originalText=original_text)
         else:
             raise FHIRValidationError(
                 f"Unsupported coding system(s) without original text: {[c.system for c in concept.coding]}"
             )
+
 
 def templateId(root: str, extension: str) -> list:
     """
