@@ -72,7 +72,7 @@ class ED(BIN):
     integrityCheckAlgorithm: Optional[str] = None  # enum SHA1 or SHA256
     language: Optional[str] = None
     mediaType: Optional[str] = None
-    xmlText: Optional[str] = None
+    xmlText: Optional[Union[str, dict]] = None
 
 
 class QTY(ANY):
@@ -131,6 +131,7 @@ class CD(ANY):
     codeSystem: Optional[str] = Field(alias="@codeSystem", default=None)
     codeSystemName: Optional[str] = Field(alias="@codeSystemName", default=None)
     displayName: Optional[str] = Field(alias="@displayName", default=None)
+    originalText: Optional[str] = None
     translation: Optional[List["CD"]] = None  # Forward reference
 
     @model_validator(mode="before")
@@ -177,7 +178,7 @@ class PQR(CV):
         "system. Used to show alternative representation for a physical "
         "quantity.",
     )
-    value: Optional[float] = None
+    value: Optional[float] = Field(alias="@value", default=None)
 
 
 class CS(CV):

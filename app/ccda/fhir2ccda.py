@@ -79,6 +79,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "given": {"#text": " ".join(official_name.given)},
                     "family": {"#text": official_name.family},
                 },
+                "administrativeGenderCode": {
+                    "@code": "M" if subject[0].gender == "male" else "F" if subject[0].gender == "female" else "UN",
+                    "@codeSystem": "2.16.840.1.113883.5.1"
+                },
                 "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
             },
         }
@@ -91,6 +95,14 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "city": {"#text": subject[0].address[0].city},
             "postalCode": {"#text": subject[0].address[0].postalCode},
         }
+
+    if subject[0].telecom:
+        telecoms = []
+        for t in subject[0].telecom:
+            # simple mapping of FHIR telecom to CDA telecom format (tel: / mailto:)
+            prefix = "tel:" if t.system in ["phone", "fax", "pager"] else "mailto:" if t.system == "email" else ""
+            telecoms.append({"@value": f"{prefix}{t.value}", "@use": "HP" if t.use == "home" else "WP" if t.use == "work" else "MC"})
+        patient_dict["patientRole"]["telecom"] = telecoms
 
     gp_organization = subject[0].managingOrganization.reference
     gp = index[gp_organization]
@@ -576,8 +588,14 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         disclaimer_text += f"All other clinical information (such as {omitted_str}) should be sought elsewhere. "
 
     disclaimer_text += (
-        f"Information added to the record in the last {caching_period} may be missing."
+        f"Information added to the record in the last {caching_period} may be missing. "
     )
+
+    # Append GP name from patient demographics
+    gp_org_ref = bundle.entry[0].resource.managingOrganization.reference
+    gp = index.get(gp_org_ref)
+    if gp and gp.name:
+        disclaimer_text += f"Registered GP: {gp.name}."
 
     header_components = {
         "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),

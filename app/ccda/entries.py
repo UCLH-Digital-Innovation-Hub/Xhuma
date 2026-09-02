@@ -22,6 +22,9 @@ from .models.base import (
     ResultObservation,
     ResultsOrganizer,
     SubstanceAdministration,
+    Precondition,
+    ReferenceRange,
+    ObservationRange,
     Act,
 )
 from .models.datatypes import (
@@ -31,10 +34,14 @@ from .models.datatypes import (
     IVL_TS,
     PIVL_TS,
     PQ,
+    PQR,
+    RTO_PQ_PQ,
     IVL_PQ,
     IVXB_PQ,
     SXCM_TS,
     IVXB_TS,
+    II,
+    CS,
 )
 
 Cell = str
@@ -216,45 +223,28 @@ async def medication(
     )
     # if dose quantiy is in dosage
     if entry.dosage[0].doseQuantity:
-        # assumption that all structuered dosage will be snomed
-        # substance_administration.doseQuantity = {
-        #     "value": {
-        #         "@xsi:type": "PQ",
-        #         "@nullFlavor": "OTH",
-        #         "translation": {
-        #             "@value": entry.dosage[0].doseQuantity.value,
-        #             "@code": entry.dosage[0].doseQuantity.code,
-        #             "@codeSystemName": entry.dosage[0].doseQuantity.system,
-        #             "@codeSystem": "2.16.840.1.113883.6.96",
-        #             "originalText": entry.dosage[0].doseQuantity.unit,
-        #         },
-        #     },
-        # }
         # TODO use proper PQ model instead of dict
-        substance_administration.doseQuantity = {
-            "@xsi:type": "PQ",
-            "@value": entry.dosage[0].doseQuantity.value,
-        }
+        substance_administration.doseQuantity = PQ(**{
+            "@value": entry.dosage[0].doseQuantity.value
+        })
         if entry.dosage[0].doseQuantity.unit:
-            substance_administration.doseQuantity["@unit"] = entry.dosage[
-                0
-            ].doseQuantity.unit
+            substance_administration.doseQuantity.unit = entry.dosage[0].doseQuantity.unit
 
         # if there is a code add a translation
         if entry.dosage[0].doseQuantity.code:
-            substance_administration.doseQuantity["translation"] = {
+            substance_administration.doseQuantity.translation = [PQR(**{
                 "@value": entry.dosage[0].doseQuantity.value,
                 "@code": entry.dosage[0].doseQuantity.code,
                 "@codeSystem": "2.16.840.1.113883.6.96",
                 "originalText": entry.dosage[0].doseQuantity.unit,
-            }
+            })]
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
     # check if dosage has as needed boolean of true
 
     if entry.dosage[0].asNeededBoolean:
         # populate precondition
-        substance_administration.precondition = {
-            "@typeCode": "PRCN",
+        precondition_kwargs = {
+            "typeCode": "PRCN",
             "criterion": {
                 "templateId": templateId(
                     root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"
@@ -267,22 +257,22 @@ async def medication(
         }
         # if there is a asNeededCodeableConcept, use it
         if entry.dosage[0].asNeededCodeableConcept:
-            substance_administration.precondition["criterion"]["value"] = {
+            precondition_kwargs["criterion"]["value"] = {
                 "@xsi:type": "CD",
                 "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
-                "@displayName": entry.dosage[0]
-                .asNeededCodeableConcept.coding[0]
-                .display,
-                "@codeSystemName": entry.dosage[0]
-                .asNeededCodeableConcept.coding[0]
-                .value,
+                "@displayName": entry.dosage[0].asNeededCodeableConcept.coding[0].display,
+                "@codeSystemName": entry.dosage[0].asNeededCodeableConcept.coding[0].value,
             }
         else:
-            # if no asNeededCodeableConcept, use NI
-            substance_administration.precondition["criterion"]["value"] = {
+            # this handles 'as directed' PRN without a clear indication
+            precondition_kwargs["criterion"]["value"] = {
                 "@xsi:type": "CD",
-                "@nullFlavor": "NI",
+                "@code": "ASSERTION",
+                "@displayName": "As Directed",
+                "@codeSystemName": "2.16.840.1.113883.5.4",
             }
+        substance_administration.precondition = [Precondition(**precondition_kwargs)]
+
 
     if entry.dosage[0].timing:
         repeat = entry.dosage[0].timing.repeat
@@ -309,8 +299,7 @@ async def medication(
         denominator = entry.dosage[0].maxDosePerPeriod.denominator
         if numerator and denominator:
             try:
-                substance_administration.maxDoseQuantity = {
-                    "@xsi:type": "RTO_PQ_PQ",
+                substance_administration.maxDoseQuantity = RTO_PQ_PQ(**{
                     "numerator": {
                         "@value": numerator.value,
                         "@unit": numerator.unit,
@@ -319,7 +308,7 @@ async def medication(
                         "@value": denominator.value,
                         "@unit": denominator.unit,
                     },
-                }
+                })
             except Exception as e:
                 logging.error(f"Error processing maxDosePerPeriod: {e}")
                 pass
@@ -396,13 +385,13 @@ async def medication(
     # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
     unit = (
-        substance_administration.doseQuantity.get("@unit", "").lower()
-        if substance_administration.doseQuantity
+        substance_administration.doseQuantity.unit.lower()
+        if substance_administration.doseQuantity and substance_administration.doseQuantity.unit
         else ""
     )
 
     if substance_administration.doseQuantity:
-        blank_unit = not substance_administration.doseQuantity.get("@unit")
+        blank_unit = not substance_administration.doseQuantity.unit
         if unit in gp_units or blank_unit:
             # we only process doses for tablets or capsules.
 
@@ -413,14 +402,14 @@ async def medication(
                     if dmd_data.vpi and substance_administration.doseQuantity:
                         processed_dose = (
                             dmd_data.vpi.value
-                            * substance_administration.doseQuantity["@value"]
+                            * substance_administration.doseQuantity.value
                         )
 
                         # clean number to remove trailing .0 if whole number
                         processed_dose = clean_number(processed_dose)
 
-                        substance_administration.doseQuantity["@value"] = processed_dose
-                        substance_administration.doseQuantity["@unit"] = (
+                        substance_administration.doseQuantity.value = processed_dose
+                        substance_administration.doseQuantity.unit = (
                             dmd_data.vpi.unit
                         )
                         warning_text = f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
@@ -465,10 +454,10 @@ async def medication(
                 print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
                 pass
 
-        if "- unit of product usage" in unit:
+        if substance_administration.doseQuantity.unit and "- unit of product usage" in substance_administration.doseQuantity.unit:
             # strip overly verbose snomed unit description to just unit
-            substance_administration.doseQuantity["@unit"] = (
-                substance_administration.doseQuantity["@unit"]
+            substance_administration.doseQuantity.unit = (
+                substance_administration.doseQuantity.unit
                 .replace("- unit of product usage", "")
                 .strip()
             )
@@ -799,8 +788,8 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
 
     immunization_entry = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
-        id=[{"@root": entry.id}],
-        statusCode={"@code": entry.status},
+        id=[II(**{"@root": entry.id})],
+        statusCode=CS(**{"@code": entry.status}),
         effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))]
         if entry.date
         else [],
@@ -858,12 +847,12 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
     if misc_notes:
         misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
         comment_activity = EntryRelationship()
-        comment_activity.act = {
+        comment_activity.act = Act(**{
             "code": {
                 "@code": "48767-8",
             },
             "text": {"@xsi:type": "ED", "xmlText": {"BR": misc_notes_text}},
-        }
+        })
         immunization_entry.entryRelationship.append(comment_activity)
 
     date_val = readable_date(date_helper(entry.date.isostring)) if entry.date else ""
@@ -1001,14 +990,14 @@ def result(entry, index: dict) -> dict:
     if hasattr(entry, "related") and entry.related:
         organizer = ResultsOrganizer()
         organizer.code = code_with_translations(entry.code.coding)
-        organizer.statusCode = {"@code": entry.status}
+        organizer.statusCode = CS(**{"@code": entry.status})
         performer = index.get(entry.performer[0].reference)
         organizer.author = organization_to_author(performer)
         organizer.id = [
-            {
+            II(**{
                 "@root": ident.system,
                 "@extension": ident.value,
-            }
+            })
             for ident in entry.identifier
         ]
         # effective_time = entry.issued
@@ -1018,9 +1007,9 @@ def result(entry, index: dict) -> dict:
             if related.type == "has-member":
                 related_resource = index.get(related.target.reference)
                 comp = ResultObservation(
-                    id=[{"@root": related_resource.id}],
+                    id=[II(**{"@root": related_resource.id})],
                     code=code_with_translations(related_resource.code.coding),
-                    status={"@code": related_resource.status},
+                    status=CS(**{"@code": related_resource.status}),
                     # effectiveDateTime=IVL_TS(value=entry.issued.isostring),
                     value=PQ(
                         **{
@@ -1038,29 +1027,24 @@ def result(entry, index: dict) -> dict:
                     )
 
                 if related_resource.referenceRange:
-                    comp.referenceRange = {"observationRange": []}
+                    comp.referenceRange = []
                     for range in related_resource.referenceRange:
+                        obs_range_kwargs = {}
                         if range.text:
-                            comp.referenceRange["observationRange"].append(
-                                {"text": range.text}
-                            )
+                            obs_range_kwargs["text"] = range.text
                         if range.low:
                             # TODO use proper model instead of dict
-                            comp.referenceRange["observationRange"].append(
-                                {
-                                    "value": {
-                                        "@xsi:type": "IVL_PQ",
-                                        "low": {
-                                            "@value": range.low.value,
-                                            "@unit": related_resource.valueQuantity.unit,
-                                        },
-                                        "high": {
-                                            "@value": range.high.value,
-                                            "@unit": related_resource.valueQuantity.unit,
-                                        },
-                                    }
-                                }
-                            )
+                            obs_range_kwargs["value"] = IVL_PQ(**{
+                                "low": IVXB_PQ(**{
+                                    "@value": range.low.value,
+                                    "@unit": related_resource.valueQuantity.unit,
+                                }),
+                                "high": IVXB_PQ(**{
+                                    "@value": range.high.value,
+                                    "@unit": related_resource.valueQuantity.unit,
+                                }),
+                            })
+                        comp.referenceRange.append(ReferenceRange(observationRange=ObservationRange(**obs_range_kwargs)))
                 components.append(comp)
 
         organizer.component = components

@@ -32,7 +32,7 @@ class ManufacturedMaterial(BaseModel):
 class ManufacturedProduct(BaseModel):
     manufacturedMaterial: ManufacturedMaterial
     templateId: List[II] = Field(default_factory=list)
-    id: II = {"@root": str(uuid4())}
+    id: II = Field(default_factory=lambda: II(**{"@root": str(uuid4())}))
     classCode: str = Field(default="MANU", alias="@classCode")
 
 
@@ -145,8 +145,9 @@ class InstructionObservation(Observation):
 class Criterion(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN")
+    templateId: Optional[List[II]] = None
     code: Optional[CD] = None
-    value: Optional[ANY] = None
+    value: Optional[Union[CD, ANY]] = None
 
 
 class Precondition(BaseModel):

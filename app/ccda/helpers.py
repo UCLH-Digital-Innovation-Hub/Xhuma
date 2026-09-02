@@ -5,8 +5,8 @@ from xml.etree import ElementTree
 import xmltodict
 from fhirclient.models import coding, organization, period
 
-from .models.admin import AssignedAuthor, AuthorParticipation
-from .models.datatypes import CD, SXCM_TS
+from .models.admin import AssignedAuthor, AuthorParticipation, Organization
+from .models.datatypes import CD, SXCM_TS, II, TEL, AD
 
 
 def validateNHSnumber(number: int) -> bool:
@@ -207,23 +207,23 @@ def organization_to_author(
     """
     author = AssignedAuthor(
         id=[
-            {"@root": ident.system, "@extension": ident.value}
+            II(**{"@root": ident.system, "@extension": ident.value})
             for ident in organization.identifier
         ],
     )
     if organization.name:
-        author.representedOrganization = {"name": organization.name}
+        author.representedOrganization = Organization(**{"name": [organization.name]})
 
     if organization.telecom:
         author.telecom = [
-            {
+            TEL(**{
                 "@use": telecom.use,
                 "@value": telecom.value,
-            }
+            })
             for telecom in organization.telecom
         ]
     if organization.address:
-        author.address = [addr.as_json() for addr in organization.address]
+        author.address = [AD(**addr.as_json()) for addr in organization.address]
 
     org = AuthorParticipation(assignedAuthor=author)
 
