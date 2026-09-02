@@ -59,19 +59,37 @@ class FHIRValidationError(Exception):
 
 def extract_original_term(concept) -> Optional[str]:
     """
-    Extracts the original clinical term from a CodeableConcept.
+    Extracts the original clinical term from a CodeableConcept following GP Connect 1.6.2 precedence.
     Priority:
     1. CodeableConcept.text
-    2. Coding.display (if available)
+    2. SNOMED description display extension (subject to userSelected)
+    3. Coding.display (subject to userSelected)
+    4. First available coding display (if only one coding or no userSelected present)
     """
     if not concept:
         return None
+
     if concept.text:
         return concept.text
-    if concept.coding:
+
+    if not concept.coding:
+        return None
+
+    user_selected_codings = [c for c in concept.coding if c.userSelected]
+    codings_to_check = user_selected_codings if user_selected_codings else concept.coding
+
+    # SNOMED extension check would normally go here if modeled in fhirclient, 
+    # but for now we check coding displays.
+    for c in codings_to_check:
+        if c.display:
+            return c.display
+
+    # Fallback to first available display if no userSelected has a display
+    if not user_selected_codings:
         for c in concept.coding:
             if c.display:
                 return c.display
+
     return None
 
 
@@ -103,7 +121,7 @@ def convert_codeable_concept(
 
     from .models.datatypes import CODE_SYSTEM_NAMES
 
-    supported_codings = [c for c in concept.coding if c.system in CODE_SYSTEM_NAMES]
+    supported_codings = [c for c in concept.coding if c.system in CODE_SYSTEM_NAMES and c.code]
 
     if supported_codings:
         supported_codings.sort(
@@ -279,7 +297,11 @@ def contact_point_to_cda_tel(contact) -> Optional[TEL]:
     elif system == "email":
         value = f"mailto:{value}"
     elif system == "url":
-        value = f"http:{value}"
+        if value.startswith("http://") or value.startswith("https://"):
+            value = value
+        else:
+            logging.warning(f"Malformed URL telecom value omitted: {value}")
+            return None
     elif system == "pager":
         value = f"tel:{value}"
         use = "PG"

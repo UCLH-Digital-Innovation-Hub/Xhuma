@@ -253,3 +253,63 @@ async def test_max_dose_quantity():
     assert "maxDoseQuantity" in substance_administration
     assert substance_administration["maxDoseQuantity"]["numerator"]["@value"] == 1
     assert substance_administration["maxDoseQuantity"]["numerator"]["@unit"] == "Tablet"
+
+prn_statement_coded = medicationstatement.MedicationStatement(
+    {
+        "status": "active",
+        "taken": "unk",
+        "medicationReference": {
+            "reference": "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511"
+        },
+        "basedOn": [
+            {"reference": "MedicationRequest/968546F0-EF03-491B-A045-4D46EE61A860"}
+        ],
+        "identifier": [
+            {
+                "system": "https://EMISWeb/A82038",
+                "value": "12345"
+            }
+        ],
+        "effectivePeriod": {"start": "2026-02-24", "end": "2026-03-10"},
+        "subject": {"reference": "Patient/1"},
+        "dosage": [
+            {
+                "text": "1 tablet when required",
+                "patientInstruction": "1 tablet when required",
+                "asNeededCodeableConcept": {
+                    "coding": [
+                        {
+                            "system": "http://snomed.info/sct",
+                            "code": "25064002",
+                            "display": "Headache"
+                        }
+                    ],
+                    "text": "Headache"
+                }
+            }
+        ],
+    }
+)
+
+@pytest.mark.asyncio
+async def test_prn_coded_indication():
+    index_dict = {
+        "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511": prn_med,
+        "MedicationRequest/968546F0-EF03-491B-A045-4D46EE61A860": med_request,
+    }
+    substance_administration = await medication_entry(prn_statement_coded, index_dict)
+    substance_administration = substance_administration.entry
+    substance_administration = substance_administration["substanceAdministration"]
+    
+    assert "precondition" in substance_administration
+    precondition = substance_administration["precondition"][0]
+    assert precondition["@typeCode"] == "PRCN"
+    
+    criterion = precondition["criterion"]
+    value = criterion["value"]
+    
+    assert value["@xsi:type"] == "CD"
+    assert value["@code"] == "25064002"
+    assert value["@codeSystem"] == "2.16.840.1.113883.6.96"
+    assert value["@displayName"] == "Headache"
+    assert value["originalText"] == "Headache"

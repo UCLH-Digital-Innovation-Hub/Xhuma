@@ -72,11 +72,13 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             official_name = name
             break
 
-    gender = subject[0].gender
+    gender = getattr(subject[0], "gender", None)
     if gender == "male":
         admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1", "@code": "M"}
     elif gender == "female":
         admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1", "@code": "F"}
+    elif gender == "other":
+        admin_gender = {"@codeSystem": "2.16.840.1.113883.5.1", "@code": "UN"}
     else:
         admin_gender = {"@nullFlavor": "UNK"}
 

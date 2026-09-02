@@ -48,7 +48,7 @@ def test_snomed_priority_and_translation():
         == "https://fhir.hl7.org.uk/Id/multilex-drug-codes"
     )
     assert result.translation[0].codeSystem == "2.16.840.1.113883.2.1.6.4"
-    assert result.originalText == "Gliclazide 80mg tables"
+    assert result.originalText == "Gliclazide 80mg tablets"
 
 
 def test_unsupported_coding_fallback_to_oth():

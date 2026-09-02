@@ -87,11 +87,14 @@ CODE_SYSTEM_NAMES = {
     "https://dmd.nhs.uk": "2.16.840.1.113883.6.96",
     "https://fhir.nhs.uk/Id/snomed-ct": "2.16.840.1.113883.6.96",
     "https://fhir.nhs.uk/Id/dmd": "2.16.840.1.113883.6.96",
+    "http://read.info/readv2": "2.16.840.1.113883.2.1.6.2",
+    "http://read.info/ctv3": "2.16.840.1.113883.2.1.6.3",
     "https://fhir.nhs.uk/Id/read-codes": "2.16.840.1.113883.2.1.6.2",
     "LOINC": "2.16.840.1.113883.6.1",
     "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
     "https://fhir.hl7.org.uk/Id/resipuk-gemscript-drug-codes": "2.16.840.1.113883.2.1.6.15",
     "https://fhir.hl7.org.uk/Id/emis-drug-codes": "2.16.840.1.113883.2.1.6.9",
+    "https://fhir.hl7.org.uk/Id/egton-drug-codes": "2.16.840.1.113883.2.1.6.1",
 }
 
 

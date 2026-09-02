@@ -269,7 +269,7 @@ async def medication(
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
     # check if dosage has as needed boolean of true
 
-    if entry.dosage[0].asNeededBoolean:
+    if getattr(entry.dosage[0], "asNeededBoolean", False) or getattr(entry.dosage[0], "asNeededCodeableConcept", None):
         # populate precondition
         precondition_kwargs = {
             "typeCode": "PRCN",
@@ -285,7 +285,7 @@ async def medication(
         }
         if entry.dosage[0].asNeededCodeableConcept:
             value = convert_codeable_concept(
-                list(entry.dosage[0].asNeededCodeableConcept)
+                entry.dosage[0].asNeededCodeableConcept
             ).model_dump(by_alias=True, exclude_none=True)
             value["@xsi:type"] = "CD"
             precondition_kwargs["criterion"]["value"] = value
