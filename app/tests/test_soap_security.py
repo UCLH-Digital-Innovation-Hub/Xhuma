@@ -84,8 +84,34 @@ def test_xxe_malicious_entity_rejected(endpoint):
     response = client.post(
         endpoint, content=xxe_soap_xml, headers={"Content-Type": "application/soap+xml"}
     )
-    # defusedxml should raise an EntitiesForbidden error which fastapi catches as a 400 Bad Request or 500
-    assert response.status_code in [400, 500]
+    assert response.status_code == 400
+    assert "Malformed XML" in response.text
+
+
+@pytest.mark.parametrize("endpoint", ENDPOINTS)
+def test_rejects_incomplete_saml_context(endpoint, monkeypatch):
+    # Override the mock for process_saml_attributes to return incomplete attributes (subject_id=None)
+    monkeypatch.setattr(
+        "app.soap.soap.process_saml_attributes",
+        lambda x: type(
+            "obj",
+            (object,),
+            {
+                "subject_id": None,
+                "organization": "2",
+                "organization_id": "3",
+                "role": "4",
+            },
+        )(),
+    )
+    valid_soap_xml = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:Issuer>urn:nhs:names:services:spine</saml2:Issuer></saml2:Assertion></wsse:Security></s:Header><s:Body><query:CrossGatewayQuery xmlns:query="urn:ihe:iti:xds-b:2007"/></s:Body></s:Envelope>"""
+    response = client.post(
+        endpoint,
+        content=valid_soap_xml,
+        headers={"Content-Type": "application/soap+xml"},
+    )
+    assert response.status_code == 401
+    assert "Incomplete SAML security context" in response.text
 
 
 def test_iti39_rejects_ssrf_reply_to():
