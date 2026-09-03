@@ -35,4 +35,4 @@ Based on the MHRA guidelines for standalone software, **Xhuma is strictly classi
 
 Because Xhuma does not alter data to provide clinical decision support, generate diagnoses, or perform therapeutic calculations, it does not possess an independent medical purpose. Therefore, **Xhuma is not a medical device** and does not require UKCA or CE marking.
 
-*Note: While exempt from Medical Device Regulations, Xhuma remains subject to NHS Health IT standards. A Clinical Risk Management Plan and Hazard Log have been completed in full compliance with **DCB0129** (Clinical Risk Management: its Application in the Manufacture of Health IT Systems) to ensure the technical translation of data remains clinically safe.*
+*Note: While exempt from Medical Device Regulations, Xhuma remains subject to NHS Health IT standards. A Clinical Risk Management Plan and Hazard Log have been completed in full compliance with **DCB0129** (Clinical Risk Management: its Application in the Manufacture of Health IT Systems) and **DCB0160** (Clinical Risk Management: its Application in the Deployment and Use of Health IT Systems) to ensure the technical translation of data remains clinically safe.*

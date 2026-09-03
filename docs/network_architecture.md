@@ -48,7 +48,7 @@ The Trust's Epic EHR connects to Xhuma over the public internet utilising mutual
 ### 3.2 Outbound Integrations (Xhuma -> NHS)
 Xhuma processes the inbound IHE ITI requests and converts them into NHS FHIR calls.
 
-* **PDS (Patient Demographics Service):** Routed over the public internet via `https://int.api.service.nhs.uk/`. Secured via NHS OAuth2 Client Credentials (JWT assertion).
+* **PDS (Patient Demographics Service):** Routed over the public internet via `https://api.service.nhs.uk/` (with `https://int.api.service.nhs.uk/` used for integration testing). Secured via NHS OAuth2 Client Credentials (JWT assertion).
 * **SDS (Spine Directory Service):** Routed over the public internet to query FHIR endpoints and routing identifiers using API keys.
 * **GP Connect (Structured Records):** GP Connect requests have separate network requirements, detailed below.
 

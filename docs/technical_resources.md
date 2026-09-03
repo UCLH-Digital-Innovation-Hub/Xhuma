@@ -13,6 +13,7 @@
 
 ### SOAP Services
 - **IHE ITI Profiles Implementation**:
+  - ITI-55: Cross Gateway Patient Discovery
   - ITI-47: Patient Demographics Query
   - ITI-38: Cross Gateway Query
   - ITI-39: Cross Gateway Retrieve
@@ -54,6 +55,7 @@
 
 ### IHE ITI
 - **Profiles Implemented**:
+  - ITI-55: Cross Gateway Patient Discovery
   - ITI-47: Patient Demographics Query
   - ITI-38: Cross Gateway Query
   - ITI-39: Cross Gateway Retrieve
@@ -86,32 +88,15 @@
 
 ## Monitoring & Observability
 
-### Prometheus
-- **Purpose**: Metrics collection and storage
-- **Documentation**: [Prometheus Docs](https://prometheus.io/docs/introduction/overview/)
+### Azure Application Insights
+- **Purpose**: Metrics collection, application logging, and visualization
 - **Key Metrics**:
-  - Request counts
-  - Response times
-  - Error rates
-  - Cache hit/miss rates
-  - Resource utilization
-
-### Grafana
-- **Purpose**: Metrics visualization and alerting
-- **Documentation**: [Grafana Docs](https://grafana.com/docs/)
+  - Request counts, response times, error rates
+  - Cache hit/miss rates, resource utilization
 - **Features**:
-  - Custom dashboards
-  - Alert management
-  - Data exploration
-  - Annotation support
-
-### ELK Stack
-- **Purpose**: Log aggregation and analysis
-- **Components**:
-  - Elasticsearch: Log storage
-  - Logstash: Log processing
-  - Kibana: Log visualization
-- **Documentation**: [Elastic Docs](https://www.elastic.co/guide/index.html)
+  - Custom KQL dashboards
+  - Alert management and data exploration
+  - Automated exception mapping
 
 ### OpenTelemetry
 - **Purpose**: Distributed tracing
@@ -134,9 +119,6 @@
 ### Integration Testing
 - **pytest-asyncio**: Async test support
 - **aiohttp**: HTTP client testing
-- **testcontainers**: Container-based testing
-  - Redis integration tests
-  - Service mocking
 
 ### Performance Testing
 - **locust**: Load testing
@@ -146,10 +128,8 @@
   - Real-time monitoring
 
 ### Code Quality
-- **black**: Code formatting
-- **flake8**: Style guide enforcement
-- **mypy**: Type checking
-- **bandit**: Security linting
+- **ruff**: Primary Python linter and formatter (replaces black/flake8)
+- **CodeQL**: Security analysis and vulnerability scanning
 
 ## Deployment & Infrastructure
 
@@ -161,13 +141,12 @@
   - Volume management
   - Network configuration
 
-### Docker Compose
-- **Documentation**: [Compose Docs](https://docs.docker.com/compose/)
+### Terraform
+- **Documentation**: [Terraform Docs](https://developer.hashicorp.com/terraform/docs)
 - **Features**:
-  - Service orchestration
-  - Environment variables
-  - Volume mapping
-  - Network setup
+  - Shared-Nothing isolated state files per NHS Trust
+  - Azure Resource Manager provider
+  - VNet and Subnet orchestration
 
 ### Health Checks
 - **Endpoints**:
@@ -179,7 +158,7 @@
 ## Security Tools
 
 ### JWT Management
-- **python-jose**: JWT implementation
+- **jwcrypto**: JWT implementation and key management
 - **cryptography**: Cryptographic operations
 - **Key rotation**: Automated key management
 
@@ -194,10 +173,7 @@
 ### Documentation Tools
 - **mkdocs**: Documentation generation
 - **OpenAPI**: API documentation
-- **sphinx**: Python documentation
 
 ### Development Tools
 - **pre-commit**: Git hooks
-- **dependabot**: Dependency updates
-- **renovate**: Package management
 - **git-flow**: Version control workflow

@@ -301,13 +301,13 @@ Xhuma implements strict data governance controls to align with NHS Information G
 ### Role-Based Access Control (RBAC) & Break The Glass
 Xhuma relies on Epic Care Everywhere as the authoritative system of record for identity and access management. 
 - **RBAC:** Only authorised clinicians with appropriate Epic security classes can initiate Xhuma queries.
-- **Break The Glass:** Epic's native 'Break The Glass' functionality is enforced prior to Xhuma retrieving GP Connect data, requiring clinicians to explicitly state their reason for accessing outside records. This decision is cryptographically audited and passed back to the NHS via SAML assertions.
+- **Break The Glass:** Epic's native 'Break The Glass' functionality is enforced prior to Xhuma retrieving GP Connect data, requiring clinicians to explicitly state their reason for accessing outside records. This decision is passed back to the NHS via SAML assertions (with cryptographic issuer validation currently live in INT and rolling out across environments).
 
 ### Hardcoded Purpose of Use
 Xhuma strictly enforces the `directcare` purpose. The middleware explicitly blocks any attempts to query the GP Connect API for research, secondary uses, or population health analytics.
 
 ### Data Minimization Scope
-To adhere to data minimization principles, Xhuma scopes its GP Connect structured record retrieval strictly to `patient/*.read`. It only requests the specific clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations), explicitly excluding sensitive or unnecessary administrative data where possible.
+To adhere to data minimization principles, GP Connect's authorisation model requires broad patient-level read scope. Minimisation is therefore enforced at the application boundary: only the clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations) are converted and returned, explicitly excluding sensitive or unnecessary administrative data.
 
 ### Delta Summary & Assumptions
 
@@ -360,12 +360,12 @@ To adhere to data minimization principles, Xhuma scopes its GP Connect structure
 - Implements ITI transaction support
 - Handles SOAP fault scenarios
 
-### 7. Caching Layer (Redis)
+### 7. Caching Layer (Azure Managed Redis)
 - **Infrastructure Configuration**
+  - Managed Azure Redis instance
   - Memory limit: 256MB with volatile-lru eviction
-  - Persistence: RDB snapshots and AOF journaling
-  - Network: Isolated container network
-  - Security: Password authentication, protected mode
+  - Network: Isolated via Private Endpoint/Service Endpoints
+  - Security: TLS 1.2+ required, Password authentication
 
 - **Client Implementation** (`app/redis_connect.py`)
   - Connection pooling with configurable limits
@@ -381,78 +381,27 @@ To adhere to data minimization principles, Xhuma scopes its GP Connect structure
   - Health checks and diagnostics
 
 - **Data Types**
-  - CCDA documents (4-hour TTL)
+  - Idempotency / SOAP transactions (1-hour TTL)
   - PDS lookup results (24-hour TTL)
   - SDS endpoint information (12-hour TTL)
-  - NHS number mappings
+  - GP Connect retrieval mappings (1-minute TTL)
 
 ## Monitoring & Observability Architecture
 
-### 1. Metrics Collection (Prometheus)
-- **Endpoint Metrics**
-  - Request counts and rates
-  - Response times
-  - Error rates by type
-  - Status code distribution
+### 1. Azure Application Insights
+- **Endpoint Metrics**: Request counts, rates, response times, and failure rates.
+- **Exceptions**: Stack traces and failure conditions are automatically mapped.
+- **Business Metrics**: Transaction success rates, API usage patterns, and cache efficiency.
 
-- **Cache Metrics**
-  - Hit/miss rates
-  - Cache size and memory usage
-  - Eviction rates
-  - Connection pool statistics
-  - Operation latencies
-  - Error counts by type
+### 2. Log Analytics Workspace
+- **Log Collection**: Structured application logs, system logs, and access logs.
+- **Log Processing**: KQL queries for pattern detection and alert generation.
 
-- **Resource Metrics**
-  - CPU usage
-  - Memory utilization
-  - Network I/O
-  - Disk operations
+### 3. Distributed Tracing (OpenTelemetry)
+- **Trace Collection**: Request tracing across the inbound API, NHS services, and cache operations.
+- **Trace Analysis**: Latency analysis, error tracking, and performance optimization.
 
-### 2. Visualization (Grafana)
-- **System Dashboards**
-  - Real-time performance monitoring
-  - Historical trends analysis
-  - Resource utilization tracking
-  - Error rate visualization
 
-- **Business Metrics**
-  - Transaction success rates
-  - API usage patterns
-  - Cache efficiency
-  - Service availability
-
-### 3. Logging Architecture (ELK Stack)
-- **Log Collection**
-  - Application logs
-  - System logs
-  - Access logs
-  - Error logs
-
-- **Log Processing**
-  - Structured log formatting
-  - Log enrichment
-  - Pattern detection
-  - Alert generation
-
-- **Log Storage**
-  - Indexed storage
-  - Retention policies
-  - Archival strategy
-  - Search optimization
-
-### 4. Distributed Tracing (OpenTelemetry)
-- **Trace Collection**
-  - Request tracing
-  - Service dependencies
-  - Performance bottlenecks
-  - Error propagation
-
-- **Trace Analysis**
-  - Latency analysis
-  - Error tracking
-  - Service mapping
-  - Performance optimization
 
 ## Testing Architecture
 
@@ -518,29 +467,19 @@ To adhere to data minimization principles, Xhuma scopes its GP Connect structure
 
 ## Deployment Architecture
 
-### Container Structure
-```
-├── Application Container
-│   ├── FastAPI Application
-│   ├── Uvicorn Server
-│   └── Application Dependencies
-├── Redis Container
-│   ├── Redis Server (v7.2)
-│   ├── Custom Configuration
-│   └── Persistence Volumes
-└── Monitoring Stack
-    ├── Prometheus
-    ├── Grafana
-    └── OpenTelemetry Collector
-```
+### Azure Infrastructure (Shared-Nothing Terraform)
+- **App Service**: Linux Web App running the FastAPI Docker container
+- **Azure Cache for Redis**: Managed Redis instance
+- **Key Vault**: Secure storage for secrets, certificates, and JWT keys
+- **Application Insights**: Dedicated observability workspace
+
+### Multi-Trust Matrix Deployment
+The deployment pipeline uses Terraform to orchestrate entirely isolated "shared-nothing" environments for each NHS Trust. While infrastructure is completely segregated, all Trusts authenticate to the NHS Spine using a unified JWKS hosted on a centralized Azure Blob Storage account.
 
 ### Network Configuration
-- Internal network for container communication
-- Exposed ports:
-  - 8000: Application API
-  - 6379: Redis (internal only)
-  - 9090: Prometheus metrics
-  - 3000: Grafana dashboards
+- Internal Azure Virtual Network (VNet) integration for outbound traffic
+- Inbound traffic secured via Azure App Service Front Door (mTLS enabled)
+- Isolated Private Endpoints for Redis and PostgreSQL
 
 ## Error Handling Architecture
 
