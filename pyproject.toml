@@ -33,19 +33,20 @@ dependencies = [
     "defusedxml>=0.7.1",
 ]
 
-[tool.isort]
-profile = "black"
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.format]
+indent-style = "tab"
+quote-style = "double"
 
 [dependency-groups]
 dev = [
-    "black",
     "websockets",
-    "isort",
     "pytest",
     "xmlschema",
     "pytest-asyncio",
     "pytest-benchmark",
-    "flake8",
     "pre-commit",
     "coverage",
     "ruff>=0.15.12",
