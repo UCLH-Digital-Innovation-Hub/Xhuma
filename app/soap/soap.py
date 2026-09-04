@@ -315,9 +315,9 @@ async def iti47(request: Request):
         nhsno = None
         ceid = None
         try:
-            query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                "queryByParameter"
-            ]["parameterList"]
+            query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"]["queryByParameter"][
+                "parameterList"
+            ]
 
             subject_id = query_params.get("livingSubjectId", [])
             if not isinstance(subject_id, list):
@@ -334,9 +334,7 @@ async def iti47(request: Request):
         if not nhsno:
             raise HTTPException(status_code=400, detail="Invalid request, no nhs number found")
         if not ceid:
-            raise HTTPException(
-                status_code=400, detail="Invalid request, no care everywhere id found"
-            )
+            raise HTTPException(status_code=400, detail="Invalid request, no care everywhere id found")
         secret = os.getenv("API_KEY", "TEST_KEY")
         from ..audit.models import _subject_ref_from_nhs_number
 

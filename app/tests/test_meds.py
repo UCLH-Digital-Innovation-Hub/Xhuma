@@ -579,14 +579,8 @@ async def test_immunization_entry_with_notes():
     assert entry["statusCode"]["@code"] == "completed"
     assert len(entry["entryRelationship"]) == 1
     assert entry["entryRelationship"][0]["act"]["code"]["@code"] == "48767-8"
-    assert (
-        "Notes on adminstration of vaccine"
-        in entry["entryRelationship"][0]["act"]["text"]["xmlText"]
-    )
-    assert (
-        "Reason: Immunisation due"
-        in entry["entryRelationship"][0]["act"]["text"]["xmlText"]
-    )
+    assert "Notes on adminstration of vaccine" in entry["entryRelationship"][0]["act"]["text"]["xmlText"]
+    assert "Reason: Immunisation due" in entry["entryRelationship"][0]["act"]["text"]["xmlText"]
     # Check narrative row formatting
     assert row[0] == "12/03/2026"
     assert "Comirnaty Omicron XBB.1.5 injection" in row[1]

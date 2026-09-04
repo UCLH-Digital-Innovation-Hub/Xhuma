@@ -33,9 +33,7 @@ def extract_trusted_saml_assertion(envelope: dict) -> dict:
 
     trusted = {
         item.strip()
-        for item in os.environ.get(
-            "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
-        ).split("|")
+        for item in os.environ.get("SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine").split("|")
         if item.strip()
     }
 
