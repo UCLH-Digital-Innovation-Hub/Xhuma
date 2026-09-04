@@ -639,11 +639,11 @@ async def test_immunization_entry_with_notes():
     assert entry["entryRelationship"][0]["act"]["code"]["@code"] == "48767-8"
     assert (
         "Notes on adminstration of vaccine"
-        in entry["entryRelationship"][0]["act"]["text"]["xmlText"]["BR"][0]
+        in entry["entryRelationship"][0]["act"]["text"]["xmlText"]
     )
     assert (
         "Reason: Immunisation due"
-        in entry["entryRelationship"][0]["act"]["text"]["xmlText"]["BR"][1]
+        in entry["entryRelationship"][0]["act"]["text"]["xmlText"]
     )
 
     # Check narrative row formatting
@@ -807,7 +807,7 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
     assert comment_act is not None, "Comment activity not found in entryRelationship"
 
     xml_text = comment_act.get("text", {}).get("xmlText", "")
-    br_notes = [n.strip() for n in xml_text.split("<br />") if n.strip()]
+    br_notes = [n.strip() for n in xml_text.split("\n") if n.strip()]
 
     # Check that they exist and their relative order is correct
     idx_note1 = next(i for i, n in enumerate(br_notes) if "Note 1" in n)
