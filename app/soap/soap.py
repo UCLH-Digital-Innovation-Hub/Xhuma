@@ -225,8 +225,6 @@ async def iti55(request: Request):
             return Response(content=data, media_type="application/soap+xml")
 
         patient = await lookup_patient(nhsno, request=request)
-        # TODO implement checking of demographics
-
         if (not patient) or (
             "resourceType" in patient and patient["resourceType"] == "OperationOutcome"
         ):
@@ -238,6 +236,27 @@ async def iti55(request: Request):
                 ],
             )
             return Response(content=data, media_type="application/soap+xml")
+
+        pds_nhsno = None
+        for ident in patient.get("identifier", []):
+            if ident.get("system") == "https://fhir.nhs.uk/Id/nhs-number":
+                pds_nhsno = ident.get("value")
+                break
+
+        if pds_nhsno and nhsno:
+            clean_pds_nhsno = str(pds_nhsno).replace(" ", "").replace("-", "")
+            clean_req_nhsno = str(nhsno).replace(" ", "").replace("-", "")
+            if clean_pds_nhsno != clean_req_nhsno:
+                # PDS FHIR API returns the new NHS number if the requested one was superseded.
+                # Returning an explicit error is the safest behavior for middleware to prevent ID swap bugs in the calling EHR.
+                data = await iti_55_error(
+                    message_id=envelope["Header"]["MessageID"],
+                    error_text=f"Patient mismatch: Requested NHS number {nhsno} has been superseded by {pds_nhsno} in PDS. Please update your local records.",
+                    query=envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                        "queryByParameter"
+                    ],
+                )
+                return Response(content=data, media_type="application/soap+xml")
 
         security_code = None
         if (

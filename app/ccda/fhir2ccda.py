@@ -476,13 +476,21 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             # status active or end date in the future
             if referenced_med.status == "active":
                 active.append(med)
-            elif (
-                referenced_med.status == "completed"
-                and hasattr(referenced_med, "endDate")
-                and referenced_med.endDate is not None
-                and date_helper(referenced_med.endDate) > datetime.datetime.now()
-            ):
-                active.append(med)
+            elif referenced_med.status == "completed":
+                end_date_str = None
+                if getattr(referenced_med, "effectivePeriod", None) and getattr(
+                    referenced_med.effectivePeriod, "end", None
+                ):
+                    end_date_str = referenced_med.effectivePeriod.end.isostring
+                elif getattr(referenced_med, "effectiveDateTime", None):
+                    end_date_str = referenced_med.effectiveDateTime.isostring
+
+                if end_date_str and date_helper(
+                    end_date_str
+                ) >= datetime.datetime.now().strftime("%Y%m%d"):
+                    active.append(med)
+                else:
+                    past.append(med)
             else:
                 past.append(med)
         # print(f"split medications into {len(active)} active and {len(past)} past")
@@ -506,6 +514,19 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 active_section = await create_section(
                     clone_list(list_obj, "Active Medications", active)
                 )
+
+                has_future_completed = any(
+                    index[med.item.reference].status == "completed" for med in active
+                )
+
+                if has_future_completed:
+                    warning_msg = "CLINICAL WARNING: Some medications listed below are marked as complete but have an end date in the future, so they are presented in the Active Medications list.<br />"
+                    para = active_section["section"]["text"].get("paragraph", {})
+                    if "#text" in para:
+                        para["#text"] += warning_msg
+                    else:
+                        para["#text"] = warning_msg
+                    active_section["section"]["text"]["paragraph"] = para
 
                 if active:
                     # delete the third column for acute medications as we don't have status for active medications and it is always active
