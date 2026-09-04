@@ -478,12 +478,16 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 active.append(med)
             elif referenced_med.status == "completed":
                 end_date_str = None
-                if getattr(referenced_med, "effectivePeriod", None) and getattr(referenced_med.effectivePeriod, "end", None):
+                if getattr(referenced_med, "effectivePeriod", None) and getattr(
+                    referenced_med.effectivePeriod, "end", None
+                ):
                     end_date_str = referenced_med.effectivePeriod.end.isostring
                 elif getattr(referenced_med, "effectiveDateTime", None):
                     end_date_str = referenced_med.effectiveDateTime.isostring
 
-                if end_date_str and date_helper(end_date_str) >= datetime.datetime.now().strftime("%Y%m%d"):
+                if end_date_str and date_helper(
+                    end_date_str
+                ) >= datetime.datetime.now().strftime("%Y%m%d"):
                     active.append(med)
                 else:
                     past.append(med)
