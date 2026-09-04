@@ -431,14 +431,14 @@ async def iti_38_response(
             r = await gpconnect(nhsno, saml_attrs, request=request)
 
             # print("-" * 40)
-            logging.info(f"no cached ccda, used internal call for {nhsno}")
+            logging.info("no cached ccda, used internal call for patient")
             r = json.loads(r.body)
         except Exception as e:
             logging.error(f"Error: {e}")
             # print(f"iti_38_error: {e}")
             r = {
                 "success": False,
-                "error": f"Internal error retrieving structured record for NHS number {nhsno}. error: {e}",
+                "error": f"Internal error retrieving structured record for patient. error: {e}",
             }
             body["AdhocQueryResponse"]["@status"] = (
                 "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
@@ -447,14 +447,14 @@ async def iti_38_response(
                 "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 "RegistryError": {
                     "@errorCode": "XDSRegistryError",
-                    "@codeContext": f"Unable to locate SCR with NHS number {nhsno}",
+                    "@codeContext": "Unable to locate SCR for patient",
                     "@location": "",
                     "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
                 },
             }
 
         if not r.get("success"):
-            logging.warning(f"gpconnect failed for {nhsno}: {r.get('error')}")
+            logging.warning(f"gpconnect failed for patient: {r.get('error')}")
             body["AdhocQueryResponse"]["@status"] = (
                 "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
             )

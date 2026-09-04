@@ -161,3 +161,4 @@ walkthrough.md
 *.tfstate
 *.tfstate.backup
 *.code-workspace
+RIGG_Presentation.html

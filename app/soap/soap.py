@@ -29,6 +29,7 @@ from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
 from ..audit.audit import process_saml_attributes
+from .saml_helper import extract_trusted_saml_assertion, InvalidSAMLContext
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
@@ -153,6 +154,24 @@ async def iti55(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
+        try:
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
+
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
+            )
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
 
         # Safely extract query params to handle fuzzing/malformed payloads
         try:
@@ -165,9 +184,12 @@ async def iti55(request: Request):
         nhsno = None
         if query_params:
             try:
-                for param in query_params["livingSubjectId"]["value"]:
-                    if param["@root"] == "2.16.840.1.113883.2.1.4.1":
-                        nhsno = param["@extension"]
+                values = query_params["livingSubjectId"]["value"]
+                if not isinstance(values, list):
+                    values = [values]
+                for param in values:
+                    if param.get("@root") == "2.16.840.1.113883.2.1.4.1":
+                        nhsno = param.get("@extension")
                         # print(f"NHSNO: {nhsno}")
             except Exception:
                 nhsno = None
@@ -196,9 +218,9 @@ async def iti55(request: Request):
                 pass
 
             data = await iti_55_error(
-                message_id or "Unknown",
-                "No NHS number found in request",
-                q_param,
+                message_id=message_id or "Unknown",
+                error_text="No NHS number found in request",
+                query=q_param,
             )
             return Response(content=data, media_type="application/soap+xml")
 
@@ -209,9 +231,9 @@ async def iti55(request: Request):
             "resourceType" in patient and patient["resourceType"] == "OperationOutcome"
         ):
             data = await iti_55_error(
-                envelope["Header"]["MessageID"],
-                f"Patient with NHS number {nhsno} not found",
-                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                message_id=envelope["Header"]["MessageID"],
+                error_text=f"Patient with NHS number {nhsno} not found",
+                query=envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
                     "queryByParameter"
                 ],
             )
@@ -230,9 +252,9 @@ async def iti55(request: Request):
 
         if security_code != "U":
             data = await iti_55_error(
-                envelope["Header"]["MessageID"],
-                "Patient record has restricted access",
-                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                message_id=envelope["Header"]["MessageID"],
+                error_text="Patient record has restricted access",
+                query=envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
                     "queryByParameter"
                 ],
             )
@@ -272,19 +294,48 @@ async def iti47(request: Request):
     Raises:
         HTTPException: For invalid content type, missing NHS number, or missing CEID
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
+        try:
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
-        query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-            "queryByParameter"
-        ]["parameterList"]
-        for param in query_params["livingSubjectId"]:
-            if param["value"]["@root"] == "2.16.840.1.113883.2.1.4.1":
-                nhsno = param["value"]["@extension"]
-            if param["value"]["@root"] == "1.2.840.114350.1.13.525.3.7.3.688884.100":
-                ceid = param["value"]["@extension"]
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
+            )
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
+
+        nhsno = None
+        ceid = None
+        try:
+            query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                "queryByParameter"
+            ]["parameterList"]
+
+            subject_id = query_params.get("livingSubjectId", [])
+            if not isinstance(subject_id, list):
+                subject_id = [subject_id]
+
+            for param in subject_id:
+                val = param.get("value", {})
+                if val.get("@root") == "2.16.840.1.113883.2.1.4.1":
+                    nhsno = val.get("@extension")
+                if val.get("@root") == "1.2.840.114350.1.13.525.3.7.3.688884.100":
+                    ceid = val.get("@extension")
+        except (KeyError, TypeError):
+            pass
         if not nhsno:
             raise HTTPException(
                 status_code=400, detail="Invalid request, no nhs number found"
@@ -293,7 +344,6 @@ async def iti47(request: Request):
             raise HTTPException(
                 status_code=400, detail="Invalid request, no care everywhere id found"
             )
-        print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
         secret = os.getenv("API_KEY", "TEST_KEY")
         from ..audit.models import _subject_ref_from_nhs_number
 
@@ -301,9 +351,8 @@ async def iti47(request: Request):
         client.setex(ceid, 3600, hashed_nhs)
         # TODO add audit stuff here too
         patient = await lookup_patient(nhsno, request=request)
-        print(f"Patient: {patient}")
         if not patient:
-            print("Patient not found")
+            pass
         data = await iti_47_response(
             envelope["Header"]["MessageID"],
             patient,
@@ -339,58 +388,51 @@ async def iti38(request: Request):
     Raises:
         HTTPException: For invalid content type
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         print("-" * 40)
         # print(f"Received body: {body}")
         envelope = clean_soap(body)
-
-        # Safely extract assertion (prevent unhandled KeyError)
         try:
-            assertion = envelope["Header"]["Security"]["Assertion"]
-            if isinstance(assertion, list):
-                assertion = assertion[0]
-        except (KeyError, TypeError):
-            assertion = {}
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
-        trusted_issuer = os.getenv(
-            "SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine"
-        )
-
-        issuer_obj = assertion.get("Issuer")
-        if isinstance(issuer_obj, list):
-            issuer_obj = issuer_obj[0]
-
-        issuer_str = (
-            issuer_obj.get("#text", "")
-            if isinstance(issuer_obj, dict)
-            else str(issuer_obj)
-            if issuer_obj is not None
-            else ""
-        )
-
-        # Prevent log injection (CWE-117)
-        issuer_str = issuer_str.replace("\n", "").replace("\r", "")
-
-        if issuer_str != trusted_issuer:
-            print(
-                f"ITI-38 SAML Verification: Rejected issuer '{issuer_str}'",
-                flush=True,
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
             )
-            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
 
-        saml_attrs = process_saml_attributes(assertion["AttributeStatement"])
+        soap_body = envelope.get("Body", {})
 
-        soap_body = envelope["Body"]
-        slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
-        query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
+        # Support both AdhocQueryRequest and CrossGatewayQuery root elements
+        adhoc_query = soap_body.get(
+            "AdhocQueryRequest", soap_body.get("CrossGatewayQuery", {})
+        ).get("AdhocQuery", {})
 
-        patient_id = next(
-            x["ValueList"]["Value"]
-            for x in slots
-            if x["@name"] == "$XDSDocumentEntryPatientId"
-        )
+        slots = adhoc_query.get("Slot", [])
+        if not isinstance(slots, list):
+            slots = [slots]
+
+        query_id = adhoc_query.get("@id", "unknown")
+
+        patient_id = None
+        for x in slots:
+            if isinstance(x, dict) and x.get("@name") == "$XDSDocumentEntryPatientId":
+                val = x.get("ValueList", {}).get("Value")
+                # Handle single or multiple values safely
+                patient_id = val[0] if isinstance(val, list) else val
+                break
 
         # OpenTelemetry trace propagation
         message_id = envelope.get("Header", {}).get("MessageID")
@@ -415,21 +457,21 @@ async def iti38(request: Request):
         if not validateNHSnumber(patient_id):
             try:
                 pattern = r"[0-9]{10}"
-                poss_nhs = re.search(pattern, patient_id).group(0)
-                # print(f"Possible NHS number: {poss_nhs}")
-                # print(validateNHSnumber(poss_nhs))
+                poss_nhs = re.search(pattern, str(patient_id)).group(0)
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
-                    data = await iti_38_response(
-                        request, patient_id, "NOCEID", query_id, saml_attrs
-                    )
-            except AttributeError:
-                print(f"No valid NHS number found in patient ID's {patient_id}")
-                logging.info(f"No valid NHS number found in patient ID's {patient_id}")
-        else:
-            data = await iti_38_response(
-                request, patient_id, "NOCEID", query_id, saml_attrs
-            )
+                else:
+                    raise AttributeError("Invalid NHS number checksum")
+            except (AttributeError, TypeError):
+                print("No valid NHS number found in patient ID field")
+                logging.info("No valid NHS number found in patient ID field")
+                raise HTTPException(
+                    status_code=400, detail="Invalid NHS number format in request"
+                )
+
+        data = await iti_38_response(
+            request, patient_id, "NOCEID", query_id, saml_attrs
+        )
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(
@@ -456,11 +498,30 @@ async def iti39(request: Request):
     Raises:
         HTTPException: For invalid content type, missing document ID, or document not found
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         soap = extract_soap_request(body.decode("utf-8"))
         envelope = clean_soap(soap)
+        try:
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
+
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
+            )
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
+
         message_id = envelope["Header"]["MessageID"]
         try:
             document_id = envelope["Body"]["RetrieveDocumentSetRequest"][
