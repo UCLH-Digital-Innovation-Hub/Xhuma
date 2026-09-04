@@ -120,9 +120,17 @@ httpx_logger.setLevel(logging.WARNING)
 
 @router.get("/gpconnect/{nhsno}")
 async def gpconnect(
-    nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
+    nhsno: int, saml_attrs: SAMLAttributes, request: Request = None
 ) -> JSONResponse:
     """accesses gp connect endpoint for nhs number"""
+    return await _fetch_gpconnect_record(
+        nhsno, saml_attrs, log_dir=None, request=request
+    )
+
+
+async def _fetch_gpconnect_record(
+    nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
+) -> JSONResponse:
 
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
@@ -566,7 +574,9 @@ async def gpconnect(
         return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     if log_dir:
-        with open(os.path.join(log_dir, f"{nhsno}.xml"), "w") as output:
+        # CodeQL static analysis requires explicit integer casting to drop path traversal taint
+        safe_nhsno = str(int(nhsno))
+        with open(os.path.join(log_dir, f"{safe_nhsno}.xml"), "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     xop = base64_xml(xml_ccda)
@@ -576,7 +586,7 @@ async def gpconnect(
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
-        with open(f"{nhsno}.xml", "w") as output:
+        with open(f"{str(int(nhsno))}.xml", "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     await _attempt_audit(
