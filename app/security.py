@@ -135,7 +135,7 @@ def create_jwt(
     """
     created_time = int(time())
 
-    subject_id_str = audit.subject_id or "Unknown, User"
+    subject_id_str = audit.subject_id
     try:
         family, given = subject_id_str.split(", ", 1)
     except ValueError:
@@ -169,10 +169,10 @@ def create_jwt(
                 },
                 {
                     "system": "2.16.840.1.113883.2.1.4",
-                    "value": audit.organization_id or "Unknown",
+                    "value": audit.organization_id,
                 },
             ],
-            "name": audit.organization or "Unknown Organization",
+            "name": audit.organization,
         },
         "requesting_practitioner": {
             "resourceType": "Practitioner",
@@ -187,7 +187,7 @@ def create_jwt(
                     "value": "UNK",  # As per NHS spec when not using NHS smartcard
                 },
                 {
-                    "system": audit.organization or "Unknown Organization",
+                    "system": audit.organization,
                     "value": subject_id_str,
                 },
             ],
@@ -205,8 +205,8 @@ def create_jwt(
     # audit_role.pop("nullFlavor", None)  # Remove null flavor if present
 
     audit_role = {
-        "system": audit.role.codeSystemName if audit.role else "Unknown",
-        "value": audit.role.code if audit.role else "Unknown",
+        "system": audit.role.codeSystemName if audit.role else "",
+        "value": audit.role.code if audit.role else "",
     }
 
     # print("Adding role to JWT payload:", audit_role)

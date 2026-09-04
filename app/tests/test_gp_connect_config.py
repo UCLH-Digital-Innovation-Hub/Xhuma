@@ -96,9 +96,12 @@ def test_xh_040_core_domains_unfiltered():
         "status",
     )
 
+    found_core_domains = set()
+
     for param in parameters:
         param_name = param.get("name", "")
         if param_name in core_domains:
+            found_core_domains.add(param_name)
             for part in param.get("part", []):
                 part_name = part.get("name", "").lower()
                 for token in filter_tokens:
@@ -106,3 +109,8 @@ def test_xh_040_core_domains_unfiltered():
                         f"Hazard XH-040 Violation: Unexpected filter '{part.get('name')}' "
                         f"applied to core domain '{param_name}'. Core domains must remain unfiltered."
                     )
+
+    assert found_core_domains == core_domains, (
+        f"Hazard XH-040 Violation: Missing core domains in output. "
+        f"Expected {core_domains}, found {found_core_domains}"
+    )

@@ -28,6 +28,7 @@ from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
 from ..audit.audit import process_saml_attributes
+from .saml_helper import extract_trusted_saml_assertion, InvalidSAMLContext
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
@@ -154,39 +155,24 @@ async def iti55(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
-
-        # Safely extract assertion (prevent unhandled KeyError)
         try:
-            assertion = envelope["Header"]["Security"]["Assertion"]
-            if isinstance(assertion, list):
-                assertion = assertion[0]
-        except (KeyError, TypeError):
-            assertion = {}
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
-        trusted_issuers_env = os.getenv("SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine")
-        trusted_issuers = [i.strip() for i in trusted_issuers_env.split("|")]
-
-        issuer_obj = assertion.get("Issuer")
-        if isinstance(issuer_obj, list):
-            issuer_obj = issuer_obj[0]
-
-        issuer_str = (
-            issuer_obj.get("#text", "")
-            if isinstance(issuer_obj, dict)
-            else str(issuer_obj)
-            if issuer_obj is not None
-            else ""
-        )
-
-        # Prevent log injection (CWE-117) and strip whitespace
-        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
-
-        if issuer_str not in trusted_issuers:
-            print(
-                f"ITI-55 SAML Verification: Rejected issuer '{issuer_str}'",
-                flush=True,
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
             )
-            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
 
         # Safely extract query params to handle fuzzing/malformed payloads
         try:
@@ -307,51 +293,50 @@ async def iti47(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
-
-        # Safely extract assertion (prevent unhandled KeyError)
         try:
-            assertion = envelope["Header"]["Security"]["Assertion"]
-            if isinstance(assertion, list):
-                assertion = assertion[0]
-        except (KeyError, TypeError):
-            assertion = {}
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
-        trusted_issuers_env = os.getenv("SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine")
-        trusted_issuers = [i.strip() for i in trusted_issuers_env.split("|")]
-
-        issuer_obj = assertion.get("Issuer")
-        if isinstance(issuer_obj, list):
-            issuer_obj = issuer_obj[0]
-
-        issuer_str = (
-            issuer_obj.get("#text", "")
-            if isinstance(issuer_obj, dict)
-            else str(issuer_obj)
-            if issuer_obj is not None
-            else ""
-        )
-
-        # Prevent log injection (CWE-117) and strip whitespace
-        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
-
-        if issuer_str not in trusted_issuers:
-            print(
-                f"ITI-47 SAML Verification: Rejected issuer '{issuer_str}'",
-                flush=True,
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
             )
-            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
 
-        query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"]["queryByParameter"]["parameterList"]
-        for param in query_params["livingSubjectId"]:
-            if param["value"]["@root"] == "2.16.840.1.113883.2.1.4.1":
-                nhsno = param["value"]["@extension"]
-            if param["value"]["@root"] == "1.2.840.114350.1.13.525.3.7.3.688884.100":
-                ceid = param["value"]["@extension"]
+        nhsno = None
+        ceid = None
+        try:
+            query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                "queryByParameter"
+            ]["parameterList"]
+
+            subject_id = query_params.get("livingSubjectId", [])
+            if not isinstance(subject_id, list):
+                subject_id = [subject_id]
+
+            for param in subject_id:
+                val = param.get("value", {})
+                if val.get("@root") == "2.16.840.1.113883.2.1.4.1":
+                    nhsno = val.get("@extension")
+                if val.get("@root") == "1.2.840.114350.1.13.525.3.7.3.688884.100":
+                    ceid = val.get("@extension")
+        except (KeyError, TypeError):
+            pass
         if not nhsno:
             raise HTTPException(status_code=400, detail="Invalid request, no nhs number found")
         if not ceid:
-            raise HTTPException(status_code=400, detail="Invalid request, no care everywhere id found")
-        print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
+            raise HTTPException(
+                status_code=400, detail="Invalid request, no care everywhere id found"
+            )
         secret = os.getenv("API_KEY", "TEST_KEY")
         from ..audit.models import _subject_ref_from_nhs_number
 
@@ -359,9 +344,8 @@ async def iti47(request: Request):
         client.setex(ceid, 3600, hashed_nhs)
         # TODO add audit stuff here too
         patient = await lookup_patient(nhsno, request=request)
-        print(f"Patient: {patient}")
         if not patient:
-            print("Patient not found")
+            pass
         data = await iti_47_response(
             envelope["Header"]["MessageID"],
             patient,
@@ -405,41 +389,24 @@ async def iti38(request: Request):
         print("-" * 40)
         # print(f"Received body: {body}")
         envelope = clean_soap(body)
-
-        # Safely extract assertion (prevent unhandled KeyError)
         try:
-            assertion = envelope["Header"]["Security"]["Assertion"]
-            if isinstance(assertion, list):
-                assertion = assertion[0]
-        except (KeyError, TypeError):
-            assertion = {}
-
-        trusted_issuers_env = os.getenv("SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine")
-        trusted_issuers = [i.strip() for i in trusted_issuers_env.split("|")]
-
-        issuer_obj = assertion.get("Issuer")
-        if isinstance(issuer_obj, list):
-            issuer_obj = issuer_obj[0]
-
-        issuer_str = (
-            issuer_obj.get("#text", "")
-            if isinstance(issuer_obj, dict)
-            else str(issuer_obj)
-            if issuer_obj is not None
-            else ""
-        )
-
-        # Prevent log injection (CWE-117) and strip whitespace
-        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
-
-        if issuer_str not in trusted_issuers:
-            print(
-                f"ITI-38 SAML Verification: Rejected issuer '{issuer_str}'",
-                flush=True,
-            )
-            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
         saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
+            )
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
 
         soap_body = envelope.get("Body", {})
 
@@ -531,39 +498,25 @@ async def iti39(request: Request):
         body = await request.body()
         soap = extract_soap_request(body.decode("utf-8"))
         envelope = clean_soap(soap)
-
-        # Safely extract assertion (prevent unhandled KeyError)
         try:
-            assertion = envelope["Header"]["Security"]["Assertion"]
-            if isinstance(assertion, list):
-                assertion = assertion[0]
-        except (KeyError, TypeError):
-            assertion = {}
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
-        trusted_issuers_env = os.getenv("SAML_TRUSTED_ISSUER", "urn:nhs:names:services:spine")
-        trusted_issuers = [i.strip() for i in trusted_issuers_env.split("|")]
-
-        issuer_obj = assertion.get("Issuer")
-        if isinstance(issuer_obj, list):
-            issuer_obj = issuer_obj[0]
-
-        issuer_str = (
-            issuer_obj.get("#text", "")
-            if isinstance(issuer_obj, dict)
-            else str(issuer_obj)
-            if issuer_obj is not None
-            else ""
-        )
-
-        # Prevent log injection (CWE-117) and strip whitespace
-        issuer_str = issuer_str.replace("\n", "").replace("\r", "").strip()
-
-        if issuer_str not in trusted_issuers:
-            print(
-                f"ITI-39 SAML Verification: Rejected issuer '{issuer_str}'",
-                flush=True,
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
             )
-            raise HTTPException(status_code=401, detail="Invalid SAML Assertion Issuer")
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
+
         message_id = envelope["Header"]["MessageID"]
         try:
             document_id = envelope["Body"]["RetrieveDocumentSetRequest"]["DocumentRequest"]["DocumentUniqueId"]
