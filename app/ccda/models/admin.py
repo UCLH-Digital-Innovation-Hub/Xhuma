@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from pydantic import BaseModel, Field
 
 from .datatypes import AD, CE, CS, II, TEL, TS
@@ -13,13 +11,13 @@ class Organization(BaseModel):
 
     classcode: str = Field(default="ORG", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    realmCode: Optional[CS] = None
-    typeId: Optional[II] = None
-    templateId: Optional[List[II]] = None
-    id: Optional[List[II]] = None
-    name: Optional[List[str]] = None
-    telecom: Optional[List[TEL]] = None
-    address: Optional[List[AD]] = None
+    realmCode: CS | None = None
+    typeId: II | None = None
+    templateId: list[II] | None = None
+    id: list[II] | None = None
+    name: list[str] | None = None
+    telecom: list[TEL] | None = None
+    address: list[AD] | None = None
 
 
 class Person(BaseModel):
@@ -30,7 +28,7 @@ class Person(BaseModel):
 
     classcode: str = Field(default="PSN", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class AuthoringDevice(BaseModel):
@@ -41,10 +39,10 @@ class AuthoringDevice(BaseModel):
 
     classcode: str = Field(default="DEV", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    templateId: Optional[List[II]] = None
-    code: Optional[CE] = None
-    softwareName: Optional[str] = None
-    softwareVersion: Optional[str] = None
+    templateId: list[II] | None = None
+    code: CE | None = None
+    softwareName: str | None = None
+    softwareVersion: str | None = None
 
 
 class AssignedAuthor(BaseModel):
@@ -55,14 +53,14 @@ class AssignedAuthor(BaseModel):
 
     classcode: str = Field(default="ASSIGNED", alias="@classCode")
     context_control_code: str = Field(default="OP", alias="@contextControlCode")
-    templateId: Optional[List[II]] = None
-    id: List[II]
-    code: Optional[CE] = None
-    address: Optional[List[AD]] = None
-    telecom: Optional[List[TEL]] = None
-    assignedPerson: Optional[Person] = None
-    assignedAuthoringDevice: Optional[AuthoringDevice] = None
-    representedOrganization: Optional[Organization] = None
+    templateId: list[II] | None = None
+    id: list[II]
+    code: CE | None = None
+    address: list[AD] | None = None
+    telecom: list[TEL] | None = None
+    assignedPerson: Person | None = None
+    assignedAuthoringDevice: AuthoringDevice | None = None
+    representedOrganization: Organization | None = None
 
     # @field_serializer("id")
     # def serialize_id(self, value: Union[List[II], II]) -> List[II]:
@@ -77,9 +75,9 @@ class AuthorParticipation(BaseModel):
     https://build.fhir.org/ig/HL7/CDA-ccda-2.1-sd/StructureDefinition-AuthorParticipation.html
     """
 
-    templateId: Optional[II] = None
-    time: Optional[TS] = None
-    mode_code: Optional[str] = None
+    templateId: II | None = None
+    time: TS | None = None
+    mode_code: str | None = None
     assignedAuthor: AssignedAuthor
-    assignedPerson: Optional[Person] = None
-    representedOrganization: Optional[Organization] = None
+    assignedPerson: Person | None = None
+    representedOrganization: Organization | None = None

@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 from app.audit.models import SAMLAttributes
 from app.ccda.models.datatypes import CD  # adjust path
@@ -20,7 +20,7 @@ def process_saml_attributes(saml_header: dict) -> SAMLAttributes:
         "urn:oasis:names:tc:xacml:2.0:resource:resource-id": "resource_id",
     }
 
-    raw: Dict[str, Any] = {}
+    raw: dict[str, Any] = {}
 
     attributes = saml_header.get("Attribute", [])
     if isinstance(attributes, dict):

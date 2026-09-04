@@ -1,7 +1,7 @@
 import asyncio
 import csv
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import xmltodict
 
@@ -30,7 +30,7 @@ NHS_NUMBERS = [
 NHS_NUMBER_SYSTEM = "https://fhir.nhs.uk/Id/nhs-number"
 
 
-def find_patient(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def find_patient(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Accept either a Patient resource or a Bundle containing one."""
     if payload.get("resourceType") == "Patient":
         return payload
@@ -44,18 +44,14 @@ def find_patient(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_nhs_number(patient: Dict[str, Any]) -> Optional[str]:
+def get_nhs_number(patient: dict[str, Any]) -> str | None:
     for ident in patient.get("identifier", []) or []:
-        if (
-            isinstance(ident, dict)
-            and ident.get("system") == NHS_NUMBER_SYSTEM
-            and ident.get("value")
-        ):
+        if isinstance(ident, dict) and ident.get("system") == NHS_NUMBER_SYSTEM and ident.get("value"):
             return str(ident["value"])
     return None
 
 
-def get_first_last(patient: Dict[str, Any]) -> tuple[str, str]:
+def get_first_last(patient: dict[str, Any]) -> tuple[str, str]:
     names = patient.get("name", []) or []
     if isinstance(names, dict):
         names = [names]
@@ -74,13 +70,13 @@ def get_first_last(patient: Dict[str, Any]) -> tuple[str, str]:
     return first, family
 
 
-def get_dob(patient: Dict[str, Any]) -> str:
+def get_dob(patient: dict[str, Any]) -> str:
     dob = patient.get("birthDate")
     return str(dob) if dob else ""
 
 
 async def main():
-    rows: List[List[str]] = []
+    rows: list[list[str]] = []
 
     for nhsno in NHS_NUMBERS:
         try:

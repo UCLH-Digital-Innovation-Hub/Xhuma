@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import List, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Extra, Field, field_serializer
@@ -19,19 +18,19 @@ from .datatypes import (
     IVL_TS,
     PIVL_TS,
     PQ,
-    SXCM_TS,
     RTO_PQ_PQ,
+    SXCM_TS,
 )
 
 
 class ManufacturedMaterial(BaseModel):
     code: CD
-    lotNumberText: Optional[str] = None
+    lotNumberText: str | None = None
 
 
 class ManufacturedProduct(BaseModel):
     manufacturedMaterial: ManufacturedMaterial
-    templateId: List[II] = Field(default_factory=list)
+    templateId: list[II] = Field(default_factory=list)
     id: II = {"@root": str(uuid4())}
     classCode: str = Field(default="MANU", alias="@classCode")
 
@@ -43,8 +42,8 @@ class Consumable(BaseModel):
 class EntryRelationshipAct(BaseModel):
     templateId: II
     code: CD
-    text: Optional[str] = None
-    statusCode: Optional[CS] = None
+    text: str | None = None
+    statusCode: CS | None = None
     classCode: str = Field(alias="@classCode", default="ACT")
     moodCode: str = Field(alias="@moodCode", default="INT")
 
@@ -56,12 +55,12 @@ class Act(BaseModel):
 
     classCode: str = Field(alias="@classCode", default="ACT")
     moodCode: str = Field(alias="@moodCode", default="EVN")
-    templateId: List[II] = Field(default_factory=list)
-    id: Optional[List[II]] = Field(default_factory=list)
-    code: Optional[CD] = None
-    text: Optional[ED] = None
-    statusCode: Optional[CS] = None
-    effectiveTime: Optional[IVL_TS] = None
+    templateId: list[II] = Field(default_factory=list)
+    id: list[II] | None = Field(default_factory=list)
+    code: CD | None = None
+    text: ED | None = None
+    statusCode: CS | None = None
+    effectiveTime: IVL_TS | None = None
 
 
 class Observation(BaseModel):
@@ -71,21 +70,21 @@ class Observation(BaseModel):
 
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN")
-    templateId: List[II] = Field(default_factory=list)
-    id: Optional[List[II]] = Field(default_factory=list)
-    code: Optional[CD] = None
-    text: Optional[str] = None
-    statusCode: Optional[CS] = None
-    effectiveTime: Optional[IVL_TS] = None
-    value: Optional[ANY] = None
-    entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
+    templateId: list[II] = Field(default_factory=list)
+    id: list[II] | None = Field(default_factory=list)
+    code: CD | None = None
+    text: str | None = None
+    statusCode: CS | None = None
+    effectiveTime: IVL_TS | None = None
+    value: ANY | None = None
+    entryRelationship: list[EntryRelationship] | None = Field(default=None)
 
 
 class ObservationRange(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN.CRT")
-    text: Optional[str] = None
-    value: Optional[ANY] = None
+    text: str | None = None
+    value: ANY | None = None
 
 
 class ReferenceRange(BaseModel):
@@ -98,7 +97,7 @@ class ResultObservation(Observation):
     Representation of CDA model object Result Observation.
     """
 
-    templateId: List[II] = Field(
+    templateId: list[II] = Field(
         default=[
             II(
                 **{
@@ -108,8 +107,8 @@ class ResultObservation(Observation):
             )
         ]
     )
-    referenceRange: Optional[List[ReferenceRange]] = None
-    value: Optional[PQ] = None  # PQ is used for numeric values
+    referenceRange: list[ReferenceRange] | None = None
+    value: PQ | None = None  # PQ is used for numeric values
 
 
 class InstructionObservation(Observation):
@@ -117,7 +116,7 @@ class InstructionObservation(Observation):
     Representation of CDA model object Instruction Observation.
     """
 
-    templateId: List[II] = Field(
+    templateId: list[II] = Field(
         default=[
             II(
                 **{
@@ -127,7 +126,7 @@ class InstructionObservation(Observation):
             )
         ]
     )
-    code: Optional[CD] = Field(
+    code: CD | None = Field(
         default=CD(
             **{
                 "@code": "89187-7",
@@ -135,7 +134,7 @@ class InstructionObservation(Observation):
             }
         )
     )
-    statusCode: Optional[CS] = CS(
+    statusCode: CS | None = CS(
         **{
             "@code": "completed",
         }
@@ -145,8 +144,8 @@ class InstructionObservation(Observation):
 class Criterion(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN")
-    code: Optional[CD] = None
-    value: Optional[ANY] = None
+    code: CD | None = None
+    value: ANY | None = None
 
 
 class Precondition(BaseModel):
@@ -162,8 +161,8 @@ class SubstanceAdministration(BaseModel):
 
     classCode: str = Field(alias="@classCode", default="SBADM")
     moodCode: str = Field(alias="@moodCode", default="INT")
-    templateId: List[II] = Field(default_factory=list)
-    id: List[II] = Field(default_factory=list)
+    templateId: list[II] = Field(default_factory=list)
+    id: list[II] = Field(default_factory=list)
     # ?code needed
     # code: Optional[CD] = Field(
     #     default=CD(
@@ -173,26 +172,22 @@ class SubstanceAdministration(BaseModel):
     #         }
     #     )
     # )
-    code: Optional[CD] = None
-    text: Optional[Union[str, ED]] = None
-    statusCode: Optional[CS] = None
-    effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
-        default_factory=list
-    )
-    consumable: Optional[Consumable] = None
-    routeCode: Optional[CE] = None
-    doseQuantity: Optional[Union[IVL_PQ, PQ]] = None
-    rateQuantity: Optional[Union[IVL_PQ, PQ]] = None
-    maxDoseQuantity: Optional[RTO_PQ_PQ] = None
-    entryRelationship: List["EntryRelationship"] = Field(default_factory=list)
-    repeatNumber: Optional[IVL_INT] = None
+    code: CD | None = None
+    text: str | ED | None = None
+    statusCode: CS | None = None
+    effectiveTime: list[SXCM_TS | IVL_TS | PIVL_TS | EIVL_TS] = Field(default_factory=list)
+    consumable: Consumable | None = None
+    routeCode: CE | None = None
+    doseQuantity: IVL_PQ | PQ | None = None
+    rateQuantity: IVL_PQ | PQ | None = None
+    maxDoseQuantity: RTO_PQ_PQ | None = None
+    entryRelationship: list[EntryRelationship] = Field(default_factory=list)
+    repeatNumber: IVL_INT | None = None
     # TODO flesh out precondition model
-    precondition: Optional[List[Precondition]] = None
+    precondition: list[Precondition] | None = None
 
     @field_serializer("effectiveTime")
-    def serialize_effective_time(
-        self, sxcm_ts_list: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]]
-    ) -> List:
+    def serialize_effective_time(self, sxcm_ts_list: list[SXCM_TS | IVL_TS | PIVL_TS | EIVL_TS]) -> list:
         """
         Takes a list of SXCM_TS objects and returns a dictionary with operator as key
         """
@@ -202,9 +197,7 @@ class SubstanceAdministration(BaseModel):
         for eff_time in sxcm_ts_list:
             # print(f"eff_time: {eff_time}")
             # print(isinstance(eff_time, SXCM_TS))
-            if eff_time.resource_type == "SXCM_TS" and getattr(
-                eff_time, "operator", None
-            ):
+            if eff_time.resource_type == "SXCM_TS" and getattr(eff_time, "operator", None):
                 # add the operator to the dictionary
                 sxcm[eff_time.operator] = {"@value": eff_time.value}
             else:
@@ -219,11 +212,11 @@ class SubstanceAdministration(BaseModel):
 class EntryRelationship(BaseModel, extra=Extra.allow):
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
-    inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
-    sequenceNumber: Optional[int] = None
-    act: Optional[Act] = None
-    observation: Optional[Observation] = None
-    substanceAdministration: Optional["SubstanceAdministration"] = None
+    inversionInd: bool | None = Field(alias="@inversionInd", default=None)
+    sequenceNumber: int | None = None
+    act: Act | None = None
+    observation: Observation | None = None
+    substanceAdministration: SubstanceAdministration | None = None
     # accept any type of object
 
 
@@ -233,8 +226,8 @@ class Entry(BaseModel):
     not relevant to what we get from Epic NoteReader messages - we only need Act.
     """
 
-    act: Optional[Act] = None
-    substanceAdministration: Optional[SubstanceAdministration] = None
+    act: Act | None = None
+    substanceAdministration: SubstanceAdministration | None = None
 
 
 class Section(BaseModel):
@@ -242,12 +235,12 @@ class Section(BaseModel):
     Representation of a generic section in a CDA document. To add more attributes if needed
     """
 
-    id: Optional[II] = None
-    templateId: List[II] = Field(default_factory=list)
-    code: Optional[CE] = None
-    title: Optional[str] = None
-    text: Optional[str] = None
-    entry: List[Entry] = Field(default_factory=list)
+    id: II | None = None
+    templateId: list[II] = Field(default_factory=list)
+    code: CE | None = None
+    title: str | None = None
+    text: str | None = None
+    entry: list[Entry] = Field(default_factory=list)
 
     class Config:
         arbitrary_types_allowed = True
@@ -260,7 +253,7 @@ class ResultsOrganizer(BaseModel):
 
     classCode: str = Field(alias="@classCode", default="BATTERY")
     moodCode: str = Field(alias="@moodCode", default="EVN")
-    templateId: List[II] = Field(
+    templateId: list[II] = Field(
         default=[
             II(
                 **{
@@ -270,12 +263,12 @@ class ResultsOrganizer(BaseModel):
             )
         ],
     )
-    id: Optional[List[II]] = Field(default_factory=list)
-    code: Optional[CD] = None
-    statusCode: Optional[CS] = None
-    effectiveTime: Optional[IVL_TS] = None
-    author: Optional[AuthorParticipation] = None
-    component: List[ResultObservation] = Field(default_factory=list)
+    id: list[II] | None = Field(default_factory=list)
+    code: CD | None = None
+    statusCode: CS | None = None
+    effectiveTime: IVL_TS | None = None
+    author: AuthorParticipation | None = None
+    component: list[ResultObservation] = Field(default_factory=list)
 
 
 class ResultsSection(Section):
@@ -283,7 +276,7 @@ class ResultsSection(Section):
     Representation of a CDA Results Section model object.
     """
 
-    templateId: List[II] = Field(
+    templateId: list[II] = Field(
         default=[
             II(
                 **{
@@ -301,9 +294,9 @@ class ResultsSection(Section):
             }
         )
     )
-    title: Optional[str] = "Results"
-    text: Optional[str] = None
-    entry: Optional[List[ResultsOrganizer]] = Field(default_factory=list)
+    title: str | None = "Results"
+    text: str | None = None
+    entry: list[ResultsOrganizer] | None = Field(default_factory=list)
 
 
 Observation.model_rebuild()

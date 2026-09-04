@@ -44,8 +44,5 @@ def test_snomed_priority_and_translation():
     assert result.codeSystem == "2.16.840.1.113883.6.96"
     assert result.translation is not None
     assert result.translation[0].code == "03716001"
-    assert (
-        result.translation[0].codeSystemName
-        == "https://fhir.hl7.org.uk/Id/multilex-drug-codes"
-    )
+    assert result.translation[0].codeSystemName == "https://fhir.hl7.org.uk/Id/multilex-drug-codes"
     assert result.translation[0].codeSystem == "2.16.840.1.113883.2.1.6.4"

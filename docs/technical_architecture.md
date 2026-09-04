@@ -294,6 +294,34 @@ sequenceDiagram
     end
 ```
 
+## Security, Governance & Data Minimization
+
+Xhuma implements strict data governance controls to align with NHS Information Governance (IG) frameworks and the National Data Sharing Arrangement (NDSA).
+
+### Role-Based Access Control (RBAC) & Break The Glass
+Xhuma relies on Epic Care Everywhere as the authoritative system of record for identity and access management. 
+- **RBAC:** Only authorised clinicians with appropriate Epic security classes can initiate Xhuma queries.
+- **Break The Glass:** Epic's native 'Break The Glass' functionality is enforced prior to Xhuma retrieving GP Connect data, requiring clinicians to explicitly state their reason for accessing outside records. This decision is cryptographically audited and passed back to the NHS via SAML assertions.
+
+### Hardcoded Purpose of Use
+Xhuma strictly enforces the `directcare` purpose. The middleware explicitly blocks any attempts to query the GP Connect API for research, secondary uses, or population health analytics.
+
+### Data Minimization Scope
+To adhere to data minimization principles, Xhuma scopes its GP Connect structured record retrieval strictly to `patient/*.read`. It only requests the specific clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations), explicitly excluding sensitive or unnecessary administrative data where possible.
+
+## Error Handling & Graceful Degradation
+
+Xhuma implements a robust **Global Exception Handling** architecture designed to prevent internal server errors from leaking sensitive stack traces, while remaining strictly compliant with downstream parsing expectations.
+
+### Centralized Exception Catching
+All unhandled exceptions (e.g., parsing failures on malformed FHIR payloads) are caught by a global middleware hook in `app/main.py`. The raw python stack trace is suppressed from the client and instead securely logged to Azure Application Insights with a unique Trace ID.
+
+### Context-Aware Error Payloads
+When a fatal error is caught, Xhuma dynamically determines the originating route and returns a clinically safe, specification-compliant error payload:
+- **REST/FHIR Routes:** Returns a standard FHIR `OperationOutcome` resource.
+- **IHE/SOAP Routes (Epic ITI-38/ITI-55):** Returns a standard `SOAP Fault` envelope (incorporating an IHE `RegistryErrorList`) so that Epic can cleanly abandon the transaction without crashing the clinician's workspace.
+- **Other Routes:** Returns a standard RFC 7807 `application/problem+json` payload.
+
 ### Delta Summary & Assumptions
 
 **Changes from previous version:**

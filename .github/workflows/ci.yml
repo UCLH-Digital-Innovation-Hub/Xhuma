@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  FORCE_COLOR: "1"
+
 jobs:
   quality:
     name: Format and lint
@@ -77,10 +80,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev
 
-      - name: Run tests with coverage
+      - name: Run unit tests with coverage
         id: tests
         run: |
-          uv run coverage run -m pytest || exit_code=$?
+          uv run coverage run -m pytest --ignore=app/tests/test_api_fuzzing.py --ignore=app/tests/test_fuzzing.py || exit_code=$?
           if [ -z "$exit_code" ]; then exit_code=0; fi
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           uv run coverage xml
@@ -93,10 +96,77 @@ jobs:
           github-token: ${{ secrets.COVERALLS_TOKEN }}
           format: cobertura
           file: coverage.xml
+          parallel: true
 
       - name: Fail if tests failed
         if: steps.tests.outputs.exit_code != 0
         run: exit 1
+
+  fuzzing:
+    name: Fuzzing
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && (github.base_ref == 'int' || github.base_ref == 'main')
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Restore uv cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            .venv
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Run fuzzing tests with coverage
+        id: fuzzing
+        run: |
+          uv run coverage run -m pytest app/tests/test_api_fuzzing.py app/tests/test_fuzzing.py || exit_code=$?
+          if [ -z "$exit_code" ]; then exit_code=0; fi
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          uv run coverage xml
+        continue-on-error: true
+
+      - name: Upload coverage to Coveralls
+        if: always()
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.COVERALLS_TOKEN }}
+          format: cobertura
+          file: coverage.xml
+          parallel: true
+
+      - name: Fail if fuzzing failed
+        if: steps.fuzzing.outputs.exit_code != 0
+        run: exit 1
+
+  coveralls-finish:
+    needs: [test, fuzzing]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Coveralls Finished
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.COVERALLS_TOKEN }}
+          parallel-finished: true
 
   security:
     name: Security scan

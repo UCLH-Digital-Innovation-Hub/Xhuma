@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import Request
 from opentelemetry import trace
@@ -21,16 +21,14 @@ from .models import (
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-def _client_ip(request: Request) -> Optional[str]:
-    return request.headers.get("x-forwarded-for") or (
-        request.client.host if request.client else None
-    )
+def _client_ip(request: Request) -> str | None:
+    return request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
 
 
-def _trace_id() -> Optional[str]:
+def _trace_id() -> str | None:
     span = trace.get_current_span()
     ctx = span.get_span_context() if span else None
     if not ctx or not ctx.is_valid:
@@ -47,12 +45,12 @@ async def build_audit_event(
     action: str,
     outcome: AuditOutcome,
     # optional extra refs
-    message_id: Optional[str] = None,
-    document_id: Optional[str] = None,
+    message_id: str | None = None,
+    document_id: str | None = None,
     # failure context
-    error_code: Optional[str] = None,
-    detail: Optional[Dict[str, Any]] = None,
-    request_id: Optional[str] = None,
+    error_code: str | None = None,
+    detail: dict[str, Any] | None = None,
+    request_id: str | None = None,
 ) -> AuditEvent:
     """
     Build a validated AuditEvent (Pydantic).

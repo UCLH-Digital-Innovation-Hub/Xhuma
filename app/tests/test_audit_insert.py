@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import Mock
 
 import pytest
@@ -42,7 +42,7 @@ async def test_insert_audit_event_adds_expected_row(monkeypatch):
     evt = AuditEvent(
         sequence=42,
         subject_nhs_number="9690937278",
-        event_time=datetime(2026, 2, 2, 12, 0, 0, tzinfo=timezone.utc),
+        event_time=datetime(2026, 2, 2, 12, 0, 0, tzinfo=UTC),
         organisation="RRV00",
         request_id="req-123",
         trace_id="trace-abc",
@@ -81,9 +81,7 @@ async def test_insert_audit_event_adds_expected_row(monkeypatch):
     assert row.user_org_name == evt.saml.organization
     assert row.user_org_id == evt.saml.organization_id
 
-    assert row.purpose_of_use == (
-        evt.saml.purpose_of_use.displayName if evt.saml.purpose_of_use else None
-    )
+    assert row.purpose_of_use == (evt.saml.purpose_of_use.displayName if evt.saml.purpose_of_use else None)
 
     assert row.action == evt.event.action
     assert row.outcome == evt.event.outcome.value

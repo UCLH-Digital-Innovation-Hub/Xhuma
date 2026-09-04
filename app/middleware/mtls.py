@@ -1,8 +1,9 @@
-import os
 import base64
 import datetime
+import os
+
 from cryptography import x509
-from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -14,7 +15,7 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
         client_cert = x509.load_der_x509_certificate(der_cert)
     except Exception as e:
         print(
-            f"Epic CA Verification: Failed to decode client cert. Error: {str(e)}",
+            f"Epic CA Verification: Failed to decode client cert. Error: {e!s}",
             flush=True,
         )
         return False
@@ -24,11 +25,7 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
         fingerprint = client_cert.fingerprint(hashes.SHA256()).hex().lower()
         trusted_thumbprints = os.getenv("MTLS_TRUSTED_THUMBPRINTS", "")
         if trusted_thumbprints:
-            allowed = {
-                t.strip().lower().replace(":", "")
-                for t in trusted_thumbprints.split(",")
-                if t.strip()
-            }
+            allowed = {t.strip().lower().replace(":", "") for t in trusted_thumbprints.split(",") if t.strip()}
             if allowed and fingerprint not in allowed:
                 print(
                     f"Epic CA Verification: Client cert fingerprint {fingerprint} not in allowlist",
@@ -37,16 +34,14 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
                 return False
     except Exception as e:
         print(
-            f"Epic CA Verification: Failed to check fingerprint. Error: {str(e)}",
+            f"Epic CA Verification: Failed to check fingerprint. Error: {e!s}",
             flush=True,
         )
         return False
 
     epic_ca_pem = os.getenv("EPIC_CA_CERT")
     if not epic_ca_pem:
-        print(
-            "Epic CA Verification: EPIC_CA_CERT env var is missing or empty", flush=True
-        )
+        print("Epic CA Verification: EPIC_CA_CERT env var is missing or empty", flush=True)
         # Secure default: If we enforce mTLS but have no CA configured, reject.
         return False
 
@@ -61,7 +56,7 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
             ca_certs = [x509.load_pem_x509_certificate(epic_ca_str)]
     except Exception as pem_error:
         print(
-            f"Epic CA Verification: Failed to load as PEM string. Error: {str(pem_error)}",
+            f"Epic CA Verification: Failed to load as PEM string. Error: {pem_error!s}",
             flush=True,
         )
         # Fallback in case they pasted a base64 DER string instead of PEM
@@ -70,7 +65,7 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
             ca_certs = [x509.load_der_x509_certificate(der_ca)]
         except Exception as e:
             print(
-                f"Epic CA Verification: Failed to parse EPIC_CA_CERT. Error: {str(e)}",
+                f"Epic CA Verification: Failed to parse EPIC_CA_CERT. Error: {e!s}",
                 flush=True,
             )
             return False
@@ -88,14 +83,14 @@ def _verify_epic_cert(client_cert_b64: str) -> bool:
     )
 
     # Check expiry
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     try:
         not_before = client_cert.not_valid_before_utc
         not_after = client_cert.not_valid_after_utc
     except AttributeError:
         # Fallback for older cryptography versions
-        not_before = client_cert.not_valid_before.replace(tzinfo=datetime.timezone.utc)
-        not_after = client_cert.not_valid_after.replace(tzinfo=datetime.timezone.utc)
+        not_before = client_cert.not_valid_before.replace(tzinfo=datetime.UTC)
+        not_after = client_cert.not_valid_after.replace(tzinfo=datetime.UTC)
 
     if now < not_before or now > not_after:
         print(
@@ -148,9 +143,7 @@ class MTLSMiddleware(BaseHTTPMiddleware):
             "/robots",
         ]
 
-        is_public = (request.url.path == "/") or any(
-            request.url.path.startswith(p) for p in public_paths
-        )
+        is_public = (request.url.path == "/") or any(request.url.path.startswith(p) for p in public_paths)
 
         if not require_mtls or is_public:
             return await call_next(request)
@@ -166,9 +159,7 @@ class MTLSMiddleware(BaseHTTPMiddleware):
                 f"MTLS Middleware: Blocked request to {request.url.path} because X-ARR-ClientCert header is missing",
                 flush=True,
             )
-            return JSONResponse(
-                status_code=403, content={"detail": "Client Certificate Required"}
-            )
+            return JSONResponse(status_code=403, content={"detail": "Client Certificate Required"})
 
         # Validate Epic CA for all other protected endpoints (e.g., /soap, /pds)
         if not _verify_epic_cert(client_cert):
@@ -178,9 +169,7 @@ class MTLSMiddleware(BaseHTTPMiddleware):
             )
             return JSONResponse(
                 status_code=403,
-                content={
-                    "detail": "Invalid Client Certificate. Epic CA Verification Failed."
-                },
+                content={"detail": "Invalid Client Certificate. Epic CA Verification Failed."},
             )
 
         return await call_next(request)
