@@ -105,6 +105,7 @@ jobs:
   fuzzing:
     name: Fuzzing
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && (github.base_ref == 'int' || github.base_ref == 'main')
 
     permissions:
       contents: read
