@@ -21,7 +21,6 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
 
     configure_azure_monitor()
 from fastapi import Depends
-
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse
@@ -35,12 +34,11 @@ from sqlalchemy import select
 from .audit.db_models import AuditEventRow
 from .audit.models import _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
-from .security import verify_api_key
 from .middleware.mtls import MTLSMiddleware
-
 from .redis_connect import redis_client
 from .relay import routes
 from .relay.hub import WebSocketHub
+from .security import verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 
@@ -139,13 +137,13 @@ app = FastAPI(
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     try:
+        # Ensure the root logger captures INFO logs so they are exported
+        import logging
+
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.logging import LoggingInstrumentor
         from opentelemetry.instrumentation.redis import RedisInstrumentor
-
-        # Ensure the root logger captures INFO logs so they are exported
-        import logging
 
         logging.getLogger().setLevel(logging.INFO)
 

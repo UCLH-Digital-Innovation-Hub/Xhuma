@@ -1,7 +1,8 @@
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes
 import binascii
 import sys
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
 
 try:
     with open("keys/ucl2 - new.cer", "r") as f:

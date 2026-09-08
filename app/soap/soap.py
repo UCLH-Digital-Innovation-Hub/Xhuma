@@ -21,27 +21,26 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Callable
 
-
 import httpx
-import xmltodict
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.routing import APIRoute
+from pydantic import ValidationError
 from starlette.background import BackgroundTask
 
 from ..audit.audit import process_saml_attributes
-from .saml_helper import extract_trusted_saml_assertion, InvalidSAMLContext
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
+from .models import ITI38Request, ITI39Request, ITI55Request
 from .responses import (
-    create_envelope,
-    create_header,
     iti_38_response,
+    iti_39_error,
     iti_39_response,
     iti_47_response,
     iti_55_error,
     iti_55_response,
 )
+from .saml_helper import InvalidSAMLContext, extract_trusted_saml_assertion
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -173,29 +172,24 @@ async def iti55(request: Request):
                 detail="Incomplete SAML security context",
             )
 
-        # Safely extract query params to handle fuzzing/malformed payloads
         try:
-            query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                "queryByParameter"
-            ]["parameterList"]
-        except (KeyError, TypeError):
-            query_params = None
-
-        nhsno = None
-        if query_params:
+            soap_request = ITI55Request.model_validate(envelope)
+            query = soap_request.query
+            query_data = query.to_xml_dict() if query else {}
+            nhsno = soap_request.patient_identifier("2.16.840.1.113883.2.1.4.1")
+            message_id = soap_request.header.message_id
+        except ValidationError:
+            # Preserve the existing ITI-55 error response for malformed queries.
+            message_id = envelope.get("Header", {}).get("MessageID")
             try:
-                values = query_params["livingSubjectId"]["value"]
-                if not isinstance(values, list):
-                    values = [values]
-                for param in values:
-                    if param.get("@root") == "2.16.840.1.113883.2.1.4.1":
-                        nhsno = param.get("@extension")
-                        # print(f"NHSNO: {nhsno}")
-            except Exception:
-                nhsno = None
+                query_data = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
+                    "queryByParameter"
+                ]
+            except (KeyError, TypeError):
+                query_data = {}
+            nhsno = None
 
         # OpenTelemetry trace propagation
-        message_id = envelope.get("Header", {}).get("MessageID")
         from opentelemetry import trace
 
         span = trace.get_current_span()
@@ -209,18 +203,10 @@ async def iti55(request: Request):
                 span.set_attribute("patient.nhs_number_hashed", hashed_nhs)
 
         if not nhsno:
-            q_param = {}
-            try:
-                q_param = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                    "queryByParameter"
-                ]
-            except (KeyError, TypeError):
-                pass
-
             data = await iti_55_error(
                 message_id=message_id or "Unknown",
                 error_text="No NHS number found in request",
-                query=q_param,
+                query=query_data,
             )
             return Response(content=data, media_type="application/soap+xml")
 
@@ -231,11 +217,9 @@ async def iti55(request: Request):
             "resourceType" in patient and patient["resourceType"] == "OperationOutcome"
         ):
             data = await iti_55_error(
-                message_id=envelope["Header"]["MessageID"],
+                message_id=message_id,
                 error_text=f"Patient with NHS number {nhsno} not found",
-                query=envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                    "queryByParameter"
-                ],
+                query=query_data,
             )
             return Response(content=data, media_type="application/soap+xml")
 
@@ -252,20 +236,16 @@ async def iti55(request: Request):
 
         if security_code != "U":
             data = await iti_55_error(
-                message_id=envelope["Header"]["MessageID"],
+                message_id=message_id,
                 error_text="Patient record has restricted access",
-                query=envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                    "queryByParameter"
-                ],
+                query=query_data,
             )
             return Response(content=data, media_type="application/soap+xml")
 
         data = await iti_55_response(
-            envelope["Header"]["MessageID"],
+            message_id,
             patient,
-            envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                "queryByParameter"
-            ],
+            query_data,
         )
         return Response(content=data, media_type="application/soap+xml")
     else:
@@ -413,29 +393,22 @@ async def iti38(request: Request):
                 detail="Incomplete SAML security context",
             )
 
-        soap_body = envelope.get("Body", {})
-
-        # Support both AdhocQueryRequest and CrossGatewayQuery root elements
-        adhoc_query = soap_body.get(
-            "AdhocQueryRequest", soap_body.get("CrossGatewayQuery", {})
-        ).get("AdhocQuery", {})
-
-        slots = adhoc_query.get("Slot", [])
-        if not isinstance(slots, list):
-            slots = [slots]
-
-        query_id = adhoc_query.get("@id", "unknown")
-
-        patient_id = None
-        for x in slots:
-            if isinstance(x, dict) and x.get("@name") == "$XDSDocumentEntryPatientId":
-                val = x.get("ValueList", {}).get("Value")
-                # Handle single or multiple values safely
-                patient_id = val[0] if isinstance(val, list) else val
-                break
+        try:
+            soap_request = ITI38Request.model_validate(envelope)
+            adhoc_query = soap_request.body.query
+            query_id = adhoc_query.query_id if adhoc_query else "unknown"
+            patient_id = (
+                adhoc_query.slot_value("$XDSDocumentEntryPatientId")
+                if adhoc_query
+                else None
+            )
+            message_id = soap_request.header.message_id
+        except ValidationError:
+            query_id = "unknown"
+            patient_id = None
+            message_id = envelope.get("Header", {}).get("MessageID")
 
         # OpenTelemetry trace propagation
-        message_id = envelope.get("Header", {}).get("MessageID")
         from opentelemetry import trace
 
         span = trace.get_current_span()
@@ -522,12 +495,15 @@ async def iti39(request: Request):
                 detail="Incomplete SAML security context",
             )
 
-        message_id = envelope["Header"]["MessageID"]
         try:
-            document_id = envelope["Body"]["RetrieveDocumentSetRequest"][
-                "DocumentRequest"
-            ]["DocumentUniqueId"]
-        except Exception:
+            soap_request = ITI39Request.model_validate(envelope)
+        except ValidationError:
+            raise HTTPException(status_code=404, detail="DocumentUniqueId not found")
+        message_id = soap_request.header.message_id
+        retrieve_request = soap_request.body.retrieve_document_set_request
+        document_request = retrieve_request.first_document if retrieve_request else None
+        document_id = document_request.document_unique_id if document_request else None
+        if not document_id:
             raise HTTPException(status_code=404, detail="DocumentUniqueId not found")
 
         # OpenTelemetry trace propagation
@@ -570,7 +546,11 @@ async def iti39(request: Request):
             headers = {"Content-Type": f'multipart/related; boundary="{boundary}"'}
 
             # if there's not an anonymous address in the reply to header, send the response to that address
-            reply_to = envelope["Header"]["ReplyTo"]["Address"]
+            reply_to = (
+                soap_request.header.reply_to.address
+                if soap_request.header.reply_to
+                else None
+            )
             if (
                 reply_to
                 and reply_to != "http://www.w3.org/2005/08/addressing/anonymous"
@@ -615,33 +595,7 @@ async def iti39(request: Request):
 
             return Response(content=data, media_type="application/soap+xml")
         else:
-            # return iti39 error
-            body = {
-                "ns4:RetrieveDocumentSetResponse": {
-                    "@xmlns:ns4": "urn:ihe:iti:xds-b:2007",
-                    "@xmlns:rs": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-                    "rs:RegistryResponse": {
-                        "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure",
-                        "rs:RegistryErrorList": {
-                            "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                            "rs:RegistryError": {
-                                "@errorCode": "XDSDocumentUniqueIdError",
-                                "@codeContext": f"Document with Id {document_id} not found",
-                                "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                            },
-                        },
-                    },
-                }
-            }
-            soap_response = create_envelope(
-                create_header(
-                    "urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id
-                ),
-                body,
-            )
-            error_response = xmltodict.unparse(
-                soap_response, full_document=False, pretty=True
-            )
+            error_response = await iti_39_error(message_id, document_id)
             return Response(
                 content=error_response,
                 media_type="application/soap+xml",

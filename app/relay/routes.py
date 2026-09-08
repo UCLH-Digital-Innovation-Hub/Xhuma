@@ -1,12 +1,17 @@
+import base64
 import json
 import os
 import urllib.parse
-import base64
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi import WebSocketException, status
+from fastapi import (
+    APIRouter,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketException,
+    status,
+)
 
 router = APIRouter(prefix="/relay", tags=["relay"])
 
@@ -89,6 +94,7 @@ async def relay_ws(websocket: WebSocket, client_id: str):
         return
 
     import asyncio
+
     from opentelemetry import trace
 
     hub = websocket.app.state.relay_hub

@@ -12,13 +12,13 @@ The module provides two main JWT creation functions:
 All tokens are signed using RS512 algorithm and have a 5-minute expiration time.
 """
 
-from fastapi import Security, HTTPException, status
-from fastapi.security import APIKeyHeader
 import os
 import uuid
 from time import time
 
 import jwt
+from fastapi import HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 
 from .audit.models import SAMLAttributes
 
