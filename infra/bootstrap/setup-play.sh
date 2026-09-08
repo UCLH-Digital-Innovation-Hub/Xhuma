@@ -41,7 +41,9 @@ elif [[ "$SA_STATUS" == *"AuthorizationFailed"* ]]; then
 fi
 
 ACCOUNT_KEY=$(az storage account keys list --resource-group "$XHUMA_RESOURCE_GROUP" --account-name "$XHUMA_STATE_ACCOUNT" --query '[0].value' -o tsv)
-echo "::add-mask::$ACCOUNT_KEY"
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  echo "::add-mask::$ACCOUNT_KEY"
+fi
 
 echo "Creating tfstate container..."
 C_STATUS=$(az storage container show --name tfstate --account-name "$XHUMA_STATE_ACCOUNT" --account-key "$ACCOUNT_KEY" --query "name" -o tsv 2>&1 || true)

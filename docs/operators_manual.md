@@ -46,6 +46,31 @@ To allow GitHub Actions to deploy infrastructure and code, Xhuma currently relie
    - `AZURE_TENANT_ID`
    - `AZURE_SUBSCRIPTION_ID`
 
+## 2. Setting Up Variables
+
+### Matrix Deployment Workflow
+
+The deployment relies on specific GitHub environments to orchestrate the provisioning and rollout phases securely. 
+
+**Environment Configuration:**
+
+| GitHub environment    | Required secrets                                                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `play-plan`           | Azure credential set; `CR_PAT`; `REGISTRY_ID`; `POSTGRES_PASSWORD`; `SHARED_KEY_VAULT_NAME`; `SHARED_RESOURCE_GROUP_NAME` |
+| `rg-xhuma-play-infra` | Azure credential set                                                                                                      |
+| `rg-xhuma-play`       | Azure credential set                                                                                                      |
+
+*Note: The Azure credential set consists of `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`. Do not duplicate Terraform input secrets in the apply/deploy environments, as apply consumes the saved plan.*
+
+**Actual Deployment Sequence:**
+
+1. **Configure GitHub Environments & Secrets:** Ensure the environments (`play-plan`, `rg-xhuma-play-infra`, `rg-xhuma-play`) exist and their secrets are securely stored. Environment names alone do not configure protection; you must set manual approvers on `rg-xhuma-play-infra` and `rg-xhuma-play`.
+2. **Automatic Bootstrap and Plan:** The workflow automatically runs the bootstrap script to create state storage (if missing), then executes `terraform plan`. The generated plan is uploaded securely and its hash is presented for review.
+3. **Review and Approved Apply:** Operators review the plan output. Once approved, the apply job verifies the plan hash and provisions the infrastructure.
+4. **Local-Vault Onboarding:** With the infrastructure provisioned, the operator manually injects required operational secrets (e.g., `epic-ca-cert`) into the newly created target Key Vault.
+5. **Approved Application Deployment:** Once the vault is ready, the deployment job replaces the inert bootstrap image with the actual application container digest.
+6. **Verification and Manual Rollback:** The new image digest is verified. If issues occur, operators manually roll back by deploying a previous known-good digest, ensuring no concurrent deployment or database incompatibility.
+
 ---
 
 ## 4. Key Vault Population

@@ -221,8 +221,8 @@ resource "azurerm_linux_web_app" "app" {
 
   site_config {
     application_stack {
-      docker_image     = length(split("@", var.docker_image)) > 1 ? split("@", var.docker_image)[0] : lower(split(":", var.docker_image)[0])
-      docker_image_tag = length(split("@", var.docker_image)) > 1 ? split("@", var.docker_image)[1] : (length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[1] : "latest")
+      docker_image     = length(split(":", var.docker_image)) > 1 ? join(":", slice(split(":", var.docker_image), 0, length(split(":", var.docker_image)) - 1)) : var.docker_image
+      docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[length(split(":", var.docker_image)) - 1] : "latest"
     }
 
     container_registry_use_managed_identity = false
