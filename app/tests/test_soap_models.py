@@ -66,6 +66,37 @@ def test_iti38_request_supports_adhoc_query_and_single_slot():
     )
 
 
+def test_iti38_request_supports_cross_gateway_query_and_repeating_values():
+    """Cover the alternate schema wrapper and its repeating Value cardinality."""
+
+    request = ITI38Request.model_validate(
+        {
+            "Header": {"MessageID": "synthetic-message-38"},
+            "Body": {
+                "CrossGatewayQuery": {
+                    "AdhocQuery": {
+                        "@id": "synthetic-query-38",
+                        "Slot": {
+                            "@name": "$XDSDocumentEntryPatientId",
+                            "ValueList": {
+                                "Value": [
+                                    "'9999999999^^^&2.16.840.1.113883.2.1.4.1&ISO'",
+                                    "'9999999999^^^&synthetic-secondary-authority&ISO'",
+                                ]
+                            },
+                        },
+                    }
+                }
+            },
+        }
+    )
+
+    assert request.body.query.query_id == "synthetic-query-38"
+    assert request.body.query.slot_value("$XDSDocumentEntryPatientId") == (
+        "'9999999999^^^&2.16.840.1.113883.2.1.4.1&ISO'"
+    )
+
+
 def test_iti39_request_exposes_document_and_reply_to():
     request = ITI39Request.model_validate(
         {
@@ -88,6 +119,27 @@ def test_iti39_request_exposes_document_and_reply_to():
     document = request.body.retrieve_document_set_request.first_document
     assert document.document_unique_id == "document-id"
     assert request.header.reply_to.address == "https://example.nhs.uk/callback"
+
+
+def test_iti39_request_selects_first_document_from_repeating_requests():
+    """The endpoint intentionally handles one document from an allowed list."""
+
+    request = ITI39Request.model_validate(
+        {
+            "Header": {"MessageID": "synthetic-message-39"},
+            "Body": {
+                "RetrieveDocumentSetRequest": {
+                    "DocumentRequest": [
+                        {"DocumentUniqueId": "synthetic-document-1"},
+                        {"DocumentUniqueId": "synthetic-document-2"},
+                    ]
+                }
+            },
+        }
+    )
+
+    document = request.body.retrieve_document_set_request.first_document
+    assert document.document_unique_id == "synthetic-document-1"
 
 
 def test_iti55_name_selection_falls_back_when_use_is_missing():
