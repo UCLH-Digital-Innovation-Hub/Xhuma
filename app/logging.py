@@ -1,6 +1,6 @@
 import logging
-import sys
 import re
+import sys
 
 import httpx
 

@@ -19,12 +19,12 @@ from .audit.store import insert_audit_event
 from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
+from .gp_connect_config import GP_CONNECT_PARAMETERS
+from .logging import record_application_failure
 from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
-from .gp_connect_config import GP_CONNECT_PARAMETERS
-from .logging import record_application_failure
 
 # from app.metrics.metric_utils import classify_error, now
 
@@ -395,9 +395,9 @@ async def _fetch_gpconnect_record(
         }
 
         from .settings import (
-            EXTERNAL_RELAY_URL,
             EXTERNAL_RELAY_CLIENT_ID,
             EXTERNAL_RELAY_TOKEN,
+            EXTERNAL_RELAY_URL,
         )
 
         if EXTERNAL_RELAY_URL:
@@ -554,6 +554,7 @@ async def _fetch_gpconnect_record(
             pass
 
     import time
+
     from opentelemetry import trace
 
     tracer = trace.get_tracer(__name__)
