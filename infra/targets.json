@@ -10,8 +10,7 @@
       "rollout_ring": 0,
       "github_environment": "rg-xhuma-play",
       "github_infra_environment": "rg-xhuma-play-infra",
-      "subscription_id": "TODO-REPLACE-SUBSCRIPTION-ID",
-      "tenant_id": "TODO-REPLACE-TENANT-ID",
+
       "resource_group": "rg-xhuma-play",
       "location": "uksouth",
       "app_service_name": "xhuma-app-play",

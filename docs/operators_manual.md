@@ -1,186 +1,102 @@
 # Xhuma Operator's Manual
 
-**Document Purpose:** This manual provides a comprehensive, end-to-end runbook for deploying, configuring, and maintaining the Xhuma middleware across NHS Trust environments. 
+**Document Purpose:** This manual provides a comprehensive, end-to-end runbook for deploying, configuring, and maintaining the Xhuma middleware across NHS Trust environments, including the `play` environment rehearsal.
 
 ---
 
 ## 1. Matrix Deployment Overview
 
-Xhuma utilizes a **Shared-Nothing Matrix Deployment** strategy. This means every NHS Trust receives its own completely isolated cloud footprint to prevent cross-contamination of health data and limit the blast radius of any infrastructure failures.
+Xhuma utilizes a **Shared-Nothing Matrix Deployment** strategy. Every target environment (e.g., `play`, `int`, production trusts) receives its own isolated cloud footprint to prevent cross-contamination of health data and limit blast radius.
 
-- **Shared Resources:** A central Azure Resource Group hosts the Public JSON Web Key Set (JWKS) via Blob Storage (used by the NHS Spine to authenticate all Xhuma instances) and a Shared Key Vault for global secrets.
-- **Trust-Local Resources:** Each Trust receives a dedicated Azure App Service, VNet, Managed Redis instance, and Local Key Vault provisioned via independent Terraform state files.
-
-> **#TODO [Matrix Deployment]:** The fully automated CI/CD matrix pipeline is currently in development. Once live, this manual will be updated with the parameterized Terraform pipeline instructions for stamping out new environments automatically.
+- **Shared Resources:** A central Azure Resource Group hosts the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault for global secrets (e.g., API keys, DM+D secrets).
+- **Target-Local Resources:** Each environment receives a dedicated Azure App Service, VNet, Managed Redis, PostgreSQL, and Local Key Vault.
 
 ---
 
-## 2. Azure Infrastructure & Authentication
+## 2. Infrastructure Bootstrapping and State Storage
 
-To allow GitHub Actions to deploy infrastructure and code to Azure, Xhuma currently relies on an Azure Service Principal.
+Terraform state and reviewed execution plans are stored securely in Azure Blob Storage. Each target has its own storage account within its target resource group.
 
-### 2.1 Service Principal Setup (Current)
-You must create a Service Principal with `Contributor` rights over the target Azure Subscription or Resource Group.
+### 2.1 Reused Bootstrapping Procedure
+We reuse the established INT bootstrap logic for new environments like `play`.
 
-1. **Create the Service Principal:**
+1. **Target Configuration**: Verify your target configuration in `infra/targets.json`.
+2. **Execute Bootstrap**: Run the helper script locally to ensure the storage account exists:
    ```bash
-   az ad sp create-for-rbac --name "xhuma-github-actions" --role contributor --scopes /subscriptions/<SUBSCRIPTION_ID> --sdk-auth
+   export AZURE_SUBSCRIPTION_ID="<your-subscription>"
+   export AZURE_TENANT_ID="<your-tenant>"
+   bash infra/bootstrap/setup-play.sh
    ```
-2. **Store the Output:** Copy the resulting JSON output. This will be used in Phase 4 as the `AZURE_CREDENTIALS` GitHub Secret.
+   This creates the `xtfrgxhumaplay` storage account (or equivalent for your target) in the `rg-xhuma-play` resource group, along with the `tfstate` and `tfplans` containers.
 
-> **#TODO [Security Modernization]:** Once the Matrix Deployment process is live, this process will migrate from long-lived Service Principal secrets to OpenID Connect (OIDC) Federated Credentials. This will allow GitHub Actions to authenticate directly against Azure Entra ID without storing static JSON credentials.
-
----
-
-## 3. Key Vault Servicing
-
-Xhuma relies on Azure Key Vault for all sensitive cryptographic material. Due to the matrix architecture, secrets are split between a **Shared Key Vault** (global) and a **Local Key Vault** (per-Trust).
-
-### 3.1 Shared Key Vault (Global)
-These secrets are shared across all Xhuma instances.
-
-1. `jwtkey`: The 2048-bit RSA Private Key in PEM format. This is used by all Xhuma instances to sign JWTs for NHS Spine authentication.
-2. `api-key`: An internal pre-shared key for Xhuma API access.
-3. `dmd-client-secret`: The DM+D API secret.
-4. `saml-trusted-issuer`: A pipe-separated string of trusted SAML Issuer CNs (e.g., `CN=EpicCA|CN=EpicTrustB`).
-
-> **#TODO [Matrix Deployment - SAML Issuers]:** Currently, `saml-trusted-issuer` lives in the Shared Key Vault. However, distinct NHS Trusts running on separate Epic EHR instances will have entirely different Epic SAML Issuers. As part of the Matrix Deployment rollout, `SAML_TRUSTED_ISSUER` must be migrated out of the Shared Key Vault and into the Trust-specific Local Key Vault (similar to the Epic CA Cert) to ensure one Trust's issuer does not authorize access to another Trust's deployment.
-
-### 3.2 Local Key Vault (Trust-Specific)
-These secrets are completely isolated per Trust.
-
-1. `epic-ca-cert`: The specific Trust's Epic Root CA certificate (Base64 PEM) used for mutual TLS (mTLS) validation. This guarantees that only that specific Trust's EHR can connect to their dedicated Xhuma instance.
-
-**How to format PEM files for Azure Key Vault:**
-Azure Key Vault UI often struggles with multi-line PEM files. You must compress the PEM into a single line string (removing the `\n` carriage returns) before pasting it into the Azure Portal. The Xhuma application layer (`app/security.py`) will automatically parse and re-add the 64-character line breaks upon startup.
+*(Note: Entra Blob authentication and OIDC are scheduled as separate, later hardening changes. We currently use interim storage-key authentication and long-lived Service Principal credentials.)*
 
 ---
 
-## 4. GitHub Actions Secrets
+## 3. Azure Service Principal & Permissions
 
-To orchestrate the deployments, the following secrets must be configured in your GitHub Repository (or GitHub Environment):
+To allow GitHub Actions to deploy infrastructure and code, Xhuma currently relies on a Service Principal with client secrets.
 
-| Secret Name | Purpose |
-|-------------|---------|
-| `AZURE_CREDENTIALS` | The JSON output from the Service Principal creation (Phase 2). |
-| `DOCKER_REGISTRY_SERVER_USERNAME` | GitHub Container Registry (GHCR) username. |
-| `DOCKER_REGISTRY_SERVER_PASSWORD` | GHCR Personal Access Token (PAT) with `read:packages` and `write:packages`. |
-| `TF_API_TOKEN` | (Optional) Terraform Cloud API token if remote state is hosted externally. |
-
----
-
-## 5. Trust-Specific Application Settings (tfvars)
-
-While most application settings (like the GP Connect include flags) have sensible defaults built into the codebase, the following variables must be explicitly defined per-Trust. 
-
-These are typically defined in the Trust's specific Terraform variables file (`infra/env/<trust>.tfvars`) which injects them as Environment Variables into the Azure App Service.
-
-| Variable | Description |
-|----------|-------------|
-| `org_code` | The official NHS ODS Code for the Trust (e.g., `RRV00` for UCLH). This is used in PDS/SDS auditing and API headers. |
-| `org_asid` | The Accredited System ID (ASID) assigned to the Trust's specific Epic instance by NHS Digital. |
-| `env` | The environment name (e.g., `int`, `prd`). Controls conditional logic such as which NHS API base URLs to target. |
-| `allowed_hosts` | A comma-separated list of domains allowed to connect to this instance. Must be restricted to the Trust's Epic outbound IPs/Domains in production. |
-| `cors_origins` | A comma-separated list of allowed CORS origins. |
-| `device_id` | A unique identifier representing the Xhuma/Epic system for NHS auditing purposes. |
-| `require_mtls` | Must be set to `"true"` in production to enforce strict Epic mutual-TLS validation on inbound connections. |
+1. **Permissions Needed**: The SP requires `Contributor` rights over the target Azure Resource Group, and must be able to list storage account keys for the state backend.
+2. **Expiry & Rotation**: Ensure the SP secret is rotated before expiry. Update the `AZURE_CLIENT_SECRET` in GitHub Secrets upon rotation.
+3. **GitHub Secrets Configuration**:
+   - `AZURE_CLIENT_ID`
+   - `AZURE_CLIENT_SECRET`
+   - `AZURE_TENANT_ID`
+   - `AZURE_SUBSCRIPTION_ID`
 
 ---
 
-## 6. Deployment & Provisioning
+## 4. Key Vault Population
 
-### 6.1 Infrastructure Provisioning
-Run Terraform from the `infra/` directory to stand up the Trust environment. 
-*Ensure your Terraform workspace/state file corresponds to the specific Trust you are deploying.*
+Before functional verification can succeed, the environment's local Key Vault must be populated by an operator.
 
-```bash
-cd infra/
-terraform init
-terraform plan -var-file="env/<trust>.tfvars"
-terraform apply -var-file="env/<trust>.tfvars"
-```
-
-### 6.2 Application Deployment
-Pushing to the `main` or designated environment branches will trigger the `.github/workflows/cd.yml` pipeline. This will:
-1. Build the Docker Image.
-2. Push the image to GHCR.
-3. Trigger the Azure Web App to pull the latest image and restart.
+1. `epic-ca-cert`: The target-specific Epic Root CA certificate (Base64 PEM) used for mutual TLS (mTLS).
+2. **Populating the Vault**: Use the Azure Portal or CLI to add the secret to the newly provisioned Local Key Vault (e.g., `kv-xhuma-play-...`).
+   *Note: Ensure multi-line PEM files are formatted correctly (newlines replaced if pasting into the Azure Portal).*
 
 ---
 
-## 7. Dashboards & Telemetry
+## 5. Deployment Orchestration
 
-Currently, the custom Xhuma operational dashboard (containing KQL charts for cache hit rates, API failures, and request latency) must be manually imported into the Azure Portal for each new Trust.
+Deployment is handled by GitHub Actions (`.github/workflows/matrix-deploy.yml`), which enforces strict boundaries:
+- `feat/matrix-deployment-pilot` -> `play` environment
+- `int` -> `int` environment
+- `main` -> `prd` environments
 
-1. Navigate to the newly created Trust Resource Group in the Azure Portal.
-2. Select **Dashboards**.
-3. Click **Upload** and select the Xhuma JSON dashboard template.
-4. Ensure the dashboard is bound to the Trust's specific Application Insights workspace.
+### 5.1 First Deployment & Protected Plans
+1. **Trigger**: Push code to the mapped branch (e.g., `feat/matrix-deployment-pilot`).
+2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are available in GitHub.
+3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary). Then, explicitly approve the infrastructure environment (`rg-xhuma-play-infra`).
+4. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
 
-> **#TODO [Matrix Deployment - Dashboards]:** The dashboard should be codified into the infrastructure pipeline using the `azurerm_portal_dashboard` Terraform resource. This will automatically provision and bind the dashboard to the correct Application Insights instance during the `terraform apply` phase, removing this manual step.
+### 5.2 Digest Rollback & Recovery
+Deployment is deterministic. We record the previous digest before deploying and the new digest after.
 
----
-
-## 8. Operational Verification
-
-After deployment, verify the health of the Xhuma instance.
-
-### 8.1 Azure SSH Console
-1. Navigate to the Azure Portal -> App Services -> `<trust-xhuma-app>`.
-2. Under "Development Tools", select **SSH**.
-3. Open a python REPL and verify Key Vault resolution and VNet outbound connectivity to the NHS:
-   ```python
-   from app.pds.pds import get_pds_token
-   print(get_pds_token()) 
-   # Should print a valid NHS access token.
-   ```
-
-### 8.2 Application Insights
-1. Navigate to the Application Insights workspace tied to the App Service.
-2. Check the **Failures** blade.
-3. Verify there are no `AccessToKeyVaultDenied` or `MalformedFraming` startup errors.
-4. Search the Transaction Search for inbound Epic requests (ITI-55, ITI-38, ITI-39) to verify mTLS handshakes and SAML validation are succeeding.
+1. **Recovery Ownership**: If a deployment introduces regressions, authorized operators can perform a rollback.
+2. **Rollback Procedure**: 
+   - Identify the previous known-good digest from the deployment step summary.
+   - Manually trigger a recovery deployment via Azure CLI or a dedicated rollback workflow using that specific digest:
+     ```bash
+     az webapp config container set --name <app_service> --resource-group <rg> --docker-custom-image-name ghcr.io/...@sha256:...
+     ```
+   - Ensure older application code is compatible with the current Alembic database schema migrations.
 
 ---
 
-## 9. Matrix Deployment Pilot Rehearsal
+## 6. Verification and Health Checks
 
-To execute a controlled deployment rehearsal against the `play` environment using the new matrix strategy, follow these steps:
+### 6.1 Safe Verification Boundaries
+- **Liveness Probe**: The `/health` endpoint is unauthenticated and returns a coarse HTTP 200 process-liveness signal. It does not leak secrets, tokens, or perform downstream NHS requests.
+- **Protected Readiness**: Startup configuration, database, and relay status are checked via Azure App Service health monitoring and Azure-side operational probes, rather than exposing an unauthenticated diagnostic endpoint.
 
-### 9.1 Platform Bootstrap
-Before the pipeline can run, the state storage for the `play` environment must be provisioned.
-1. Run `infra/bootstrap/setup-play.sh` from your local machine.
-2. This creates `rg-xhuma-play` (resource group), `rg-xhuma-state-play` (state resource group), and `xtfrgxhumaplay` (storage account).
-
-### 9.2 Interim Service Principal Setup
-For the pilot phase, we will continue to use the existing Service Principal with client secrets. Ensure the following GitHub Secrets are configured at the repository or environment level:
-- `AZURE_CLIENT_ID`
-- `AZURE_CLIENT_SECRET`
-- `AZURE_TENANT_ID`
-- `AZURE_SUBSCRIPTION_ID`
-
-*Note: OIDC migration is deferred until after this pilot phase.*
-
-### 9.3 Triggering the Rehearsal
-The matrix pipeline (`matrix-deploy.yml`) is currently restricted to the pilot branch.
-1. Commit your changes to `feat/matrix-deployment-pilot`.
-2. Push the branch to GitHub:
-   ```bash
-   git push origin feat/matrix-deployment-pilot
-   ```
-3. Pushing to this exact branch will trigger the pipeline, automatically mapping the deployment to the `play` target. 
-4. The pipeline will build the candidate image, run CI, plan the infrastructure, and pause.
-5. An authorized operator must explicitly approve the `rg-xhuma-play-infra` and `rg-xhuma-play` environments in the GitHub Actions UI before infrastructure is applied and the container is deployed.
-
-### 9.4 Rollback & Recovery Steps
-If the deployment fails or introduces regressions:
-1. Re-run an older, successful GitHub Actions run of the matrix deploy workflow to restore the previous container digest.
-2. The infrastructure plan uses `ignore_changes` on the Docker image, ensuring a subsequent Terraform run will not overwrite the rollback image.
-3. Database migrations (Alembic) are executed at container startup. If a rollback is required, ensure the previous image's code is compatible with any new database schema changes applied during the rehearsal.
-
-### 9.5 Remaining Configuration Dependencies
-Before this workflow is adopted for `INT` or `main`:
-- OIDC Service Principal authentication must be implemented.
-- Shared-vault access policies must be migrated or updated to ensure targets do not inadvertently inherit excessive permissions.
-- The `matrix-deploy.yml` orchestrator must be expanded to handle multi-ring rollouts and `fail-fast: false` aggregation.
-- Existing `cd.yml` and `infra.yml` workflows must be deprecated in a coordinated cutover.
+### 6.2 Operator Checklist for New Environments
+- [ ] Target configuration defined in `infra/targets.json`.
+- [ ] Scoped Azure SP access configured.
+- [ ] Bootstrap script executed to provision state storage.
+- [ ] Code pushed to trigger the pipeline.
+- [ ] Protected Terraform plan reviewed.
+- [ ] GitHub Environment approvals granted for infra apply and container deployment.
+- [ ] Local Key Vault populated with `epic-ca-cert`.
+- [ ] Azure-side functional verification (e.g., checking Application Insights logs).
+- [ ] Rollback exercise performed and documented.

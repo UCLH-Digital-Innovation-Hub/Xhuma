@@ -8,11 +8,11 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
-  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
-  ARM_CLIENT_SECRET: "${{ secrets.AZURE_CLIENT_SECRET }}"
-  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
-  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
   
+concurrency:
+  group: xhuma-play-release
+  cancel-in-progress: false
+
 jobs:
   ci:
     name: CI & Tests
@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v5 # pinned major version
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -32,7 +32,7 @@ jobs:
       - name: Ruff Format Check
         run: uv run ruff format --check .
       - name: Run Tests
-        run: uv run coverage run -m pytest --ignore=app/tests/test_api_fuzzing.py --ignore=app/tests/test_fuzzing.py
+        run: uv run coverage run -m pytest
 
   build:
     name: Build & Push
@@ -69,7 +69,7 @@ jobs:
         with:
           image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}'
           format: 'table'
-          exit-code: '0'
+          exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
 
@@ -91,7 +91,7 @@ jobs:
       - name: Select Targets
         id: set-matrix
         run: |
-          TARGETS=$(python scripts/deploy/select_targets.py infra/targets.json "feat/matrix-deployment-pilot")
+          TARGETS=$(python scripts/deploy/select_targets.py infra/targets.json "${{ github.ref_name }}")
           if [ "$TARGETS" == "[]" ]; then
             echo "No enabled targets found for this branch."
             exit 1
@@ -113,17 +113,24 @@ jobs:
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+      
+      - name: Bootstrap State Storage
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        run: bash infra/bootstrap/setup-play.sh
+        
       - name: Terraform Init
         working-directory: ./infra
         run: |
           terraform init \
             -backend-config="${{ matrix.target.backend_file }}"
+            
       - name: Terraform Plan
+        id: plan
         working-directory: ./infra
         env:
-          TF_VAR_resource_group_name: "${{ secrets.RESOURCE_GROUP }}"
-          TF_VAR_api_key: "${{ secrets.API_KEY }}"
-          TF_VAR_jwt_key: "${{ secrets.JWT_KEY }}"
+          TF_VAR_resource_group_name: "${{ matrix.target.resource_group }}"
           TF_VAR_registry_id: "${{ secrets.REGISTRY_ID }}"
           TF_VAR_docker_registry_password: "${{ secrets.CR_PAT }}"
           TF_VAR_docker_registry_username: "${{ github.actor }}"
@@ -131,13 +138,27 @@ jobs:
           TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
           TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
         run: |
-          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="${{ matrix.target.id }}.tfplan"
-      - name: Upload Plan
-        uses: actions/upload-artifact@v4
-        with:
-          name: tfplan-${{ matrix.target.id }}
-          path: infra/${{ matrix.target.id }}.tfplan
-          retention-days: 1
+          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="${{ matrix.target.id }}.tfplan" > plan_output.txt
+          
+      - name: Upload Plan to Azure Blob Storage
+        working-directory: ./infra
+        run: |
+          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
+          az storage blob upload \
+            --account-name "xtfrgxhumaplay" \
+            --account-key "$ACCOUNT_KEY" \
+            --container-name tfplans \
+            --name "${{ matrix.target.id }}-${{ github.run_id }}.tfplan" \
+            --file "${{ matrix.target.id }}.tfplan" \
+            --overwrite
+            
+          PLAN_HASH=$(sha256sum "${{ matrix.target.id }}.tfplan" | awk '{ print $1 }')
+          echo "### Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Plan Hash:** \`$PLAN_HASH\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          tail -n 50 plan_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
   infra-apply:
     name: Infra Apply - ${{ matrix.target.id }}
@@ -149,22 +170,30 @@ jobs:
       matrix: ${{ fromJson(needs.prepare-targets.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download Plan
-        uses: actions/download-artifact@v4
-        with:
-          name: tfplan-${{ matrix.target.id }}
-          path: infra/
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+      
+      - name: Download Plan from Azure Blob Storage
+        working-directory: ./infra
+        run: |
+          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
+          az storage blob download \
+            --account-name "xtfrgxhumaplay" \
+            --account-key "$ACCOUNT_KEY" \
+            --container-name tfplans \
+            --name "${{ matrix.target.id }}-${{ github.run_id }}.tfplan" \
+            --file "${{ matrix.target.id }}.tfplan"
+            
       - name: Terraform Init
         working-directory: ./infra
         run: |
           terraform init \
             -backend-config="${{ matrix.target.backend_file }}"
+            
       - name: Terraform Apply
         working-directory: ./infra
         run: terraform apply -input=false -auto-approve "${{ matrix.target.id }}.tfplan"
@@ -182,8 +211,23 @@ jobs:
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          
+      - name: Capture Previous Digest
+        id: prev_digest
+        run: |
+          PREV_DIGEST=$(az webapp config container show --name "${{ matrix.target.app_service_name }}" --resource-group "${{ matrix.target.resource_group }}" --query 'value[?name==`DOCKER_CUSTOM_IMAGE_NAME`].value' -o tsv || echo "none")
+          echo "PREV_DIGEST=$PREV_DIGEST" >> $GITHUB_ENV
+          
       - name: Deploy Container to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ matrix.target.app_service_name }}
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}'
+          
+      - name: Verify New Digest
+        run: |
+          NEW_DIGEST=$(az webapp config container show --name "${{ matrix.target.app_service_name }}" --resource-group "${{ matrix.target.resource_group }}" --query 'value[?name==`DOCKER_CUSTOM_IMAGE_NAME`].value' -o tsv || echo "none")
+          echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Previous Image:** \`$PREV_DIGEST\`" >> $GITHUB_STEP_SUMMARY
+          echo "**New Image:** \`$NEW_DIGEST\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY

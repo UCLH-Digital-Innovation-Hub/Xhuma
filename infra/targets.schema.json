@@ -15,7 +15,7 @@
         "required": [
           "id", "stage", "source_branch", "enabled", "hold",
           "rollout_ring", "github_environment", "github_infra_environment",
-          "subscription_id", "tenant_id", "resource_group", "location",
+          "resource_group", "location",
           "app_service_name", "tfvars_file", "backend_file",
           "runner_label", "owner", "support_route"
         ],

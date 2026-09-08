@@ -215,16 +215,16 @@ resource "azurerm_linux_web_app" "app" {
     ignore_changes = [
       site_config[0].application_stack[0].docker_image,
       site_config[0].application_stack[0].docker_image_tag,
-      app_settings["DOCKER_REGISTRY_SERVER_URL"],
-      app_settings["DOCKER_REGISTRY_SERVER_USERNAME"],
-      app_settings["DOCKER_REGISTRY_SERVER_PASSWORD"]
+      app_settings["WEBSITE_VNET_ROUTE_ALL"]
     ]
   }
 
   site_config {
     application_stack {
-      docker_image     = lower(split(":", var.docker_image)[0])
-      docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[1] : "latest"
+      # Use an inert bootstrap image for initial creation.
+      # The actual application image digest is deployed via the CD workflow.
+      docker_image     = "mcr.microsoft.com/appsvc/staticsite"
+      docker_image_tag = "latest"
     }
 
     container_registry_use_managed_identity = false
@@ -319,11 +319,6 @@ resource "azurerm_linux_web_app" "app" {
     "REQUIRE_MTLS"  = var.require_mtls
   }
 
-  lifecycle {
-    ignore_changes = [
-      app_settings["WEBSITE_VNET_ROUTE_ALL"]
-    ]
-  }
 }
 
 # Access Policy for Local Vault
