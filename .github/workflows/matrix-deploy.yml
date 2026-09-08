@@ -1,0 +1,189 @@
+name: Matrix Deployment Pilot
+
+on:
+  push:
+    branches:
+      - feat/matrix-deployment-pilot
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+  ARM_CLIENT_SECRET: "${{ secrets.AZURE_CLIENT_SECRET }}"
+  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+  
+jobs:
+  ci:
+    name: CI & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --locked --dev
+      - name: Ruff Check
+        run: uv run ruff check .
+      - name: Ruff Format Check
+        run: uv run ruff format --check .
+      - name: Run Tests
+        run: uv run coverage run -m pytest --ignore=app/tests/test_api_fuzzing.py --ignore=app/tests/test_fuzzing.py
+
+  build:
+    name: Build & Push
+    needs: [ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: type=sha,format=long
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+      - name: Run Trivy scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+  prepare-targets:
+    name: Prepare Targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install jsonschema
+        run: pip install jsonschema
+      - name: Validate Targets
+        run: python scripts/deploy/validate_targets.py infra/targets.schema.json infra/targets.json
+      - name: Select Targets
+        id: set-matrix
+        run: |
+          TARGETS=$(python scripts/deploy/select_targets.py infra/targets.json "feat/matrix-deployment-pilot")
+          if [ "$TARGETS" == "[]" ]; then
+            echo "No enabled targets found for this branch."
+            exit 1
+          fi
+          echo "matrix={\"target\":$TARGETS}" >> $GITHUB_OUTPUT
+
+  infra-plan:
+    name: Infra Plan - ${{ matrix.target.id }}
+    needs: [build, prepare-targets]
+    runs-on: ${{ matrix.target.runner_label }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+      - name: Terraform Init
+        working-directory: ./infra
+        run: |
+          terraform init \
+            -backend-config="${{ matrix.target.backend_file }}"
+      - name: Terraform Plan
+        working-directory: ./infra
+        env:
+          TF_VAR_resource_group_name: "${{ secrets.RESOURCE_GROUP }}"
+          TF_VAR_api_key: "${{ secrets.API_KEY }}"
+          TF_VAR_jwt_key: "${{ secrets.JWT_KEY }}"
+          TF_VAR_registry_id: "${{ secrets.REGISTRY_ID }}"
+          TF_VAR_docker_registry_password: "${{ secrets.CR_PAT }}"
+          TF_VAR_docker_registry_username: "${{ github.actor }}"
+          TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
+          TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
+          TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
+        run: |
+          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="${{ matrix.target.id }}.tfplan"
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ matrix.target.id }}
+          path: infra/${{ matrix.target.id }}.tfplan
+          retention-days: 1
+
+  infra-apply:
+    name: Infra Apply - ${{ matrix.target.id }}
+    needs: [prepare-targets, infra-plan]
+    runs-on: ${{ matrix.target.runner_label }}
+    environment: ${{ matrix.target.github_infra_environment }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ matrix.target.id }}
+          path: infra/
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+      - name: Terraform Init
+        working-directory: ./infra
+        run: |
+          terraform init \
+            -backend-config="${{ matrix.target.backend_file }}"
+      - name: Terraform Apply
+        working-directory: ./infra
+        run: terraform apply -input=false -auto-approve "${{ matrix.target.id }}.tfplan"
+
+  deploy:
+    name: Deploy - ${{ matrix.target.id }}
+    needs: [build, prepare-targets, infra-apply]
+    runs-on: ${{ matrix.target.runner_label }}
+    environment: ${{ matrix.target.github_environment }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-targets.outputs.matrix) }}
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+      - name: Deploy Container to Azure Web App
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ matrix.target.app_service_name }}
+          images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}'

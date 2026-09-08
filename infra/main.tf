@@ -211,6 +211,16 @@ resource "azurerm_linux_web_app" "app" {
     type = "SystemAssigned"
   }
 
+  lifecycle {
+    ignore_changes = [
+      site_config[0].application_stack[0].docker_image,
+      site_config[0].application_stack[0].docker_image_tag,
+      app_settings["DOCKER_REGISTRY_SERVER_URL"],
+      app_settings["DOCKER_REGISTRY_SERVER_USERNAME"],
+      app_settings["DOCKER_REGISTRY_SERVER_PASSWORD"]
+    ]
+  }
+
   site_config {
     application_stack {
       docker_image     = lower(split(":", var.docker_image)[0])
