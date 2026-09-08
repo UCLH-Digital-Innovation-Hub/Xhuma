@@ -37,9 +37,10 @@ We reuse the established INT bootstrap logic for new environments like `play`.
 
 To allow GitHub Actions to deploy infrastructure and code, Xhuma currently relies on a Service Principal with client secrets.
 
-1. **Permissions Needed**: The SP requires `Contributor` rights over the target Azure Resource Group, and must be able to list storage account keys for the state backend.
-2. **Expiry & Rotation**: Ensure the SP secret is rotated before expiry. Update the `AZURE_CLIENT_SECRET` in GitHub Secrets upon rotation.
-3. **GitHub Secrets Configuration**:
+1. **Target Resource Group Permissions**: The SP requires `Contributor` rights over the target Azure Resource Group, and must be able to list storage account keys for the state backend.
+2. **Shared Key Vault Access Prerequisite**: The Terraform configuration explicitly writes access policies to the shared key vault (`kv-xhuma-shared`) for the newly provisioned App Service identity and Locust Managed Identity. **The Service Principal must have `Key Vault Contributor` (or equivalent `Microsoft.KeyVault/vaults/accessPolicies/write` permissions) on the shared Key Vault.** This is an approved onboarding prerequisite.
+3. **Expiry & Rotation**: Ensure the SP secret is rotated before expiry. Update the `AZURE_CLIENT_SECRET` in GitHub Secrets upon rotation.
+4. **GitHub Secrets Configuration**:
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`
    - `AZURE_TENANT_ID`

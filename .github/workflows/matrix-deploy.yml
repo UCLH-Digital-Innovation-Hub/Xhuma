@@ -65,7 +65,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
       - name: Run Trivy scanner
-        uses: aquasecurity/trivy-action@master
+        # Pinning Trivy to a specific verified commit to avoid bypass or unreviewed changes
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2
         with:
           image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}'
           format: 'table'
@@ -102,13 +103,18 @@ jobs:
     name: Infra Plan - ${{ matrix.target.id }}
     needs: [build, prepare-targets]
     runs-on: ${{ matrix.target.runner_label }}
+    environment: ${{ matrix.target.id }}-plan # Separate plan environment, configured without manual approvers
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-targets.outputs.matrix) }}
+    outputs:
+      plan_hash: ${{ steps.plan.outputs.plan_hash }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -124,7 +130,7 @@ jobs:
         working-directory: ./infra
         run: |
           terraform init \
-            -backend-config="${{ matrix.target.backend_file }}"
+            -backend-config="../${{ matrix.target.backend_file }}"
             
       - name: Terraform Plan
         id: plan
@@ -138,26 +144,29 @@ jobs:
           TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
           TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
         run: |
-          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="${{ matrix.target.id }}.tfplan" > plan_output.txt
+          PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tfplan"
+          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" > plan_output.txt
           
-      - name: Upload Plan to Azure Blob Storage
-        working-directory: ./infra
-        run: |
+          # Upload Plan
           ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
           az storage blob upload \
             --account-name "xtfrgxhumaplay" \
             --account-key "$ACCOUNT_KEY" \
             --container-name tfplans \
-            --name "${{ matrix.target.id }}-${{ github.run_id }}.tfplan" \
-            --file "${{ matrix.target.id }}.tfplan" \
+            --name "$PLAN_FILE" \
+            --file "$PLAN_FILE" \
             --overwrite
             
-          PLAN_HASH=$(sha256sum "${{ matrix.target.id }}.tfplan" | awk '{ print $1 }')
+          PLAN_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')
+          echo "plan_hash=$PLAN_HASH" >> $GITHUB_OUTPUT
+          
           echo "### Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Plan Hash:** \`$PLAN_HASH\`" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Expected Image Digest:** \`${{ needs.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo '```text' >> $GITHUB_STEP_SUMMARY
-          tail -n 50 plan_output.txt >> $GITHUB_STEP_SUMMARY
+          # Filter output to non-secret change summary
+          grep -E "Plan: |No changes.|error" plan_output.txt >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
 
   infra-apply:
@@ -172,31 +181,43 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
       
-      - name: Download Plan from Azure Blob Storage
+      - name: Download and Verify Plan
         working-directory: ./infra
         run: |
+          PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tfplan"
           ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
           az storage blob download \
             --account-name "xtfrgxhumaplay" \
             --account-key "$ACCOUNT_KEY" \
             --container-name tfplans \
-            --name "${{ matrix.target.id }}-${{ github.run_id }}.tfplan" \
-            --file "${{ matrix.target.id }}.tfplan"
+            --name "$PLAN_FILE" \
+            --file "$PLAN_FILE"
+            
+          DOWNLOADED_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')
+          if [ "$DOWNLOADED_HASH" != "${{ needs.infra-plan.outputs.plan_hash }}" ]; then
+            echo "::error::Plan hash mismatch! Expected ${{ needs.infra-plan.outputs.plan_hash }}, got $DOWNLOADED_HASH"
+            exit 1
+          fi
+          echo "Plan hash verified: $DOWNLOADED_HASH"
             
       - name: Terraform Init
         working-directory: ./infra
         run: |
           terraform init \
-            -backend-config="${{ matrix.target.backend_file }}"
+            -backend-config="../${{ matrix.target.backend_file }}"
             
       - name: Terraform Apply
         working-directory: ./infra
-        run: terraform apply -input=false -auto-approve "${{ matrix.target.id }}.tfplan"
+        run: |
+          PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tfplan"
+          terraform apply -input=false -auto-approve "$PLAN_FILE"
 
   deploy:
     name: Deploy - ${{ matrix.target.id }}
@@ -215,7 +236,8 @@ jobs:
       - name: Capture Previous Digest
         id: prev_digest
         run: |
-          PREV_DIGEST=$(az webapp config container show --name "${{ matrix.target.app_service_name }}" --resource-group "${{ matrix.target.resource_group }}" --query 'value[?name==`DOCKER_CUSTOM_IMAGE_NAME`].value' -o tsv || echo "none")
+          PREV_DIGEST=$(az webapp config container show --name "${{ matrix.target.app_service_name }}" --resource-group "${{ matrix.target.resource_group }}" --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" -o tsv || echo "none")
+          if [ -z "$PREV_DIGEST" ]; then PREV_DIGEST="none"; fi
           echo "PREV_DIGEST=$PREV_DIGEST" >> $GITHUB_ENV
           
       - name: Deploy Container to Azure Web App
@@ -226,7 +248,18 @@ jobs:
           
       - name: Verify New Digest
         run: |
-          NEW_DIGEST=$(az webapp config container show --name "${{ matrix.target.app_service_name }}" --resource-group "${{ matrix.target.resource_group }}" --query 'value[?name==`DOCKER_CUSTOM_IMAGE_NAME`].value' -o tsv || echo "none")
+          NEW_DIGEST=$(az webapp config container show --name "${{ matrix.target.app_service_name }}" --resource-group "${{ matrix.target.resource_group }}" --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" -o tsv || echo "none")
+          if [[ -z "$NEW_DIGEST" || "$NEW_DIGEST" == "none" ]]; then
+             echo "::error::Failed to retrieve new digest from Azure"
+             exit 1
+          fi
+          
+          EXPECTED_DIGEST="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
+          if [[ "$NEW_DIGEST" != *"${{ needs.build.outputs.digest }}"* ]]; then
+             echo "::error::Deployed digest $NEW_DIGEST does not match expected ${{ needs.build.outputs.digest }}"
+             exit 1
+          fi
+          
           echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Previous Image:** \`$PREV_DIGEST\`" >> $GITHUB_STEP_SUMMARY
           echo "**New Image:** \`$NEW_DIGEST\`" >> $GITHUB_STEP_SUMMARY

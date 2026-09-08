@@ -221,10 +221,8 @@ resource "azurerm_linux_web_app" "app" {
 
   site_config {
     application_stack {
-      # Use an inert bootstrap image for initial creation.
-      # The actual application image digest is deployed via the CD workflow.
-      docker_image     = "mcr.microsoft.com/appsvc/staticsite"
-      docker_image_tag = "latest"
+      docker_image     = length(split("@", var.docker_image)) > 1 ? split("@", var.docker_image)[0] : lower(split(":", var.docker_image)[0])
+      docker_image_tag = length(split("@", var.docker_image)) > 1 ? split("@", var.docker_image)[1] : (length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[1] : "latest")
     }
 
     container_registry_use_managed_identity = false

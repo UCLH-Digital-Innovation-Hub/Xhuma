@@ -104,8 +104,14 @@ celerybeat.pid
 # Environments
 .env
 .venv
+env/
 venv/
+ENV/
+env.bak/
 venv.bak/
+
+# Do not ignore non-secret tfvars
+!infra/env/play.tfvars
 
 # Spyder project settings
 .spyderproject

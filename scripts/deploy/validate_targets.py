@@ -79,9 +79,41 @@ def main():
             )
             sys.exit(1)
 
+        # Extract actual backend coordinates
+        backend_content = ""
+        with open(os.path.join(repo_root, backend), "r") as bf:
+            backend_content = bf.read()
+
+        coord = {}
+        for line in backend_content.splitlines():
+            line = line.strip()
+            if "=" in line:
+                k, v = line.split("=", 1)
+                coord[k.strip()] = v.strip().strip('"')
+
+        # Required backend fields
+        b_rg = coord.get("resource_group_name")
+        b_sa = coord.get("storage_account_name")
+        b_container = coord.get("container_name")
+        b_key = coord.get("key")
+
+        if not (b_rg and b_sa and b_container and b_key):
+            print(
+                f"Validation error: Target {t_id} backend missing required coordinates in {backend}"
+            )
+            sys.exit(1)
+
+        if b_rg != t.get("resource_group"):
+            print(
+                f"Validation error: Target {t_id} backend RG ({b_rg}) does not match target RG ({t.get('resource_group')})"
+            )
+            sys.exit(1)
+
+        backend_coord = f"{b_rg}/{b_sa}/{b_container}/{b_key}"
+        backends.append(backend_coord)
+
         ids.append(t_id)
         app_names.append(app_name)
-        backends.append(backend)
 
     if len(ids) != len(set(ids)):
         print("Validation error: Duplicate enabled target IDs found.")
@@ -92,7 +124,7 @@ def main():
         sys.exit(1)
 
     if len(backends) != len(set(backends)):
-        print("Validation error: Duplicate enabled backend files found.")
+        print("Validation error: Duplicate enabled backend coordinates found.")
         sys.exit(1)
 
     print("Validation successful: targets match schema and constraints.")
