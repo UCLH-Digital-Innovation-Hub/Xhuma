@@ -1,14 +1,9 @@
 import pytest
-import pytest_asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from app.audit.store import insert_audit_event
-from app.audit.build import build_audit_event
 from app.audit.audit import attempt_audit, AuditFailureException
 from app.audit.models import AuditOutcome
 from app.tests.fixtures.saml_attributes import saml
-from fastapi import Request
 
 
 @pytest.mark.asyncio
@@ -55,7 +50,7 @@ async def test_audit_fail_closed_db_exception():
     mock_request.app.state.SessionLocal = mock_sessionlocal
 
     with pytest.raises(AuditFailureException) as excinfo:
-        with patch("app.audit.build.build_audit_event", new_callable=AsyncMock) as mock_build:
+        with patch("app.audit.build.build_audit_event", new_callable=AsyncMock):
             with patch("app.audit.store.insert_audit_event", new_callable=AsyncMock):
                 await attempt_audit(
                     request=mock_request,

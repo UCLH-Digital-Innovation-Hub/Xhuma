@@ -13,9 +13,7 @@ from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
 from .audit.audit import process_saml_attributes, attempt_audit
-from .audit.build import build_audit_event
 from .audit.models import AuditOutcome, SAMLAttributes
-from .audit.store import insert_audit_event
 from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
