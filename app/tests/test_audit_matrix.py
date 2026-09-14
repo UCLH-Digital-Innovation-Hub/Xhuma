@@ -88,9 +88,9 @@ async def test_iti39_missing_association_uses_none(mock_extract_saml, mock_redis
 
 
 @pytest.mark.asyncio
-@patch("app.soap.responses.redis_client.get")
-@patch("app.soap.responses.gpconnect", new_callable=AsyncMock)
-@patch("app.soap.responses.attempt_audit", new_callable=AsyncMock)
+@patch("app.soap.responses.iti_38.redis_client.get")
+@patch("app.soap.responses.iti_38.gpconnect", new_callable=AsyncMock)
+@patch("app.soap.soap.attempt_audit", new_callable=AsyncMock)
 @patch("app.soap.soap.extract_trusted_saml_assertion")
 async def test_iti38_audit_failure_blocks_cache_hit(
     mock_extract_saml, mock_attempt_audit, mock_gpconnect, mock_redis_get, client

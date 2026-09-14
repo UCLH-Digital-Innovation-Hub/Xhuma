@@ -93,6 +93,7 @@ async def test_unknown_subject_builder_and_store():
     request.client.host = "127.0.0.1"
 
     session = AsyncMock()
+    session.add = MagicMock()
     mock_execute_result = MagicMock()
     mock_execute_result.mappings.return_value.one.return_value = {"seq": 1}
     session.execute.return_value = mock_execute_result
@@ -317,30 +318,41 @@ async def test_attempt_audit_preserves_none(mock_insert, mock_build):
 
 
 @pytest.mark.asyncio
-@patch("app.audit.audit.insert_audit_event", new_callable=AsyncMock)
-async def test_audit_boundary_failure_closure(mock_insert):
+async def test_audit_boundary_failure_closure():
+    from app.audit.audit import attempt_audit
+
     request = MagicMock()
+    request.headers = {}
+    request.client.host = "127.0.0.1"
     request.app.state.SessionLocal = MagicMock()
     session_mock = AsyncMock()
+    session_mock.add = MagicMock()
+
+    # Mock sequence query
+    mock_execute_result = MagicMock()
+    mock_execute_result.scalar.return_value = 1
+    session_mock.execute.return_value = mock_execute_result
+
+    # Inject failure at commit boundary
+    session_mock.commit.side_effect = Exception("DB failure")
+
     request.app.state.SessionLocal.return_value.__aenter__.return_value = session_mock
 
     saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
 
-    mock_insert.side_effect = Exception("DB failure")
+    # Real builder, real store, mock DB boundary
+    with patch.dict(os.environ, {"API_KEY": "test"}):
+        with pytest.raises(AuditFailureException, match="Failed to persist audit event"):
+            await attempt_audit(
+                request=request,
+                nhs_number="9690937278",
+                saml=saml,
+                action="test",
+                outcome=AuditOutcome.fail,
+            )
 
-    from app.audit.audit import attempt_audit
-
-    with pytest.raises(AuditFailureException, match="Failed to insert audit event: DB failure"):
-        await attempt_audit(
-            request=request,
-            nhs_number="9690937278",
-            saml=saml,
-            action="test",
-            outcome=AuditOutcome.fail,
-        )
-
-    mock_insert.assert_called_once()
-    session_mock.commit.assert_not_called()
+    session_mock.add.assert_called_once()
+    session_mock.commit.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -348,15 +360,24 @@ async def test_audit_missing_pseudonymisation_key():
     from app.audit.audit import attempt_audit
 
     request = MagicMock()
+    request.headers = {}
+    request.client.host = "127.0.0.1"
     request.app.state.SessionLocal = MagicMock()
     session_mock = AsyncMock()
+    session_mock.add = MagicMock()
+
+    # Mock sequence query
+    mock_execute_result = MagicMock()
+    mock_execute_result.scalar.return_value = 1
+    session_mock.execute.return_value = mock_execute_result
+
     request.app.state.SessionLocal.return_value.__aenter__.return_value = session_mock
 
     saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
 
-    # Run without API_KEY
+    # Run without API_KEY so pseudonymisation fails during model validation
     with patch.dict(os.environ, clear=True):
-        with pytest.raises(AuditFailureException, match="Pseudonymisation key missing"):
+        with pytest.raises(AuditFailureException, match="Failed to persist audit event"):
             await attempt_audit(
                 request=request,
                 nhs_number="9690937278",
@@ -364,3 +385,6 @@ async def test_audit_missing_pseudonymisation_key():
                 action="test",
                 outcome=AuditOutcome.ok,
             )
+
+    session_mock.add.assert_not_called()
+    session_mock.commit.assert_not_called()
