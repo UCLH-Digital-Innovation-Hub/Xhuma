@@ -36,6 +36,12 @@ router = APIRouter()
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
 
+# use environment to set path
+environment = os.getenv("ENV", "dev")
+if environment.lower() in ["dev", "int"]:
+    RELAY_BASE_PATH = "https://proxy.int.spine2.ncrs.nhs.uk"
+    OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk/"
+
 
 # audit event with shared session
 async def _attempt_audit(
@@ -448,14 +454,14 @@ async def _fetch_gpconnect_record(
     resp = None
     try:
         if USE_RELAY:
-            url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            url = f"{RELAY_BASE_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             resp = await _relay_call(url, headers, body)
             # print(f"Relay response status: {status_code}")
             # print(f"Relay response text: {resp_text}")
             # resp = httpx.Response(status_code=status_code, content=resp_text)
 
         else:
-            url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            url = f"{OVER_INTERNET_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             resp = await _direct_http_call(url, headers, body)
 
         if log_dir:

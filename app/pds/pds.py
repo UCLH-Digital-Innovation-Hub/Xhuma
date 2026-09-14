@@ -23,6 +23,13 @@ SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
 
 # router = fastapi.APIRouter(prefix="/pds")
 
+# use environment to set path
+environment = os.getenv("ENV", "dev")
+if environment == "dev":
+    BASE_PATH = DEV_BASE_PATH
+elif environment == "int":
+    BASE_PATH = INT_BASE_PATH
+
 
 def pds_cache_key(nhsno: int, secret: str = None) -> str:
     """Return a deterministic, pseudonymous Redis key for a patient lookup."""
@@ -53,7 +60,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
     logging.info("Cache miss for PDS patient query. Fetching from PDS API.")
 
     def get_pds_token(kid: str):
-        full_path = f"{INT_BASE_PATH}oauth2/token"
+        full_path = f"{BASE_PATH}oauth2/token"
         jwt_token = pds_jwt(API_KEY, API_KEY, full_path, kid)
         # print(f"jwt_token: {jwt_token}")
 
@@ -105,8 +112,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
         "X-Correlation-ID": str(uuid.uuid4()),
-        # TODO make end user organisation dynamic
-        "NHSD-End-User-Organisation-ODS": "Y12345",
+        "NHSD-End-User-Organisation-ODS": os.getenv("ORG_CODE", "RRV00"),
         "Authorization": f"Bearer {nhs_token}",
         "accept": "application/fhir+json",
     }
@@ -161,11 +167,13 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
             "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
         ]
 
-    url = f"{INT_BASE_PATH}spine-directory/FHIR/R4/{suffix}"
+    url = f"{BASE_PATH}spine-directory/FHIR/R4/{suffix}"
     organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|{ods}"
-    # organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|YES"
 
     api_key = os.environ.get("API_KEY")
+    # if no API key is set, raise an exception
+    if not api_key:
+        raise Exception("API_KEY environment variable is not set")
     parameters = {
         "organization": organisation,
         "identifier": identifier,
