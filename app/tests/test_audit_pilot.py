@@ -1,7 +1,9 @@
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
-
+import os
+from app.audit.models import SAMLAttributes
+from app.ccda.models.datatypes import CD
 import app.main
 from app.audit.audit import AuditFailureException
 from app.audit.models import AuditOutcome
@@ -312,3 +314,53 @@ async def test_attempt_audit_preserves_none(mock_insert, mock_build):
     # Assert build_audit_event was called with nhs_number=None (not "None")
     mock_build.assert_called_once()
     assert mock_build.call_args.kwargs["nhs_number"] is None
+
+
+@pytest.mark.asyncio
+@patch("app.audit.audit.insert_audit_event", new_callable=AsyncMock)
+async def test_audit_boundary_failure_closure(mock_insert):
+    request = MagicMock()
+    request.app.state.SessionLocal = MagicMock()
+    session_mock = AsyncMock()
+    request.app.state.SessionLocal.return_value.__aenter__.return_value = session_mock
+
+    saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
+
+    mock_insert.side_effect = Exception("DB failure")
+
+    from app.audit.audit import attempt_audit
+
+    with pytest.raises(AuditFailureException, match="Failed to insert audit event: DB failure"):
+        await attempt_audit(
+            request=request,
+            nhs_number="9690937278",
+            saml=saml,
+            action="test",
+            outcome=AuditOutcome.fail,
+        )
+
+    mock_insert.assert_called_once()
+    session_mock.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_audit_missing_pseudonymisation_key():
+    from app.audit.audit import attempt_audit
+
+    request = MagicMock()
+    request.app.state.SessionLocal = MagicMock()
+    session_mock = AsyncMock()
+    request.app.state.SessionLocal.return_value.__aenter__.return_value = session_mock
+
+    saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
+
+    # Run without API_KEY
+    with patch.dict(os.environ, clear=True):
+        with pytest.raises(AuditFailureException, match="Pseudonymisation key missing"):
+            await attempt_audit(
+                request=request,
+                nhs_number="9690937278",
+                saml=saml,
+                action="test",
+                outcome=AuditOutcome.ok,
+            )

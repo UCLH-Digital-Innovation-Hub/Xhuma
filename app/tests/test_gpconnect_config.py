@@ -2,6 +2,8 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 from app.gpconnect import _fetch_gpconnect_record
+from app.main import lifespan
+from fastapi import FastAPI
 
 
 @pytest.mark.asyncio
@@ -70,15 +72,43 @@ async def test_ccda_expiry_configuration_parsing(
             args, kwargs = mock_pipeline.return_value.setex.call_args_list[0]
             assert args[1].total_seconds() == 1.5 * 3600
 
-        # Test invalid config
-        with patch.dict(
-            os.environ, {"CCDA_EXPIRY_HOURS": "invalid", "ORG_ASID": "123", "API_KEY": "test", "ORG_CODE": "RRV00"}
-        ):
-            with pytest.raises(ValueError, match="Invalid CCDA_EXPIRY_HOURS"):
-                await _fetch_gpconnect_record(9690937278, saml, request=request)
 
-        with patch.dict(
-            os.environ, {"CCDA_EXPIRY_HOURS": "-1", "ORG_ASID": "123", "API_KEY": "test", "ORG_CODE": "RRV00"}
-        ):
-            with pytest.raises(ValueError, match="Invalid CCDA_EXPIRY_HOURS"):
-                await _fetch_gpconnect_record(9690937278, saml, request=request)
+@pytest.mark.asyncio
+async def test_startup_config_validation():
+    app = FastAPI()
+
+    # Happy path
+    with patch.dict(
+        os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00", "CCDA_EXPIRY_HOURS": "1.5"}
+    ):
+        async with lifespan(app):
+            pass  # Should not raise
+
+    # Missing required config
+    for var in ["API_KEY", "ORG_ASID", "ORG_CODE"]:
+        env_dict = {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00", "CCDA_EXPIRY_HOURS": "4"}
+        env_dict.pop(var)
+        with patch.dict(os.environ, env_dict, clear=True):
+            with pytest.raises(RuntimeError, match=f"Missing required configuration: {var}"):
+                async with lifespan(app):
+                    pass
+
+        # Empty string config
+        env_dict[var] = "   "
+        with patch.dict(os.environ, env_dict, clear=True):
+            with pytest.raises(RuntimeError, match=f"Missing required configuration: {var}"):
+                async with lifespan(app):
+                    pass
+
+    # Invalid expiry
+    with patch.dict(
+        os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00", "CCDA_EXPIRY_HOURS": "invalid"}
+    ):
+        with pytest.raises(RuntimeError, match="Invalid CCDA_EXPIRY_HOURS configuration"):
+            async with lifespan(app):
+                pass
+
+    with patch.dict(os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00", "CCDA_EXPIRY_HOURS": "-1"}):
+        with pytest.raises(RuntimeError, match="Must be positive and finite"):
+            async with lifespan(app):
+                pass
