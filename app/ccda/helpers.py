@@ -1,14 +1,13 @@
 from datetime import datetime
 from typing import List
-from defusedxml import ElementTree
 
 import xmltodict
+from defusedxml import ElementTree
+from fastapi import HTTPException
 from fhirclient.models import coding, organization, period
 
 from .models.admin import AssignedAuthor, AuthorParticipation
 from .models.datatypes import CD, SXCM_TS
-
-from fastapi import HTTPException
 
 
 def validateNHSnumber(number: int) -> bool:

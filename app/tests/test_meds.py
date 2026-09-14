@@ -4,15 +4,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fhirclient.models import bundle
+from fhirclient.models import (
+    bundle,
+    immunization,
+    medication,
+    medicationrequest,
+    medicationstatement,
+)
 from fhirclient.models import list as fhirlist
-from fhirclient.models import medication, medicationrequest, medicationstatement
 
-from app.ccda.entries import immunization_entry as immunization_entry_func
 from app.ccda.entries import _cda_period_from_repeat, _event_timing_warning
+from app.ccda.entries import immunization_entry as immunization_entry_func
 from app.ccda.entries import medication as medication_entry
 from app.ccda.models.dmd import DMDConcept, VPIProperty
-from fhirclient.models import immunization
 
 med = medication.Medication(
     {

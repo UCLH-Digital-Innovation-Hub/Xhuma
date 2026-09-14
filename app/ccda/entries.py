@@ -3,9 +3,14 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, List, Optional, Union
 
-from fhirclient.models import allergyintolerance, condition, immunization
+from fhirclient.models import (
+    allergyintolerance,
+    condition,
+    immunization,
+    medicationrequest,
+    medicationstatement,
+)
 from fhirclient.models import medication as fhirmed
-from fhirclient.models import medicationrequest, medicationstatement
 
 from .dmd import dmd_lookup
 from .helpers import (
@@ -18,23 +23,23 @@ from .helpers import (
     templateId,
 )
 from .models.base import (
+    Act,
     EntryRelationship,
     ResultObservation,
     ResultsOrganizer,
     SubstanceAdministration,
-    Act,
 )
 from .models.datatypes import (
     CD,
     ED,
     IVL_INT,
+    IVL_PQ,
     IVL_TS,
+    IVXB_PQ,
+    IVXB_TS,
     PIVL_TS,
     PQ,
-    IVL_PQ,
-    IVXB_PQ,
     SXCM_TS,
-    IVXB_TS,
 )
 
 Cell = str

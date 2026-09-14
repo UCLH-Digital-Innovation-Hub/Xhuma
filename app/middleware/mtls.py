@@ -1,8 +1,9 @@
-import os
 import base64
 import datetime
+import os
+
 from cryptography import x509
-from cryptography.hazmat.primitives.asymmetric import padding, rsa, ec
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse

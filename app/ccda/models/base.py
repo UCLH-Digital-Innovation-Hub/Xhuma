@@ -19,8 +19,8 @@ from .datatypes import (
     IVL_TS,
     PIVL_TS,
     PQ,
-    SXCM_TS,
     RTO_PQ_PQ,
+    SXCM_TS,
 )
 
 

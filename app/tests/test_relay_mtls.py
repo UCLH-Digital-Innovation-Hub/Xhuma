@@ -1,5 +1,5 @@
-import datetime as dt
 import base64
+import datetime as dt
 
 import pytest
 from cryptography import x509

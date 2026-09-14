@@ -48,12 +48,13 @@ def test_mtls_public_paths(monkeypatch):
 
 
 def test_mtls_accepts_valid_thumbprint(monkeypatch):
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID
+    import base64
+    import datetime as dt
+
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
-    import datetime as dt
-    import base64
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
@@ -87,12 +88,13 @@ def test_mtls_accepts_valid_thumbprint(monkeypatch):
 
 
 def test_mtls_rejects_invalid_thumbprint(monkeypatch):
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID
+    import base64
+    import datetime as dt
+
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
-    import datetime as dt
-    import base64
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])
@@ -123,12 +125,13 @@ def test_mtls_rejects_invalid_thumbprint(monkeypatch):
 
 
 def test_mtls_lenient_thumbprint_formatting(monkeypatch):
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID
+    import base64
+    import datetime as dt
+
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
-    import datetime as dt
-    import base64
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
 
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test")])

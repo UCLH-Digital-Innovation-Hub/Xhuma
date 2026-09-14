@@ -2,9 +2,10 @@ import atexit
 import os
 import tempfile
 import uuid
-from locust import HttpUser, task, between
+
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
+from locust import HttpUser, between, task
 
 KEY_VAULT_URL = os.getenv("KEY_VAULT_URL")
 PEM_SECRET_NAME = os.getenv("PEM_SECRET_NAME", "epic-ca-cert")
