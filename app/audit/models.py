@@ -158,9 +158,11 @@ class AuditEvent(BaseModel):
         Returns None if secret or nhs number not available.
         """
         nhsno = self.subject_nhs_number
-        secret = os.getenv("API_KEY")
-        if not nhsno or not secret:
+        if not nhsno:
             return None
+        secret = os.getenv("API_KEY")
+        if not secret:
+            raise ValueError("Pseudonymisation key missing")
         return _subject_ref_from_nhs_number(nhsno, secret)
 
     # Safety: forbid unknown fields

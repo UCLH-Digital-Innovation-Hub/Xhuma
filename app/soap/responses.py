@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import xmltodict
 from fastapi import Request
 
-from ..audit.audit import attempt_audit
+from ..audit.audit import AuditFailureException, attempt_audit
 from ..audit.models import AuditOutcome, SAMLAttributes
 from ..gpconnect import gpconnect
 from ..redis_connect import redis_client
@@ -426,6 +426,8 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
             # print("-" * 40)
             logging.info("no cached ccda, used internal call for patient")
             r = json.loads(r.body)
+        except AuditFailureException:
+            raise
         except Exception as e:
             logging.error(f"Error: {e}")
             # print(f"iti_38_error: {e}")

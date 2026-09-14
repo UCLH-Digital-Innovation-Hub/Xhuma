@@ -89,7 +89,7 @@ async def attempt_audit(
             ev = await build_audit_event(
                 request=request,
                 session=session,
-                nhs_number=str(nhs_number),
+                nhs_number=nhs_number,
                 saml=saml,
                 action=action,
                 outcome=outcome,

@@ -229,3 +229,86 @@ async def test_redis_publication_audit_failure_interaction(mock_lookup, mock_pip
 
                     # Verify pipeline was NOT executed (document was not cached)
                     mock_pipeline.return_value.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.soap.responses.attempt_audit", new_callable=AsyncMock)
+@patch("app.soap.responses.gpconnect", new_callable=AsyncMock)
+@patch("app.soap.responses.redis_client.get")
+async def test_iti38_cache_miss_audit_failure_propagation(mock_redis_get, mock_gpconnect, mock_attempt_audit):
+    # Setup cache miss
+    mock_redis_get.return_value = None
+
+    # gpconnect raises AuditFailureException
+    mock_gpconnect.side_effect = AuditFailureException("Failed to persist audit event")
+
+    # Test iti_38_response
+    from app.soap.responses import iti_38_response
+    from app.audit.models import SAMLAttributes
+    from app.ccda.models.datatypes import CD
+
+    saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
+    request = MagicMock()
+
+    with pytest.raises(AuditFailureException):
+        await iti_38_response(request, 1234567890, "ceid", "queryid", saml)
+
+    # Verify no second audit attempt was made in iti_38_response
+    mock_attempt_audit.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.soap.responses.gpconnect", new_callable=AsyncMock)
+@patch("app.soap.responses.redis_client.get")
+@patch("app.soap.soap.extract_trusted_saml_assertion")
+async def test_iti38_endpoint_audit_failure(mock_extract, mock_redis_get, mock_gpconnect, client):
+    mock_extract.return_value = {
+        "AttributeStatement": {
+            "Attribute": [
+                {"@Name": "urn:oasis:names:tc:xspa:1.0:subject:subject-id", "AttributeValue": "user1"},
+                {"@Name": "urn:oasis:names:tc:xspa:1.0:subject:organization", "AttributeValue": "org1"},
+                {"@Name": "urn:oasis:names:tc:xspa:1.0:subject:organization-id", "AttributeValue": "orgid1"},
+                {"@Name": "urn:oasis:names:tc:xacml:2.0:subject:role", "AttributeValue": {"Role": {"code": "code"}}},
+            ]
+        }
+    }
+    mock_redis_get.return_value = None
+    mock_gpconnect.side_effect = AuditFailureException("Failed to persist audit event")
+
+    # Use a valid NHS number so validation passes
+    request_xml = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><MessageID>123</MessageID></s:Header><s:Body><AdhocQueryRequest><AdhocQuery><Slot name="$XDSDocumentEntryPatientId"><ValueList><Value>9690937278</Value></ValueList></Slot></AdhocQuery></AdhocQueryRequest></s:Body></s:Envelope>"""
+
+    response = client.post("/SOAP/iti38", content=request_xml, headers={"Content-Type": "application/soap+xml"})
+    assert response.status_code == 502
+    assert "Failed to persist audit event" not in response.text
+    assert "SQL" not in response.text
+
+
+@pytest.mark.asyncio
+@patch("app.audit.build.build_audit_event", new_callable=AsyncMock)
+@patch("app.audit.store.insert_audit_event", new_callable=AsyncMock)
+async def test_attempt_audit_preserves_none(mock_insert, mock_build):
+    from app.audit.audit import attempt_audit
+    from app.audit.models import SAMLAttributes
+    from app.ccda.models.datatypes import CD
+
+    request = MagicMock()
+    request.app.state.SessionLocal = MagicMock()
+    session_mock = AsyncMock()
+    request.app.state.SessionLocal.return_value.__aenter__.return_value = session_mock
+
+    saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
+
+    mock_build.return_value = MagicMock()
+
+    await attempt_audit(
+        request=request,
+        nhs_number=None,
+        saml=saml,
+        action="test",
+        outcome=AuditOutcome.fail,
+    )
+
+    # Assert build_audit_event was called with nhs_number=None (not "None")
+    mock_build.assert_called_once()
+    assert mock_build.call_args.kwargs["nhs_number"] is None
