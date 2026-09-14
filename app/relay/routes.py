@@ -106,11 +106,9 @@ async def relay_ws(websocket: WebSocket, client_id: str):
                 span.set_attribute("client_id", client_id)
                 try:
                     # Agent sends RelayResponse JSON
-                    data = await asyncio.wait_for(
-                        websocket.receive_text(), timeout=30.0
-                    )
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                     hub.fulfill(json.loads(data))
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Expected idle wait, log it so Azure knows we are healthy
                     span.set_attribute("status", "idle_keepalive")
                     continue

@@ -51,7 +51,5 @@ def test_dev_audit_post_requires_api_key(monkeypatch):
     assert "Not authenticated" in response.text
 
     # Valid API Key
-    response = client.post(
-        "/_dev/audit", headers={"X-API-Key": "TEST_KEY"}, data={"query": "test"}
-    )
+    response = client.post("/_dev/audit", headers={"X-API-Key": "TEST_KEY"}, data={"query": "test"})
     assert response.status_code != 401

@@ -131,6 +131,14 @@
   - Fixture support
   - Parameterized testing
 
+### API Fuzzing & Resilience Testing
+- **schemathesis**: API Fuzzing framework
+  - Automatically generates edge-case HTTP requests based on the OpenAPI schema.
+  - Used in CI (via `pytest`) to ensure the API never returns unhandled 500 exceptions.
+- **hypothesis**: Property-Based Testing
+  - Generates random payload structures (`@given`) for internal FHIR/C-CDA mappers.
+  - Ensures deep parsing logic fails gracefully rather than crashing.
+
 ### Integration Testing
 - **pytest-asyncio**: Async test support
 - **aiohttp**: HTTP client testing

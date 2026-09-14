@@ -44,9 +44,7 @@ def fix_pem_formatting(pem_string: str) -> str:
         import re
 
         formatted_certs = []
-        matches = re.finditer(
-            r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string
-        )
+        matches = re.finditer(r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string)
         for match in matches:
             header = match.group(1)
             # Remove all whitespace from the base64 body
@@ -222,9 +220,7 @@ def create_jwt(
     #     import json
 
     #     json.dump(payload, f, indent=4)
-    return jwt.encode(
-        payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"}
-    )
+    return jwt.encode(payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"})
 
 
 if __name__ == "__main__":

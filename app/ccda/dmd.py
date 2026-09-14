@@ -19,12 +19,8 @@ async def get_terminology_token():
 
     # check if client_id and client_secret are set
     if not client_id or not client_secret:
-        logging.error(
-            "DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables."
-        )
-        raise ValueError(
-            "DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables."
-        )
+        logging.error("DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables.")
+        raise ValueError("DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables.")
 
     url = "https://ontology.nhs.uk/authorisation/auth/realms/nhs-digital-terminology/protocol/openid-connect/token"
 
@@ -88,9 +84,7 @@ async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
         response = await client.get(url, headers=headers)
 
         if response.status_code == 401:
-            logging.warning(
-                "Unauthorized access to DMD API. Token may have expired. Fetching new token."
-            )
+            logging.warning("Unauthorized access to DMD API. Token may have expired. Fetching new token.")
             token = await get_terminology_token()
             headers["Authorization"] = f"Bearer {token}"
             response = await client.get(url, headers=headers)
@@ -109,14 +103,10 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
     dmd = await get_dmd_concept(concept_id, properties=properties)
     # make sure dmd is a dict
     if not isinstance(dmd, dict):
-        logging.error(
-            f"Unexpected DMD concept data format for concept {concept_id}: {dmd}"
-        )
+        logging.error(f"Unexpected DMD concept data format for concept {concept_id}: {dmd}")
         dmd = json.loads(dmd)
 
-    display_name = [
-        prop["valueString"] for prop in dmd["parameter"] if prop["name"] == "display"
-    ]
+    display_name = [prop["valueString"] for prop in dmd["parameter"] if prop["name"] == "display"]
 
     processed_dmd = DMDConcept(
         concept_id=concept_id,
@@ -136,10 +126,7 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
         for part in property_data["part"]:
             if part["name"] == "subproperty":
                 for subpart in part["part"]:
-                    if (
-                        subpart["name"] == "code"
-                        and subpart["valueCode"] == subproperty_name
-                    ):
+                    if subpart["name"] == "code" and subpart["valueCode"] == subproperty_name:
                         return part
 
     # check if there is a parent property
@@ -175,14 +162,8 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
             unit_concept = await get_dmd_concept(dose_unit_code)
             # pprint.pprint(unit_concept)
             # print(type(unit_concept))
-            unit_display_parameter = [
-                parm for parm in unit_concept["parameter"] if parm["name"] == "display"
-            ]
-            unit_display = (
-                unit_display_parameter[0]["valueString"]
-                if unit_display_parameter
-                else None
-            )
+            unit_display_parameter = [parm for parm in unit_concept["parameter"] if parm["name"] == "display"]
+            unit_display = unit_display_parameter[0]["valueString"] if unit_display_parameter else None
 
         processed_dmd.vpi = VPI(value=dose_value, unit=unit_display)
 
@@ -202,14 +183,8 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
             route_concept = await get_dmd_concept(route_code)
             # print(f"Route concept for code {route_code}:")
             # pprint.pprint(route_concept)
-            route_display_parameter = [
-                parm for parm in route_concept["parameter"] if parm["name"] == "display"
-            ]
-            route_display = (
-                route_display_parameter[0]["valueString"]
-                if route_display_parameter
-                else None
-            )
+            route_display_parameter = [parm for parm in route_concept["parameter"] if parm["name"] == "display"]
+            route_display = route_display_parameter[0]["valueString"] if route_display_parameter else None
             processed_dmd.route = CD(
                 code=route_code,
                 displayName=route_display,

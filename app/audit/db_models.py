@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Column, DateTime
@@ -23,31 +23,31 @@ class AuditEventRow(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True), index=True),
     )
 
-    organisation: Optional[str] = Field(default=None, index=True)
+    organisation: str | None = Field(default=None, index=True)
 
-    request_id: Optional[str] = Field(default=None, index=True)
-    trace_id: Optional[str] = Field(default=None, index=True)
+    request_id: str | None = Field(default=None, index=True)
+    trace_id: str | None = Field(default=None, index=True)
 
-    user_id: Optional[str] = Field(default=None, index=True)
-    user_role_code: Optional[str] = Field(default=None)
-    user_role_name: Optional[str] = Field(default=None)
+    user_id: str | None = Field(default=None, index=True)
+    user_role_code: str | None = Field(default=None)
+    user_role_name: str | None = Field(default=None)
 
-    user_org_name: Optional[str] = Field(default=None)
-    user_org_id: Optional[str] = Field(default=None)
+    user_org_name: str | None = Field(default=None)
+    user_org_id: str | None = Field(default=None)
 
-    purpose_of_use: Optional[str] = Field(default=None)
+    purpose_of_use: str | None = Field(default=None)
 
     action: str = Field(index=True)
     outcome: str = Field(index=True)
-    error_code: Optional[str] = Field(default=None)
+    error_code: str | None = Field(default=None)
 
     subject_ref: str = Field(index=True)
 
-    message_id: Optional[str] = Field(default=None)
-    document_id: Optional[str] = Field(default=None)
+    message_id: str | None = Field(default=None)
+    document_id: str | None = Field(default=None)
 
-    client_ip: Optional[str] = Field(default=None)
-    user_agent: Optional[str] = Field(default=None)
+    client_ip: str | None = Field(default=None)
+    user_agent: str | None = Field(default=None)
 
     # Keep original event.detail structure
-    detail: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
+    detail: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))

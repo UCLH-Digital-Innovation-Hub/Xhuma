@@ -11,9 +11,7 @@ PDS_DIR = FIXTURE_DIR / "pdsresults"
 
 def get_nhs_ids():
     """Returns sorted list of all NHS numbers found in bundles (expecting .json files)."""
-    return sorted(
-        f.stem for f in BUNDLE_DIR.glob("*.json") if (PDS_DIR / f.name).exists()
-    )
+    return sorted(f.stem for f in BUNDLE_DIR.glob("*.json") if (PDS_DIR / f.name).exists())
 
 
 def load_bundle(nhsno):
