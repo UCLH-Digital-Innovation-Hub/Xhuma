@@ -3,10 +3,10 @@ import datetime
 import json
 import logging
 import os
-from copy import deepcopy
 from typing import List
 
 import xmltodict
+from copy import deepcopy
 from fhirclient.models import bundle
 from fhirclient.models import list as fhirlist
 from fhirclient.models import patient
@@ -14,6 +14,7 @@ from fhirclient.models import patient
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
 from .helpers import date_helper, templateId
 from app.gp_connect_config import get_gp_connect_inclusions
+from .entries.results import investigation
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -177,7 +178,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             },
             "Investigations and results": {
                 "displayName": "Investigations and results",
-                "root": "2.16.840.1.113883.6.1",
+                "root": "2.16.840.1.113883.10.20.22.2.3",
                 "Code": "30954-2",
             },
         }
@@ -457,6 +458,45 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
             return comp
 
+        elif list.title == "Investigations and results":
+            print(list.title)
+            comp = {}
+            comp["section"] = {
+                "templateId": templateId(templates[list.title]["root"], "2015-08-01"),
+                "code": {
+                    "@code": templates[list.title]["Code"],
+                    "@displayName": templates[list.title]["displayName"],
+                    "@codeSystem": "2.16.840.1.113883.6.1",
+                },
+                "title": templates[list.title]["displayName"],
+                "text": "",  # Will be populated with table
+            }
+
+            # organizer_with_table = asyncio.gather(
+            #     *[investigation(entry, index) for entry in list.entry]
+            # )
+            # print(organizer_with_table)
+            if not list.entry:
+                comp["section"]["text"] = {"paragraph": "No Information Available"}
+                return comp
+            references = [index[entry.item.reference] for entry in list.entry]
+
+            organizer_with_table = [
+                await investigation(ref, index) for ref in references
+            ]
+
+            table_list = {
+                "@styleCode": "TOC",
+                "item": [org.table for org in organizer_with_table],
+            }
+            comp["section"]["text"] = {"list": table_list}
+            entries = [
+                {"@typeCode": "DRIV", "organizer": org.organizer}
+                for org in organizer_with_table
+            ]
+            comp["section"]["entry"] = entries
+            return comp
+
     def split_medications(medications: fhirlist.List) -> List[dict]:
         """Splits medications into active and past based on status
 
@@ -543,6 +583,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             section = await create_section(list_obj)
             if section is not None:
                 bundle_components.append(section)
+
     caching_period = os.environ.get("CCDA_CACHING_PERIOD", "24 hours")
 
     # Get current query inclusions to build the clinical safety disclaimer
@@ -606,7 +647,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9692136744.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9692140466.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None
