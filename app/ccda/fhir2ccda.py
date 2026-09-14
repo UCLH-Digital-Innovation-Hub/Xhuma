@@ -63,7 +63,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     # loop through names to find official name
     for name in subject[0].name:
-        if name.use == "official":
+        if name.use == "usual":
             official_name = name
             break
 
