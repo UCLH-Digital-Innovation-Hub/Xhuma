@@ -60,7 +60,7 @@ class AuditFailureException(Exception):
 async def attempt_audit(
     request: Any,
     *,
-    nhs_number: str,
+    nhs_number: str | None,
     saml: SAMLAttributes,
     action: str,
     outcome: Any,  # AuditOutcome
@@ -101,7 +101,7 @@ async def attempt_audit(
             )
             await insert_audit_event(session, ev)
             await session.commit()
-    except Exception as e:
+    except Exception:
         # Do not log raw database exceptions containing SQL parameters.
         logging.error("AuditFailure: Database persistence failed")
-        raise AuditFailureException("Failed to persist audit event") from e
+        raise AuditFailureException("Failed to persist audit event")

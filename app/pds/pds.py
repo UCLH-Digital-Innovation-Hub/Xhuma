@@ -96,17 +96,29 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
     # if nhs token expired or not request, get one and cache
 
-    if not redis_client.exists("access_token"):
-        logging.info("NHS token expired or not found, getting new one")
-        # Extract dynamically generated Key ID, fallback to 'test-1'
-        kid = "test-1"
-        if request and hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
-            kid = request.app.state.jwk_json.get("kid", "test-1")
+    try:
+        if not redis_client.exists("access_token"):
+            logging.info("NHS token expired or not found, getting new one")
+            # Extract dynamically generated Key ID, fallback to 'test-1'
+            kid = "test-1"
+            if request and hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
+                kid = request.app.state.jwk_json.get("kid", "test-1")
 
-        nhs_token = get_pds_token(kid)
-    else:
-        logging.info("NHS token found in cache")
-        nhs_token = redis_client.get("access_token").decode("utf-8")
+            nhs_token = get_pds_token(kid)
+        else:
+            logging.info("NHS token found in cache")
+            nhs_token = redis_client.get("access_token").decode("utf-8")
+    except Exception as e:
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml,
+            action="pds_token_fetch",
+            outcome=AuditOutcome.fail,
+            detail={"exception": str(e)},
+            error_code="502",
+        )
+        raise fastapi.HTTPException(status_code=502, detail=f"Failed to obtain PDS token: {e}")
 
     # print(f"nhs_token: {nhs_token}")
     # set headers for pds request
@@ -120,11 +132,22 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
     }
 
     url = f"{INT_BASE_PATH}personal-demographics/FHIR/R4/Patient/{nhsno}"
-    # print(url)
-    async with httpx.AsyncClient(event_hooks={"request": [log_request], "response": [log_response]}) as client:
-        r = await client.get(url, headers=headers)
-
-    patient_dict = json.loads(r.text)
+    try:
+        async with httpx.AsyncClient(event_hooks={"request": [log_request], "response": [log_response]}) as client:
+            r = await client.get(url, headers=headers)
+            r.raise_for_status()
+            patient_dict = json.loads(r.text)
+    except Exception as e:
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml,
+            action="pds_lookup",
+            outcome=AuditOutcome.fail,
+            detail={"cache_hit": False, "exception": str(e)},
+            error_code="502",
+        )
+        raise fastapi.HTTPException(status_code=502, detail=f"PDS lookup failed: {e}")
 
     outcome = (
         AuditOutcome.fail

@@ -112,7 +112,7 @@ class AuditEvent(BaseModel):
     sequence: int
 
     # subject
-    subject_nhs_number: str
+    subject_nhs_number: str | None = None
 
     # Timing
     event_time: datetime

@@ -47,7 +47,7 @@ def fake_sds_endpoint_trace():
 @patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.convert_bundle", new_callable=AsyncMock)
 @patch("app.gpconnect.base64_xml")
-@patch("app.gpconnect.redis_client.setex")
+@patch("app.gpconnect.redis_client.pipeline")
 @patch("app.gpconnect.create_nhs_ssl_context")
 @patch("app.gpconnect.httpx.AsyncClient")
 @patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
@@ -57,7 +57,7 @@ async def test_gpconnect_with_nhs_data(
     mock_sds_trace,
     mock_async_client,
     mock_create_nhs_ssl_context,
-    mock_redis_setex,
+    mock_redis_pipeline,
     mock_base64_xml,
     mock_convert_bundle,
     mock_attempt_audit,
@@ -103,7 +103,7 @@ async def test_gpconnect_with_nhs_data(
     mock_client.post.assert_called_once()
     mock_convert_bundle.assert_called_once()
     mock_base64_xml.assert_called_once()
-    assert mock_redis_setex.call_count == 2
+    mock_redis_pipeline.return_value.execute.assert_called_once()
 
 
 @pytest.mark.asyncio

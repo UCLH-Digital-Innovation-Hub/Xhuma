@@ -503,9 +503,12 @@ async def _fetch_gpconnect_record(
 
     xop = base64_xml(xml_ccda)
     doc_uuid = str(uuid4())
-    redis_client.setex(nhsno, timedelta(minutes=1), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=1), xop)
-    redis_client.setex(f"doc_patient:{doc_uuid}", timedelta(minutes=1), nhsno)
+    # Use a pipeline to write all keys atomically with a consistent TTL
+    pipe = redis_client.pipeline()
+    pipe.setex(str(nhsno), timedelta(minutes=1), doc_uuid)
+    pipe.setex(doc_uuid, timedelta(minutes=1), xop)
+    pipe.setex(f"doc_patient:{doc_uuid}", timedelta(minutes=1), str(nhsno))
+    pipe.execute()
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):

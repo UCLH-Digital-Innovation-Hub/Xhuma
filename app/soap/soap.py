@@ -539,7 +539,7 @@ async def iti39(request: Request):
         if not doc_nhsno:
             await attempt_audit(
                 request=request,
-                nhs_number="UNKNOWN",
+                nhs_number=None,
                 saml=saml_attrs,
                 action="iti39_document_retrieve",
                 outcome=AuditOutcome.fail,
@@ -549,14 +549,6 @@ async def iti39(request: Request):
             raise HTTPException(status_code=404, detail="Document association expired or missing")
 
         if document is not None:
-            await attempt_audit(
-                request=request,
-                nhs_number=doc_nhsno,
-                saml=saml_attrs,
-                action="iti39_document_retrieve",
-                outcome=AuditOutcome.ok,
-                document_id=document_id,
-            )
             data = await iti_39_response(message_id, document_id, document)
             # mime encode the data
             boundary = f"uuid:{uuid.uuid4()}"
@@ -604,6 +596,15 @@ async def iti39(request: Request):
                         httpx.post(url, data=payload, headers=hdrs, timeout=10.0)
                     except Exception as e:
                         print(f"Failed to send async response: {e}", flush=True)
+
+                await attempt_audit(
+                    request=request,
+                    nhs_number=doc_nhsno,
+                    saml=saml_attrs,
+                    action="iti39_document_retrieve",
+                    outcome=AuditOutcome.ok,
+                    document_id=document_id,
+                )
 
                 return Response(
                     content=mime_string.encode("utf-8"),

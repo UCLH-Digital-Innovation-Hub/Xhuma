@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 import xmltodict
 from fastapi import Request
 
-from ..audit.models import SAMLAttributes
+from ..audit.audit import attempt_audit
+from ..audit.models import AuditOutcome, SAMLAttributes
 from ..gpconnect import gpconnect
 from ..redis_connect import redis_client
 
@@ -411,7 +412,11 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
     }
 
     # check the redis cache if there's an existing ccda
-    docid = redis_client.get(nhsno)
+    docid_bytes = redis_client.get(nhsno)
+    docid = docid_bytes.decode("utf-8") if docid_bytes else None
+
+    # We determine cache hit purely on whether docid was already in Redis
+    cache_hit = docid is not None
 
     if docid is None:
         # no cached ccda
@@ -454,6 +459,16 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
         else:
             # print(r)
             docid = r["document_id"]
+
+    await attempt_audit(
+        request=request,
+        nhs_number=str(nhsno),
+        saml=saml_attrs,
+        action="iti38_document_query",
+        outcome=AuditOutcome.ok if docid else AuditOutcome.fail,
+        detail={"cache_hit": cache_hit},
+        document_id=docid,
+    )
 
     if docid is not None:
         # make sure docid is a string and not bytes
