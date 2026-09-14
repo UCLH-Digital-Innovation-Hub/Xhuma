@@ -9,8 +9,9 @@ def test_dev_audit_requires_api_key(monkeypatch):
     # We must import app AFTER patching ENV if it depends on it at load time,
     # but `app/main.py` evaluates ENV at load time for `/_dev/audit`.
     # Let's import app and TestClient locally here
-    import app.main
     import importlib
+
+    import app.main
 
     importlib.reload(app.main)
 
@@ -36,8 +37,9 @@ def test_dev_audit_post_requires_api_key(monkeypatch):
     monkeypatch.setenv("REQUIRE_MTLS", "false")
     monkeypatch.setenv("API_KEY", "TEST_KEY")
 
-    import app.main
     import importlib
+
+    import app.main
 
     importlib.reload(app.main)
 
@@ -49,7 +51,5 @@ def test_dev_audit_post_requires_api_key(monkeypatch):
     assert "Not authenticated" in response.text
 
     # Valid API Key
-    response = client.post(
-        "/_dev/audit", headers={"X-API-Key": "TEST_KEY"}, data={"query": "test"}
-    )
+    response = client.post("/_dev/audit", headers={"X-API-Key": "TEST_KEY"}, data={"query": "test"})
     assert response.status_code != 401

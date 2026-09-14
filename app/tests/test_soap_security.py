@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+
 from app.main import app
 
 client = TestClient(app)
@@ -24,9 +25,7 @@ def mock_dependencies(monkeypatch):
             },
         )(),
     )
-    monkeypatch.setattr(
-        "app.soap.soap.lookup_patient", lambda *args, **kwargs: {"id": "test"}
-    )
+    monkeypatch.setattr("app.soap.soap.lookup_patient", lambda *args, **kwargs: {"id": "test"})
 
     # mock the responses so they don't fail later in the pipeline
     async def mock_response(*args, **kwargs):
@@ -81,9 +80,7 @@ def test_xxe_malicious_entity_rejected(endpoint):
 <!ELEMENT foo ANY >
 <!ENTITY xxe SYSTEM "file:///etc/passwd" >]>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:Issuer>&xxe;</saml2:Issuer></saml2:Assertion></wsse:Security></s:Header><s:Body></s:Body></s:Envelope>"""
-    response = client.post(
-        endpoint, content=xxe_soap_xml, headers={"Content-Type": "application/soap+xml"}
-    )
+    response = client.post(endpoint, content=xxe_soap_xml, headers={"Content-Type": "application/soap+xml"})
     assert response.status_code == 400
     assert "Malformed XML" in response.text
 

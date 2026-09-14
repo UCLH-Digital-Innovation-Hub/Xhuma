@@ -1,14 +1,12 @@
 from datetime import datetime
-from typing import List
-from defusedxml import ElementTree
 
 import xmltodict
+from defusedxml import ElementTree
+from fastapi import HTTPException
 from fhirclient.models import coding, organization, period
 
 from .models.admin import AssignedAuthor, AuthorParticipation
 from .models.datatypes import CD, SXCM_TS
-
-from fastapi import HTTPException
 
 
 def validateNHSnumber(number: int) -> bool:
@@ -26,7 +24,7 @@ def validateNHSnumber(number: int) -> bool:
     numbers = [int(c) for c in str(number)]
 
     total = 0
-    for idx in range(0, 9):
+    for idx in range(9):
         multiplier = 10 - idx
         total += numbers[idx] * multiplier
 
@@ -54,7 +52,7 @@ def generate_code(coding: coding.Coding) -> dict:
     return code
 
 
-def code_with_translations(codings: List[coding.Coding]) -> CD:
+def code_with_translations(codings: list[coding.Coding]) -> CD:
     """
     Takes a list of coding objects and returns a CD object with translations
     Args:
@@ -111,7 +109,7 @@ def date_helper(isodate):
     return new_date
 
 
-def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
+def effective_time_helper(effective_period: period.Period) -> list[SXCM_TS]:
     """
     Takes a FHIR effective period and returns a list of SXCM_TS objects
     """
@@ -211,10 +209,7 @@ def organization_to_author(
         AuthorParticipation: An AuthorParticipation object with the organization details.
     """
     author = AssignedAuthor(
-        id=[
-            {"@root": ident.system, "@extension": ident.value}
-            for ident in organization.identifier
-        ],
+        id=[{"@root": ident.system, "@extension": ident.value} for ident in organization.identifier],
     )
     if organization.name:
         author.representedOrganization = {"name": organization.name}

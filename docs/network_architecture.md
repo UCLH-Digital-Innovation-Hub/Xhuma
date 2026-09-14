@@ -40,8 +40,8 @@ flowchart LR
 Xhuma acts as a translator between inbound Epic SOAP transactions and outbound NHS FHIR REST APIs.
 
 ### 3.1 Inbound Integrations (Epic -> Xhuma)
-The Trust's Epic EHR connects to Xhuma over the public internet utilising mutually authenticated TLS (mTLS). Xhuma provides a SOAP-compliant FastAPI router (`app/soap/routes.py`) that handles standard IHE ITI Profiles:
-* **ITI-47 / ITI-55:** Patient Demographic Queries and Patient Discovery.
+The Trust's Epic EHR connects to Xhuma over the public internet utilising mutually authenticated TLS (mTLS). Client certificates are strictly validated against an allowlist of thumbprints stored securely in Azure KeyVault. Xhuma provides a SOAP-compliant FastAPI router (`app/soap/routes.py`) that handles standard IHE ITI Profiles:
+* **ITI-55:** Cross Gateway Patient Discovery (Patient Demographics).
 * **ITI-38:** Cross Gateway Document Queries.
 * **ITI-39:** Cross Gateway Document Retrieve.
 
@@ -58,13 +58,11 @@ Xhuma processes the inbound IHE ITI requests and converts them into NHS FHIR cal
 
 Due to NHS England policies regarding GP Connect, Xhuma supports two different network paths for structured record retrieval.
 
-### Scenario A: Current State (HSCN Requirement)
+### Scenario A: Current State (HSCN Relay)
 
-Currently, GP Connect requires an HSCN (Health and Social Care Network) connection for structured record queries. To meet this requirement while keeping Xhuma in the cloud, Xhuma uses an outbound HSCN Relay approach.
+Due to NHS England restrictions on GP Connect via the public internet, Xhuma leverages a robust outbound HSCN Relay approach.
 
-An HSCN-connected agent (such as a third-party HSCN connection provider via Azure Private Link, or an internal NHS VPN Gateway) establishes a WebSocket connection inbound to the Xhuma Azure App Service. GP Connect requests are tunnelled back down this WebSocket to the agent, which executes the query against HSCN.
-
-*Note: The timeline for NHSE to allow public internet connectivity at scale is unclear. We assume this HSCN connection is time-limited and should be scrapped in favour of public internet routing when a long-term solution becomes available.*
+An HSCN-connected agent (e.g., via Azure Private Link or an internal NHS VPN Gateway) establishes a WebSocket connection inbound to the Xhuma Azure App Service. GP Connect requests are securely tunnelled back down this WebSocket to the agent, which executes the query natively against HSCN. This allows Xhuma's main infrastructure to remain purely cloud-native while satisfying strict NHS network requirements.
 
 ```mermaid
 flowchart TD

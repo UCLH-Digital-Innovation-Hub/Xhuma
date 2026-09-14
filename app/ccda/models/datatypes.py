@@ -4,8 +4,6 @@ Contains CDA datatype objects with pydantic validation
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Union
-
 from pydantic import BaseModel, Field, model_validator
 
 # TODO: add Enums
@@ -17,18 +15,18 @@ class ANY(BaseModel):
         description="This field provides a description for each date type",
         alias="@xsi:type",
     )
-    nullFlavor: Optional[str] = None  # enumeration
+    nullFlavor: str | None = None  # enumeration
 
 
 class BIN(ANY):
     resource_type: str = Field("BIN", description="Binary data.")
-    mixed: Optional[Dict] = None
-    representation: Optional[str] = None  # enumeration B64 or TXT
+    mixed: dict | None = None
+    representation: str | None = None  # enumeration B64 or TXT
 
 
 class URL(ANY):
     resource_type: str = Field("URL", description="URL data.")
-    value: Optional[str] = None
+    value: str | None = None
 
 
 class TEL(URL):
@@ -40,9 +38,9 @@ class TEL(URL):
         "and use codes that help in deciding which address to use for a "
         "given time and purpose.",
     )
-    usablePeriod: Optional[List[SXCM_TS]] = None
-    use: Optional[List[str]] = None
-    value: Optional[str] = Field(alias="@value", default=None)
+    usablePeriod: list[SXCM_TS] | None = None
+    use: list[str] | None = None
+    value: str | None = Field(alias="@value", default=None)
 
 
 class AD(ANY):
@@ -50,12 +48,12 @@ class AD(ANY):
         "AD",
         description="Mailing and home or office addresses. A sequence of address parts.",
     )
-    use: Optional[str] = Field(alias="@use", default=None)
-    streetAddressLine: Optional[List[str]] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    postalCode: Optional[str] = None
-    country: Optional[str] = None
+    use: str | None = Field(alias="@use", default=None)
+    streetAddressLine: list[str] | None = None
+    city: str | None = None
+    state: str | None = None
+    postalCode: str | None = None
+    country: str | None = None
 
 
 class ED(BIN):
@@ -65,14 +63,14 @@ class ED(BIN):
         "further machine processing is outside the scope of HL7.",
         alias="@xsi:type",
     )
-    reference: Optional[TEL] = None
-    thumbnail: Optional[str] = None  # thumbnail
-    compression: Optional[str] = None  # enum
-    integrityCheck: Optional[str] = None
-    integrityCheckAlgorithm: Optional[str] = None  # enum SHA1 or SHA256
-    language: Optional[str] = None
-    mediaType: Optional[str] = None
-    xmlText: Optional[str] = None
+    reference: TEL | None = None
+    thumbnail: str | None = None  # thumbnail
+    compression: str | None = None  # enum
+    integrityCheck: str | None = None
+    integrityCheckAlgorithm: str | None = None  # enum SHA1 or SHA256
+    language: str | None = None
+    mediaType: str | None = None
+    xmlText: str | None = None
 
 
 class QTY(ANY):
@@ -93,12 +91,10 @@ class II(ANY):
         description="An identifier that uniquely identifies a thing or object.",
         alias="@xsi:type",
     )
-    assigningAuthorityName: Optional[str] = Field(
-        alias="@assigningAuthorityName", default=None
-    )
-    displayable: Optional[bool] = None
-    extension: Optional[str] = Field(alias="@extension", default=None)
-    root: Optional[str] = Field(alias="@root")
+    assigningAuthorityName: str | None = Field(alias="@assigningAuthorityName", default=None)
+    displayable: bool | None = None
+    extension: str | None = Field(alias="@extension", default=None)
+    root: str | None = Field(alias="@root")
 
     model_config = {
         "populate_by_name": True,
@@ -128,10 +124,10 @@ class CD(ANY):
         alias="@xsi:type",
     )
     code: str = Field(alias="@code")
-    codeSystem: Optional[str] = Field(alias="@codeSystem", default=None)
-    codeSystemName: Optional[str] = Field(alias="@codeSystemName", default=None)
-    displayName: Optional[str] = Field(alias="@displayName", default=None)
-    translation: Optional[List["CD"]] = None  # Forward reference
+    codeSystem: str | None = Field(alias="@codeSystem", default=None)
+    codeSystemName: str | None = Field(alias="@codeSystemName", default=None)
+    displayName: str | None = Field(alias="@displayName", default=None)
+    translation: list[CD] | None = None  # Forward reference
 
     @model_validator(mode="before")
     def set_code_system_from_name(cls, values):
@@ -177,7 +173,7 @@ class PQR(CV):
         "system. Used to show alternative representation for a physical "
         "quantity.",
     )
-    value: Optional[float] = None
+    value: float | None = None
 
 
 class CS(CV):
@@ -195,9 +191,9 @@ class PQ(QTY):
         description="A dimensioned quantity expressing the result of a measurement act.",
         alias="@xsi:type",
     )
-    translation: Optional[List[PQR]] = None
-    unit: Optional[str] = Field(alias="@unit", default=None)
-    value: Optional[float] = Field(alias="@value", default=None)
+    translation: list[PQR] | None = None
+    unit: str | None = Field(alias="@unit", default=None)
+    value: float | None = Field(alias="@value", default=None)
 
 
 class TS(QTY):
@@ -206,7 +202,7 @@ class TS(QTY):
         description="A quantity specifying a point on the axis of natural time. A point "
         "in time is most often represented as a calendar expression.",
     )
-    value: Optional[str] = Field(
+    value: str | None = Field(
         alias="@value",
         default=None,
         description="Date Format: YYYYMMDDHHMMSS.UUUU[+|-ZZzz]",
@@ -215,7 +211,7 @@ class TS(QTY):
 
 class SXCM_TS(TS):
     resource_type: str = Field("SXCM_TS", description="", alias="@xsi:type")
-    operator: Optional[str] = Field(alias="@operator", default=None)
+    operator: str | None = Field(alias="@operator", default=None)
     model_config = {
         "populate_by_name": True,
     }
@@ -223,21 +219,17 @@ class SXCM_TS(TS):
 
 class SXCM_PQ(PQ):
     resource_type: str = Field("SXCM_PQ", description="", alias="@xsi:type")
-    operator: Optional[str] = None  # enumeration
+    operator: str | None = None  # enumeration
 
 
 class IVXB_TS(SXCM_TS):
     resource_type: str = Field("IVXB_TS", description="", alias="@xsi:type")
-    inclusive: Optional[bool] = Field(
-        None, description="Specifies whether the limit is included in the interval."
-    )
+    inclusive: bool | None = Field(None, description="Specifies whether the limit is included in the interval.")
 
 
 class IVXB_PQ(PQ):
     resource_type: str = Field("IVXB_PQ", description="", alias="@xsi:type")
-    inclusive: Optional[bool] = Field(
-        None, description="Specifies whether the limit is included in the interval."
-    )
+    inclusive: bool | None = Field(None, description="Specifies whether the limit is included in the interval.")
 
 
 class IVL_PQ(ANY):
@@ -245,42 +237,38 @@ class IVL_PQ(ANY):
         "IVL_PQ",
         alias="@xsi:type",
     )
-    unit: Optional[CS] = Field(alias="@unit", default=None)
-    value: Optional[PQ] = Field(alias="@value", default=None)
-    operator: Optional[CS] = Field(alias="@operator", default=None)
-    low: Optional[IVXB_PQ] = None
-    center: Optional[PQ] = None
-    width: Optional[PQ] = None
-    high: Optional[IVXB_PQ] = None
+    unit: CS | None = Field(alias="@unit", default=None)
+    value: PQ | None = Field(alias="@value", default=None)
+    operator: CS | None = Field(alias="@operator", default=None)
+    low: IVXB_PQ | None = None
+    center: PQ | None = None
+    width: PQ | None = None
+    high: IVXB_PQ | None = None
     model_config = {
         "populate_by_name": True,
     }
 
 
 class IVL_TS(IVXB_TS):
-    resource_type: str = Field(
-        "IVL_TS", description="Time interval.", alias="@xsi:type"
-    )
-    low: Optional[IVXB_TS] = None
-    center: Optional[TS] = None
-    width: Optional[PQ] = None
-    high: Optional[IVXB_TS] = None
+    resource_type: str = Field("IVL_TS", description="Time interval.", alias="@xsi:type")
+    low: IVXB_TS | None = None
+    center: TS | None = None
+    width: PQ | None = None
+    high: IVXB_TS | None = None
     model_config = {
         "populate_by_name": True,
     }
 
 
 class IVL_INT(ANY):
-    resource_type: str = Field(
-        "IVL_INT", description="Interval of integers.", alias="@xsi:type"
-    )
-    nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)
-    value: Optional[int] = Field(alias="@value", default=None)
-    operator: Optional[str] = Field(alias="@operator", default=None)
-    low: Optional[int] = None
-    center: Optional[int] = None
-    width: Optional[int] = None
-    high: Optional[int] = None
+    resource_type: str = Field("IVL_INT", description="Interval of integers.", alias="@xsi:type")
+    nullFlavor: str | None = Field(alias="@nullFlavor", default=None)
+    value: int | None = Field(alias="@value", default=None)
+    operator: str | None = Field(alias="@operator", default=None)
+    low: int | None = None
+    center: int | None = None
+    width: int | None = None
+    high: int | None = None
     model_config = {
         "populate_by_name": True,
     }
@@ -288,12 +276,10 @@ class IVL_INT(ANY):
 
 class PIVL_TS(SXCM_TS):
     resource_type: str = Field("PIVL_TS", description="", alias="@xsi:type")
-    phase: Optional[IVL_TS] = None
-    period: Optional[Union[IVL_PQ, PQ]] = None
-    alignment: Optional[CalendarCycle] = Field(alias="@alignment", default=None)
-    institutionSpecified: Optional[str] = Field(
-        alias="@institutionSpecified", default=None
-    )
+    phase: IVL_TS | None = None
+    period: IVL_PQ | PQ | None = None
+    alignment: CalendarCycle | None = Field(alias="@alignment", default=None)
+    institutionSpecified: str | None = Field(alias="@institutionSpecified", default=None)
     model_config = {
         "populate_by_name": True,
     }
@@ -301,8 +287,8 @@ class PIVL_TS(SXCM_TS):
 
 class EIVL_TS(SXCM_TS):
     resource_type: str = Field("EIVL_TS", description="", alias="@xsi:type")
-    event: Optional[CE] = None
-    offset: Optional[IVL_PQ] = None
+    event: CE | None = None
+    offset: IVL_PQ | None = None
     model_config = {
         "populate_by_name": True,
     }
@@ -310,7 +296,7 @@ class EIVL_TS(SXCM_TS):
 
 class CalendarCycle(ANY):
     resource_type: str = Field("CalendarCycle", description="", alias="@xsi:type")
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class RTO_PQ_PQ(QTY):
@@ -319,5 +305,5 @@ class RTO_PQ_PQ(QTY):
         description="A ratio of two physical quantities.",
         alias="@xsi:type",
     )
-    numerator: Optional[PQ] = None
-    denominator: Optional[PQ] = None
+    numerator: PQ | None = None
+    denominator: PQ | None = None

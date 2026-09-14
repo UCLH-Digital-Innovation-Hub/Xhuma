@@ -7,11 +7,7 @@ prn_statement = medicationstatement.MedicationStatement(
     {
         "resourceType": "MedicationStatement",
         "id": "968546F0-EF03-491B-A045-4D46EE61A860-MS",
-        "meta": {
-            "profile": [
-                "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationStatement-1"
-            ]
-        },
+        "meta": {"profile": ["https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationStatement-1"]},
         "extension": [
             {
                 "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1",
@@ -36,13 +32,9 @@ prn_statement = medicationstatement.MedicationStatement(
                 "value": "593C97B57B9943269140B329CC03A0D1968546F0EF03491BA0454D46EE61A860MS",
             }
         ],
-        "basedOn": [
-            {"reference": "MedicationRequest/968546F0-EF03-491B-A045-4D46EE61A860"}
-        ],
+        "basedOn": [{"reference": "MedicationRequest/968546F0-EF03-491B-A045-4D46EE61A860"}],
         "status": "completed",
-        "medicationReference": {
-            "reference": "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511"
-        },
+        "medicationReference": {"reference": "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511"},
         "effectivePeriod": {"start": "2026-02-24", "end": "2026-03-10"},
         "dateAsserted": "2026-02-24T10:08:32.33+00:00",
         "subject": {"reference": "Patient/593C97B5-7B99-4326-9140-B329CC03A0D1"},
@@ -50,9 +42,7 @@ prn_statement = medicationstatement.MedicationStatement(
         "dosage": [
             {
                 "text": "Take One Tablet As Required On Each Day There Is A Risk Of Drinking Alcohol. Maximum One Tablet Daily.",
-                "additionalInstruction": [
-                    {"text": "on each day there is a risk of drinking alcohol"}
-                ],
+                "additionalInstruction": [{"text": "on each day there is a risk of drinking alcohol"}],
                 "asNeededBoolean": True,
                 "method": {
                     "coding": [
@@ -92,11 +82,7 @@ prn_med = medication.Medication(
     {
         "resourceType": "Medication",
         "id": "1004837_1",
-        "meta": {
-            "profile": [
-                "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-Medication-1"
-            ]
-        },
+        "meta": {"profile": ["https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-Medication-1"]},
         "code": {
             "coding": [
                 {
@@ -114,11 +100,7 @@ med_request = medicationrequest.MedicationRequest(
     {
         "resourceType": "MedicationRequest",
         "id": "968546F0-EF03-491B-A045-4D46EE61A860",
-        "meta": {
-            "profile": [
-                "https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationRequest-1"
-            ]
-        },
+        "meta": {"profile": ["https://fhir.nhs.uk/STU3/StructureDefinition/CareConnect-GPC-MedicationRequest-1"]},
         "extension": [
             {
                 "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescriptionType-1",
@@ -142,18 +124,14 @@ med_request = medicationrequest.MedicationRequest(
         "groupIdentifier": {"value": "968546f0-ef03-491b-a045-4d46ee61a860"},
         "status": "completed",
         "intent": "plan",
-        "medicationReference": {
-            "reference": "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511"
-        },
+        "medicationReference": {"reference": "Medication/12EE2DA3-065A-41CD-93A3-67A80785C511"},
         "subject": {"reference": "Patient/593C97B5-7B99-4326-9140-B329CC03A0D1"},
         "authoredOn": "2026-02-24T10:08:32.33+00:00",
         "recorder": {"reference": "Practitioner/C8FD0E2C-3124-4C72-AC8D-ABEA65537D1B"},
         "dosageInstruction": [
             {
                 "text": "Take One Tablet As Required On Each Day There Is A Risk Of Drinking Alcohol. Maximum One Tablet Daily.",
-                "additionalInstruction": [
-                    {"text": "on each day there is a risk of drinking alcohol"}
-                ],
+                "additionalInstruction": [{"text": "on each day there is a risk of drinking alcohol"}],
                 "asNeededBoolean": True,
                 "method": {
                     "coding": [
@@ -225,14 +203,8 @@ async def test_prn_medication_statement():
         substance_administration["precondition"]["criterion"]["templateId"][0]["@root"]
         == "2.16.840.1.113883.10.20.22.4.25"
     )
-    assert (
-        substance_administration["precondition"]["criterion"]["code"]["@code"]
-        == "ASSERTION"
-    )
-    assert (
-        substance_administration["precondition"]["criterion"]["value"]["@nullFlavor"]
-        == "NI"
-    )
+    assert substance_administration["precondition"]["criterion"]["code"]["@code"] == "ASSERTION"
+    assert substance_administration["precondition"]["criterion"]["value"]["@nullFlavor"] == "NI"
     # Check the medication details
 
 

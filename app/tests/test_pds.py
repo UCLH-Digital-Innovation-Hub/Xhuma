@@ -18,9 +18,7 @@ async def test_get_data_success(mock_async_client, mock_post, mock_redis):
     mock_redis.setex.return_value = True  # avoid failure
 
     # --- mock token response ---
-    mock_post.return_value.text = json.dumps(
-        {"access_token": "fake-token", "expires_in": 300}
-    )
+    mock_post.return_value.text = json.dumps({"access_token": "fake-token", "expires_in": 300})
 
     # --- mock patient response ---
     mock_client_instance = AsyncMock()
@@ -48,9 +46,7 @@ async def test_get_data_success(mock_async_client, mock_post, mock_redis):
 @patch("app.pds.pds.httpx.AsyncClient")
 @pytest.mark.asyncio
 async def test_lookup_patient_returns_cached_result(mock_async_client, mock_redis):
-    mock_redis.get.return_value = json.dumps(
-        {"resourceType": "Patient", "id": "9690937278"}
-    ).encode("utf-8")
+    mock_redis.get.return_value = json.dumps({"resourceType": "Patient", "id": "9690937278"}).encode("utf-8")
 
     patient = await lookup_patient(9690937278)
 

@@ -26,11 +26,7 @@ for entry in fhir_bundle.entry:
     except Exception:
         pass
 
-lists = [
-    entry.resource
-    for entry in fhir_bundle.entry
-    if isinstance(entry.resource, fhirlist.List)
-]
+lists = [entry.resource for entry in fhir_bundle.entry if isinstance(entry.resource, fhirlist.List)]
 for lst in lists:
     print(f"List ID: {lst.id}, Title: {lst.title}, Status: {lst.status}")
 
@@ -44,9 +40,7 @@ for lst in lists:
         resource = bundle_index.get(entry.item.reference)
         if resource:
             print(f"  - {resource.resource_type}: {resource.id}")
-            print(
-                f"    - {resource.code.coding[0].display if hasattr(resource, 'code') else 'No code'}"
-            )
+            print(f"    - {resource.code.coding[0].display if hasattr(resource, 'code') else 'No code'}")
             if resource.result:
                 for result in resource.result:
                     print(f"      - {result.reference}")
@@ -57,18 +51,11 @@ for lst in lists:
                         )
                         # check if result_resource related has type of "has-member"
                         # if resource related is not none:
-                        if (
-                            hasattr(result_resource, "related")
-                            and result_resource.related
-                        ):
-                            print(
-                                f"            - Related Resources:{len(result_resource.related)}"
-                            )
+                        if hasattr(result_resource, "related") and result_resource.related:
+                            print(f"            - Related Resources:{len(result_resource.related)}")
                             for related in result_resource.related:
                                 if related.type == "has-member":
-                                    related_resource = bundle_index.get(
-                                        related.target.reference
-                                    )
+                                    related_resource = bundle_index.get(related.target.reference)
                                     if related_resource:
                                         print(
                                             f"             - {related_resource.code.coding[0].display if hasattr(related_resource, 'code') else 'No code'}"

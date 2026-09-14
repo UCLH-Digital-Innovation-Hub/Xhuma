@@ -53,6 +53,9 @@ dev = [
     "azure-identity",
     "azure-keyvault-secrets",
     "pytest-cov>=7.1.0",
+    "schemathesis>=4.25.2",
+    "hypothesis>=6.165.10",
+    "pytest-sugar>=1.1.1",
 ]
 
 [tool.uv]
@@ -69,3 +72,11 @@ paths=[
     "alembic"]
 deps-file="pyproject.toml"
 sections=["project.dependencies"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501"]
+
