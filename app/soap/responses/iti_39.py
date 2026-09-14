@@ -34,7 +34,7 @@ async def iti_39_response(message_id: str, document_id: str, document):
         create_header("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id), body
     )
 
-    print(f"ITI39 response: {soap_response}")
+    # print(f"ITI39 response: {soap_response}")
 
     # soap_response = create_envelope(
     #     create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", "test"), body

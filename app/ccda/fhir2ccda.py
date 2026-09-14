@@ -3,7 +3,6 @@ import datetime
 import json
 import logging
 import os
-from typing import List
 
 import xmltodict
 from copy import deepcopy
@@ -196,7 +195,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         # print(list.title)
         # check if list is one of the desired ones
         if list.title in sections:
-            print(list.title)
             comp = {}
             comp["section"] = {
                 "templateId": templateId(templates[list.title]["root"], "2015-08-01"),
@@ -459,7 +457,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             return comp
 
         elif list.title == "Investigations and results":
-            print(list.title)
             comp = {}
             comp["section"] = {
                 "templateId": templateId(templates[list.title]["root"], "2015-08-01"),
@@ -497,7 +494,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             comp["section"]["entry"] = entries
             return comp
 
-    def split_medications(medications: fhirlist.List) -> List[dict]:
+    def split_medications(medications: fhirlist.List):
         """Splits medications into active and past based on status
 
         Args:
@@ -508,26 +505,45 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         """
         active = []
         past = []
+        future_meds = 0
 
         for med in medications.entry:
-            print(med)
+            # print(med)
             referenced_med = index[med.item.reference]
+            effective_period = getattr(referenced_med, "effectivePeriod", None)
+            effective_end = getattr(effective_period, "end", None)
+            effective_end_date = None
+
+            # ensure is the correct type for comparison
+            if effective_end is not None:
+                if isinstance(effective_end, datetime.datetime):
+                    effective_end_date = effective_end.date()
+                elif isinstance(effective_end, datetime.date):
+                    effective_end_date = effective_end
+                else:
+                    # consider just enforcing this route
+                    effective_end_iso = getattr(
+                        effective_end, "isostring", effective_end
+                    )
+                    effective_end_date = datetime.date.fromisoformat(
+                        str(effective_end_iso)[:10]
+                    )
             # print(referenced_med)
             # status active or end date in the future
             if referenced_med.status == "active":
                 active.append(med)
             elif (
                 referenced_med.status == "completed"
-                and hasattr(referenced_med, "endDate")
-                and referenced_med.endDate is not None
-                and date_helper(referenced_med.endDate) > datetime.datetime.now()
+                and effective_end_date is not None
+                and effective_end_date > datetime.date.today()
             ):
                 active.append(med)
+                future_meds += 1
             else:
                 past.append(med)
         # print(f"split medications into {len(active)} active and {len(past)} past")
         # print(active)
-        return active, past
+        return active, past, future_meds
 
     def clone_list(original, new_title, new_entries):
         new_list = deepcopy(original)
@@ -541,13 +557,26 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     for list_obj in lists:
         if list_obj.title == "Medications and medical devices":
             try:
-                active, past = split_medications(list_obj)
+                active, past, future_meds = split_medications(list_obj)
                 # print(f"active medications: {len(active)}, past medications: {len(past)}")
                 active_section = await create_section(
                     clone_list(list_obj, "Active Medications", active)
                 )
 
                 if active:
+                    # add warning about future medications
+                    if future_meds > 0:
+                        # append paragraph about future medications
+                        existing_text = active_section["section"]["text"][
+                            "paragraph"
+                        ].get("#text", "")
+                        note_text = f"Note: There are {future_meds} medications marked as complete but considered active because of an end date in the future."
+                        active_section["section"]["text"]["paragraph"]["#text"] = (
+                            f"{existing_text}<br />{note_text}"
+                            if existing_text
+                            else note_text
+                        )
+
                     # delete the third column for acute medications as we don't have status for active medications and it is always active
                     for entry in active_section["section"]["text"]["table"]["tbody"][
                         "tr"

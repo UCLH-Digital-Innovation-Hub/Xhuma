@@ -41,6 +41,9 @@ environment = os.getenv("ENV", "dev")
 if environment.lower() in ["dev", "int"]:
     RELAY_BASE_PATH = "https://proxy.int.spine2.ncrs.nhs.uk"
     OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk/"
+elif environment.lower() == "prod":
+    # raise error for now as production paths are not set
+    raise NotImplementedError("Production environment paths are not configured")
 
 
 # audit event with shared session
@@ -337,7 +340,7 @@ async def _fetch_gpconnect_record(
     token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
     headers = {
         "Ssp-TraceID": str(uuid4()),
-        "Ssp-From": "200000002574",  # TODO this should be dynamic as each client endpoint will have own SSID
+        "Ssp-From": os.getenv("ASID", "200000002574"),
         "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
@@ -587,8 +590,13 @@ async def _fetch_gpconnect_record(
 
     xop = base64_xml(xml_ccda)
     doc_uuid = str(uuid4())
-    redis_client.setex(nhsno, timedelta(minutes=1), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=1), xop)
+
+    redis_client.setex(
+        nhsno, timedelta(hours=os.getenv("CCDA_EXPIRY_HOURS", 4)), doc_uuid
+    )
+    redis_client.setex(
+        doc_uuid, timedelta(hours=os.getenv("CCDA_EXPIRY_HOURS", 4)), xop
+    )
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
