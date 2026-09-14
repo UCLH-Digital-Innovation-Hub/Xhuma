@@ -358,3 +358,50 @@ resource "azurerm_key_vault_access_policy" "locust_shared_policy" {
   secret_permissions      = ["Get", "List"]
   certificate_permissions = ["Get", "List"]
 }
+
+# --- PostgreSQL Audit Logging Configuration ---
+
+resource "azurerm_monitor_diagnostic_setting" "postgres_diag" {
+  name                       = "postgres-audit-logs"
+  target_resource_id         = azurerm_postgresql_flexible_server.postgres.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+
+  enabled_log {
+    category = "PostgreSQLLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+    enabled  = true
+  }
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_connections" {
+  name      = "log_connections"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "on"
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_disconnections" {
+  name      = "log_disconnections"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "on"
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_checkpoints" {
+  name      = "log_checkpoints"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "on"
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_statement" {
+  name      = "log_statement"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "ddl"
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_min_duration_statement" {
+  name      = "log_min_duration_statement"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "2000"
+}
