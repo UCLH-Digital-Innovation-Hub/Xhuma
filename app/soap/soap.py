@@ -15,11 +15,11 @@ import os
 import re
 import urllib.parse
 import uuid
-from collections.abc import Callable
 from datetime import datetime
 from email import charset
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from typing import Callable
 
 import httpx
 import xmltodict
@@ -28,7 +28,6 @@ from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
 from ..audit.audit import process_saml_attributes
-from .saml_helper import extract_trusted_saml_assertion, InvalidSAMLContext
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
@@ -41,6 +40,7 @@ from .responses import (
     iti_55_error,
     iti_55_response,
 )
+from .saml_helper import InvalidSAMLContext, extract_trusted_saml_assertion
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
