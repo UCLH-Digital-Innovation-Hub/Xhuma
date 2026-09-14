@@ -248,6 +248,15 @@ async def iti55(request: Request):
             security_code = patient["meta"]["security"][0]["code"]
 
         if security_code != "U":
+            await attempt_audit(
+                request=request,
+                nhs_number=str(nhsno),
+                saml=saml_attrs,
+                action="iti55_patient_discovery",
+                outcome=AuditOutcome.deny,
+                message_id=envelope["Header"]["MessageID"],
+                detail={"error": "Patient record has restricted access"},
+            )
             data = await iti_55_error(
                 message_id=envelope["Header"]["MessageID"],
                 error_text="Patient record has restricted access",
@@ -573,11 +582,23 @@ async def iti39(request: Request):
             mime_string = mime_message.as_string()
             headers = {"Content-Type": f'multipart/related; boundary="{boundary}"'}
 
-            # if there's not an anonymous address in the reply to header, send the response to that address
-            reply_to = envelope["Header"]["ReplyTo"]["Address"]
+            try:
+                reply_to = envelope["Header"]["ReplyTo"]["Address"]
+            except Exception:
+                reply_to = None
+
             if reply_to and reply_to != "http://www.w3.org/2005/08/addressing/anonymous":
                 # SSRF Protection
                 if not reply_to.startswith("https://"):
+                    await attempt_audit(
+                        request=request,
+                        nhs_number=doc_nhsno,
+                        saml=saml_attrs,
+                        action="iti39_document_retrieve",
+                        outcome=AuditOutcome.deny,
+                        document_id=document_id,
+                        detail={"error": "ReplyTo must use https", "reply_to": reply_to},
+                    )
                     raise HTTPException(status_code=400, detail="ReplyTo must use https")
 
                 allowed_domains = os.getenv("ALLOWED_REPLY_TO_DOMAINS", ".nhs.uk").split(",")
@@ -586,6 +607,15 @@ async def iti39(request: Request):
                     print(
                         f"ITI-39 SSRF Protection: Rejected ReplyTo domain '{parsed_url.hostname}' (allowed: {allowed_domains})",
                         flush=True,
+                    )
+                    await attempt_audit(
+                        request=request,
+                        nhs_number=doc_nhsno,
+                        saml=saml_attrs,
+                        action="iti39_document_retrieve",
+                        outcome=AuditOutcome.deny,
+                        document_id=document_id,
+                        detail={"error": "ReplyTo domain not allowed", "reply_to": reply_to},
                     )
                     raise HTTPException(status_code=403, detail="ReplyTo domain not allowed")
 
@@ -604,6 +634,7 @@ async def iti39(request: Request):
                     action="iti39_document_retrieve",
                     outcome=AuditOutcome.ok,
                     document_id=document_id,
+                    detail={"delivery_mode": "async", "reply_to": reply_to},
                 )
 
                 return Response(
@@ -612,6 +643,15 @@ async def iti39(request: Request):
                     background=BackgroundTask(send_post, reply_to, mime_string.encode("utf-8"), headers),
                 )
 
+            await attempt_audit(
+                request=request,
+                nhs_number=doc_nhsno,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.ok,
+                document_id=document_id,
+                detail={"delivery_mode": "sync"},
+            )
             return Response(content=data, media_type="application/soap+xml")
         else:
             await attempt_audit(

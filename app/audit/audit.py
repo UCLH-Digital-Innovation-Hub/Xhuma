@@ -104,4 +104,4 @@ async def attempt_audit(
     except Exception:
         # Do not log raw database exceptions containing SQL parameters.
         logging.error("AuditFailure: Database persistence failed")
-        raise AuditFailureException("Failed to persist audit event")
+        raise AuditFailureException("Failed to persist audit event") from None

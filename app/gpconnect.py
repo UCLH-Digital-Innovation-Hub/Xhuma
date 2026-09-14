@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
-from .audit.audit import process_saml_attributes, attempt_audit
+from .audit.audit import process_saml_attributes, attempt_audit, AuditFailureException
 from .audit.models import AuditOutcome, SAMLAttributes
 from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
@@ -98,6 +98,8 @@ async def _fetch_gpconnect_record(
     # t = now()
     try:
         pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"PDS lookup failed: {e}"
         record_application_failure(e)
@@ -120,7 +122,7 @@ async def _fetch_gpconnect_record(
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="check_restriction",
-            outcome=AuditOutcome.fail,
+            outcome=AuditOutcome.deny,
             error_code="403",
         )
         logging.error("Patient is restricted")
@@ -132,6 +134,8 @@ async def _fetch_gpconnect_record(
     # 4) Resolve ODS → ASID + PartyKey
     try:
         gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Unable to read GP ODS from PDS response: {e}"
         await attempt_audit(
@@ -159,6 +163,8 @@ async def _fetch_gpconnect_record(
             action="sds_trace",
             outcome=AuditOutcome.ok,
         )
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"SDS trace failed: {e}"
         await attempt_audit(
@@ -185,6 +191,8 @@ async def _fetch_gpconnect_record(
                 asid = item.get("value")
             elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
                 nhsmhsparty = item.get("value")
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Unable to parse SDS trace response: {e}"
         record_application_failure(e)
@@ -221,6 +229,8 @@ async def _fetch_gpconnect_record(
             action="fhir_endpoint_trace",
             outcome=AuditOutcome.ok,
         )
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"SDS endpoint trace failed: {e}"
         await attempt_audit(
@@ -388,6 +398,8 @@ async def _fetch_gpconnect_record(
                 f.write(resp.text)
         logging.info(f"GP Connect request successful with status {resp.status_code}")
 
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Transport error: {e}"
         await attempt_audit(
@@ -456,6 +468,8 @@ async def _fetch_gpconnect_record(
 
     try:
         fhir_bundle = bundle.Bundle(scr_bundle)
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Failed to parse FHIR Bundle from GP Connect response: {e}"
         record_application_failure(e)
@@ -486,6 +500,8 @@ async def _fetch_gpconnect_record(
 
         duration_ms = (time.perf_counter() - start_time) * 1000
         logging.info(f"FHIR2CCDA conversion completed in {duration_ms:.2f}ms")
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
         record_application_failure(e)
@@ -503,6 +519,15 @@ async def _fetch_gpconnect_record(
 
     xop = base64_xml(xml_ccda)
     doc_uuid = str(uuid4())
+    await attempt_audit(
+        request=request,
+        nhs_number=str(nhsno),
+        saml=saml_attrs,
+        action="store_ccda",
+        outcome=AuditOutcome.ok,
+        document_id=doc_uuid,
+    )
+
     # Use a pipeline to write all keys atomically with a consistent TTL
     pipe = redis_client.pipeline()
     pipe.setex(str(nhsno), timedelta(minutes=1), doc_uuid)
@@ -514,15 +539,6 @@ async def _fetch_gpconnect_record(
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
         with open(f"{int(nhsno)!s}.xml", "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
-
-    await attempt_audit(
-        request=request,
-        nhs_number=str(nhsno),
-        saml=saml_attrs,
-        action="store_ccda",
-        outcome=AuditOutcome.ok,
-        document_id=doc_uuid,
-    )
 
     return JSONResponse(status_code=200, content={"success": True, "document_id": doc_uuid})
 

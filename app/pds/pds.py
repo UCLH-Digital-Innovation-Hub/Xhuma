@@ -13,7 +13,7 @@ import httpx
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
 from app.security import pds_jwt
-from app.audit.audit import attempt_audit
+from app.audit.audit import attempt_audit, AuditFailureException
 from app.audit.models import AuditOutcome, SAMLAttributes
 
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
@@ -108,6 +108,8 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         else:
             logging.info("NHS token found in cache")
             nhs_token = redis_client.get("access_token").decode("utf-8")
+    except AuditFailureException:
+        raise
     except Exception as e:
         await attempt_audit(
             request=request,
@@ -137,6 +139,8 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             r = await client.get(url, headers=headers)
             r.raise_for_status()
             patient_dict = json.loads(r.text)
+    except AuditFailureException:
+        raise
     except Exception as e:
         await attempt_audit(
             request=request,
