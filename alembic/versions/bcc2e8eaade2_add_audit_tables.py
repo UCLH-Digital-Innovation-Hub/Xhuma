@@ -6,7 +6,7 @@ Create Date: 2026-02-10 10:21:54.603522
 
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 import sqlmodel
@@ -16,9 +16,9 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "bcc2e8eaade2"
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -49,36 +49,20 @@ def upgrade() -> None:
         sa.Column("detail", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.PrimaryKeyConstraint("audit_id"),
     )
-    op.create_index(
-        op.f("ix_audit_event_action"), "audit_event", ["action"], unique=False
-    )
-    op.create_index(
-        op.f("ix_audit_event_event_time"), "audit_event", ["event_time"], unique=False
-    )
+    op.create_index(op.f("ix_audit_event_action"), "audit_event", ["action"], unique=False)
+    op.create_index(op.f("ix_audit_event_event_time"), "audit_event", ["event_time"], unique=False)
     op.create_index(
         op.f("ix_audit_event_organisation"),
         "audit_event",
         ["organisation"],
         unique=False,
     )
-    op.create_index(
-        op.f("ix_audit_event_outcome"), "audit_event", ["outcome"], unique=False
-    )
-    op.create_index(
-        op.f("ix_audit_event_request_id"), "audit_event", ["request_id"], unique=False
-    )
-    op.create_index(
-        op.f("ix_audit_event_sequence"), "audit_event", ["sequence"], unique=False
-    )
-    op.create_index(
-        op.f("ix_audit_event_subject_ref"), "audit_event", ["subject_ref"], unique=False
-    )
-    op.create_index(
-        op.f("ix_audit_event_trace_id"), "audit_event", ["trace_id"], unique=False
-    )
-    op.create_index(
-        op.f("ix_audit_event_user_id"), "audit_event", ["user_id"], unique=False
-    )
+    op.create_index(op.f("ix_audit_event_outcome"), "audit_event", ["outcome"], unique=False)
+    op.create_index(op.f("ix_audit_event_request_id"), "audit_event", ["request_id"], unique=False)
+    op.create_index(op.f("ix_audit_event_sequence"), "audit_event", ["sequence"], unique=False)
+    op.create_index(op.f("ix_audit_event_subject_ref"), "audit_event", ["subject_ref"], unique=False)
+    op.create_index(op.f("ix_audit_event_trace_id"), "audit_event", ["trace_id"], unique=False)
+    op.create_index(op.f("ix_audit_event_user_id"), "audit_event", ["user_id"], unique=False)
     # ### end Alembic commands ###
 
 

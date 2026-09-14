@@ -5,11 +5,11 @@
 ### 1. Patient Demographics Service (PDS) Flow
 ```mermaid
 flowchart TD
-    A[Client Request] -->|ITI-47| B[PDS Lookup]
+    A[Client Request] -->|ITI-55| B[PDS Lookup]
     B -->|NHS Number| C[PDS FHIR API]
     C -->|Patient Demographics| D[Response Validation]
     D -->|Valid Response| E[Cache Demographics]
-    E -->|Formatted Response| F[ITI-47 Response]
+    E -->|Formatted Response| F[ITI-55 Response]
     D -->|Invalid Response| G[Error Handler]
     G -->|Error Response| F
 ```
@@ -46,13 +46,14 @@ flowchart TD
 ### 2. Logging Flow
 ```mermaid
 flowchart TD
-    A[Application Logs] -->|JSON Format| B[Logstash]
-    B -->|Process| C[Elasticsearch]
-    C -->|Query| D[Kibana]
+    A[Application Logs] -->|JSON Format| B[PHI Regex Scrubber]
+    B -->|Redacted Logs| C[Logstash]
+    C -->|Process| D[Elasticsearch]
+    D -->|Query| E[Kibana]
 
-    E[System Logs] -->|Structured| B
-    F[Access Logs] -->|Parse| B
-    G[Error Logs] -->|Enrich| B
+    F[System Logs] -->|Structured| C
+    G[Access Logs] -->|Parse| C
+    H[Error Logs] -->|Enrich| C
 ```
 
 ### 3. Tracing Flow
@@ -155,12 +156,15 @@ flowchart TD
 ### 1. Authentication Flow
 ```mermaid
 flowchart TD
-    A[Request] -->|JWT Token| B[Token Validation]
-    B -->|Valid| C[Permission Check]
-    C -->|Authorized| D[Process Request]
-    B -->|Invalid| E[Auth Error]
-    C -->|Unauthorized| E
-    E -->|Log| F[Error Tracking]
+    A[Request] -->|mTLS Client Cert| B[Thumbprint Validation]
+    B -->|Valid Cert| C[SAML Assertion Check]
+    C -->|Valid Clinician Identity| D[JWT Token Generation]
+    D -->|Valid| E[Permission Check]
+    E -->|Authorized| F[Process Request]
+    B -->|Invalid| G[Auth Error]
+    C -->|Invalid| G
+    E -->|Unauthorized| G
+    G -->|Log| H[Error Tracking]
 ```
 
 ### 2. Audit Trail Flow

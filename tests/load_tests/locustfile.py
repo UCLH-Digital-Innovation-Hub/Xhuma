@@ -2,9 +2,10 @@ import atexit
 import os
 import tempfile
 import uuid
-from locust import HttpUser, task, between
+
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
+from locust import HttpUser, between, task
 
 KEY_VAULT_URL = os.getenv("KEY_VAULT_URL")
 PEM_SECRET_NAME = os.getenv("PEM_SECRET_NAME", "epic-ca-cert")
@@ -72,9 +73,7 @@ class EpicClientUser(HttpUser):
 
         # We use a Multipart MIME boundary since Xhuma expects MTOM SOAP
         boundary = "uuid:benchmark-boundary"
-        headers = {
-            "Content-Type": f'multipart/related; type="application/xop+xml"; boundary="{boundary}"'
-        }
+        headers = {"Content-Type": f'multipart/related; type="application/xop+xml"; boundary="{boundary}"'}
 
         body = f"""--{boundary}\r
 Content-Type: application/xop+xml; charset=UTF-8; type="application/soap+xml"\r
@@ -94,9 +93,7 @@ Content-Type: application/xop+xml; charset=UTF-8; type="application/soap+xml"\r
         """Simulates an ITI-38 Document Query (Using the same payload structure for benchmark routing)"""
         payload = generate_soap_payload("9692136744")
         boundary = "uuid:benchmark-boundary"
-        headers = {
-            "Content-Type": f'multipart/related; type="application/xop+xml"; boundary="{boundary}"'
-        }
+        headers = {"Content-Type": f'multipart/related; type="application/xop+xml"; boundary="{boundary}"'}
         body = f'--{boundary}\\r\\nContent-Type: application/xop+xml; charset=UTF-8; type="application/soap+xml"\\r\\n\\r\\n{payload}\\r\\n--{boundary}--\\r\\n'
         self.client.post(
             "/SOAP/iti38",

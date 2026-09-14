@@ -35,11 +35,7 @@ async def test_GPC_SPN_TST_01():
 
                 asid = None
                 nhsmhsparty = None
-                for item in (
-                    asid_trace.get("entry", [{}])[0]
-                    .get("resource", {})
-                    .get("identifier", [])
-                ):
+                for item in asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", []):
                     if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
                         asid = item.get("value")
                     elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
@@ -72,20 +68,14 @@ async def test_GPC_SPN_TST_02():
 
                 asid = None
                 nhsmhsparty = None
-                for item in (
-                    asid_trace.get("entry", [{}])[0]
-                    .get("resource", {})
-                    .get("identifier", [])
-                ):
+                for item in asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", []):
                     if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
                         asid = item.get("value")
                     elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
                         nhsmhsparty = item.get("value")
                 f.write(f"ASID: {asid}\n")
                 f.write(f"NHS MHS Party Key: {nhsmhsparty}\n")
-                endpoint_trace = await sds_trace(
-                    gp_ods, endpoint=True, mhsparty=nhsmhsparty
-                )
+                endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
                 f.write("SDS Endpoint trace output" + json.dumps(endpoint_trace) + "\n")
                 fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
                 f.write(f"FHIR Endpoint URL: {fhir_endpoint_url}\n")
