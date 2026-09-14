@@ -5,7 +5,7 @@ redis_name                 = "xhuma-redis-play"
 postgres_server_name       = "xhuma-psql-play"
 
 # Immutable bootstrap image reference for initial creation
-docker_image               = "mcr.microsoft.com/appsvc/staticsite@sha256:2b5b58d7d2c0542629d59ce2fe7f88bc971f3f1800c2498480c05df27d84d1d5"
+docker_image               = "mcr.microsoft.com/appsvc/staticsite@sha256:23edadf1c0aca901e8532eb145432f49d4e27a20bef92c48710bb4a81142d4ee"
 
 # Application Settings (Operator must review and populate corresponding secrets)
 org_code                   = "RRV00"
