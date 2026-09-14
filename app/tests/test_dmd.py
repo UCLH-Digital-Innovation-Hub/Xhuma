@@ -221,3 +221,39 @@ async def test_dmd_lookup(mock_async_client, mock_get_token, mock_snomed):
     assert concept.route.displayName == "Oral"
 
     assert mock_snomed.setex.call_count == 3
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client")
+@patch("app.ccda.dmd.httpx.AsyncClient")
+async def test_get_dmd_concept_cache_hit(mock_async_client, mock_snomed):
+    from app.ccda.dmd import get_dmd_concept
+    import json
+
+    # Mock Redis returning a cached concept
+    mock_snomed.get.return_value = json.dumps({"cached": "value"}).encode("utf-8")
+
+    result = await get_dmd_concept(12345, ["test_prop"])
+
+    assert result == {"cached": "value"}
+    # Assert network client was never instantiated/called
+    mock_async_client.assert_not_called()
+    # Assert it checked the correct cache key
+    mock_snomed.get.assert_called_once_with("snomed:12345:properties:test_prop")
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client")
+@patch("app.ccda.dmd.httpx.AsyncClient")
+async def test_get_token_cache_hit(mock_async_client, mock_snomed):
+    from app.ccda.dmd import _get_token
+
+    # Mock Redis returning a cached token
+    mock_snomed.get.return_value = b"cached-dmd-token"
+
+    token = await _get_token()
+
+    assert token == "cached-dmd-token"
+    # Assert network client was never instantiated/called for the token
+    mock_async_client.assert_not_called()
+    mock_snomed.get.assert_called_once_with("dmd_token")
