@@ -1,4 +1,10 @@
 import pytest
+import os
+
+os.environ["API_KEY"] = "test-api-key"
+os.environ["ORG_CODE"] = "RRV00"
+os.environ["ORG_ASID"] = "123"
+os.environ["CCDA_EXPIRY_HOURS"] = "4"
 
 # Generated dummy key for testing
 TEST_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----

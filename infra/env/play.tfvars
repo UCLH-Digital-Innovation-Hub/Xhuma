@@ -12,6 +12,7 @@ org_code                   = "RRV00"
 org_asid                   = "200000000000"
 device_id                  = "1"
 env                        = "int" # Non-production
+ccda_expiry_hours          = "4"
 allowed_hosts              = "*"
 cors_origins               = "*"
 require_mtls               = "true"

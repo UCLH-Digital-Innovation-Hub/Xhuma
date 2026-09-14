@@ -232,9 +232,9 @@ async def test_redis_publication_audit_failure_interaction(mock_lookup, mock_pip
 
 
 @pytest.mark.asyncio
-@patch("app.soap.responses.attempt_audit", new_callable=AsyncMock)
-@patch("app.soap.responses.gpconnect", new_callable=AsyncMock)
-@patch("app.soap.responses.redis_client.get")
+@patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock)
+@patch("app.soap.responses.iti_38.gpconnect", new_callable=AsyncMock)
+@patch("app.soap.responses.iti_38.redis_client.get")
 async def test_iti38_cache_miss_audit_failure_propagation(mock_redis_get, mock_gpconnect, mock_attempt_audit):
     # Setup cache miss
     mock_redis_get.return_value = None
@@ -243,7 +243,7 @@ async def test_iti38_cache_miss_audit_failure_propagation(mock_redis_get, mock_g
     mock_gpconnect.side_effect = AuditFailureException("Failed to persist audit event")
 
     # Test iti_38_response
-    from app.soap.responses import iti_38_response
+    from app.soap.responses.iti_38 import iti_38_response
     from app.audit.models import SAMLAttributes
     from app.ccda.models.datatypes import CD
 
@@ -258,8 +258,8 @@ async def test_iti38_cache_miss_audit_failure_propagation(mock_redis_get, mock_g
 
 
 @pytest.mark.asyncio
-@patch("app.soap.responses.gpconnect", new_callable=AsyncMock)
-@patch("app.soap.responses.redis_client.get")
+@patch("app.soap.responses.iti_38.gpconnect", new_callable=AsyncMock)
+@patch("app.soap.responses.iti_38.redis_client.get")
 @patch("app.soap.soap.extract_trusted_saml_assertion")
 async def test_iti38_endpoint_audit_failure(mock_extract, mock_redis_get, mock_gpconnect, client):
     mock_extract.return_value = {

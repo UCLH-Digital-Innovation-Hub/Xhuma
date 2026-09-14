@@ -34,6 +34,13 @@ router = APIRouter()
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
 
+environment = os.getenv("ENV", "dev")
+if environment.lower() in ["dev", "int", "play"]:
+    RELAY_BASE_PATH = "https://proxy.int.spine2.ncrs.nhs.uk"
+    OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk/"
+else:
+    raise ValueError(f"Unknown or unsupported environment: {environment}")
+
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
     # Verify files exist before trying to load
@@ -272,7 +279,7 @@ async def _fetch_gpconnect_record(
     token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
     headers = {
         "Ssp-TraceID": str(uuid4()),
-        "Ssp-From": "200000002574",  # TODO this should be dynamic as each client endpoint will have own SSID
+        "Ssp-From": os.environ["ORG_ASID"],
         "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
@@ -383,14 +390,14 @@ async def _fetch_gpconnect_record(
     resp = None
     try:
         if USE_RELAY:
-            url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            url = f"{RELAY_BASE_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             resp = await _relay_call(url, headers, body)
             # print(f"Relay response status: {status_code}")
             # print(f"Relay response text: {resp_text}")
             # resp = httpx.Response(status_code=status_code, content=resp_text)
 
         else:
-            url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            url = f"{OVER_INTERNET_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             resp = await _direct_http_call(url, headers, body)
 
         if log_dir:
@@ -528,11 +535,20 @@ async def _fetch_gpconnect_record(
         document_id=doc_uuid,
     )
 
+    try:
+        expiry_hours = float(os.getenv("CCDA_EXPIRY_HOURS", "4"))
+        if expiry_hours <= 0 or expiry_hours != expiry_hours:  # check for nan/negative
+            raise ValueError("CCDA_EXPIRY_HOURS must be positive and finite")
+    except ValueError as e:
+        raise ValueError(f"Invalid CCDA_EXPIRY_HOURS: {e}")
+
+    cache_ttl = timedelta(hours=expiry_hours)
+
     # Use a pipeline to write all keys atomically with a consistent TTL
     pipe = redis_client.pipeline()
-    pipe.setex(str(nhsno), timedelta(minutes=1), doc_uuid)
-    pipe.setex(doc_uuid, timedelta(minutes=1), xop)
-    pipe.setex(f"doc_patient:{doc_uuid}", timedelta(minutes=1), str(nhsno))
+    pipe.setex(str(nhsno), cache_ttl, doc_uuid)
+    pipe.setex(doc_uuid, cache_ttl, xop)
+    pipe.setex(f"doc_patient:{doc_uuid}", cache_ttl, str(nhsno))
     pipe.execute()
 
     # only write the xml if dev
@@ -549,11 +565,7 @@ if __name__ == "__main__":
     xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
     saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 
-    # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(gpconnect(9692136744, saml))
-    print(result.body.decode())
-    print(result.status_code)
-    # assert "error" in result.body.decode()
-    # body = json.loads(result.body)
-    # assert body["success"] is False
-    # assert result["resourceType"] == "Patient"
+    result = asyncio.run(gpconnect(9692140466, saml))
+    # save bundle as json for inspection
+    with open("gpconnect_response.json", "w") as f:
+        json.dump(json.loads(result.body), f, indent=2)
