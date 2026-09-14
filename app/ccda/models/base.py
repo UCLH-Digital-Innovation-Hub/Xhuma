@@ -108,7 +108,6 @@ class ResultObservation(Observation):
         ]
     )
     referenceRange: Optional[List[ReferenceRange]] = None
-    value: Optional[PQ] = None  # PQ is used for numeric values
     interpretationCode: Optional[CE] = None
     methodCode: Optional[CE] = None
     targetSiteCode: Optional[CD] = None

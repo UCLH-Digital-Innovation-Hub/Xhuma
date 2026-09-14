@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from fhirclient.models import diagnosticreport as dr
 from fhirclient.models import observation as obs
 
-from . import EntryWithRow
 from ..helpers import (
     code_with_translations,
     datetime_helper,
@@ -12,6 +11,7 @@ from ..helpers import (
 )
 from ..models.base import ResultObservation, ResultsOrganizer
 from ..models.datatypes import CD, CS, II, IVL_TS, IVXB_TS, PQ
+from .types import EntryWithRow
 
 COMMENT_NOTE_SNOMED = ["37331000000100", "364712009"]  # SNOMED codes for comment note
 INVESTIGATION_RESULT = "24641000000107"
@@ -38,7 +38,7 @@ class ResultWithRow(EntryWithRow):
 
 @dataclass(frozen=True)
 class InvestigationWithTable:
-    organizer: ResultsOrganizer
+    organizer: dict
     table: dict
 
 
@@ -92,6 +92,8 @@ async def create_result_component(
         statusCode=CS(code=observation.status) if observation.status else None,
     )
 
+    # TODO: Map FHIR statuses to CDA Result Status codes, using lowercase
+    # "completed" (HL7 ActStatus is case-sensitive).
     # change final to completed for better mapping to CDA status codes
     if result_component.statusCode and result_component.statusCode.code == "final":
         result_component.statusCode.code = "Completed"
@@ -236,6 +238,9 @@ async def create_result_component(
                 observation_ranges.append({"value": range_value})
 
         if observation_ranges:
+            # TODO: Emit separate referenceRange wrappers with exactly one
+            # observationRange each (CONF:1198-7151), and supply a value for
+            # text-only ranges (CONF:1198-32175).
             result_component.referenceRange = {"observationRange": observation_ranges}
 
             # create string with each reference range on a new line
@@ -302,6 +307,12 @@ async def investigation(
                 if code.system == "http://hl7.org/fhir/observation-category":
                     if code.code == "laboratory":
                         print("Category is laboratory")
+                        # TODO: Supply the required id, observation code and
+                        # statusCode, and the 2015-08-01 Result Observation
+                        # template extension (CONF:1198-7137/7133/7134/32575).
+                        # TODO: Confirm category code 16 and the additional
+                        # template OID against the receiving system's specification;
+                        # C-CDA recommends SNOMED CT for CD values (CONF:1198-32610).
                         category_observation = ResultObservation(
                             templateId=[
                                 II(
@@ -339,6 +350,8 @@ async def investigation(
         effectiveTime=report_issued_time,
     )
 
+    # TODO: Map FHIR statuses to CDA Result Status codes, using lowercase
+    # "completed" (HL7 ActStatus is case-sensitive).
     # change final to completed for better mapping to CDA status codes
     if organizer.statusCode and organizer.statusCode.code == "final":
         organizer.statusCode.code = "Completed"

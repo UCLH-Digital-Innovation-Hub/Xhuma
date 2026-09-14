@@ -9,7 +9,6 @@ from .medication import (
 )
 from .observation_entry import observation_entry
 from .problem import problem
-from .result import result
 from .types import Cell, EntryWithRow, Row
 
 __all__ = [
@@ -24,6 +23,5 @@ __all__ = [
     "allergy",
     "immunization_entry",
     "observation_entry",
-    "result",
     "empty_entry",
 ]
