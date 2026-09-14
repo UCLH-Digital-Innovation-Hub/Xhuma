@@ -53,7 +53,6 @@ def fake_sds_endpoint_trace():
 @patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_with_nhs_data(
-    mock_attempt_audit,
     mock_lookup_patient,
     mock_sds_trace,
     mock_async_client,
@@ -61,6 +60,7 @@ async def test_gpconnect_with_nhs_data(
     mock_redis_setex,
     mock_base64_xml,
     mock_convert_bundle,
+    mock_attempt_audit,
     nhsno,
 ):
     fake_bundle = load_bundle(nhsno)
@@ -152,12 +152,13 @@ async def test_gpconnect_returns_403_when_patient_restricted(mock_lookup_patient
 
 
 @pytest.mark.asyncio
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_returns_502_when_sds_trace_fails(
     mock_lookup_patient,
     mock_sds_trace,
+    mock_attempt_audit,
 ):
     fake_pds = load_pds(9690937278)
 

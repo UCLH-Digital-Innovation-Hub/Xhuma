@@ -8,11 +8,12 @@ from app.pds.pds import lookup_patient, pds_cache_key, sds_cache_key, sds_trace
 from app.tests.fixtures.saml_attributes import saml
 
 
+@patch("app.pds.pds.attempt_audit", new_callable=AsyncMock)
 @patch("app.pds.pds.redis_client")
 @patch("app.pds.pds.httpx.post")
 @patch("app.pds.pds.httpx.AsyncClient")
 @pytest.mark.asyncio
-async def test_get_data_success(mock_async_client, mock_post, mock_redis):
+async def test_get_data_success(mock_async_client, mock_post, mock_redis, mock_attempt_audit):
     # --- mock redis: no token exists ---
     mock_redis.exists.return_value = False
     mock_redis.get.return_value = None
@@ -43,10 +44,11 @@ async def test_get_data_success(mock_async_client, mock_post, mock_redis):
     )
 
 
+@patch("app.pds.pds.attempt_audit", new_callable=AsyncMock)
 @patch("app.pds.pds.redis_client")
 @patch("app.pds.pds.httpx.AsyncClient")
 @pytest.mark.asyncio
-async def test_lookup_patient_returns_cached_result(mock_async_client, mock_redis):
+async def test_lookup_patient_returns_cached_result(mock_async_client, mock_redis, mock_attempt_audit):
     mock_redis.get.return_value = json.dumps({"resourceType": "Patient", "id": "9690937278"}).encode("utf-8")
 
     patient = await lookup_patient(9690937278, saml=saml)
