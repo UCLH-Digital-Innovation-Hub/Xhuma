@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
-from .audit.audit import process_saml_attributes
+from .audit.audit import process_saml_attributes, attempt_audit
 from .audit.build import build_audit_event
 from .audit.models import AuditOutcome, SAMLAttributes
 from .audit.store import insert_audit_event
@@ -35,51 +35,6 @@ router = APIRouter()
 #     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
-
-
-# audit event with shared session
-async def _attempt_audit(
-    request: Request,
-    *,
-    nhs_number: str,
-    saml: SAMLAttributes,
-    action: str,
-    outcome: AuditOutcome,
-    error_code: str | None = None,
-    detail: dict | None = None,
-    message_id: str | None = None,
-    document_id: str | None = None,
-    request_id: str | None = None,
-) -> None:
-    """Attempt to write an audit event, but don't fail the main request if it fails."""
-    if not request or not hasattr(request, "app"):
-        logging.warning("No request or app found; skipping audit event")
-        return
-
-    SessionLocal = getattr(request.app.state, "SessionLocal", None)
-    if not SessionLocal:
-        logging.warning("No SessionLocal found in app state; skipping audit event")
-        return
-
-    try:
-        async with SessionLocal() as session:
-            ev = await build_audit_event(
-                request=request,
-                session=session,
-                nhs_number=str(nhs_number),
-                saml=saml,
-                action=action,
-                outcome=outcome,
-                error_code=error_code,
-                detail=detail,
-                message_id=message_id,
-                document_id=document_id,
-                request_id=request_id,
-            )
-            await insert_audit_event(session, ev)
-            await session.commit()
-    except Exception as e:
-        logging.error(f"Failed to write audit event: {e}")
 
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
@@ -131,7 +86,7 @@ async def _fetch_gpconnect_record(
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -144,25 +99,9 @@ async def _fetch_gpconnect_record(
     # 2) PDS lookup (consider caching in future)
     # t = now()
     try:
-        pds_search = await lookup_patient(nhsno, request=request)
-        await _attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="pds_lookup",
-            outcome=AuditOutcome.ok,
-        )
+        pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
     except Exception as e:
         msg = f"PDS lookup failed: {e}"
-        await _attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="pds_lookup",
-            outcome=AuditOutcome.fail,
-            error_code="502",
-            detail={"exception": str(e)},
-        )
         record_application_failure(e)
         logging.exception(msg)
         if log_dir:
@@ -178,7 +117,7 @@ async def _fetch_gpconnect_record(
 
     if security_code != "U":
         msg = "Patient is not unrestricted, access to GP Connect is not permitted"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -197,7 +136,7 @@ async def _fetch_gpconnect_record(
         gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
     except Exception as e:
         msg = f"Unable to read GP ODS from PDS response: {e}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -215,7 +154,7 @@ async def _fetch_gpconnect_record(
 
     try:
         asid_trace = await sds_trace(gp_ods)
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -224,7 +163,7 @@ async def _fetch_gpconnect_record(
         )
     except Exception as e:
         msg = f"SDS trace failed: {e}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -259,7 +198,7 @@ async def _fetch_gpconnect_record(
 
     if not asid or not nhsmhsparty:
         msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -277,7 +216,7 @@ async def _fetch_gpconnect_record(
     # 5) Endpoint lookup
     try:
         endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -286,7 +225,7 @@ async def _fetch_gpconnect_record(
         )
     except Exception as e:
         msg = f"SDS endpoint trace failed: {e}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -304,7 +243,7 @@ async def _fetch_gpconnect_record(
 
     if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
         msg = f"Unable to find FHIR endpoint for ODS code {gp_ods}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -453,7 +392,7 @@ async def _fetch_gpconnect_record(
 
     except Exception as e:
         msg = f"Transport error: {e}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             request_id=headers.get("Ssp-TraceID"),
             nhs_number=str(nhsno),
@@ -480,7 +419,7 @@ async def _fetch_gpconnect_record(
     # 8) Non-200 handling
     if resp.status_code != 200:
         msg = f"Error from GP Connect endpoint {resp.status_code}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             request_id=headers.get("Ssp-TraceID"),
             nhs_number=str(nhsno),
@@ -497,7 +436,7 @@ async def _fetch_gpconnect_record(
         return JSONResponse(status_code=resp.status_code, content={"success": False, "error": msg})
 
     # audit successful response
-    await _attempt_audit(
+    await attempt_audit(
         request=request,
         request_id=headers.get("Ssp-TraceID"),
         nhs_number=str(nhsno),
@@ -568,13 +507,14 @@ async def _fetch_gpconnect_record(
     doc_uuid = str(uuid4())
     redis_client.setex(nhsno, timedelta(minutes=1), doc_uuid)
     redis_client.setex(doc_uuid, timedelta(minutes=1), xop)
+    redis_client.setex(f"doc_patient:{doc_uuid}", timedelta(minutes=1), nhsno)
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
         with open(f"{int(nhsno)!s}.xml", "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
-    await _attempt_audit(
+    await attempt_audit(
         request=request,
         nhs_number=str(nhsno),
         saml=saml_attrs,

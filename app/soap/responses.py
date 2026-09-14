@@ -415,10 +415,6 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
 
     if docid is None:
         # no cached ccda
-        r = await gpconnect(nhsno, saml_attrs, request=request)
-        # print("-" * 40)
-        # print(r.body)
-        # print("-" * 40)
         try:
             r = await gpconnect(nhsno, saml_attrs, request=request)
 
@@ -604,8 +600,6 @@ async def iti_39_response(message_id: str, document_id: str, document):
     }
 
     soap_response = create_envelope(create_header("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id), body)
-
-    print(f"ITI39 response: {soap_response}")
 
     # soap_response = create_envelope(
     #     create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", "test"), body

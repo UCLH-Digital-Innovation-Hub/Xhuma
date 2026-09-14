@@ -69,9 +69,7 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
     allowed = _allowed_cert_fingerprints()
     if not allowed:
-        print(
-            "Relay mTLS failed: Relay mTLS allowlist is empty or unresolved", flush=True
-        )
+        print("Relay mTLS failed: Relay mTLS allowlist is empty or unresolved", flush=True)
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason="Relay mTLS allowlist is empty or unresolved",

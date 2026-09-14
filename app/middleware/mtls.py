@@ -150,9 +150,7 @@ class MTLSMiddleware(BaseHTTPMiddleware):
 
         if is_public:
             if request.method not in ("GET", "HEAD"):
-                return JSONResponse(
-                    status_code=405, content={"detail": "Method Not Allowed"}
-                )
+                return JSONResponse(status_code=405, content={"detail": "Method Not Allowed"})
             return await call_next(request)
 
         # Bypass all global mTLS checks for Relay connections.

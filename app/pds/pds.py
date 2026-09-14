@@ -13,6 +13,8 @@ import httpx
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
 from app.security import pds_jwt
+from app.audit.audit import attempt_audit
+from app.audit.models import AuditOutcome, SAMLAttributes
 
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
@@ -34,19 +36,37 @@ def pds_cache_key(nhsno: int, secret: str = None) -> str:
 def sds_cache_key(ods: str, endpoint: bool = False, partykey: str = None) -> str:
     """Return the deterministic Redis key for an SDS query."""
     resource = "endpoint" if endpoint else "device"
-    key = f"pds:sds:{resource}:{ods.upper()}"
+    key = f"pds:sds:{resource}:{str(ods).upper()}"
     return f"{key}:{partykey}" if endpoint else key
 
 
 # @router.get("/lookup_patient/{nhsno}")
-async def lookup_patient(nhsno: int, request: fastapi.Request = None):
+async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAMLAttributes = None):
+    if not saml:
+        raise ValueError("Missing SAML attributes: Clinical lookup cannot continue unaudited.")
+
     cache_key = pds_cache_key(nhsno)
     cached_patient = redis_client.get(cache_key)
     if cached_patient:
         logging.info("Cache hit for PDS patient query")
         if isinstance(cached_patient, bytes):
             cached_patient = cached_patient.decode("utf-8")
-        return json.loads(cached_patient)
+
+        patient_dict = json.loads(cached_patient)
+        outcome = (
+            AuditOutcome.fail
+            if ("resourceType" in patient_dict and patient_dict["resourceType"] == "OperationOutcome")
+            else AuditOutcome.ok
+        )
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml,
+            action="pds_lookup",
+            outcome=outcome,
+            detail={"cache_hit": True},
+        )
+        return patient_dict
 
     logging.info("Cache miss for PDS patient query. Fetching from PDS API.")
 
@@ -105,6 +125,20 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None):
         r = await client.get(url, headers=headers)
 
     patient_dict = json.loads(r.text)
+
+    outcome = (
+        AuditOutcome.fail
+        if ("resourceType" in patient_dict and patient_dict["resourceType"] == "OperationOutcome")
+        else AuditOutcome.ok
+    )
+    await attempt_audit(
+        request=request,
+        nhs_number=str(nhsno),
+        saml=saml,
+        action="pds_lookup",
+        outcome=outcome,
+        detail={"cache_hit": False, "status_code": r.status_code},
+    )
 
     redis_client.setex(cache_key, PDS_CACHE_HOURS * 60 * 60, json.dumps(patient_dict))
     return patient_dict

@@ -50,9 +50,7 @@ def main():
         # Check placeholders
         for k, v in t.items():
             if isinstance(v, str) and "TODO" in v:
-                print(
-                    f"Validation error: Target {t_id} contains unresolved placeholder in {k}: {v}"
-                )
+                print(f"Validation error: Target {t_id} contains unresolved placeholder in {k}: {v}")
                 sys.exit(1)
 
         # Validate paths
@@ -68,15 +66,11 @@ def main():
             sys.exit(1)
 
         if not os.path.isfile(os.path.join(repo_root, tfvars)):
-            print(
-                f"Validation error: Target {t_id} tfvars_file {tfvars} does not exist."
-            )
+            print(f"Validation error: Target {t_id} tfvars_file {tfvars} does not exist.")
             sys.exit(1)
 
         if not os.path.isfile(os.path.join(repo_root, backend)):
-            print(
-                f"Validation error: Target {t_id} backend_file {backend} does not exist."
-            )
+            print(f"Validation error: Target {t_id} backend_file {backend} does not exist.")
             sys.exit(1)
 
         # Extract actual backend coordinates
@@ -98,9 +92,7 @@ def main():
         b_key = coord.get("key")
 
         if not (b_rg and b_sa and b_container and b_key):
-            print(
-                f"Validation error: Target {t_id} backend missing required coordinates in {backend}"
-            )
+            print(f"Validation error: Target {t_id} backend missing required coordinates in {backend}")
             sys.exit(1)
 
         if b_rg != t.get("resource_group"):

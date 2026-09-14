@@ -31,6 +31,8 @@ from ..audit.audit import process_saml_attributes
 from .saml_helper import extract_trusted_saml_assertion, InvalidSAMLContext
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
+from app.audit.audit import attempt_audit
+from app.audit.models import AuditOutcome
 from ..redis_connect import redis_connect
 from .responses import (
     create_envelope,
@@ -223,7 +225,7 @@ async def iti55(request: Request):
             )
             return Response(content=data, media_type="application/soap+xml")
 
-        patient = await lookup_patient(nhsno, request=request)
+        patient = await lookup_patient(nhsno, request=request, saml=saml_attrs)
         # TODO implement checking of demographics
 
         if (not patient) or ("resourceType" in patient and patient["resourceType"] == "OperationOutcome"):
@@ -340,8 +342,7 @@ async def iti47(request: Request):
 
         hashed_nhs = _subject_ref_from_nhs_number(nhsno, secret)
         client.setex(ceid, 3600, hashed_nhs)
-        # TODO add audit stuff here too
-        patient = await lookup_patient(nhsno, request=request)
+        patient = await lookup_patient(nhsno, request=request, saml=saml_attrs)
         if not patient:
             pass
         data = await iti_47_response(
@@ -532,8 +533,30 @@ async def iti39(request: Request):
                 span.set_attribute("soap.document_id", document_id)
 
         document = client.get(document_id)
+        doc_nhsno_bytes = client.get(f"doc_patient:{document_id}")
+        doc_nhsno = doc_nhsno_bytes.decode("utf-8") if doc_nhsno_bytes else None
+
+        if not doc_nhsno:
+            await attempt_audit(
+                request=request,
+                nhs_number="UNKNOWN",
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.fail,
+                document_id=document_id,
+                detail={"error": "Document-to-patient association missing or expired"},
+            )
+            raise HTTPException(status_code=404, detail="Document association expired or missing")
 
         if document is not None:
+            await attempt_audit(
+                request=request,
+                nhs_number=doc_nhsno,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.ok,
+                document_id=document_id,
+            )
             data = await iti_39_response(message_id, document_id, document)
             # mime encode the data
             boundary = f"uuid:{uuid.uuid4()}"
@@ -590,6 +613,15 @@ async def iti39(request: Request):
 
             return Response(content=data, media_type="application/soap+xml")
         else:
+            await attempt_audit(
+                request=request,
+                nhs_number=doc_nhsno,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.fail,
+                document_id=document_id,
+                detail={"error": "Document not found"},
+            )
             # return iti39 error
             body = {
                 "ns4:RetrieveDocumentSetResponse": {

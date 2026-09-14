@@ -403,5 +403,5 @@ resource "azurerm_postgresql_flexible_server_configuration" "log_statement" {
 resource "azurerm_postgresql_flexible_server_configuration" "log_min_duration_statement" {
   name      = "log_min_duration_statement"
   server_id = azurerm_postgresql_flexible_server.postgres.id
-  value     = "2000"
+  value     = "-1"
 }
