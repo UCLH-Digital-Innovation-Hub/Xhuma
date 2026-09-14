@@ -28,7 +28,8 @@ api_key_header_scheme = APIKeyHeader(name="X-API-Key", auto_error=True)
 
 
 async def verify_api_key(api_key_header: str = Security(api_key_header_scheme)):
-    if api_key_header != API_KEY:
+    expected_key = os.getenv("API_KEY", "TEST_KEY")
+    if api_key_header != expected_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API Key",
