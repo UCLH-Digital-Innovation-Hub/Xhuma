@@ -19,7 +19,7 @@ from app.audit.models import AuditOutcome, SAMLAttributes
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
 INT_BASE_PATH = "https://int.api.service.nhs.uk/"
-API_KEY = os.environ["API_KEY"]
+API_KEY = os.getenv("API_KEY")
 PDS_CACHE_HOURS = int(os.getenv("PDS_CACHE_HOURS", 24))
 SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
 
@@ -29,7 +29,7 @@ SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
 environment = os.getenv("ENV", "dev").lower()
 if environment == "dev":
     BASE_PATH = DEV_BASE_PATH
-elif environment in ["int", "play"]:
+elif environment == "int":
     BASE_PATH = INT_BASE_PATH
 else:
     raise ValueError(f"Unknown or unsupported environment: {environment}")
@@ -141,7 +141,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         "accept": "application/fhir+json",
     }
 
-    url = f"{INT_BASE_PATH}personal-demographics/FHIR/R4/Patient/{nhsno}"
+    url = f"{BASE_PATH}personal-demographics/FHIR/R4/Patient/{nhsno}"
     try:
         async with httpx.AsyncClient(event_hooks={"request": [log_request], "response": [log_response]}) as client:
             r = await client.get(url, headers=headers)

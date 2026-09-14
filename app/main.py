@@ -58,6 +58,24 @@ async def lifespan(app: FastAPI):
     Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
     # --- Startup logic ---
+    # Validate required configuration
+    for var in ["API_KEY", "ORG_ASID", "ORG_CODE"]:
+        val = os.getenv(var)
+        if not val or not val.strip():
+            raise RuntimeError(f"Missing required configuration: {var}")
+
+    ccda_expiry_str = os.getenv("CCDA_EXPIRY_HOURS", "4")
+    try:
+        expiry_hours = float(ccda_expiry_str)
+        if expiry_hours <= 0 or expiry_hours != expiry_hours:
+            raise ValueError("Must be positive and finite")
+        import datetime
+
+        if datetime.timedelta(hours=expiry_hours).total_seconds() < 1:
+            raise ValueError("Duration too small for Redis expiry")
+    except ValueError as e:
+        raise RuntimeError(f"Invalid CCDA_EXPIRY_HOURS configuration: {e}")
+
     # Initialize Postgres connection pool
     engine = make_engine()
     SessionLocal = make_sessionmaker(engine)

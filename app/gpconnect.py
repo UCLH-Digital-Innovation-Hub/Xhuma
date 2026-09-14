@@ -35,9 +35,11 @@ router = APIRouter()
 # )
 
 environment = os.getenv("ENV", "dev")
-if environment.lower() in ["dev", "int", "play"]:
+if environment.lower() in ["dev", "int"]:
     RELAY_BASE_PATH = "https://proxy.int.spine2.ncrs.nhs.uk"
-    OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk/"
+    IS_DEV = environment.lower() == "dev"
+    OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk"
+    gp_connect_endpoint = f"https://msg.{'dev.' if IS_DEV else ''}spine2.ncrs.nhs.uk/reliablemessaging/reliablerequest"
 else:
     raise ValueError(f"Unknown or unsupported environment: {environment}")
 
@@ -535,13 +537,7 @@ async def _fetch_gpconnect_record(
         document_id=doc_uuid,
     )
 
-    try:
-        expiry_hours = float(os.getenv("CCDA_EXPIRY_HOURS", "4"))
-        if expiry_hours <= 0 or expiry_hours != expiry_hours:  # check for nan/negative
-            raise ValueError("CCDA_EXPIRY_HOURS must be positive and finite")
-    except ValueError as e:
-        raise ValueError(f"Invalid CCDA_EXPIRY_HOURS: {e}")
-
+    expiry_hours = float(os.getenv("CCDA_EXPIRY_HOURS", "4"))
     cache_ttl = timedelta(hours=expiry_hours)
 
     # Use a pipeline to write all keys atomically with a consistent TTL
