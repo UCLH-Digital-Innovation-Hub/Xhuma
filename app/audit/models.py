@@ -112,7 +112,7 @@ class AuditEvent(BaseModel):
     sequence: int
 
     # subject
-    subject_nhs_number: str
+    subject_nhs_number: str | None = None
 
     # Timing
     event_time: datetime
@@ -158,9 +158,11 @@ class AuditEvent(BaseModel):
         Returns None if secret or nhs number not available.
         """
         nhsno = self.subject_nhs_number
-        secret = os.getenv("API_KEY")
-        if not nhsno or not secret:
+        if not nhsno:
             return None
+        secret = os.getenv("API_KEY")
+        if not secret:
+            raise ValueError("Pseudonymisation key missing")
         return _subject_ref_from_nhs_number(nhsno, secret)
 
     # Safety: forbid unknown fields

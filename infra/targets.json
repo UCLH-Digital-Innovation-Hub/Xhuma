@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "targets": [
+    {
+      "id": "play",
+      "stage": "play",
+      "source_branch": "dev",
+      "enabled": true,
+      "hold": false,
+      "rollout_ring": 0,
+      "github_environment": "rg-xhuma-play",
+      "github_infra_environment": "rg-xhuma-play-infra",
+
+      "resource_group": "rg-xhuma-play",
+      "location": "uksouth",
+      "app_service_name": "xhuma-app-play",
+      "tfvars_file": "infra/env/play.tfvars",
+      "backend_file": "infra/backends/play.hcl",
+      "runner_label": "ubuntu-latest",
+      "owner": "platform-team",
+      "support_route": "slack-channel-play"
+    }
+  ]
+}

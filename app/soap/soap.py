@@ -31,6 +31,8 @@ from ..audit.audit import process_saml_attributes
 from .saml_helper import extract_trusted_saml_assertion, InvalidSAMLContext
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
+from app.audit.audit import attempt_audit
+from app.audit.models import AuditOutcome
 from ..redis_connect import redis_connect
 from .responses import (
     create_envelope,
@@ -223,7 +225,7 @@ async def iti55(request: Request):
             )
             return Response(content=data, media_type="application/soap+xml")
 
-        patient = await lookup_patient(nhsno, request=request)
+        patient = await lookup_patient(nhsno, request=request, saml=saml_attrs)
         # TODO implement checking of demographics
 
         if (not patient) or ("resourceType" in patient and patient["resourceType"] == "OperationOutcome"):
@@ -246,6 +248,15 @@ async def iti55(request: Request):
             security_code = patient["meta"]["security"][0]["code"]
 
         if security_code != "U":
+            await attempt_audit(
+                request=request,
+                nhs_number=str(nhsno),
+                saml=saml_attrs,
+                action="iti55_patient_discovery",
+                outcome=AuditOutcome.deny,
+                message_id=envelope["Header"]["MessageID"],
+                detail={"error": "Patient record has restricted access"},
+            )
             data = await iti_55_error(
                 message_id=envelope["Header"]["MessageID"],
                 error_text="Patient record has restricted access",
@@ -340,8 +351,7 @@ async def iti47(request: Request):
 
         hashed_nhs = _subject_ref_from_nhs_number(nhsno, secret)
         client.setex(ceid, 3600, hashed_nhs)
-        # TODO add audit stuff here too
-        patient = await lookup_patient(nhsno, request=request)
+        patient = await lookup_patient(nhsno, request=request, saml=saml_attrs)
         if not patient:
             pass
         data = await iti_47_response(
@@ -532,6 +542,20 @@ async def iti39(request: Request):
                 span.set_attribute("soap.document_id", document_id)
 
         document = client.get(document_id)
+        doc_nhsno_bytes = client.get(f"doc_patient:{document_id}")
+        doc_nhsno = doc_nhsno_bytes.decode("utf-8") if doc_nhsno_bytes else None
+
+        if not doc_nhsno:
+            await attempt_audit(
+                request=request,
+                nhs_number=None,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.fail,
+                document_id=document_id,
+                detail={"error": "Document-to-patient association missing or expired"},
+            )
+            raise HTTPException(status_code=404, detail="Document association expired or missing")
 
         if document is not None:
             data = await iti_39_response(message_id, document_id, document)
@@ -558,11 +582,23 @@ async def iti39(request: Request):
             mime_string = mime_message.as_string()
             headers = {"Content-Type": f'multipart/related; boundary="{boundary}"'}
 
-            # if there's not an anonymous address in the reply to header, send the response to that address
-            reply_to = envelope["Header"]["ReplyTo"]["Address"]
+            try:
+                reply_to = envelope["Header"]["ReplyTo"]["Address"]
+            except Exception:
+                reply_to = None
+
             if reply_to and reply_to != "http://www.w3.org/2005/08/addressing/anonymous":
                 # SSRF Protection
                 if not reply_to.startswith("https://"):
+                    await attempt_audit(
+                        request=request,
+                        nhs_number=doc_nhsno,
+                        saml=saml_attrs,
+                        action="iti39_document_retrieve",
+                        outcome=AuditOutcome.deny,
+                        document_id=document_id,
+                        detail={"error": "ReplyTo must use https", "reply_to": reply_to},
+                    )
                     raise HTTPException(status_code=400, detail="ReplyTo must use https")
 
                 allowed_domains = os.getenv("ALLOWED_REPLY_TO_DOMAINS", ".nhs.uk").split(",")
@@ -571,6 +607,15 @@ async def iti39(request: Request):
                     print(
                         f"ITI-39 SSRF Protection: Rejected ReplyTo domain '{parsed_url.hostname}' (allowed: {allowed_domains})",
                         flush=True,
+                    )
+                    await attempt_audit(
+                        request=request,
+                        nhs_number=doc_nhsno,
+                        saml=saml_attrs,
+                        action="iti39_document_retrieve",
+                        outcome=AuditOutcome.deny,
+                        document_id=document_id,
+                        detail={"error": "ReplyTo domain not allowed", "reply_to": reply_to},
                     )
                     raise HTTPException(status_code=403, detail="ReplyTo domain not allowed")
 
@@ -582,14 +627,42 @@ async def iti39(request: Request):
                     except Exception as e:
                         print(f"Failed to send async response: {e}", flush=True)
 
+                await attempt_audit(
+                    request=request,
+                    nhs_number=doc_nhsno,
+                    saml=saml_attrs,
+                    action="iti39_document_retrieve",
+                    outcome=AuditOutcome.ok,
+                    document_id=document_id,
+                    detail={"delivery_mode": "async", "reply_to": reply_to},
+                )
+
                 return Response(
                     content=mime_string.encode("utf-8"),
                     headers=headers,
                     background=BackgroundTask(send_post, reply_to, mime_string.encode("utf-8"), headers),
                 )
 
+            await attempt_audit(
+                request=request,
+                nhs_number=doc_nhsno,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.ok,
+                document_id=document_id,
+                detail={"delivery_mode": "sync"},
+            )
             return Response(content=data, media_type="application/soap+xml")
         else:
+            await attempt_audit(
+                request=request,
+                nhs_number=doc_nhsno,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.fail,
+                document_id=document_id,
+                detail={"error": "Document not found"},
+            )
             # return iti39 error
             body = {
                 "ns4:RetrieveDocumentSetResponse": {

@@ -36,6 +36,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from sqlalchemy import select
 
+from .audit.audit import AuditFailureException
 from .audit.db_models import AuditEventRow
 from .audit.models import _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
@@ -57,6 +58,31 @@ async def lifespan(app: FastAPI):
     Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
     # --- Startup logic ---
+    # Validate required configuration
+    for var in ["API_KEY", "ORG_ASID", "ORG_CODE"]:
+        val = os.getenv(var)
+        if not val or not val.strip():
+            raise RuntimeError(f"Missing required configuration: {var}")
+
+    import math
+    import datetime
+
+    ccda_expiry_str = os.getenv("CCDA_EXPIRY_HOURS", "4")
+    try:
+        expiry_hours = float(ccda_expiry_str)
+        if not math.isfinite(expiry_hours) or expiry_hours <= 0:
+            raise ValueError("Must be positive and finite")
+        ttl = datetime.timedelta(hours=expiry_hours)
+        if ttl.total_seconds() < 1:
+            raise ValueError("Duration too small for Redis expiry")
+        # Prevent integer overflow in Redis / Timedelta by capping at a reasonable upper bound (e.g. 1 year)
+        if ttl.total_seconds() > 31536000:
+            raise ValueError("Duration exceeds maximum allowed cache expiry (1 year)")
+
+        app.state.ccda_expiry_hours = expiry_hours
+    except (ValueError, OverflowError) as e:
+        raise RuntimeError(f"Invalid CCDA_EXPIRY_HOURS configuration: {e}")
+
     # Initialize Postgres connection pool
     engine = make_engine()
     SessionLocal = make_sessionmaker(engine)
@@ -168,6 +194,45 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
 
 # register soap error handler
 soap.register_handlers(app)
+
+
+@app.exception_handler(AuditFailureException)
+async def audit_failure_handler(request: Request, exc: AuditFailureException):
+    trace_id = str(uuid.uuid4())
+    # Explicitly do NOT log traceback to avoid leaking SQL parameters
+    logging.error(f"AuditFailureException [TraceID: {trace_id}] at {request.url.path}: {exc}")
+
+    path = request.url.path
+    if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
+        fault_xml = f"""<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+    <env:Body>
+        <env:Fault>
+            <env:Code><env:Value>env:Receiver</env:Value></env:Code>
+            <env:Reason><env:Text xml:lang="en">Internal Server Error (TraceID: {trace_id})</env:Text></env:Reason>
+        </env:Fault>
+    </env:Body>
+</env:Envelope>"""
+        return Response(content=fault_xml, status_code=502, media_type="application/soap+xml")
+
+    elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
+        issue = OperationOutcomeIssue()
+        issue.severity = "fatal"
+        issue.code = "exception"
+        issue.diagnostics = f"An internal error occurred. TraceID: {trace_id}"
+        outcome = OperationOutcome()
+        outcome.issue = [issue]
+        return JSONResponse(status_code=502, content=outcome.as_json())
+
+    else:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "type": "about:blank",
+                "title": "Internal Server Error",
+                "status": 502,
+                "detail": f"An unexpected error occurred. TraceID: {trace_id}",
+            },
+        )
 
 
 @app.exception_handler(Exception)
