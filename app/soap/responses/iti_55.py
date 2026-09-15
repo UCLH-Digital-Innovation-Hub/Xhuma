@@ -7,6 +7,17 @@ from .constants import COMMUNITY_ID
 from .helpers import create_envelope, create_header, create_id
 
 
+def _select_usual_name(patient: dict) -> dict:
+    """Select the FHIR ``usual`` name, falling back for legacy patient data."""
+    names = patient.get("name", [])
+    if not names:
+        raise ValueError("Patient record missing names entirely")
+
+    # Some older PDS fixtures do not carry a use code. Retaining the first-name
+    # fallback avoids rejecting those patients while preferring the intended name.
+    return next((name for name in names if isinstance(name, dict) and name.get("use") == "usual"), names[0])
+
+
 async def iti_55_response(message_id, patient, query):
     """ITI47 response message generator
 
@@ -29,6 +40,8 @@ async def iti_55_response(message_id, patient, query):
         gender = "F"
     else:
         gender = "UNK"
+
+    usual_name = _select_usual_name(patient)
 
     ids = []
     ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
@@ -109,8 +122,8 @@ async def iti_55_response(message_id, patient, query):
                                 "@classCode": "PSN",
                                 "@determinerCode": "INSTANCE",
                                 "name": {
-                                    "given": {"#text": patient["name"][0]["given"][0]},
-                                    "family": {"#text": patient["name"][0]["family"]},
+                                    "given": {"#text": usual_name["given"][0]},
+                                    "family": {"#text": usual_name["family"]},
                                 },
                                 "administrativeGenderCode": {"@code": gender},
                                 # birthTime is ISO 8601 format
