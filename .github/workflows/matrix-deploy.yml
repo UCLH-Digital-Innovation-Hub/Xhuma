@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feat/matrix-deployment-pilot
+      - feat/matrix-deployment-pilot-integration
 
 env:
   REGISTRY: ghcr.io
