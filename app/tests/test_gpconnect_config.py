@@ -53,6 +53,7 @@ async def test_ccda_expiry_configuration_parsing(
 
     saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
     request = MagicMock()
+    del request.app
 
     with patch("app.gpconnect.convert_bundle") as mock_convert:
 
@@ -145,7 +146,10 @@ async def test_startup_config_validation():
             async with lifespan(app):
                 pass
 
-    # Normal default value
-    with patch.dict(os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00"}):
+    # Normal default value (explicitly remove CCDA_EXPIRY_HOURS if set by conftest)
+    env_vars = {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00"}
+    with patch.dict(os.environ, env_vars), patch.dict(os.environ, clear=False):
+        if "CCDA_EXPIRY_HOURS" in os.environ:
+            del os.environ["CCDA_EXPIRY_HOURS"]
         async with lifespan(app):
             pass

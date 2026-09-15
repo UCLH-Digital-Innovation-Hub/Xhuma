@@ -90,7 +90,7 @@ async def test_iti39_missing_association_uses_none(mock_extract_saml, mock_redis
 @pytest.mark.asyncio
 @patch("app.soap.responses.iti_38.redis_client.get")
 @patch("app.soap.responses.iti_38.gpconnect", new_callable=AsyncMock)
-@patch("app.soap.soap.attempt_audit", new_callable=AsyncMock)
+@patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock)
 @patch("app.soap.soap.extract_trusted_saml_assertion")
 async def test_iti38_audit_failure_blocks_cache_hit(
     mock_extract_saml, mock_attempt_audit, mock_gpconnect, mock_redis_get, client
@@ -122,7 +122,8 @@ async def test_iti38_audit_failure_blocks_cache_hit(
     assert response.status_code == 502
     assert "Internal Server Error" in response.text
 
-    # gpconnect should not be called due to cache hit
+    # Audit should be attempted exactly once, and GP connect should not be called
+    mock_attempt_audit.assert_called_once()
     mock_gpconnect.assert_not_called()
 
 

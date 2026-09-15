@@ -14,6 +14,7 @@ pytest_plugins = ("pytest_asyncio",)
 def get_mock_request():
     mock_request = MagicMock()
     mock_request.app.state.SessionLocal = MagicMock()
+    mock_request.app.state.ccda_expiry_hours = 4.0
     return mock_request
 
 

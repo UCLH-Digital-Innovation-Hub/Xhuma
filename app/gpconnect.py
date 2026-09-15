@@ -536,7 +536,11 @@ async def _fetch_gpconnect_record(
         document_id=doc_uuid,
     )
 
-    expiry_hours = float(os.getenv("CCDA_EXPIRY_HOURS", "4"))
+    if request and hasattr(request, "app") and hasattr(request.app.state, "ccda_expiry_hours"):
+        expiry_hours = request.app.state.ccda_expiry_hours
+    else:
+        expiry_hours = float(os.getenv("CCDA_EXPIRY_HOURS", "4"))
+
     cache_ttl = timedelta(hours=expiry_hours)
 
     # Use a pipeline to write all keys atomically with a consistent TTL

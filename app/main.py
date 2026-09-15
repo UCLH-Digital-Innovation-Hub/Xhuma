@@ -78,6 +78,8 @@ async def lifespan(app: FastAPI):
         # Prevent integer overflow in Redis / Timedelta by capping at a reasonable upper bound (e.g. 1 year)
         if ttl.total_seconds() > 31536000:
             raise ValueError("Duration exceeds maximum allowed cache expiry (1 year)")
+
+        app.state.ccda_expiry_hours = expiry_hours
     except (ValueError, OverflowError) as e:
         raise RuntimeError(f"Invalid CCDA_EXPIRY_HOURS configuration: {e}")
 
