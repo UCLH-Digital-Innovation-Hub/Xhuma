@@ -8,12 +8,11 @@ from .helpers import create_envelope, create_header, create_id
 
 def _select_usual_name(patient: dict) -> dict:
     """Select the FHIR ``usual`` name, falling back for legacy patient data."""
-    names = patient.get("name", [])
-    if not names:
-        raise ValueError("Patient record missing names entirely")
+
+    names = patient["name"]
     # Some older PDS fixtures do not carry a use code. Retaining the first-name
     # fallback avoids rejecting those patients while preferring the intended name.
-    return next((name for name in names if isinstance(name, dict) and name.get("use") == "usual"), names[0])
+    return next((name for name in names if name.get("use") == "usual"), names[0])
 
 
 async def iti_47_response(message_id, patient, ceid, query):
