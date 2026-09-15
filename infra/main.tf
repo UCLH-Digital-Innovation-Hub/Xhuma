@@ -299,12 +299,12 @@ resource "azurerm_linux_web_app" "app" {
     "OTEL_METRIC_EXPORT_INTERVAL_MS"        = var.otel_metric_export_interval_ms
 
     # Business Logic
-    "ORG_CODE"  = var.org_code
-    "ENV"       = var.env
+    "ORG_CODE"          = var.org_code
+    "ENV"               = var.env
     "CCDA_EXPIRY_HOURS" = var.ccda_expiry_hours
-    "VERSION"   = var.app_version
-    "DEVICE_ID" = var.device_id
-    "ORG_ASID"  = var.org_asid
+    "VERSION"           = var.app_version
+    "DEVICE_ID"         = var.device_id
+    "ORG_ASID"          = var.org_asid
 
     "GP_CONNECT_INCLUDE_ALLERGIES"      = var.gp_connect_include_allergies
     "GP_CONNECT_INCLUDE_MEDICATION"     = var.gp_connect_include_medication

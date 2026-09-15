@@ -112,3 +112,40 @@ async def test_startup_config_validation():
         with pytest.raises(RuntimeError, match="Must be positive and finite"):
             async with lifespan(app):
                 pass
+
+    # Infinity
+    with patch.dict(
+        os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00", "CCDA_EXPIRY_HOURS": "inf"}
+    ):
+        with pytest.raises(RuntimeError, match="Must be positive and finite"):
+            async with lifespan(app):
+                pass
+
+    # NaN
+    with patch.dict(
+        os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00", "CCDA_EXPIRY_HOURS": "nan"}
+    ):
+        with pytest.raises(RuntimeError, match="Must be positive and finite"):
+            async with lifespan(app):
+                pass
+
+    # Oversized value (e.g. 100 years)
+    with patch.dict(
+        os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00", "CCDA_EXPIRY_HOURS": "876000"}
+    ):
+        with pytest.raises(RuntimeError, match="Duration exceeds maximum allowed cache expiry"):
+            async with lifespan(app):
+                pass
+
+    # Sub-second expiry
+    with patch.dict(
+        os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00", "CCDA_EXPIRY_HOURS": "0.0001"}
+    ):
+        with pytest.raises(RuntimeError, match="Duration too small for Redis expiry"):
+            async with lifespan(app):
+                pass
+
+    # Normal default value
+    with patch.dict(os.environ, {"API_KEY": "test", "ORG_ASID": "123", "ORG_CODE": "RRV00"}):
+        async with lifespan(app):
+            pass

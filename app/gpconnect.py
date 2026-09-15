@@ -39,7 +39,6 @@ if environment.lower() in ["dev", "int"]:
     RELAY_BASE_PATH = "https://proxy.int.spine2.ncrs.nhs.uk"
     IS_DEV = environment.lower() == "dev"
     OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk"
-    gp_connect_endpoint = f"https://msg.{'dev.' if IS_DEV else ''}spine2.ncrs.nhs.uk/reliablemessaging/reliablerequest"
 else:
     raise ValueError(f"Unknown or unsupported environment: {environment}")
 

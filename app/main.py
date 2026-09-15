@@ -64,16 +64,21 @@ async def lifespan(app: FastAPI):
         if not val or not val.strip():
             raise RuntimeError(f"Missing required configuration: {var}")
 
+    import math
+    import datetime
+
     ccda_expiry_str = os.getenv("CCDA_EXPIRY_HOURS", "4")
     try:
         expiry_hours = float(ccda_expiry_str)
-        if expiry_hours <= 0 or expiry_hours != expiry_hours:
+        if not math.isfinite(expiry_hours) or expiry_hours <= 0:
             raise ValueError("Must be positive and finite")
-        import datetime
-
-        if datetime.timedelta(hours=expiry_hours).total_seconds() < 1:
+        ttl = datetime.timedelta(hours=expiry_hours)
+        if ttl.total_seconds() < 1:
             raise ValueError("Duration too small for Redis expiry")
-    except ValueError as e:
+        # Prevent integer overflow in Redis / Timedelta by capping at a reasonable upper bound (e.g. 1 year)
+        if ttl.total_seconds() > 31536000:
+            raise ValueError("Duration exceeds maximum allowed cache expiry (1 year)")
+    except (ValueError, OverflowError) as e:
         raise RuntimeError(f"Invalid CCDA_EXPIRY_HOURS configuration: {e}")
 
     # Initialize Postgres connection pool

@@ -48,6 +48,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # TODO refine address parsing as may have multiple
 
     # loop through names to find official name
+    official_name = subject[0].name[0] if subject[0].name else None
     for name in subject[0].name:
         if name.use == "usual":
             official_name = name
