@@ -5,22 +5,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.pds.pds import lookup_patient, pds_cache_key, sds_cache_key, sds_trace
+from app.tests.fixtures.saml_attributes import saml
 
 
+@patch("app.pds.pds.attempt_audit", new_callable=AsyncMock)
 @patch("app.pds.pds.redis_client")
 @patch("app.pds.pds.httpx.post")
 @patch("app.pds.pds.httpx.AsyncClient")
 @pytest.mark.asyncio
-async def test_get_data_success(mock_async_client, mock_post, mock_redis):
+async def test_get_data_success(mock_async_client, mock_post, mock_redis, mock_attempt_audit):
     # --- mock redis: no token exists ---
     mock_redis.exists.return_value = False
     mock_redis.get.return_value = None
     mock_redis.setex.return_value = True  # avoid failure
 
     # --- mock token response ---
-    mock_post.return_value.text = json.dumps(
-        {"access_token": "fake-token", "expires_in": 300}
-    )
+    mock_post.return_value.text = json.dumps({"access_token": "fake-token", "expires_in": 300})
 
     # --- mock patient response ---
     mock_client_instance = AsyncMock()
@@ -33,7 +33,7 @@ async def test_get_data_success(mock_async_client, mock_post, mock_redis):
     mock_request = MagicMock()
     mock_request.app.state.jwk_json = {"keys": [{"kid": "test-1"}]}
 
-    patient = await lookup_patient(9690937278, request=mock_request)
+    patient = await lookup_patient(9690937278, request=mock_request, saml=saml)
 
     assert patient["resourceType"] == "Patient"
     assert patient["id"] == "9690937278"
@@ -44,15 +44,14 @@ async def test_get_data_success(mock_async_client, mock_post, mock_redis):
     )
 
 
+@patch("app.pds.pds.attempt_audit", new_callable=AsyncMock)
 @patch("app.pds.pds.redis_client")
 @patch("app.pds.pds.httpx.AsyncClient")
 @pytest.mark.asyncio
-async def test_lookup_patient_returns_cached_result(mock_async_client, mock_redis):
-    mock_redis.get.return_value = json.dumps(
-        {"resourceType": "Patient", "id": "9690937278"}
-    ).encode("utf-8")
+async def test_lookup_patient_returns_cached_result(mock_async_client, mock_redis, mock_attempt_audit):
+    mock_redis.get.return_value = json.dumps({"resourceType": "Patient", "id": "9690937278"}).encode("utf-8")
 
-    patient = await lookup_patient(9690937278)
+    patient = await lookup_patient(9690937278, saml=saml)
 
     assert patient == {"resourceType": "Patient", "id": "9690937278"}
     mock_async_client.assert_not_called()

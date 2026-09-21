@@ -7,7 +7,7 @@ test fixtures and are never read by this suite.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 from fastapi import HTTPException
@@ -17,8 +17,6 @@ from app.soap import soap
 
 NHS_NUMBER = "9999999999"
 NHS_NUMBER_ROOT = "2.16.840.1.113883.2.1.4.1"
-CARE_EVERYWHERE_ROOT = "1.2.840.114350.1.13.525.3.7.3.688884.100"
-CARE_EVERYWHERE_ID = "SYNTHETIC-CEID-001"
 DOCUMENT_ID = "1.2.826.0.1.3680043.10.999.1"
 ANONYMOUS_REPLY_TO = "http://www.w3.org/2005/08/addressing/anonymous"
 
@@ -76,20 +74,13 @@ def _soap_envelope(body: str, *, reply_to: str = ANONYMOUS_REPLY_TO) -> str:
 """
 
 
-def _iti55_body(*, include_nhs_number: bool = True, include_ceid: bool = False) -> str:
+def _iti55_body(*, include_nhs_number: bool = True) -> str:
     identifiers = [
-        '<livingSubjectId><value root="1.2.826.0.1.3680043.10.999.2" '
-        'extension="SYNTHETIC-LOCAL-ID"/></livingSubjectId>'
+        '<livingSubjectId><value root="1.2.826.0.1.3680043.10.999.2" extension="SYNTHETIC-LOCAL-ID"/></livingSubjectId>'
     ]
     if include_nhs_number:
         identifiers.append(
-            f'<livingSubjectId><value root="{NHS_NUMBER_ROOT}" '
-            f'extension="{NHS_NUMBER}"/></livingSubjectId>'
-        )
-    if include_ceid:
-        identifiers.append(
-            f'<livingSubjectId><value root="{CARE_EVERYWHERE_ROOT}" '
-            f'extension="{CARE_EVERYWHERE_ID}"/></livingSubjectId>'
+            f'<livingSubjectId><value root="{NHS_NUMBER_ROOT}" extension="{NHS_NUMBER}"/></livingSubjectId>'
         )
 
     return f"""\
@@ -157,9 +148,7 @@ def _iti39_body(*, include_second_document: bool = False) -> str:
 def _iti39_mime_message(body: str, *, reply_to: str = ANONYMOUS_REPLY_TO) -> str:
     # The production extractor expects the whole SOAP envelope on one MIME line,
     # matching the supplied transport example rather than a plain XML body.
-    envelope = " ".join(
-        line.strip() for line in _soap_envelope(body, reply_to=reply_to).splitlines()
-    )
+    envelope = " ".join(line.strip() for line in _soap_envelope(body, reply_to=reply_to).splitlines())
     return (
         "--synthetic-boundary\r\n"
         'Content-Type: application/xop+xml; type="application/soap+xml"\r\n'
@@ -178,13 +167,12 @@ def complete_saml_context(monkeypatch):
         role="synthetic-clinician-role",
     )
     monkeypatch.setattr(soap, "process_saml_attributes", lambda _: attributes)
+    monkeypatch.setattr(soap, "attempt_audit", AsyncMock())
     return attributes
 
 
 @pytest.mark.asyncio
-async def test_iti55_uses_nhs_identifier_from_a_full_synthetic_query(
-    monkeypatch, complete_saml_context
-):
+async def test_iti55_uses_nhs_identifier_from_a_full_synthetic_query(monkeypatch, complete_saml_context):
     patient = {
         "id": NHS_NUMBER,
         "meta": {"security": [{"code": "U"}]},
@@ -205,7 +193,7 @@ async def test_iti55_uses_nhs_identifier_from_a_full_synthetic_query(
 
     assert response.status_code == 200
     assert response.body == b"<synthetic-iti55-response/>"
-    lookup_patient.assert_awaited_once_with(NHS_NUMBER, request=request)
+    lookup_patient.assert_awaited_once_with(NHS_NUMBER, request=request, saml=complete_saml_context)
     message_id, actual_patient, query = response_builder.await_args.args
     assert message_id == "urn:uuid:11111111-1111-4111-8111-111111111111"
     assert actual_patient is patient
@@ -213,77 +201,22 @@ async def test_iti55_uses_nhs_identifier_from_a_full_synthetic_query(
 
 
 @pytest.mark.asyncio
-async def test_iti55_returns_profile_error_when_nhs_identifier_is_missing(
-    monkeypatch, complete_saml_context
-):
+async def test_iti55_returns_profile_error_when_nhs_identifier_is_missing(monkeypatch, complete_saml_context):
     lookup_patient = AsyncMock()
     error_builder = AsyncMock(return_value="<synthetic-iti55-error/>")
     monkeypatch.setattr(soap, "lookup_patient", lookup_patient)
     monkeypatch.setattr(soap, "iti_55_error", error_builder)
 
-    response = await soap.iti55(
-        _request(_soap_envelope(_iti55_body(include_nhs_number=False)))
-    )
+    response = await soap.iti55(_request(_soap_envelope(_iti55_body(include_nhs_number=False))))
 
     assert response.status_code == 200
     assert response.body == b"<synthetic-iti55-error/>"
     lookup_patient.assert_not_awaited()
-    assert error_builder.await_args.kwargs["error_text"] == (
-        "No NHS number found in request"
-    )
+    assert error_builder.await_args.kwargs["error_text"] == ("No NHS number found in request")
 
 
 @pytest.mark.asyncio
-async def test_iti47_extracts_repeating_identifiers_and_caches_the_mapping(
-    monkeypatch, complete_saml_context
-):
-    redis_client = MagicMock()
-    patient = {"id": NHS_NUMBER, "name": [{"use": "usual", "family": "Example"}]}
-    lookup_patient = AsyncMock(return_value=patient)
-    response_builder = AsyncMock(return_value="<synthetic-iti47-response/>")
-    monkeypatch.setattr(soap, "client", redis_client)
-    monkeypatch.setattr(soap, "lookup_patient", lookup_patient)
-    monkeypatch.setattr(soap, "iti_47_response", response_builder)
-    monkeypatch.setattr(
-        "app.audit.models._subject_ref_from_nhs_number",
-        lambda nhs_number, secret: f"synthetic-hash:{nhs_number}:{secret}",
-    )
-    monkeypatch.setenv("API_KEY", "synthetic-test-secret")
-
-    request = _request(
-        _soap_envelope(_iti55_body(include_nhs_number=True, include_ceid=True))
-    )
-    response = await soap.iti47(request)
-
-    assert response.status_code == 200
-    redis_client.setex.assert_called_once_with(
-        CARE_EVERYWHERE_ID,
-        3600,
-        f"synthetic-hash:{NHS_NUMBER}:synthetic-test-secret",
-    )
-    lookup_patient.assert_awaited_once_with(NHS_NUMBER, request=request)
-    assert response_builder.await_args.args[:3] == (
-        "urn:uuid:11111111-1111-4111-8111-111111111111",
-        patient,
-        CARE_EVERYWHERE_ID,
-    )
-
-
-@pytest.mark.asyncio
-async def test_iti47_rejects_query_without_care_everywhere_identifier(
-    complete_saml_context,
-):
-    with pytest.raises(HTTPException) as exc_info:
-        await soap.iti47(_request(_soap_envelope(_iti55_body())))
-
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "Invalid request, no care everywhere id found"
-
-
-@pytest.mark.asyncio
-async def test_iti38_normalizes_xds_patient_identifier_and_uses_query_id(
-    monkeypatch, complete_saml_context
-):
+async def test_iti38_normalizes_xds_patient_identifier_and_uses_query_id(monkeypatch, complete_saml_context):
     response_builder = AsyncMock(return_value="<synthetic-iti38-response/>")
     monkeypatch.setattr(soap, "iti_38_response", response_builder)
     xds_patient_id = f"'{NHS_NUMBER}^^^&amp;{NHS_NUMBER_ROOT}&amp;ISO'"
@@ -306,9 +239,7 @@ async def test_iti38_normalizes_xds_patient_identifier_and_uses_query_id(
 async def test_iti38_rejects_patient_identifier_without_a_valid_nhs_number(
     complete_saml_context,
 ):
-    request = _request(
-        _soap_envelope(_iti38_body("'SYNTHETIC-NON-NHS-ID^^^&amp;1.2.3&amp;ISO'"))
-    )
+    request = _request(_soap_envelope(_iti38_body("'SYNTHETIC-NON-NHS-ID^^^&amp;1.2.3&amp;ISO'")))
 
     with pytest.raises(HTTPException) as exc_info:
         await soap.iti38(request)
@@ -318,11 +249,13 @@ async def test_iti38_rejects_patient_identifier_without_a_valid_nhs_number(
 
 
 @pytest.mark.asyncio
-async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(
-    monkeypatch, complete_saml_context
-):
+async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(monkeypatch, complete_saml_context):
     redis_client = MagicMock()
-    redis_client.get.return_value = b"<ClinicalDocument>synthetic</ClinicalDocument>"
+    redis_client.get.side_effect = lambda key: (
+        NHS_NUMBER.encode()
+        if key == f"doc_patient:{DOCUMENT_ID}"
+        else b"<ClinicalDocument>synthetic</ClinicalDocument>"
+    )
     response_builder = AsyncMock(return_value="<synthetic-iti39-response/>")
     monkeypatch.setattr(soap, "client", redis_client)
     monkeypatch.setattr(soap, "iti_39_response", response_builder)
@@ -332,7 +265,7 @@ async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(
 
     assert response.status_code == 200
     assert response.body == b"<synthetic-iti39-response/>"
-    redis_client.get.assert_called_once_with(DOCUMENT_ID)
+    assert redis_client.get.call_args_list == [call(DOCUMENT_ID), call(f"doc_patient:{DOCUMENT_ID}")]
     response_builder.assert_awaited_once_with(
         "urn:uuid:11111111-1111-4111-8111-111111111111",
         DOCUMENT_ID,
@@ -341,11 +274,9 @@ async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(
 
 
 @pytest.mark.asyncio
-async def test_iti39_returns_registry_error_when_document_is_not_cached(
-    monkeypatch, complete_saml_context
-):
+async def test_iti39_returns_registry_error_when_document_is_not_cached(monkeypatch, complete_saml_context):
     redis_client = MagicMock()
-    redis_client.get.return_value = None
+    redis_client.get.side_effect = lambda key: NHS_NUMBER.encode() if key == f"doc_patient:{DOCUMENT_ID}" else None
     error_builder = AsyncMock(return_value="<synthetic-iti39-error/>")
     monkeypatch.setattr(soap, "client", redis_client)
     monkeypatch.setattr(soap, "iti_39_error", error_builder)
@@ -354,26 +285,24 @@ async def test_iti39_returns_registry_error_when_document_is_not_cached(
 
     assert response.status_code == 200
     assert response.body == b"<synthetic-iti39-error/>"
-    error_builder.assert_awaited_once_with(
-        "urn:uuid:11111111-1111-4111-8111-111111111111", DOCUMENT_ID
-    )
+    error_builder.assert_awaited_once_with("urn:uuid:11111111-1111-4111-8111-111111111111", DOCUMENT_ID)
 
 
 @pytest.mark.asyncio
 async def test_iti39_rejects_non_https_reply_to(monkeypatch, complete_saml_context):
     redis_client = MagicMock()
-    redis_client.get.return_value = b"<ClinicalDocument>synthetic</ClinicalDocument>"
+    redis_client.get.side_effect = lambda key: (
+        NHS_NUMBER.encode()
+        if key == f"doc_patient:{DOCUMENT_ID}"
+        else b"<ClinicalDocument>synthetic</ClinicalDocument>"
+    )
     monkeypatch.setattr(soap, "client", redis_client)
     monkeypatch.setattr(
         soap,
         "iti_39_response",
         AsyncMock(return_value="<synthetic-iti39-response/>"),
     )
-    request = _request(
-        _iti39_mime_message(
-            _iti39_body(), reply_to="http://synthetic.internal.example/callback"
-        )
-    )
+    request = _request(_iti39_mime_message(_iti39_body(), reply_to="http://synthetic.internal.example/callback"))
 
     with pytest.raises(HTTPException) as exc_info:
         await soap.iti39(request)
@@ -382,7 +311,7 @@ async def test_iti39_rejects_non_https_reply_to(monkeypatch, complete_saml_conte
     assert exc_info.value.detail == "ReplyTo must use https"
 
 
-@pytest.mark.parametrize("handler", [soap.iti55, soap.iti47, soap.iti38, soap.iti39])
+@pytest.mark.parametrize("handler", [soap.iti55, soap.iti38, soap.iti39])
 @pytest.mark.asyncio
 async def test_soap_handlers_reject_unsupported_content_type(handler):
     with pytest.raises(HTTPException) as exc_info:

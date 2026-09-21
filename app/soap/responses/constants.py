@@ -1,0 +1,6 @@
+import os
+
+COMMUNITY_ID = os.getenv("COMMUNITY_ID", "2.16.840.1.113883.2.1.3.34.9001")
+
+
+REGISTRY_ID = os.getenv("REGISTRY_ID", "2.16.840.1.113883.2.1.3.34.69.420")

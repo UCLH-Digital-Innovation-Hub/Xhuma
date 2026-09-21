@@ -103,7 +103,7 @@
                 "active": true,
                 "name": [
                     {
-                        "use": "official",
+                        "use": "usual",
                         "text": "Diana DAWKIN",
                         "family": "DAWKIN",
                         "given": [
@@ -8585,22 +8585,22 @@
                 "taken": "unk",
                 "note": [
                     {
-                        "text": "Prescriber Notes:Pharmacy Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Prescriber Notes:Pharmacy Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     },
                     {
-                        "text": "Patient Notes:Patient Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Patient Notes:Patient Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     },
                     {
-                        "text": "Prescriber Notes:Issue number 1 Pharmacy Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`\r\nPharmacy Message with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Prescriber Notes:Issue number 1 Pharmacy Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`\r\nPharmacy Message with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     },
                     {
-                        "text": "Patient Notes:Issue number 1 Patient Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`\r\nPatient Message with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Patient Notes:Issue number 1 Patient Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`\r\nPatient Message with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     }
                 ],
                 "dosage": [
                     {
-                        "text": "Dosage with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`",
-                        "patientInstruction": "Patient Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Dosage with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`",
+                        "patientInstruction": "Patient Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     }
                 ]
             }
@@ -8651,16 +8651,16 @@
                 },
                 "note": [
                     {
-                        "text": "Prescriber Notes:Pharmacy Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Prescriber Notes:Pharmacy Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     },
                     {
-                        "text": "Patient Notes:Patient Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Patient Notes:Patient Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     }
                 ],
                 "dosageInstruction": [
                     {
-                        "text": "Dosage with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`",
-                        "patientInstruction": "Patient Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Dosage with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`",
+                        "patientInstruction": "Patient Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     }
                 ],
                 "dispenseRequest": {
@@ -8732,16 +8732,16 @@
                 },
                 "note": [
                     {
-                        "text": "Prescriber Notes:Issue number 1 Pharmacy Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`\r\nPharmacy Message with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Prescriber Notes:Issue number 1 Pharmacy Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`\r\nPharmacy Message with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     },
                     {
-                        "text": "Patient Notes:Issue number 1 Patient Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`\r\nPatient Message with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Patient Notes:Issue number 1 Patient Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`\r\nPatient Message with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     }
                 ],
                 "dosageInstruction": [
                     {
-                        "text": "Dosage with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`",
-                        "patientInstruction": "Patient Info with special characters:!@£$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
+                        "text": "Dosage with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`",
+                        "patientInstruction": "Patient Info with special characters:!@\u00a3$%^&*()_+-={}[]:\"|;'\\<>?,./~`"
                     }
                 ],
                 "dispenseRequest": {

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, Extra, Field, field_serializer
 
 from .admin import AuthorParticipation
 from .datatypes import (
-    ANY,
     CD,
     CE,
     CS,
@@ -77,7 +76,7 @@ class Observation(BaseModel):
     text: Optional[str] = None
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
-    value: Optional[ANY] = None
+    value: Optional[Any] = None
     entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
 
 
@@ -85,7 +84,7 @@ class ObservationRange(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN.CRT")
     text: Optional[str] = None
-    value: Optional[ANY] = None
+    value: Optional[Any] = None
 
 
 class ReferenceRange(BaseModel):
@@ -109,7 +108,10 @@ class ResultObservation(Observation):
         ]
     )
     referenceRange: Optional[List[ReferenceRange]] = None
-    value: Optional[PQ] = None  # PQ is used for numeric values
+    interpretationCode: Optional[CE] = None
+    methodCode: Optional[CE] = None
+    targetSiteCode: Optional[CD] = None
+    author: Optional[AuthorParticipation] = None
 
 
 class InstructionObservation(Observation):
@@ -146,7 +148,7 @@ class Criterion(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN")
     code: Optional[CD] = None
-    value: Optional[ANY] = None
+    value: Optional[Any] = None
 
 
 class Precondition(BaseModel):
@@ -176,9 +178,7 @@ class SubstanceAdministration(BaseModel):
     code: Optional[CD] = None
     text: Optional[Union[str, ED]] = None
     statusCode: Optional[CS] = None
-    effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(
-        default_factory=list
-    )
+    effectiveTime: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]] = Field(default_factory=list)
     consumable: Optional[Consumable] = None
     routeCode: Optional[CE] = None
     doseQuantity: Optional[Union[IVL_PQ, PQ]] = None
@@ -190,9 +190,7 @@ class SubstanceAdministration(BaseModel):
     precondition: Optional[List[Precondition]] = None
 
     @field_serializer("effectiveTime")
-    def serialize_effective_time(
-        self, sxcm_ts_list: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]]
-    ) -> List:
+    def serialize_effective_time(self, sxcm_ts_list: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]]) -> List:
         """
         Takes a list of SXCM_TS objects and returns a dictionary with operator as key
         """
@@ -202,9 +200,7 @@ class SubstanceAdministration(BaseModel):
         for eff_time in sxcm_ts_list:
             # print(f"eff_time: {eff_time}")
             # print(isinstance(eff_time, SXCM_TS))
-            if eff_time.resource_type == "SXCM_TS" and getattr(
-                eff_time, "operator", None
-            ):
+            if eff_time.resource_type == "SXCM_TS" and getattr(eff_time, "operator", None):
                 # add the operator to the dictionary
                 sxcm[eff_time.operator] = {"@value": eff_time.value}
             else:
@@ -258,7 +254,7 @@ class ResultsOrganizer(BaseModel):
     Representation of a CDA Results Organizer model object.
     """
 
-    classCode: str = Field(alias="@classCode", default="BATTERY")
+    classCode: str = Field(alias="@classCode", default="CLUSTER")
     moodCode: str = Field(alias="@moodCode", default="EVN")
     templateId: List[II] = Field(
         default=[
@@ -267,7 +263,12 @@ class ResultsOrganizer(BaseModel):
                     "@root": "2.16.840.1.113883.10.20.22.4.1",
                     "@extension": "2015-08-01",
                 }
-            )
+            ),
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.4.1",
+                }
+            ),
         ],
     )
     id: Optional[List[II]] = Field(default_factory=list)
@@ -275,7 +276,7 @@ class ResultsOrganizer(BaseModel):
     statusCode: Optional[CS] = None
     effectiveTime: Optional[IVL_TS] = None
     author: Optional[AuthorParticipation] = None
-    component: List[ResultObservation] = Field(default_factory=list)
+    component: List[Dict[str, ResultObservation]] = Field(default_factory=list)
 
 
 class ResultsSection(Section):
@@ -290,7 +291,12 @@ class ResultsSection(Section):
                     "@root": "2.16.840.1.113883.10.20.22.2.3.1",
                     "@extension": "2015-08-01",
                 }
-            )
+            ),
+            II(
+                **{
+                    "@root": "2.16.840.1.113883.10.20.22.2.3.1",
+                }
+            ),
         ]
     )
     code: CE = Field(

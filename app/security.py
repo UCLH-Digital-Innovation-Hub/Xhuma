@@ -23,12 +23,18 @@ from fastapi.security import APIKeyHeader
 from .audit.models import SAMLAttributes
 
 JWTKEY = os.getenv("JWTKEY")
-API_KEY = os.getenv("API_KEY", "TEST_KEY")
+API_KEY = os.getenv("API_KEY")
 api_key_header_scheme = APIKeyHeader(name="X-API-Key", auto_error=True)
 
 
 async def verify_api_key(api_key_header: str = Security(api_key_header_scheme)):
-    if api_key_header != API_KEY:
+    expected_key = os.getenv("API_KEY")
+    if not expected_key or not expected_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server authentication misconfigured",
+        )
+    if api_key_header != expected_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API Key",
@@ -44,9 +50,7 @@ def fix_pem_formatting(pem_string: str) -> str:
         import re
 
         formatted_certs = []
-        matches = re.finditer(
-            r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string
-        )
+        matches = re.finditer(r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string)
         for match in matches:
             header = match.group(1)
             # Remove all whitespace from the base64 body
@@ -222,9 +226,7 @@ def create_jwt(
     #     import json
 
     #     json.dump(payload, f, indent=4)
-    return jwt.encode(
-        payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"}
-    )
+    return jwt.encode(payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"})
 
 
 if __name__ == "__main__":

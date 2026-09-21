@@ -6,9 +6,7 @@ def fix_pem_formatting(pem_string: str) -> str:
         return pem_string
     pem_string = pem_string.replace("\\n", "\n")
     if "\n" not in pem_string:
-        match = re.search(
-            r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string
-        )
+        match = re.search(r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string)
         if match:
             header = match.group(1)
             raw_body = re.sub(r"\s+", "", match.group(2))

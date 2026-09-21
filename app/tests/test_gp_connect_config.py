@@ -111,6 +111,5 @@ def test_xh_040_core_domains_unfiltered():
                     )
 
     assert found_core_domains == core_domains, (
-        f"Hazard XH-040 Violation: Missing core domains in output. "
-        f"Expected {core_domains}, found {found_core_domains}"
+        f"Hazard XH-040 Violation: Missing core domains in output. Expected {core_domains}, found {found_core_domains}"
     )

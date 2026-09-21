@@ -5,7 +5,7 @@ from app.main import app
 
 client = TestClient(app)
 
-ENDPOINTS = ["/SOAP/iti38", "/SOAP/iti39", "/SOAP/iti47", "/SOAP/iti55"]
+ENDPOINTS = ["/SOAP/iti38", "/SOAP/iti39", "/SOAP/iti55"]
 
 
 @pytest.fixture(autouse=True)
@@ -25,9 +25,10 @@ def mock_dependencies(monkeypatch):
             },
         )(),
     )
-    monkeypatch.setattr(
-        "app.soap.soap.lookup_patient", lambda *args, **kwargs: {"id": "test"}
-    )
+    monkeypatch.setattr("app.soap.soap.lookup_patient", lambda *args, **kwargs: {"id": "test"})
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("app.soap.soap.attempt_audit", AsyncMock())
 
     # mock the responses so they don't fail later in the pipeline
     async def mock_response(*args, **kwargs):
@@ -35,7 +36,6 @@ def mock_dependencies(monkeypatch):
 
     monkeypatch.setattr("app.soap.soap.iti_38_response", mock_response)
     monkeypatch.setattr("app.soap.soap.iti_39_response", mock_response)
-    monkeypatch.setattr("app.soap.soap.iti_47_response", mock_response)
     monkeypatch.setattr("app.soap.soap.iti_55_response", mock_response)
 
 
@@ -82,9 +82,7 @@ def test_xxe_malicious_entity_rejected(endpoint):
 <!ELEMENT foo ANY >
 <!ENTITY xxe SYSTEM "file:///etc/passwd" >]>
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:Issuer>&xxe;</saml2:Issuer></saml2:Assertion></wsse:Security></s:Header><s:Body></s:Body></s:Envelope>"""
-    response = client.post(
-        endpoint, content=xxe_soap_xml, headers={"Content-Type": "application/soap+xml"}
-    )
+    response = client.post(endpoint, content=xxe_soap_xml, headers={"Content-Type": "application/soap+xml"})
     assert response.status_code == 400
     assert "Malformed XML" in response.text
 

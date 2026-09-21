@@ -69,7 +69,11 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
     allowed = _allowed_cert_fingerprints()
     if not allowed:
-        return
+        print("Relay mTLS failed: Relay mTLS allowlist is empty or unresolved", flush=True)
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Relay mTLS allowlist is empty or unresolved",
+        )
 
     fingerprint = cert.fingerprint(hashes.SHA256()).hex()
     if fingerprint not in allowed:
@@ -85,13 +89,13 @@ def _enforce_relay_mtls(websocket: WebSocket) -> None:
 
 @router.websocket("/ws/{client_id}")
 async def relay_ws(websocket: WebSocket, client_id: str):
-    # TODO(Finding 7): Authenticate the handshake (mTLS or a per-agent signed token bound to client_id) and authorize before accept()
-    await websocket.accept()
     try:
         _enforce_relay_mtls(websocket)
     except WebSocketException as e:
         await websocket.close(code=e.code, reason=e.reason)
         return
+
+    await websocket.accept()
 
     import asyncio
 
@@ -106,11 +110,9 @@ async def relay_ws(websocket: WebSocket, client_id: str):
                 span.set_attribute("client_id", client_id)
                 try:
                     # Agent sends RelayResponse JSON
-                    data = await asyncio.wait_for(
-                        websocket.receive_text(), timeout=30.0
-                    )
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                     hub.fulfill(json.loads(data))
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Expected idle wait, log it so Azure knows we are healthy
                     span.set_attribute("status", "idle_keepalive")
                     continue

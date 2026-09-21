@@ -93,9 +93,7 @@ class II(ANY):
         description="An identifier that uniquely identifies a thing or object.",
         alias="@xsi:type",
     )
-    assigningAuthorityName: Optional[str] = Field(
-        alias="@assigningAuthorityName", default=None
-    )
+    assigningAuthorityName: Optional[str] = Field(alias="@assigningAuthorityName", default=None)
     displayable: Optional[bool] = None
     extension: Optional[str] = Field(alias="@extension", default=None)
     root: Optional[str] = Field(alias="@root")
@@ -198,6 +196,9 @@ class PQ(QTY):
     translation: Optional[List[PQR]] = None
     unit: Optional[str] = Field(alias="@unit", default=None)
     value: Optional[float] = Field(alias="@value", default=None)
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 class TS(QTY):
@@ -228,16 +229,12 @@ class SXCM_PQ(PQ):
 
 class IVXB_TS(SXCM_TS):
     resource_type: str = Field("IVXB_TS", description="", alias="@xsi:type")
-    inclusive: Optional[bool] = Field(
-        None, description="Specifies whether the limit is included in the interval."
-    )
+    inclusive: Optional[bool] = Field(None, description="Specifies whether the limit is included in the interval.")
 
 
 class IVXB_PQ(PQ):
     resource_type: str = Field("IVXB_PQ", description="", alias="@xsi:type")
-    inclusive: Optional[bool] = Field(
-        None, description="Specifies whether the limit is included in the interval."
-    )
+    inclusive: Optional[bool] = Field(None, description="Specifies whether the limit is included in the interval.")
 
 
 class IVL_PQ(ANY):
@@ -258,9 +255,7 @@ class IVL_PQ(ANY):
 
 
 class IVL_TS(IVXB_TS):
-    resource_type: str = Field(
-        "IVL_TS", description="Time interval.", alias="@xsi:type"
-    )
+    resource_type: str = Field("IVL_TS", description="Time interval.", alias="@xsi:type")
     low: Optional[IVXB_TS] = None
     center: Optional[TS] = None
     width: Optional[PQ] = None
@@ -271,9 +266,7 @@ class IVL_TS(IVXB_TS):
 
 
 class IVL_INT(ANY):
-    resource_type: str = Field(
-        "IVL_INT", description="Interval of integers.", alias="@xsi:type"
-    )
+    resource_type: str = Field("IVL_INT", description="Interval of integers.", alias="@xsi:type")
     nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)
     value: Optional[int] = Field(alias="@value", default=None)
     operator: Optional[str] = Field(alias="@operator", default=None)
@@ -291,9 +284,7 @@ class PIVL_TS(SXCM_TS):
     phase: Optional[IVL_TS] = None
     period: Optional[Union[IVL_PQ, PQ]] = None
     alignment: Optional[CalendarCycle] = Field(alias="@alignment", default=None)
-    institutionSpecified: Optional[str] = Field(
-        alias="@institutionSpecified", default=None
-    )
+    institutionSpecified: Optional[str] = Field(alias="@institutionSpecified", default=None)
     model_config = {
         "populate_by_name": True,
     }

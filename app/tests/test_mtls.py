@@ -64,22 +64,18 @@ def test_mtls_accepts_valid_thumbprint(monkeypatch):
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1))
-        .not_valid_after(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=30))
+        .not_valid_before(dt.datetime.now(dt.UTC) - dt.timedelta(days=1))
+        .not_valid_after(dt.datetime.now(dt.UTC) + dt.timedelta(days=30))
         .sign(private_key=key, algorithm=hashes.SHA256())
     )
-    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode(
-        "ascii"
-    )
+    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode("ascii")
     fingerprint = cert.fingerprint(hashes.SHA256()).hex()
 
     # The actual implementation calls `_verify_epic_cert` internally, so let's import it
     from app.middleware.mtls import _verify_epic_cert
 
     # Mock EPIC_CA_CERT so it doesn't fail on CA load
-    monkeypatch.setenv(
-        "EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
-    )
+    monkeypatch.setenv("EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"))
 
     # Set the allowlist to exactly our fingerprint
     monkeypatch.setenv("MTLS_TRUSTED_THUMBPRINTS", fingerprint)
@@ -104,22 +100,16 @@ def test_mtls_rejects_invalid_thumbprint(monkeypatch):
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1))
-        .not_valid_after(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=30))
+        .not_valid_before(dt.datetime.now(dt.UTC) - dt.timedelta(days=1))
+        .not_valid_after(dt.datetime.now(dt.UTC) + dt.timedelta(days=30))
         .sign(private_key=key, algorithm=hashes.SHA256())
     )
-    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode(
-        "ascii"
-    )
+    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode("ascii")
 
     from app.middleware.mtls import _verify_epic_cert
 
-    monkeypatch.setenv(
-        "EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
-    )
-    monkeypatch.setenv(
-        "MTLS_TRUSTED_THUMBPRINTS", "1234567890abcdef"
-    )  # Invalid thumbprint
+    monkeypatch.setenv("EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"))
+    monkeypatch.setenv("MTLS_TRUSTED_THUMBPRINTS", "1234567890abcdef")  # Invalid thumbprint
 
     assert _verify_epic_cert(der_b64) is False
 
@@ -141,27 +131,21 @@ def test_mtls_lenient_thumbprint_formatting(monkeypatch):
         .issuer_name(issuer)
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1))
-        .not_valid_after(dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=30))
+        .not_valid_before(dt.datetime.now(dt.UTC) - dt.timedelta(days=1))
+        .not_valid_after(dt.datetime.now(dt.UTC) + dt.timedelta(days=30))
         .sign(private_key=key, algorithm=hashes.SHA256())
     )
-    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode(
-        "ascii"
-    )
+    der_b64 = base64.b64encode(cert.public_bytes(serialization.Encoding.DER)).decode("ascii")
 
     # Original fingerprint is pure hex lowercase (e.g. b12f5a...)
     fingerprint = cert.fingerprint(hashes.SHA256()).hex()
 
     # Format it with colons and uppercase: B1:2F:5A...
-    formatted_fingerprint = ":".join(
-        fingerprint[i : i + 2] for i in range(0, len(fingerprint), 2)
-    ).upper()
+    formatted_fingerprint = ":".join(fingerprint[i : i + 2] for i in range(0, len(fingerprint), 2)).upper()
 
     from app.middleware.mtls import _verify_epic_cert
 
-    monkeypatch.setenv(
-        "EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
-    )
+    monkeypatch.setenv("EPIC_CA_CERT", cert.public_bytes(serialization.Encoding.PEM).decode("utf-8"))
     monkeypatch.setenv(
         "MTLS_TRUSTED_THUMBPRINTS",
         f"other_thumbprint, {formatted_fingerprint} , another_one",

@@ -20,10 +20,15 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor()
+import logging
+import traceback
+import uuid
+
 from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fhirclient.models.operationoutcome import OperationOutcome, OperationOutcomeIssue
 from jwcrypto import jwk
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
@@ -31,6 +36,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from sqlalchemy import select
 
+from .audit.audit import AuditFailureException
 from .audit.db_models import AuditEventRow
 from .audit.models import _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
@@ -52,6 +58,31 @@ async def lifespan(app: FastAPI):
     Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
     # --- Startup logic ---
+    # Validate required configuration
+    for var in ["API_KEY", "ORG_ASID", "ORG_CODE"]:
+        val = os.getenv(var)
+        if not val or not val.strip():
+            raise RuntimeError(f"Missing required configuration: {var}")
+
+    import datetime
+    import math
+
+    ccda_expiry_str = os.getenv("CCDA_EXPIRY_HOURS", "4")
+    try:
+        expiry_hours = float(ccda_expiry_str)
+        if not math.isfinite(expiry_hours) or expiry_hours <= 0:
+            raise ValueError("Must be positive and finite")
+        ttl = datetime.timedelta(hours=expiry_hours)
+        if ttl.total_seconds() < 1:
+            raise ValueError("Duration too small for Redis expiry")
+        # Prevent integer overflow in Redis / Timedelta by capping at a reasonable upper bound (e.g. 1 year)
+        if ttl.total_seconds() > 31536000:
+            raise ValueError("Duration exceeds maximum allowed cache expiry (1 year)")
+
+        app.state.ccda_expiry_hours = expiry_hours
+    except (ValueError, OverflowError) as e:
+        raise RuntimeError(f"Invalid CCDA_EXPIRY_HOURS configuration: {e}")
+
     # Initialize Postgres connection pool
     engine = make_engine()
     SessionLocal = make_sessionmaker(engine)
@@ -82,13 +113,9 @@ async def lifespan(app: FastAPI):
             app.state.jwk_json = jwk_dict
         except Exception as e:
             print(f"Warning: Failed to load JWTKEY from environment: {e}")
-    elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile(
-        "keys/test-1.pem"
-    ):
+    elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
         # Local development fallback
-        print(
-            "Warning: Falling back to local keys/test-1.pem key. Not for use in production."
-        )
+        print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
         with open("keys/test-1.pem", "rb") as pemfile:
             private_pem = pemfile.read()
             public_jwk = jwk.JWK.from_pem(data=private_pem)
@@ -97,14 +124,10 @@ async def lifespan(app: FastAPI):
             jwk_dict["use"] = "sig"
             app.state.jwk_json = jwk_dict
     else:
-        print(
-            "Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error."
-        )
+        print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
 
     # Set up OpenTelemetry metrics
-    otlp_endpoint = os.getenv(
-        "OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"
-    )
+    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
     metric_exporter = OTLPMetricExporter(
         endpoint=otlp_endpoint.replace("http://", "").replace("https://", ""),
         insecure=True,
@@ -151,13 +174,9 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         HTTPXClientInstrumentor().instrument()
         LoggingInstrumentor().instrument(set_logging_format=True)
         RedisInstrumentor().instrument()
-        print(
-            "Application Insights OpenTelemetry instrumentation enabled successfully."
-        )
+        print("Application Insights OpenTelemetry instrumentation enabled successfully.")
     except Exception as telemetry_err:
-        print(
-            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
-        )
+        print(f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}")
 
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
@@ -169,16 +188,89 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         FastAPIInstrumentor.instrument_app(app)
         HTTPXClientInstrumentor().instrument()
         LoggingInstrumentor().instrument(set_logging_format=True)
-        print(
-            "Application Insights OpenTelemetry instrumentation enabled successfully."
-        )
+        print("Application Insights OpenTelemetry instrumentation enabled successfully.")
     except Exception as telemetry_err:
-        print(
-            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
-        )
+        print(f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}")
 
 # register soap error handler
 soap.register_handlers(app)
+
+
+@app.exception_handler(AuditFailureException)
+async def audit_failure_handler(request: Request, exc: AuditFailureException):
+    trace_id = str(uuid.uuid4())
+    # Explicitly do NOT log traceback to avoid leaking SQL parameters
+    logging.error(f"AuditFailureException [TraceID: {trace_id}] at {request.url.path}: {exc}")
+
+    path = request.url.path
+    if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
+        fault_xml = f"""<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+    <env:Body>
+        <env:Fault>
+            <env:Code><env:Value>env:Receiver</env:Value></env:Code>
+            <env:Reason><env:Text xml:lang="en">Internal Server Error (TraceID: {trace_id})</env:Text></env:Reason>
+        </env:Fault>
+    </env:Body>
+</env:Envelope>"""
+        return Response(content=fault_xml, status_code=502, media_type="application/soap+xml")
+
+    elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
+        issue = OperationOutcomeIssue()
+        issue.severity = "fatal"
+        issue.code = "exception"
+        issue.diagnostics = f"An internal error occurred. TraceID: {trace_id}"
+        outcome = OperationOutcome()
+        outcome.issue = [issue]
+        return JSONResponse(status_code=502, content=outcome.as_json())
+
+    else:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "type": "about:blank",
+                "title": "Internal Server Error",
+                "status": 502,
+                "detail": f"An unexpected error occurred. TraceID: {trace_id}",
+            },
+        )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    trace_id = str(uuid.uuid4())
+    logging.error(f"Unhandled Exception [TraceID: {trace_id}] at {request.url.path}: {exc}\n{traceback.format_exc()}")
+
+    path = request.url.path
+    if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
+        fault_xml = f"""<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+    <env:Body>
+        <env:Fault>
+            <env:Code><env:Value>env:Receiver</env:Value></env:Code>
+            <env:Reason><env:Text xml:lang="en">Internal Server Error (TraceID: {trace_id})</env:Text></env:Reason>
+        </env:Fault>
+    </env:Body>
+</env:Envelope>"""
+        return Response(content=fault_xml, status_code=500, media_type="application/soap+xml")
+
+    elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
+        issue = OperationOutcomeIssue()
+        issue.severity = "fatal"
+        issue.code = "exception"
+        issue.diagnostics = f"An internal error occurred. TraceID: {trace_id}"
+        outcome = OperationOutcome()
+        outcome.issue = [issue]
+        return JSONResponse(status_code=500, content=outcome.as_json())
+
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "type": "about:blank",
+                "title": "Internal Server Error",
+                "status": 500,
+                "detail": f"An unexpected error occurred. TraceID: {trace_id}",
+            },
+        )
 
 
 # 1) Trusted hosts
@@ -367,8 +459,7 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
         # --- render ---
         out: list[str] = []
         out.append(
-            "<html><head><title>Dev Audit Results</title></head>"
-            "<body style='font-family:sans-serif;margin:2rem;'>"
+            "<html><head><title>Dev Audit Results</title></head><body style='font-family:sans-serif;margin:2rem;'>"
         )
         out.append("<a href='/_dev/audit'>← back</a>")
         out.append("<h2>Audit results</h2>")

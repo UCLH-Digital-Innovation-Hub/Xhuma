@@ -44,10 +44,10 @@ sequenceDiagram
     end
 
 
-    EHR->>Fast API: ITI 47 Request
+    EHR->>Fast API: ITI 55 Request
     Fast API->>PDS: FHIR PDS lookup
     PDS->>Fast API: PDS response
-    Fast API->>EHR: ITI 47 Response
+    Fast API->>EHR: ITI 55 Response
     Fast API->>Redis: Check for cached SDS lookup
     opt if no cached SDS lookup
     Fast API--)SDS: ASID Lookup

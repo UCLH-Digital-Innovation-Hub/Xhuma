@@ -211,10 +211,18 @@ resource "azurerm_linux_web_app" "app" {
     type = "SystemAssigned"
   }
 
+  lifecycle {
+    ignore_changes = [
+      site_config[0].application_stack[0].docker_image,
+      site_config[0].application_stack[0].docker_image_tag,
+      app_settings["WEBSITE_VNET_ROUTE_ALL"]
+    ]
+  }
+
   site_config {
     application_stack {
-      docker_image     = lower(split(":", var.docker_image)[0])
-      docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[1] : "latest"
+      docker_image     = length(split(":", var.docker_image)) > 1 ? join(":", slice(split(":", var.docker_image), 0, length(split(":", var.docker_image)) - 1)) : var.docker_image
+      docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[length(split(":", var.docker_image)) - 1] : "latest"
     }
 
     container_registry_use_managed_identity = false
@@ -291,11 +299,12 @@ resource "azurerm_linux_web_app" "app" {
     "OTEL_METRIC_EXPORT_INTERVAL_MS"        = var.otel_metric_export_interval_ms
 
     # Business Logic
-    "ORG_CODE"  = var.org_code
-    "ENV"       = var.env
-    "VERSION"   = var.app_version
-    "DEVICE_ID" = var.device_id
-    "ORG_ASID"  = var.org_asid
+    "ORG_CODE"          = var.org_code
+    "ENV"               = var.env
+    "CCDA_EXPIRY_HOURS" = var.ccda_expiry_hours
+    "VERSION"           = var.app_version
+    "DEVICE_ID"         = var.device_id
+    "ORG_ASID"          = var.org_asid
 
     "GP_CONNECT_INCLUDE_ALLERGIES"      = var.gp_connect_include_allergies
     "GP_CONNECT_INCLUDE_MEDICATION"     = var.gp_connect_include_medication
@@ -309,11 +318,6 @@ resource "azurerm_linux_web_app" "app" {
     "REQUIRE_MTLS"  = var.require_mtls
   }
 
-  lifecycle {
-    ignore_changes = [
-      app_settings["WEBSITE_VNET_ROUTE_ALL"]
-    ]
-  }
 }
 
 # Access Policy for Local Vault
@@ -354,4 +358,51 @@ resource "azurerm_key_vault_access_policy" "locust_shared_policy" {
 
   secret_permissions      = ["Get", "List"]
   certificate_permissions = ["Get", "List"]
+}
+
+# --- PostgreSQL Audit Logging Configuration ---
+
+resource "azurerm_monitor_diagnostic_setting" "postgres_diag" {
+  name                       = "postgres-audit-logs"
+  target_resource_id         = azurerm_postgresql_flexible_server.postgres.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.law.id
+
+  enabled_log {
+    category = "PostgreSQLLogs"
+  }
+
+  metric {
+    category = "AllMetrics"
+    enabled  = true
+  }
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_connections" {
+  name      = "log_connections"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "on"
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_disconnections" {
+  name      = "log_disconnections"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "on"
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_checkpoints" {
+  name      = "log_checkpoints"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "on"
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_statement" {
+  name      = "log_statement"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "ddl"
+}
+
+resource "azurerm_postgresql_flexible_server_configuration" "log_min_duration_statement" {
+  name      = "log_min_duration_statement"
+  server_id = azurerm_postgresql_flexible_server.postgres.id
+  value     = "-1"
 }

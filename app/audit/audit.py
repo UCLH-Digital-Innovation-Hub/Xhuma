@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 from app.audit.models import SAMLAttributes
 from app.ccda.models.datatypes import CD  # adjust path
@@ -20,7 +20,7 @@ def process_saml_attributes(saml_header: dict) -> SAMLAttributes:
         "urn:oasis:names:tc:xacml:2.0:resource:resource-id": "resource_id",
     }
 
-    raw: Dict[str, Any] = {}
+    raw: dict[str, Any] = {}
 
     attributes = saml_header.get("Attribute", [])
     if isinstance(attributes, dict):
@@ -49,3 +49,59 @@ def process_saml_attributes(saml_header: dict) -> SAMLAttributes:
             raw[key] = value
 
     return SAMLAttributes.model_validate(raw)
+
+
+class AuditFailureException(Exception):
+    """Raised when an audit event fails to process or persist to the database."""
+
+    pass
+
+
+async def attempt_audit(
+    request: Any,
+    *,
+    nhs_number: str | None,
+    saml: SAMLAttributes,
+    action: str,
+    outcome: Any,  # AuditOutcome
+    error_code: str | None = None,
+    detail: dict | None = None,
+    message_id: str | None = None,
+    document_id: str | None = None,
+    request_id: str | None = None,
+) -> None:
+    """Attempt to write an audit event, failing the main request if it fails."""
+    import logging
+    from .build import build_audit_event
+    from .store import insert_audit_event
+
+    if not request or not hasattr(request, "app"):
+        logging.error("AuditFailure: No request or app found")
+        raise AuditFailureException("Audit context missing")
+
+    SessionLocal = getattr(request.app.state, "SessionLocal", None)
+    if not SessionLocal:
+        logging.error("AuditFailure: No SessionLocal found in app state")
+        raise AuditFailureException("Audit persistence context missing")
+
+    try:
+        async with SessionLocal() as session:
+            ev = await build_audit_event(
+                request=request,
+                session=session,
+                nhs_number=nhs_number,
+                saml=saml,
+                action=action,
+                outcome=outcome,
+                error_code=error_code,
+                detail=detail,
+                message_id=message_id,
+                document_id=document_id,
+                request_id=request_id,
+            )
+            await insert_audit_event(session, ev)
+            await session.commit()
+    except Exception:
+        # Do not log raw database exceptions containing SQL parameters.
+        logging.error("AuditFailure: Database persistence failed")
+        raise AuditFailureException("Failed to persist audit event") from None

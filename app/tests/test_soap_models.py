@@ -1,11 +1,14 @@
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 import xmltodict
 
 from app.soap import responses
 from app.soap.models import ITI38Request, ITI39Request, ITI55Request
+from app.soap.responses import iti_38
+from app.soap.responses.iti_55 import _select_usual_name
 
 PDS_RESULTS = Path(__file__).parent / "fixtures" / "pdsresults"
 
@@ -60,10 +63,7 @@ def test_iti38_request_supports_adhoc_query_and_single_slot():
     )
 
     assert request.body.query.query_id == "query-38"
-    assert (
-        request.body.query.slot_value("$XDSDocumentEntryPatientId")
-        == "'9999999999^^^&oid&ISO'"
-    )
+    assert request.body.query.slot_value("$XDSDocumentEntryPatientId") == "'9999999999^^^&oid&ISO'"
 
 
 def test_iti38_request_supports_cross_gateway_query_and_repeating_values():
@@ -145,7 +145,7 @@ def test_iti39_request_selects_first_document_from_repeating_requests():
 def test_iti55_name_selection_falls_back_when_use_is_missing():
     name = {"given": ["Ada"], "family": "Lovelace"}
 
-    assert responses._select_usual_name({"name": [name]}) == name
+    assert _select_usual_name({"name": [name]}) == name
 
 
 @pytest.mark.asyncio
@@ -179,9 +179,7 @@ async def test_iti55_response_uses_usual_name_and_preserves_xml_shape():
     assert envelope["s:Header"]["a:RelatesTo"] == "message-55"
     assert response["interactionId"]["@extension"] == "PRPA_IN201306UV02"
     assert response["controlActProcess"]["queryByParameter"] == query
-    name = response["controlActProcess"]["subject"]["registrationEvent"]["subject1"][
-        "patient"
-    ]["patientPerson"]["name"]
+    name = response["controlActProcess"]["subject"]["registrationEvent"]["subject1"]["patient"]["patientPerson"]["name"]
     assert name == {"given": "Ada", "family": "Lovelace"}
 
 
@@ -193,21 +191,15 @@ async def test_iti55_response_uses_usual_name_and_preserves_xml_shape():
     ],
 )
 @pytest.mark.asyncio
-async def test_iti55_response_with_pds_fixture(
-    fixture_name, given, family, gp_code, birth_time
-):
+async def test_iti55_response_with_pds_fixture(fixture_name, given, family, gp_code, birth_time):
     """Exercise ITI-55 mapping with representative PDS response payloads."""
 
     with (PDS_RESULTS / fixture_name).open(encoding="utf-8") as fixture:
         patient = json.load(fixture)
 
-    xml = await responses.iti_55_response(
-        "message-55", patient, {"queryId": {"@root": "query-55"}}
-    )
+    xml = await responses.iti_55_response("message-55", patient, {"queryId": {"@root": "query-55"}})
     response = xmltodict.parse(xml)["s:Envelope"]["s:Body"]["PRPA_IN201306UV02"]
-    patient_xml = response["controlActProcess"]["subject"]["registrationEvent"][
-        "subject1"
-    ]["patient"]
+    patient_xml = response["controlActProcess"]["subject"]["registrationEvent"]["subject1"]["patient"]
     person_xml = patient_xml["patientPerson"]
 
     assert patient_xml["id"][0]["@extension"] == patient["id"]
@@ -219,7 +211,8 @@ async def test_iti55_response_with_pds_fixture(
 
 @pytest.mark.asyncio
 async def test_iti38_response_preserves_registry_metadata_shape(monkeypatch):
-    monkeypatch.setattr(responses.redis_client, "get", lambda _: b"document-id")
+    monkeypatch.setattr(iti_38.redis_client, "get", lambda _: b"document-id")
+    monkeypatch.setattr(iti_38, "attempt_audit", AsyncMock())
 
     xml = await responses.iti_38_response(
         request=None,
@@ -244,12 +237,8 @@ async def test_iti38_response_preserves_registry_metadata_shape(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_iti39_response_decodes_cached_document_bytes():
-    xml = await responses.iti_39_response(
-        "message-39", "document-id", b"<ClinicalDocument/>"
-    )
-    response = xmltodict.parse(xml)["s:Envelope"]["s:Body"][
-        "ns4:RetrieveDocumentSetResponse"
-    ]
+    xml = await responses.iti_39_response("message-39", "document-id", b"<ClinicalDocument/>")
+    response = xmltodict.parse(xml)["s:Envelope"]["s:Body"]["ns4:RetrieveDocumentSetResponse"]
 
     assert response["ns8:RegistryResponse"]["@status"].endswith(":Success")
     assert response["ns4:DocumentResponse"]["ns4:Document"] == "<ClinicalDocument/>"
@@ -258,9 +247,7 @@ async def test_iti39_response_decodes_cached_document_bytes():
 @pytest.mark.asyncio
 async def test_iti39_error_preserves_registry_error_shape():
     xml = await responses.iti_39_error("message-39", "missing-document")
-    response = xmltodict.parse(xml)["s:Envelope"]["s:Body"][
-        "ns4:RetrieveDocumentSetResponse"
-    ]
+    response = xmltodict.parse(xml)["s:Envelope"]["s:Body"]["ns4:RetrieveDocumentSetResponse"]
     registry_response = response["rs:RegistryResponse"]
     error = registry_response["rs:RegistryErrorList"]["rs:RegistryError"]
 
