@@ -1,6 +1,6 @@
 """C-CDA allergy concern, allergy/intolerance, and reaction models."""
 
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Union
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
@@ -83,6 +83,12 @@ class AllergyReaction(EntryRelationship):
         return "true" if value else "false"
 
 
+class AllergyComment(EntryRelationship):
+    """Comment activity carrying source notes alongside allergy reactions."""
+
+    act: Act
+
+
 class AllergyIntoleranceObservation(Observation):
     """Allergy - Intolerance Observation, including its inherited template ID.
 
@@ -109,8 +115,7 @@ class AllergyIntoleranceObservation(Observation):
     value: CD
     interpretationCode: Optional[List[CE]] = None
     participant: Optional[List[Participant2]] = None
-    # Currently supports the reaction relationships used by the entry converter.
-    entryRelationship: Optional[List[AllergyReaction]] = None
+    entryRelationship: Optional[List[Union[AllergyReaction, AllergyComment]]] = None
 
     @field_serializer("negationInd")
     def serialize_negation(self, value: Optional[bool]) -> Optional[str]:

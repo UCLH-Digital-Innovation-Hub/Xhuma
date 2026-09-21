@@ -3,17 +3,17 @@ import datetime
 import json
 import logging
 import os
+from copy import deepcopy
 
 import xmltodict
-from copy import deepcopy
-from fhirclient.models import bundle
+from fhirclient.models import bundle, patient
 from fhirclient.models import list as fhirlist
-from fhirclient.models import patient
+
+from app.gp_connect_config import get_gp_connect_inclusions
 
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
-from .helpers import date_helper, templateId
-from app.gp_connect_config import get_gp_connect_inclusions
 from .entries.results import investigation
+from .helpers import date_helper, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -250,10 +250,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             section_setup = {
                 "Allergies and adverse reactions": {
                     "section_headers": [
-                        "Start Date",
+                        "Asserted Date",
                         "Status",
                         "Description",
                         "Reaction",
+                        "Notes",
                     ],
                     "parser": parse_allergies,
                 },
@@ -610,7 +611,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9692140466.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9692136744.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None
