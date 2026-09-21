@@ -1,9 +1,11 @@
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from fastapi import FastAPI
+
 from app.gpconnect import _fetch_gpconnect_record
 from app.main import lifespan
-from fastapi import FastAPI
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,6 @@
-import pytest
 import os
+
+import pytest
 
 os.environ["API_KEY"] = "test-api-key"
 os.environ["ORG_CODE"] = "RRV00"

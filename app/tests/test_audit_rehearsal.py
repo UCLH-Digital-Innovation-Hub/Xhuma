@@ -1,7 +1,8 @@
-import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.audit.audit import attempt_audit, AuditFailureException
+import pytest
+
+from app.audit.audit import AuditFailureException, attempt_audit
 from app.audit.models import AuditOutcome
 from app.tests.fixtures.saml_attributes import saml
 

@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
-from .audit.audit import process_saml_attributes, attempt_audit, AuditFailureException
+from .audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
 from .audit.models import AuditOutcome, SAMLAttributes
 from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
