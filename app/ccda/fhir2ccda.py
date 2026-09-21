@@ -251,9 +251,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "Allergies and adverse reactions": {
                     "section_headers": [
                         "Asserted Date",
-                        "Status",
                         "Description",
                         "Reaction",
+                        "Severity",
                         "Notes",
                     ],
                     "parser": parse_allergies,
@@ -611,7 +611,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9692136744.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None

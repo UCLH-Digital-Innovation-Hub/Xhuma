@@ -13,6 +13,8 @@ from ..models.allergy import (
     ParticipantRole,
     PlayingEntity,
     ReactionObservation,
+    ReactionSeverity,
+    SeverityObservation,
 )
 from ..models.base import Act
 from ..models.datatypes import CD, CE, ED, II, IVL_TS, IVXB_TS
@@ -28,6 +30,9 @@ _ALLERGY_TYPES = {
     (None, "medication"): ("419511003", "Propensity to adverse reactions to drug"),
     (None, "food"): ("418471000", "Propensity to adverse reactions to food"),
 }
+
+# SNOMED severity qualifiers corresponding to FHIR reaction.severity.
+_SEVERITIES = {"mild": ("255604002", "Mild"), "moderate": ("6736007", "Moderate"), "severe": ("24484000", "Severe")}
 
 
 def _date_low(date) -> IVXB_TS:
@@ -73,15 +78,33 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
 
     reactions = []
     reaction_labels = []
+    severity_labels = []
     for reaction in entry.reaction or []:
         for manifestation in reaction.manifestation or []:
             manifestation_code = code_with_translations(list(manifestation.coding))
-            reaction_labels.append(manifestation.text or manifestation_code.displayName or manifestation_code.code)
+            label = manifestation.text or manifestation_code.displayName or manifestation_code.code
+            reaction_labels.append(label)
+            severity = None
+            if reaction.severity:
+                severity_code, severity_display = _SEVERITIES[reaction.severity]
+                # severity_labels.append(f"{label}: {severity_display}")
+                severity_labels.append(f"{severity_display}")
+                severity = ReactionSeverity(
+                    observation=SeverityObservation(
+                        value=CD(
+                            code=severity_code,
+                            displayName=severity_display,
+                            codeSystem="2.16.840.1.113883.6.96",
+                            codeSystemName="SNOMED CT",
+                        )
+                    )
+                )
             reactions.append(
                 AllergyReaction(
                     observation=ReactionObservation(
                         effectiveTime=IVL_TS(low=_date_low(reaction.onset)),
                         value=manifestation_code,
+                        entryRelationship=[severity] if severity else None,
                     )
                 )
             )
@@ -109,9 +132,9 @@ def allergy(entry: allergyintolerance.AllergyIntolerance) -> EntryWithRow:
         entry=AllergyEntry(act=act).model_dump(by_alias=True, exclude_none=True),
         row=[
             row_date,
-            act.statusCode.code,
             substance_ce.displayName or entry.code.text or "",
             "; ".join(dict.fromkeys(reaction_labels)),
+            "; ".join(dict.fromkeys(severity_labels)),
             {"BR": [f"{note} <br />" for note in notes]} if notes else "",
         ],
     )

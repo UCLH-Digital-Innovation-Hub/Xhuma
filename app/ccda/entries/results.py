@@ -268,14 +268,23 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
     )
 
     report_issued_time = IVL_TS(low=IVXB_TS(value=datetime_helper(diagnostic_report.issued)))
-    comment_observations = [o for o in observations if is_comment_note(o)]
     test_group_headers = [o for o in observations if is_test_group_header(o)]
 
     # add results in test group headers to observations list
+    seen = {id(o) for o in observations}
     for header in test_group_headers:
-        if hasattr(header, "hasMember"):
-            for member in header.hasMember:
-                observations.append(index[member.reference])
+        members = list(getattr(header, "hasMember", None) or [])
+        members.extend(
+            relation.target
+            for relation in getattr(header, "related", None) or []
+            if relation.type == "has-member" and relation.target is not None
+        )
+        for member in members:
+            observation = index[member.reference]
+            if id(observation) not in seen:
+                observations.append(observation)
+                seen.add(id(observation))
+    comment_observations = [o for o in observations if is_comment_note(o)]
 
     category_observation = None
     if len(test_group_headers) == 0 or len(test_group_headers) > 1:
@@ -286,8 +295,8 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
         test_title = test_group_headers[0].code.coding[0].display if test_group_headers else "Diagnostic Report"
 
         # look for category in test group header
-        for category in test_group_headers[0].category:
-            for code in category.coding:
+        for category in test_group_headers[0].category or []:
+            for code in category.coding or []:
                 if code.system == "http://hl7.org/fhir/observation-category":
                     if code.code == "laboratory":
                         print("Category is laboratory")

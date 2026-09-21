@@ -48,6 +48,34 @@ class CompletedStatus(CS):
     code: Literal["completed"] = Field(alias="@code", default="completed")
 
 
+class SeverityObservation(Observation):
+    """C-CDA Severity Observation associated with a reaction."""
+
+    templateId: List[II] = Field(
+        default_factory=lambda: [II(root="2.16.840.1.113883.10.20.22.4.8", extension="2014-06-09")]
+    )
+    code: CD = Field(default_factory=lambda: CD(code="SEV", codeSystem="2.16.840.1.113883.5.4"))
+    statusCode: CompletedStatus = Field(default_factory=CompletedStatus)
+    value: CD
+
+
+class ReactionSeverity(EntryRelationship):
+    model_config = ConfigDict(populate_by_name=True)
+
+    typeCode: Literal["SUBJ"] = Field(alias="@typeCode", default="SUBJ")
+    inversionInd: Literal[True] = Field(alias="@inversionInd", default=True)
+    observation: SeverityObservation
+
+    @field_validator("inversionInd", mode="before")
+    @classmethod
+    def parse_inversion(cls, value):
+        return True if value in ("true", "1") else value
+
+    @field_serializer("inversionInd")
+    def serialize_inversion(self, value: bool) -> str:
+        return "true" if value else "false"
+
+
 class ReactionObservation(Observation):
     """Reaction Observation (2.16.840.1.113883.10.20.22.4.9)."""
 
@@ -63,6 +91,7 @@ class ReactionObservation(Observation):
     code: AssertionCode = Field(default_factory=AssertionCode)
     statusCode: CompletedStatus = Field(default_factory=CompletedStatus)
     value: CD
+    entryRelationship: Optional[List[ReactionSeverity]] = Field(default=None, max_length=1)
 
 
 class AllergyReaction(EntryRelationship):

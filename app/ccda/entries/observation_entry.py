@@ -84,7 +84,7 @@ def observation_entry(entry, index: dict, section_name: Union[str, int]) -> Entr
     elif section_name == "Problems":
         row = [date_val, "N/A", name_val]
     elif section_name == "Allergies and adverse reactions":
-        row = [date_val, "N/A", name_val, "N/A", "<br />".join(obs_notes)]
+        row = [date_val, name_val, "N/A", "N/A", "<br />".join(obs_notes)]
     else:
         # Fallback to old behavior if a simple integer length is passed
         row = [date_val, name_val]
