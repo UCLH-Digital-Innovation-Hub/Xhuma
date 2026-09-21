@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Xhuma Target Inventory",
+  "type": "object",
+  "required": ["schema_version", "targets"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id", "stage", "source_branch", "enabled", "hold",
+          "rollout_ring", "github_environment", "github_infra_environment",
+          "resource_group", "location",
+          "app_service_name", "tfvars_file", "backend_file",
+          "runner_label", "owner", "support_route"
+        ],
+        "properties": {
+          "id": { "type": "string" },
+          "stage": { "type": "string", "enum": ["play", "int", "prd"] },
+          "source_branch": { "type": "string" },
+          "enabled": { "type": "boolean" },
+          "hold": { "type": "boolean" },
+          "rollout_ring": { "type": "integer" },
+          "github_environment": { "type": "string" },
+          "github_infra_environment": { "type": "string" },
+          "subscription_id": { "type": "string" },
+          "tenant_id": { "type": "string" },
+          "resource_group": { "type": "string" },
+          "location": { "type": "string" },
+          "app_service_name": { "type": "string" },
+          "tfvars_file": { "type": "string" },
+          "backend_file": { "type": "string" },
+          "runner_label": { "type": "string" },
+          "owner": { "type": "string" },
+          "support_route": { "type": "string" }
+        }
+      }
+    }
+  }
+}

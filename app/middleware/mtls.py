@@ -134,18 +134,23 @@ class MTLSMiddleware(BaseHTTPMiddleware):
         require_mtls = os.getenv("REQUIRE_MTLS", "true").lower() == "true"
 
         # Public paths that don't need mTLS
-        public_paths = [
+        public_paths = {
             "/docs",
             "/openapi.json",
             "/jwk",
             "/health",
             "/favicon.ico",
-            "/robots",
-        ]
+            "/robots.txt",
+        }
 
         is_public = (request.url.path == "/") or any(request.url.path.startswith(p) for p in public_paths)
 
-        if not require_mtls or is_public:
+        if not require_mtls:
+            return await call_next(request)
+
+        if is_public:
+            if request.method not in ("GET", "HEAD"):
+                return JSONResponse(status_code=405, content={"detail": "Method Not Allowed"})
             return await call_next(request)
 
         # Bypass all global mTLS checks for Relay connections.

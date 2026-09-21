@@ -135,6 +135,10 @@ class RedisClient:
         """Check if a key exists."""
         return bool(self._client.exists(key))
 
+    def pipeline(self):
+        """Return a new pipeline object that can queue multiple commands for later execution."""
+        return self._client.pipeline()
+
     def get_cache_info(self) -> dict:
         """Get cache statistics and memory usage."""
         try:

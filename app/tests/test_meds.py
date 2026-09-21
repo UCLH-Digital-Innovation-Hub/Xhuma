@@ -335,7 +335,7 @@ async def test_substance_administration():
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+@patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_structured_dosage(mock_dmd_lookup):
     """
     Test the structured dosage
@@ -382,7 +382,7 @@ async def test_structured_dosage(mock_dmd_lookup):
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+@patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_structured_detail(mock_dmd_lookup):
     mock_dmd_lookup.return_value = DMDConcept(
         concept_id=1,
@@ -510,7 +510,7 @@ new_med = medication.Medication(
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+@patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_new_structured_detail(mock_dmd_lookup):
     mock_dmd_lookup.return_value = DMDConcept(
         concept_id=212169831,
@@ -655,7 +655,7 @@ async def test_medication_repeats_robustness():
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+@patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
     # Setup mock data to test chronological order of notes and that issued quantity / repeats are included in XML
     med_request_data = {

@@ -41,7 +41,7 @@ async def build_audit_event(
     request: Request,
     session: AsyncSession,
     saml: SAMLAttributes,
-    nhs_number: str,
+    nhs_number: str | None,
     action: str,
     outcome: AuditOutcome,
     # optional extra refs

@@ -26,6 +26,9 @@ def mock_dependencies(monkeypatch):
         )(),
     )
     monkeypatch.setattr("app.soap.soap.lookup_patient", lambda *args, **kwargs: {"id": "test"})
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("app.soap.soap.attempt_audit", AsyncMock())
 
     # mock the responses so they don't fail later in the pipeline
     async def mock_response(*args, **kwargs):

@@ -41,7 +41,7 @@ class AuditEventRow(SQLModel, table=True):
     outcome: str = Field(index=True)
     error_code: str | None = Field(default=None)
 
-    subject_ref: str = Field(index=True)
+    subject_ref: str | None = Field(default=None, index=True)
 
     message_id: str | None = Field(default=None)
     document_id: str | None = Field(default=None)
