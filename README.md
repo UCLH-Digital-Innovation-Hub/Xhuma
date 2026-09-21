@@ -76,16 +76,26 @@ sequenceDiagram
 - NHS Digital API access credentials
 
 ## Development
-1. install pipenv
+1. Install uv.
 
-2. install development dependencies
+2. Install development dependencies from the lockfile.
 ```bash
-pipenv install --dev
+uv sync --locked --dev
 ```
 
 3. install pre-commit hooks to ensure consistency
 ```bash
-pre-commit install
+uv run --locked pre-commit install
+```
+
+The Ruff hooks check the whole repository using the version in `uv.lock` and
+the rules in `pyproject.toml`, matching CI. They automatically fix lint and
+formatting issues where possible; review and stage those edits before retrying
+the commit. To run the same read-only checks as CI:
+
+```bash
+uv run --locked ruff check .
+uv run --locked ruff format --check .
 ```
 
 4. configure environmental variables and use docker as below

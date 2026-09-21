@@ -84,18 +84,12 @@ class LivingSubjectId(XmlModel):
 
 
 class ITI55ParameterList(XmlModel):
-    living_subject_id: LivingSubjectId | list[LivingSubjectId] | None = Field(
-        default=None, alias="livingSubjectId"
-    )
+    living_subject_id: LivingSubjectId | list[LivingSubjectId] | None = Field(default=None, alias="livingSubjectId")
 
     def identifiers(self) -> list[Identifier]:
         if self.living_subject_id is None:
             return []
-        parameters = (
-            self.living_subject_id
-            if isinstance(self.living_subject_id, list)
-            else [self.living_subject_id]
-        )
+        parameters = self.living_subject_id if isinstance(self.living_subject_id, list) else [self.living_subject_id]
         return [identifier for item in parameters for identifier in item.identifiers()]
 
 
@@ -104,21 +98,15 @@ class ITI55QueryByParameter(XmlModel):
     status_code: Any = Field(default=None, alias="statusCode")
     response_modality_code: Any = Field(default=None, alias="responseModalityCode")
     response_priority_code: Any = Field(default=None, alias="responsePriorityCode")
-    parameter_list: ITI55ParameterList | None = Field(
-        default=None, alias="parameterList"
-    )
+    parameter_list: ITI55ParameterList | None = Field(default=None, alias="parameterList")
 
 
 class ITI55ControlActProcess(XmlModel):
-    query_by_parameter: ITI55QueryByParameter | None = Field(
-        default=None, alias="queryByParameter"
-    )
+    query_by_parameter: ITI55QueryByParameter | None = Field(default=None, alias="queryByParameter")
 
 
 class ITI55Payload(XmlModel):
-    control_act_process: ITI55ControlActProcess | None = Field(
-        default=None, alias="controlActProcess"
-    )
+    control_act_process: ITI55ControlActProcess | None = Field(default=None, alias="controlActProcess")
 
 
 class ITI55RequestBody(XmlModel):
@@ -151,9 +139,7 @@ class ValueList(XmlModel):
     def first_value(self) -> str | None:
         # The stored-query schema permits repeated values. This service handles
         # one patient per request, matching the behaviour of the original code.
-        value = (
-            self.value[0] if isinstance(self.value, list) and self.value else self.value
-        )
+        value = self.value[0] if isinstance(self.value, list) and self.value else self.value
         if isinstance(value, dict):
             value = value.get("#text")
         return str(value) if value is not None else None
@@ -183,12 +169,8 @@ class AdhocQueryContainer(XmlModel):
 
 
 class ITI38RequestBody(XmlModel):
-    adhoc_query_request: AdhocQueryContainer | None = Field(
-        default=None, alias="AdhocQueryRequest"
-    )
-    cross_gateway_query: AdhocQueryContainer | None = Field(
-        default=None, alias="CrossGatewayQuery"
-    )
+    adhoc_query_request: AdhocQueryContainer | None = Field(default=None, alias="AdhocQueryRequest")
+    cross_gateway_query: AdhocQueryContainer | None = Field(default=None, alias="CrossGatewayQuery")
 
     @property
     def query(self) -> AdhocQuery | None:
@@ -208,9 +190,7 @@ class DocumentRequest(XmlModel):
 
 
 class RetrieveDocumentSetRequest(XmlModel):
-    document_request: DocumentRequest | list[DocumentRequest] | None = Field(
-        default=None, alias="DocumentRequest"
-    )
+    document_request: DocumentRequest | list[DocumentRequest] | None = Field(default=None, alias="DocumentRequest")
 
     @property
     def first_document(self) -> DocumentRequest | None:
@@ -245,10 +225,7 @@ class SecurityTimestamp(XmlModel):
 class SecurityHeader(XmlModel):
     must_understand: int = Field(default=1, alias="@s:mustUnderstand")
     xmlns_o: str = Field(
-        default=(
-            "http://docs.oasis-open.org/wss/2004/01/"
-            "oasis-200401-wss-wssecurity-secext-1.0.xsd"
-        ),
+        default=("http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"),
         alias="@xmlns:o",
     )
     timestamp: SecurityTimestamp = Field(alias="u:Timestamp")
@@ -267,17 +244,10 @@ class ResponseHeader(XmlModel):
 
 
 class SoapEnvelopeContent(XmlModel):
-    xmlns_s: str = Field(
-        default="http://www.w3.org/2003/05/soap-envelope", alias="@xmlns:s"
-    )
-    xmlns_a: str = Field(
-        default="http://www.w3.org/2005/08/addressing", alias="@xmlns:a"
-    )
+    xmlns_s: str = Field(default="http://www.w3.org/2003/05/soap-envelope", alias="@xmlns:s")
+    xmlns_a: str = Field(default="http://www.w3.org/2005/08/addressing", alias="@xmlns:a")
     xmlns_u: str = Field(
-        default=(
-            "http://docs.oasis-open.org/wss/2004/01/"
-            "oasis-200401-wss-wssecurity-utility-1.0.xsd"
-        ),
+        default=("http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"),
         alias="@xmlns:u",
     )
     header: Any = Field(alias="s:Header")
@@ -321,23 +291,17 @@ class AcknowledgementDetail(XmlModel):
 class Acknowledgement(XmlModel):
     type_code: CodeElement = Field(alias="typeCode")
     target_message: TargetMessage = Field(alias="targetMessage")
-    detail: AcknowledgementDetail | None = Field(
-        default=None, alias="acknowledgementDetail"
-    )
+    detail: AcknowledgementDetail | None = Field(default=None, alias="acknowledgementDetail")
 
 
 class AssignedDevice(XmlModel):
     class_code: str = Field(default="ASSIGNED", alias="@classCode")
-    identifier: Identifier = Field(
-        default_factory=lambda: Identifier(root=NHS_NUMBER_ROOT), alias="id"
-    )
+    identifier: Identifier = Field(default_factory=lambda: Identifier(root=NHS_NUMBER_ROOT), alias="id")
 
 
 class AuthorOrPerformer(XmlModel):
     type_code: str = Field(default="AUT", alias="@typeCode")
-    assigned_device: AssignedDevice = Field(
-        default_factory=AssignedDevice, alias="assignedDevice"
-    )
+    assigned_device: AssignedDevice = Field(default_factory=AssignedDevice, alias="assignedDevice")
 
 
 class AssignedEntity(XmlModel):
@@ -383,9 +347,7 @@ class ProviderOrganization(XmlModel):
 class Patient(XmlModel):
     class_code: str = Field(default="PAT", alias="@classCode")
     identifiers: list[Identifier] = Field(alias="id")
-    status_code: CodeElement = Field(
-        default_factory=lambda: CodeElement(code="active"), alias="statusCode"
-    )
+    status_code: CodeElement = Field(default_factory=lambda: CodeElement(code="active"), alias="statusCode")
     patient_person: PatientPerson = Field(alias="patientPerson")
     provider_organization: ProviderOrganization = Field(alias="providerOrganization")
 
@@ -398,9 +360,7 @@ class Subject1(XmlModel):
 class RegistrationEvent(XmlModel):
     class_code: str = Field(default="REG", alias="@classCode")
     mood_code: str = Field(default="EVN", alias="moodCode")
-    status_code: CodeElement = Field(
-        default_factory=lambda: CodeElement(code="active"), alias="statusCode"
-    )
+    status_code: CodeElement = Field(default_factory=lambda: CodeElement(code="active"), alias="statusCode")
     custodian: Custodian | None = None
     subject: Subject1 = Field(alias="subject1")
 
@@ -421,13 +381,9 @@ class ITI55ControlActResponse(XmlModel):
     class_code: str = Field(default="CACT", alias="@classCode")
     mood_code: str = Field(default="EVN", alias="@moodCode")
     code: CodeElement = Field(
-        default_factory=lambda: CodeElement(
-            code="PRPA_TE201306UV02", code_system=HL7_INTERACTION_ROOT
-        )
+        default_factory=lambda: CodeElement(code="PRPA_TE201306UV02", code_system=HL7_INTERACTION_ROOT)
     )
-    author_or_performer: AuthorOrPerformer | None = Field(
-        default=None, alias="authorOrPerformer"
-    )
+    author_or_performer: AuthorOrPerformer | None = Field(default=None, alias="authorOrPerformer")
     subject: Subject | None = None
     query_ack: QueryAcknowledgement = Field(alias="queryAck")
     query_by_parameter: Any = Field(alias="queryByParameter")
@@ -436,47 +392,29 @@ class ITI55ControlActResponse(XmlModel):
 class ITI55ResponseMessage(XmlModel):
     xmlns: str = Field(default="urn:hl7-org:v3", alias="@xmlns")
     its_version: str = Field(default="XML_1.0", alias="@ITSVersion")
-    identifier: Identifier = Field(
-        default_factory=lambda: Identifier(root=str(uuid4())), alias="id"
-    )
+    identifier: Identifier = Field(default_factory=lambda: Identifier(root=str(uuid4())), alias="id")
     creation_time: ValueElement = Field(
         default_factory=lambda: ValueElement(value=int(datetime.now().timestamp())),
         alias="creationTime",
     )
     interaction_id: Identifier = Field(
-        default_factory=lambda: Identifier(
-            root=HL7_INTERACTION_ROOT, extension="PRPA_IN201306UV02"
-        ),
+        default_factory=lambda: Identifier(root=HL7_INTERACTION_ROOT, extension="PRPA_IN201306UV02"),
         alias="interactionId",
     )
     # These fixed transmission values preserve the existing synchronous test-mode
     # contract: test processing, no separate accept acknowledgement.
-    processing_code: CodeElement = Field(
-        default_factory=lambda: CodeElement(code="T"), alias="processingCode"
-    )
-    processing_mode_code: CodeElement = Field(
-        default_factory=lambda: CodeElement(code="T"), alias="processingModeCode"
-    )
-    accept_ack_code: CodeElement = Field(
-        default_factory=lambda: CodeElement(code="NE"), alias="acceptAckCode"
-    )
-    receiver: MessageEndpoint = Field(
-        default_factory=lambda: MessageEndpoint(type_code="RCV")
-    )
-    sender: MessageEndpoint = Field(
-        default_factory=lambda: MessageEndpoint(type_code="SND")
-    )
+    processing_code: CodeElement = Field(default_factory=lambda: CodeElement(code="T"), alias="processingCode")
+    processing_mode_code: CodeElement = Field(default_factory=lambda: CodeElement(code="T"), alias="processingModeCode")
+    accept_ack_code: CodeElement = Field(default_factory=lambda: CodeElement(code="NE"), alias="acceptAckCode")
+    receiver: MessageEndpoint = Field(default_factory=lambda: MessageEndpoint(type_code="RCV"))
+    sender: MessageEndpoint = Field(default_factory=lambda: MessageEndpoint(type_code="SND"))
     acknowledgement: Acknowledgement
     control_act_process: ITI55ControlActResponse = Field(alias="controlActProcess")
 
 
 class ITI55ResponseBody(XmlModel):
-    xmlns_xsi: str = Field(
-        default="http://www.w3.org/2001/XMLSchema-instance", alias="@xmlns:xsi"
-    )
-    xmlns_xsd: str = Field(
-        default="http://www.w3.org/2001/XMLSchema", alias="@xmlns:xsd"
-    )
+    xmlns_xsi: str = Field(default="http://www.w3.org/2001/XMLSchema-instance", alias="@xmlns:xsi")
+    xmlns_xsd: str = Field(default="http://www.w3.org/2001/XMLSchema", alias="@xmlns:xsd")
     message: ITI55ResponseMessage = Field(alias="PRPA_IN201306UV02")
 
 
@@ -547,23 +485,15 @@ class ExtrinsicObject(XmlModel):
 
 
 class RegistryObjectList(XmlModel):
-    xmlns: str = Field(
-        default="urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0", alias="@xmlns"
-    )
+    xmlns: str = Field(default="urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0", alias="@xmlns")
     extrinsic_object: ExtrinsicObject = Field(alias="ExtrinsicObject")
 
 
 class AdhocQueryResponse(XmlModel):
     status: str = Field(default=XDS_SUCCESS_STATUS, alias="@status")
-    xmlns: str = Field(
-        default="urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0", alias="@xmlns"
-    )
-    registry_error_list: RegistryErrorList | None = Field(
-        default=None, alias="RegistryErrorList"
-    )
-    registry_object_list: RegistryObjectList | dict[str, Any] | None = Field(
-        default=None, alias="RegistryObjectList"
-    )
+    xmlns: str = Field(default="urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0", alias="@xmlns")
+    registry_error_list: RegistryErrorList | None = Field(default=None, alias="RegistryErrorList")
+    registry_object_list: RegistryObjectList | dict[str, Any] | None = Field(default=None, alias="RegistryObjectList")
 
 
 class ITI38ResponseBody(XmlModel):
@@ -582,18 +512,14 @@ class ITI39RegistryErrorList(XmlModel):
 class ITI39RegistryResponse(XmlModel):
     identifier: str | None = Field(default=None, alias="@id")
     status: str = Field(default=XDS_SUCCESS_STATUS, alias="@status")
-    registry_error_list: ITI39RegistryErrorList | None = Field(
-        default=None, alias="rs:RegistryErrorList"
-    )
+    registry_error_list: ITI39RegistryErrorList | None = Field(default=None, alias="rs:RegistryErrorList")
 
 
 class ITI39DocumentResponse(XmlModel):
     home_community_id: TextElement = Field(alias="ns4:HomeCommunityId")
     repository_unique_id: TextElement = Field(alias="ns4:RepositoryUniqueId")
     document_unique_id: TextElement = Field(alias="ns4:DocumentUniqueId")
-    mime_type: TextElement = Field(
-        default_factory=lambda: TextElement(text="text/xml"), alias="ns4:mimeType"
-    )
+    mime_type: TextElement = Field(default_factory=lambda: TextElement(text="text/xml"), alias="ns4:mimeType")
     document: bytes | str = Field(alias="ns4:Document")
 
     @field_serializer("document")
@@ -611,26 +537,18 @@ class RetrieveDocumentSetResponse(XmlModel):
     )
     xmlns_rs: str | None = Field(default=None, alias="@xmlns:rs")
     registry_response: ITI39RegistryResponse = Field(alias="ns8:RegistryResponse")
-    document_response: ITI39DocumentResponse | None = Field(
-        default=None, alias="ns4:DocumentResponse"
-    )
+    document_response: ITI39DocumentResponse | None = Field(default=None, alias="ns4:DocumentResponse")
 
 
 class ITI39ResponseBody(XmlModel):
-    response: RetrieveDocumentSetResponse = Field(
-        alias="ns4:RetrieveDocumentSetResponse"
-    )
+    response: RetrieveDocumentSetResponse = Field(alias="ns4:RetrieveDocumentSetResponse")
 
 
 class ITI39ErrorRetrieveDocumentSetResponse(XmlModel):
     xmlns_ns4: str = Field(default="urn:ihe:iti:xds-b:2007", alias="@xmlns:ns4")
-    xmlns_rs: str = Field(
-        default="urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0", alias="@xmlns:rs"
-    )
+    xmlns_rs: str = Field(default="urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0", alias="@xmlns:rs")
     registry_response: ITI39RegistryResponse = Field(alias="rs:RegistryResponse")
 
 
 class ITI39ErrorResponseBody(XmlModel):
-    response: ITI39ErrorRetrieveDocumentSetResponse = Field(
-        alias="ns4:RetrieveDocumentSetResponse"
-    )
+    response: ITI39ErrorRetrieveDocumentSetResponse = Field(alias="ns4:RetrieveDocumentSetResponse")

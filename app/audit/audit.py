@@ -72,6 +72,7 @@ async def attempt_audit(
 ) -> None:
     """Attempt to write an audit event, failing the main request if it fails."""
     import logging
+
     from .build import build_audit_event
     from .store import insert_audit_event
 
