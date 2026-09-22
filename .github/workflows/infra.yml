@@ -53,6 +53,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate Branch and Event
+        working-directory: .
         run: python scripts/deploy/validate_branch.py infra "${{ github.event_name }}" "${{ github.ref }}" "${{ github.base_ref }}"
 
       - name: Setup Terraform

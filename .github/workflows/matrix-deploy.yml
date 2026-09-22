@@ -149,7 +149,7 @@ jobs:
         env:
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          XHUMA_BACKEND_FILE: infra/${{ matrix.target.backend_file }}
+          XHUMA_BACKEND_FILE: ${{ matrix.target.backend_file }}
         run: bash infra/bootstrap/setup-target.sh
 
       - name: Terraform Init
@@ -244,7 +244,7 @@ jobs:
 
   infra-apply:
     name: Infra Apply - ${{ matrix.target.id }}
-    needs: [prepare-targets, infra-plan]
+    needs: [build, prepare-targets, infra-plan]
     runs-on: ${{ matrix.target.runner_label }}
     environment: ${{ matrix.target.github_infra_environment }}
     strategy:
@@ -435,12 +435,14 @@ jobs:
           SUCCESS=0
           
           while [ $ELAPSED -lt $TIMEOUT ]; do
-            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 $APP_URL || echo "failed")
-            if [ "$RESPONSE" == "200" ]; then
+            # Use max-time for the connection/request
+            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$APP_URL" || echo "curl_failed")
+            
+            if [ "$RESPONSE_CODE" == "200" ]; then
               SUCCESS=1
               break
-            elif [ "$RESPONSE" == "403" ] || [ "$RESPONSE" == "000" ] || [ "$RESPONSE" == "failed" ]; then
-              echo "Health check blocked by network or WAF (HTTP $RESPONSE). Operator manual verification required."
+            elif [ "$RESPONSE_CODE" == "403" ] || [ "$RESPONSE_CODE" == "000" ] || [ "$RESPONSE_CODE" == "curl_failed" ]; then
+              echo "Health check blocked by network, WAF, or unreachable (Status: $RESPONSE_CODE)."
               echo "::warning::Automated health check BLOCKED/NOT RUN. Operator must verify."
               SUCCESS=2
               break
@@ -451,7 +453,17 @@ jobs:
           done
           
           if [ $SUCCESS -eq 0 ]; then
-            echo "::error::Health check timed out or failed (last response: $RESPONSE)"
+            echo "::error::Health check timed out or failed (last response: $RESPONSE_CODE)"
             exit 1
           fi
-          echo "Application check finished. Manual clinical check required."
+          
+          echo "### Acceptance Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container Image Configured**: Verified" >> $GITHUB_STEP_SUMMARY
+          if [ $SUCCESS -eq 1 ]; then
+            echo "- **Automated Liveness**: Verified" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Automated Liveness**: BLOCKED/UNAVAILABLE (Operator intervention required)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Manual Functional Acceptance (SOAP/mTLS)**: OUTSTANDING" >> $GITHUB_STEP_SUMMARY
+          
+          echo "Application check finished. Manual clinical check required before marking deployment complete."
