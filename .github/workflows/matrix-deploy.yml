@@ -314,7 +314,7 @@ jobs:
           RG_NAME=$(jq -r '.backend_resource_group' $MANIFEST_FILE)
           SA_NAME=$(jq -r '.backend_storage_account' $MANIFEST_FILE)
           EXPECTED_DIGEST=$(jq -r '.candidate_image_digest' $MANIFEST_FILE)
-          
+
           if [ "$EXPECTED_DIGEST" != "${{ needs.build.outputs.digest }}" ]; then
             echo "::error::Candidate image digest mismatch! Expected $EXPECTED_DIGEST, got ${{ needs.build.outputs.digest }}"
             exit 1
@@ -433,11 +433,11 @@ jobs:
           INTERVAL=5
           ELAPSED=0
           SUCCESS=0
-          
+
           while [ $ELAPSED -lt $TIMEOUT ]; do
             # Use max-time for the connection/request
             RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$APP_URL" || echo "curl_failed")
-            
+
             if [ "$RESPONSE_CODE" == "200" ]; then
               SUCCESS=1
               break
@@ -451,12 +451,12 @@ jobs:
             ELAPSED=$((ELAPSED + INTERVAL))
             echo "Waiting... (elapsed ${ELAPSED}s)"
           done
-          
+
           if [ $SUCCESS -eq 0 ]; then
             echo "::error::Health check timed out or failed (last response: $RESPONSE_CODE)"
             exit 1
           fi
-          
+
           echo "### Acceptance Status" >> $GITHUB_STEP_SUMMARY
           echo "- **Container Image Configured**: Verified" >> $GITHUB_STEP_SUMMARY
           if [ $SUCCESS -eq 1 ]; then
@@ -465,5 +465,5 @@ jobs:
             echo "- **Automated Liveness**: BLOCKED/UNAVAILABLE (Operator intervention required)" >> $GITHUB_STEP_SUMMARY
           fi
           echo "- **Manual Functional Acceptance (SOAP/mTLS)**: OUTSTANDING" >> $GITHUB_STEP_SUMMARY
-          
+
           echo "Application check finished. Manual clinical check required before marking deployment complete."
