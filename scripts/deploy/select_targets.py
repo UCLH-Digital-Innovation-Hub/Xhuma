@@ -23,6 +23,10 @@ def main():
 
         stage = t.get("stage")
 
+        # Require source_branch matches the invoking branch
+        if t.get("source_branch") != branch:
+            continue
+
         # Enforce strict branch-to-stage mapping
         if branch == "rehearsal/play-deployment":
             if stage == "play":

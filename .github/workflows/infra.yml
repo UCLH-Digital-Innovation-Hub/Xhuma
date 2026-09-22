@@ -52,6 +52,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Branch and Event
+        run: python scripts/deploy/validate_branch.py infra "${{ github.event_name }}" "${{ github.ref }}" "${{ github.base_ref }}"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
 
@@ -60,26 +63,29 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
-      - name: Bootstrap Terraform State Storage
+      - name: Set TF State Variables
         run: |
           RG_NAME="${{ secrets.RESOURCE_GROUP }}"
           CLEAN_RG=$(echo $RG_NAME | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
           SA_NAME="xtf${CLEAN_RG}"
           SA_NAME=${SA_NAME:0:24}
 
-          echo "Ensuring Storage Account $SA_NAME exists in $RG_NAME..."
-          if ! az storage account show --name $SA_NAME --resource-group $RG_NAME &>/dev/null; then
-            az storage account create --resource-group $RG_NAME --name $SA_NAME --sku Standard_LRS --encryption-services blob --allow-blob-public-access false --min-tls-version TLS1_2
-          fi
-
-          ACCOUNT_KEY=$(az storage account keys list --resource-group $RG_NAME --account-name $SA_NAME --query '[0].value' -o tsv)
-
-          if ! az storage container show --name tfstate --account-name $SA_NAME --account-key $ACCOUNT_KEY &>/dev/null; then
-            az storage container create --name tfstate --account-name $SA_NAME --account-key $ACCOUNT_KEY
-          fi
-
           echo "TF_STATE_SA=$SA_NAME" >> $GITHUB_ENV
           echo "TF_STATE_RG=$RG_NAME" >> $GITHUB_ENV
+
+      - name: Bootstrap Terraform State Storage
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Ensuring Storage Account ${{ env.TF_STATE_SA }} exists in ${{ env.TF_STATE_RG }}..."
+          if ! az storage account show --name ${{ env.TF_STATE_SA }} --resource-group ${{ env.TF_STATE_RG }} &>/dev/null; then
+            az storage account create --resource-group ${{ env.TF_STATE_RG }} --name ${{ env.TF_STATE_SA }} --sku Standard_LRS --encryption-services blob --allow-blob-public-access false --min-tls-version TLS1_2
+          fi
+
+          ACCOUNT_KEY=$(az storage account keys list --resource-group ${{ env.TF_STATE_RG }} --account-name ${{ env.TF_STATE_SA }} --query '[0].value' -o tsv)
+
+          if ! az storage container show --name tfstate --account-name ${{ env.TF_STATE_SA }} --account-key $ACCOUNT_KEY &>/dev/null; then
+            az storage container create --name tfstate --account-name ${{ env.TF_STATE_SA }} --account-key $ACCOUNT_KEY
+          fi
 
       - name: Terraform Init
         run: |

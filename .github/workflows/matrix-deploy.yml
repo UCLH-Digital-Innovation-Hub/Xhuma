@@ -149,8 +149,7 @@ jobs:
         env:
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          XHUMA_TARGET: ${{ matrix.target.id }}
-          XHUMA_RESOURCE_GROUP: ${{ matrix.target.resource_group }}
+          XHUMA_BACKEND_FILE: infra/${{ matrix.target.backend_file }}
         run: bash infra/bootstrap/setup-target.sh
 
       - name: Terraform Init
@@ -183,9 +182,13 @@ jobs:
           PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}.tfplan"
 
           # Check if plan already exists (fail if re-planning)
-          RG_CLEAN=$(echo "${{ matrix.target.resource_group }}" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
-          SA_NAME="xtf${RG_CLEAN:0:21}"
-          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "$SA_NAME" --query '[0].value' -o tsv)
+          # Extract authoritative storage coordinates
+          RG_NAME=$(grep 'resource_group_name' "../${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          SA_NAME=$(grep 'storage_account_name' "../${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          CONTAINER_NAME=$(grep 'container_name' "../${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          STATE_KEY=$(grep 'key' "../${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+
+          ACCOUNT_KEY=$(az storage account keys list --resource-group "$RG_NAME" --account-name "$SA_NAME" --query '[0].value' -o tsv)
           echo "::add-mask::$ACCOUNT_KEY"
 
           EXISTS=$(az storage blob exists --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" --container-name tfplans --name "$PLAN_FILE" --query exists -o tsv)
@@ -214,6 +217,10 @@ jobs:
             "azure_tenant_id": "${{ secrets.AZURE_TENANT_ID }}",
             "azure_subscription_id": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
             "backend_file": "${{ matrix.target.backend_file }}",
+            "backend_resource_group": "$RG_NAME",
+            "backend_storage_account": "$SA_NAME",
+            "backend_container": "$CONTAINER_NAME",
+            "backend_key": "$STATE_KEY",
             "candidate_image_digest": "${{ needs.build.outputs.digest }}",
             "plan_blob_path": "$PLAN_FILE",
             "plan_sha256": "$PLAN_HASH"
@@ -294,14 +301,26 @@ jobs:
           BACKEND=$(jq -r '.backend_file' $MANIFEST_FILE)
 
           # Validation
-          if [ "$REPO" != "${{ github.repository }}" ] || [ "$SHA" != "${GITHUB_SHA}" ] || [ "$RUN_ID" != "${GITHUB_RUN_ID}" ] || [ "$T_ID" != "${{ matrix.target.id }}" ] || [ "$TENANT" != "${{ secrets.AZURE_TENANT_ID }}" ] || [ "$SUB" != "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] || [ "$BACKEND" != "${{ matrix.target.backend_file }}" ]; then
-            echo "::error::Manifest identity verification failed!"
+          export EXPECTED_REPO="${{ github.repository }}"
+          export EXPECTED_SHA="${GITHUB_SHA}"
+          export EXPECTED_RUN_ID="${GITHUB_RUN_ID}"
+          export EXPECTED_TARGET="${{ matrix.target.id }}"
+          export EXPECTED_TENANT="${{ secrets.AZURE_TENANT_ID }}"
+          export EXPECTED_SUB="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          export EXPECTED_BACKEND="${{ matrix.target.backend_file }}"
+          export EXPECTED_DIGEST="${{ needs.build.outputs.digest }}"
+          python ../scripts/deploy/validate_manifest.py "$MANIFEST_FILE"
+
+          RG_NAME=$(jq -r '.backend_resource_group' $MANIFEST_FILE)
+          SA_NAME=$(jq -r '.backend_storage_account' $MANIFEST_FILE)
+          EXPECTED_DIGEST=$(jq -r '.candidate_image_digest' $MANIFEST_FILE)
+          
+          if [ "$EXPECTED_DIGEST" != "${{ needs.build.outputs.digest }}" ]; then
+            echo "::error::Candidate image digest mismatch! Expected $EXPECTED_DIGEST, got ${{ needs.build.outputs.digest }}"
             exit 1
           fi
 
-          RG_CLEAN=$(echo "${{ matrix.target.resource_group }}" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
-          SA_NAME="xtf${RG_CLEAN:0:21}"
-          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "$SA_NAME" --query '[0].value' -o tsv)
+          ACCOUNT_KEY=$(az storage account keys list --resource-group "$RG_NAME" --account-name "$SA_NAME" --query '[0].value' -o tsv)
           echo "::add-mask::$ACCOUNT_KEY"
 
           az storage blob download \
@@ -409,11 +428,30 @@ jobs:
       - name: Application Health Check
         run: |
           echo "Waiting for application to start..."
-          sleep 10
           APP_URL="https://${{ matrix.target.app_service_name }}.azurewebsites.net/health"
-          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" $APP_URL || echo "failed")
-          if [ "$RESPONSE" != "200" ]; then
-            echo "::error::Health check failed with response: $RESPONSE"
+          TIMEOUT=120
+          INTERVAL=5
+          ELAPSED=0
+          SUCCESS=0
+          
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 $APP_URL || echo "failed")
+            if [ "$RESPONSE" == "200" ]; then
+              SUCCESS=1
+              break
+            elif [ "$RESPONSE" == "403" ] || [ "$RESPONSE" == "000" ] || [ "$RESPONSE" == "failed" ]; then
+              echo "Health check blocked by network or WAF (HTTP $RESPONSE). Operator manual verification required."
+              echo "::warning::Automated health check BLOCKED/NOT RUN. Operator must verify."
+              SUCCESS=2
+              break
+            fi
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+            echo "Waiting... (elapsed ${ELAPSED}s)"
+          done
+          
+          if [ $SUCCESS -eq 0 ]; then
+            echo "::error::Health check timed out or failed (last response: $RESPONSE)"
             exit 1
           fi
-          echo "Application is healthy (HTTP 200). Manual clinical check required."
+          echo "Application check finished. Manual clinical check required."

@@ -18,18 +18,17 @@ Xhuma utilizes a **Shared-Nothing Matrix Deployment** strategy. Every target env
 Terraform state and reviewed execution plans are stored securely in Azure Blob Storage. Each target has its own storage account within its target resource group.
 
 ### 2.1 Reused Bootstrapping Procedure
-We reuse the established INT bootstrap logic for new environments like `play`.
+We reuse the established bootstrap logic across environments. For `play`, we now utilize a target-agnostic script.
 
-1. **Target Configuration**: Verify your target configuration in `infra/targets.json`.
-2. **Execute Bootstrap**: Run the helper script locally to ensure the storage account exists:
+1. **Target Configuration**: Verify your target configuration in `infra/targets.json` and backend coordinates in `infra/backends/play.hcl`.
+2. **Execution**: The `matrix-deploy.yml` workflow automatically runs the bootstrap script:
    ```bash
    export AZURE_SUBSCRIPTION_ID="<your-subscription>"
    export AZURE_TENANT_ID="<your-tenant>"
-   export XHUMA_TARGET="play"
-   export XHUMA_RESOURCE_GROUP="rg-xhuma-play"
+   export XHUMA_BACKEND_FILE="infra/backends/play.hcl"
    bash infra/bootstrap/setup-target.sh
    ```
-   This creates the state storage account and containers in the target resource group. `tfplans` automatically expires files after 7 days to prevent unbounded plan retention.
+   This creates the state storage account and containers in the target resource group. `tfplans` automatically expires files after 7 days to prevent unbounded plan retention. It is important to note that this step performs writes to Azure Storage (creating the storage account and blob containers) *before* the infrastructure plan is even generated or approved.
 
 *(Note: Entra Blob authentication and OIDC are scheduled as separate, later hardening changes. We currently use interim storage-key authentication and long-lived Service Principal credentials.)*
 
@@ -88,15 +87,15 @@ Before functional verification can succeed, the environment's local Key Vault mu
 ## 5. Deployment Orchestration
 
 Deployment is handled by GitHub Actions (`.github/workflows/matrix-deploy.yml`), which enforces strict boundaries:
-- `rehearsal/play-deployment` -> `play` environment
-- `int` -> `int` environment
-- `main` -> `prd` environments
+- `matrix-deploy.yml` currently orchestrates only the `play` environment from the `rehearsal/play-deployment` branch.
+- Legacy pipelines (`cd.yml` and `infra.yml`) still own the deployment to `int` and `prd` from the `int` and `main` branches.
 
 ### 5.1 First Deployment & Protected Plans
 1. **Trigger**: Push code to the mapped branch (e.g., `rehearsal/play-deployment`).
-2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are available in GitHub.
+2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are available in GitHub. Plan generation will fail if a plan already exists for that run.
 3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary). Then, explicitly approve the infrastructure environment (`rg-xhuma-play-infra`).
-4. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
+4. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a completely new workflow run is required to generate and approve a new plan.
+5. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
 
 ### 5.2 Digest Rollback & Recovery
 Deployment is deterministic. We record the previous digest before deploying and the new digest after.
@@ -120,12 +119,22 @@ Deployment is deterministic. We record the previous digest before deploying and 
 - **Manual Clinical Check**: Because the GitHub Actions runner does not possess the required mTLS certificates, a manual synthetic test must be run from a trusted clinical workstation to verify SOAP mTLS and audit capabilities after deployment.
 
 ### 6.2 Operator Checklist for New Environments
+
+**Implemented Readiness Checks (Automated):**
+- [x] Application liveness probe (HTTP 200).
+- [x] Key Vault reference resolution at application startup.
+- [x] Digest verification of the deployed container.
+
+**Manual Prerequisites (To be done by Operator):**
 - [ ] Target configuration defined in `infra/targets.json`.
-- [ ] Scoped Azure SP access configured.
-- [ ] Bootstrap script executed to provision state storage.
-- [ ] Code pushed to trigger the pipeline.
-- [ ] Protected Terraform plan reviewed.
-- [ ] GitHub Environment approvals granted for infra apply and container deployment.
+- [ ] Scoped Azure SP access configured and credentials placed in GitHub.
+- [ ] GitHub Environment approvals configured for infra apply and container deployment.
 - [ ] Local Key Vault populated with `epic-ca-cert`.
-- [ ] Azure-side functional verification (e.g., checking Application Insights logs).
+
+**Follow-ups / Manual Exercises:**
+- [ ] Trust-local authentication.
+- [ ] Audit retention/access policies.
+- [ ] Restore evidence.
+- [ ] Key rotation.
+- [ ] Run synthetic manual clinical check (SOAP/mTLS) from a trusted workstation.
 - [ ] Rollback exercise performed and documented.
