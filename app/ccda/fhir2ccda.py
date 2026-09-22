@@ -3,17 +3,17 @@ import datetime
 import json
 import logging
 import os
+from copy import deepcopy
 
 import xmltodict
-from copy import deepcopy
-from fhirclient.models import bundle
+from fhirclient.models import bundle, patient
 from fhirclient.models import list as fhirlist
-from fhirclient.models import patient
+
+from app.gp_connect_config import get_gp_connect_inclusions
 
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
-from .helpers import date_helper, templateId
-from app.gp_connect_config import get_gp_connect_inclusions
 from .entries.results import investigation
+from .helpers import date_helper, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:

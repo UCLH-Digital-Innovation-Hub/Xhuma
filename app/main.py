@@ -63,9 +63,11 @@ async def lifespan(app: FastAPI):
         val = os.getenv(var)
         if not val or not val.strip():
             raise RuntimeError(f"Missing required configuration: {var}")
+        if val.strip().startswith("@Microsoft.KeyVault("):
+            raise RuntimeError(f"Unresolved KeyVault reference for required configuration: {var}")
 
-    import math
     import datetime
+    import math
 
     ccda_expiry_str = os.getenv("CCDA_EXPIRY_HOURS", "4")
     try:

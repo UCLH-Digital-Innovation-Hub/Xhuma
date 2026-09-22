@@ -1,5 +1,6 @@
 import pytest
 from fhirclient.models import bundle
+
 from app.ccda import fhir2ccda
 
 

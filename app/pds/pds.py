@@ -10,11 +10,11 @@ import uuid
 import fastapi
 import httpx
 
+from app.audit.audit import AuditFailureException, attempt_audit
+from app.audit.models import AuditOutcome, SAMLAttributes
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
 from app.security import pds_jwt
-from app.audit.audit import attempt_audit, AuditFailureException
-from app.audit.models import AuditOutcome, SAMLAttributes
 
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"

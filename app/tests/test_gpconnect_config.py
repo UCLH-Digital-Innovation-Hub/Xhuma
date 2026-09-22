@@ -1,9 +1,11 @@
 import os
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from fastapi import FastAPI
+
 from app.gpconnect import _fetch_gpconnect_record
 from app.main import lifespan
-from fastapi import FastAPI
 
 
 @pytest.mark.asyncio
@@ -153,3 +155,20 @@ async def test_startup_config_validation():
             del os.environ["CCDA_EXPIRY_HOURS"]
         async with lifespan(app):
             pass
+
+
+@pytest.mark.asyncio
+async def test_lifespan_unresolved_keyvault_secret():
+    """Test that application startup fails if Azure Key Vault fails to resolve a required secret."""
+    with patch.dict(
+        os.environ,
+        {
+            "API_KEY": "@Microsoft.KeyVault(SecretUri=https://xhuma.vault.azure.net/secrets/apikey/)",
+            "ORG_ASID": "123",
+            "ORG_CODE": "RRV00",
+        },
+    ):
+        app = FastAPI()
+        with pytest.raises(RuntimeError, match="Unresolved KeyVault reference for required configuration: API_KEY"):
+            async with lifespan(app):
+                pass

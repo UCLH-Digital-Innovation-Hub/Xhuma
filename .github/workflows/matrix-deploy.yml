@@ -3,13 +3,12 @@ name: Matrix Deployment Pilot
 on:
   push:
     branches:
-      - feat/matrix-deployment-pilot
-      - feat/matrix-deployment-pilot-integration
+      - rehearsal/play-deployment
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
-  
+
 concurrency:
   group: xhuma-play-release
   cancel-in-progress: false
@@ -108,9 +107,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-targets.outputs.matrix) }}
-    outputs:
-      plan_hash: ${{ steps.plan.outputs.plan_hash }}
-      plan_file: ${{ steps.plan.outputs.plan_file }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Terraform
@@ -143,18 +139,20 @@ jobs:
             echo "::error::Missing required secrets:$MISSING"
             exit 1
           fi
-          
+
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-      
+
       - name: Bootstrap State Storage
         env:
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        run: bash infra/bootstrap/setup-play.sh
-        
+          XHUMA_TARGET: ${{ matrix.target.id }}
+          XHUMA_RESOURCE_GROUP: ${{ matrix.target.resource_group }}
+        run: bash infra/bootstrap/setup-target.sh
+
       - name: Terraform Init
         working-directory: ./infra
         env:
@@ -165,7 +163,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="../${{ matrix.target.backend_file }}"
-            
+
       - name: Terraform Plan
         id: plan
         working-directory: ./infra
@@ -182,24 +180,46 @@ jobs:
           TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
           TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
         run: |
-          PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tfplan"
-          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" > plan_output.txt
-          
-          # Upload Plan
-          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
+          PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}.tfplan"
+
+          # Check if plan already exists (fail if re-planning)
+          RG_CLEAN=$(echo "${{ matrix.target.resource_group }}" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
+          SA_NAME="xtf${RG_CLEAN:0:21}"
+          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "$SA_NAME" --query '[0].value' -o tsv)
           echo "::add-mask::$ACCOUNT_KEY"
+
+          EXISTS=$(az storage blob exists --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" --container-name tfplans --name "$PLAN_FILE" --query exists -o tsv)
+          if [ "$EXISTS" == "true" ]; then
+            echo "::error::Plan $PLAN_FILE already exists. Overwriting is forbidden. A replacement plan requires a new workflow run."
+            exit 1
+          fi
+
+          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" > plan_output.txt
+
           az storage blob upload \
-            --account-name "xtfrgxhumaplay" \
+            --account-name "$SA_NAME" \
             --account-key "$ACCOUNT_KEY" \
             --container-name tfplans \
             --name "$PLAN_FILE" \
-            --file "$PLAN_FILE" \
-            --overwrite
-            
+            --file "$PLAN_FILE"
+
           PLAN_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')
-          echo "plan_hash=$PLAN_HASH" >> $GITHUB_OUTPUT
-          echo "plan_file=$PLAN_FILE" >> $GITHUB_OUTPUT
-          
+
+          cat <<EOF_MANIFEST > manifest.json
+          {
+            "repository": "${{ github.repository }}",
+            "source_commit_sha": "${GITHUB_SHA}",
+            "workflow_run_id": "${GITHUB_RUN_ID}",
+            "target_id": "${{ matrix.target.id }}",
+            "azure_tenant_id": "${{ secrets.AZURE_TENANT_ID }}",
+            "azure_subscription_id": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+            "backend_file": "${{ matrix.target.backend_file }}",
+            "candidate_image_digest": "${{ needs.build.outputs.digest }}",
+            "plan_blob_path": "$PLAN_FILE",
+            "plan_sha256": "$PLAN_HASH"
+          }
+          EOF_MANIFEST
+
           echo "### Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Plan Hash:** \`$PLAN_HASH\`" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
@@ -208,6 +228,12 @@ jobs:
           # Filter output to non-secret change summary
           grep -E "Plan: |No changes.|error" plan_output.txt >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Manifest Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-manifest-${{ matrix.target.id }}
+          path: infra/manifest.json
 
   infra-apply:
     name: Infra Apply - ${{ matrix.target.id }}
@@ -239,32 +265,60 @@ jobs:
             echo "::error::Missing required secrets:$MISSING"
             exit 1
           fi
-          
+
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-      
+
+      - name: Download Manifest Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-manifest-${{ matrix.target.id }}
+          path: infra/
+
       - name: Download and Verify Plan
         working-directory: ./infra
         run: |
-          PLAN_FILE="${{ needs.infra-plan.outputs.plan_file }}"
-          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
+          MANIFEST_FILE="manifest.json"
+
+          # Read fields from manifest
+          PLAN_FILE=$(jq -r '.plan_blob_path' $MANIFEST_FILE)
+          EXPECTED_HASH=$(jq -r '.plan_sha256' $MANIFEST_FILE)
+          REPO=$(jq -r '.repository' $MANIFEST_FILE)
+          SHA=$(jq -r '.source_commit_sha' $MANIFEST_FILE)
+          RUN_ID=$(jq -r '.workflow_run_id' $MANIFEST_FILE)
+          T_ID=$(jq -r '.target_id' $MANIFEST_FILE)
+          TENANT=$(jq -r '.azure_tenant_id' $MANIFEST_FILE)
+          SUB=$(jq -r '.azure_subscription_id' $MANIFEST_FILE)
+          BACKEND=$(jq -r '.backend_file' $MANIFEST_FILE)
+
+          # Validation
+          if [ "$REPO" != "${{ github.repository }}" ] || [ "$SHA" != "${GITHUB_SHA}" ] || [ "$RUN_ID" != "${GITHUB_RUN_ID}" ] || [ "$T_ID" != "${{ matrix.target.id }}" ] || [ "$TENANT" != "${{ secrets.AZURE_TENANT_ID }}" ] || [ "$SUB" != "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] || [ "$BACKEND" != "${{ matrix.target.backend_file }}" ]; then
+            echo "::error::Manifest identity verification failed!"
+            exit 1
+          fi
+
+          RG_CLEAN=$(echo "${{ matrix.target.resource_group }}" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
+          SA_NAME="xtf${RG_CLEAN:0:21}"
+          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "$SA_NAME" --query '[0].value' -o tsv)
           echo "::add-mask::$ACCOUNT_KEY"
+
           az storage blob download \
-            --account-name "xtfrgxhumaplay" \
+            --account-name "$SA_NAME" \
             --account-key "$ACCOUNT_KEY" \
             --container-name tfplans \
             --name "$PLAN_FILE" \
             --file "$PLAN_FILE"
-            
+
           DOWNLOADED_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')
-          if [ "$DOWNLOADED_HASH" != "${{ needs.infra-plan.outputs.plan_hash }}" ]; then
-            echo "::error::Plan hash mismatch! Expected ${{ needs.infra-plan.outputs.plan_hash }}, got $DOWNLOADED_HASH"
+          if [ "$DOWNLOADED_HASH" != "$EXPECTED_HASH" ]; then
+            echo "::error::Plan hash mismatch! Expected $EXPECTED_HASH, got $DOWNLOADED_HASH"
             exit 1
           fi
           echo "Plan hash verified: $DOWNLOADED_HASH"
-            
+          echo "PLAN_FILE=$PLAN_FILE" >> $GITHUB_ENV
+
       - name: Terraform Init
         working-directory: ./infra
         env:
@@ -275,7 +329,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="../${{ matrix.target.backend_file }}"
-            
+
       - name: Terraform Apply
         working-directory: ./infra
         env:
@@ -284,7 +338,6 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
-          PLAN_FILE="${{ needs.infra-plan.outputs.plan_file }}"
           terraform apply -input=false -auto-approve "$PLAN_FILE"
 
   deploy:
@@ -312,12 +365,12 @@ jobs:
             echo "::error::Missing required secrets:$MISSING"
             exit 1
           fi
-          
+
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-          
+
       - name: Capture Previous Digest
         id: prev_digest
         run: |
@@ -326,13 +379,13 @@ jobs:
           # Normalize Azure prefix
           PREV_DIGEST="${PREV_DIGEST#DOCKER|}"
           echo "PREV_DIGEST=$PREV_DIGEST" >> $GITHUB_ENV
-          
+
       - name: Deploy Container to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ matrix.target.app_service_name }}
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}'
-          
+
       - name: Verify New Digest
         run: |
           NEW_DIGEST=$(az webapp config container show --name "${{ matrix.target.app_service_name }}" --resource-group "${{ matrix.target.resource_group }}" --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" -o tsv || echo "none")
@@ -340,15 +393,27 @@ jobs:
              echo "::error::Failed to retrieve new digest from Azure"
              exit 1
           fi
-          
+
           NEW_DIGEST="${NEW_DIGEST#DOCKER|}"
           EXPECTED_DIGEST="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
           if [[ "$NEW_DIGEST" != "$EXPECTED_DIGEST" ]]; then
              echo "::error::Deployed digest $NEW_DIGEST does not match expected $EXPECTED_DIGEST"
              exit 1
           fi
-          
+
           echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Previous Image:** \`$PREV_DIGEST\`" >> $GITHUB_STEP_SUMMARY
           echo "**New Image:** \`$NEW_DIGEST\`" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Application Health Check
+        run: |
+          echo "Waiting for application to start..."
+          sleep 10
+          APP_URL="https://${{ matrix.target.app_service_name }}.azurewebsites.net/health"
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" $APP_URL || echo "failed")
+          if [ "$RESPONSE" != "200" ]; then
+            echo "::error::Health check failed with response: $RESPONSE"
+            exit 1
+          fi
+          echo "Application is healthy (HTTP 200). Manual clinical check required."

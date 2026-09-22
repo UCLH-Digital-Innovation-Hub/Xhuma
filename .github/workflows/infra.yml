@@ -32,16 +32,16 @@ env:
   TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
 
   # Construct names dynamically (Using static names for persistence in Main environment)
-  TF_VAR_app_service_name: ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || github.ref == 'refs/heads/int' && 'xhuma-app-int' || 'xhuma-app-play' }}
-  TF_VAR_redis_name: ${{ github.ref == 'refs/heads/main' && 'xhuma-redis-prd' || github.ref == 'refs/heads/int' && 'xhuma-redis-int' || 'xhuma-redis-play' }}
-  TF_VAR_postgres_server_name: ${{ github.ref == 'refs/heads/main' && 'xhuma-psql-prd' || github.ref == 'refs/heads/int' && 'xhuma-psql-int' || 'xhuma-psql-play' }}
+  TF_VAR_app_service_name: ${{ github.base_ref == 'main' && 'xhuma-app-prd' || github.ref == 'refs/heads/main' && 'xhuma-app-prd' || 'xhuma-app-int' }}
+  TF_VAR_redis_name: ${{ github.base_ref == 'main' && 'xhuma-redis-prd' || github.ref == 'refs/heads/main' && 'xhuma-redis-prd' || 'xhuma-redis-int' }}
+  TF_VAR_postgres_server_name: ${{ github.base_ref == 'main' && 'xhuma-psql-prd' || github.ref == 'refs/heads/main' && 'xhuma-psql-prd' || 'xhuma-psql-int' }}
 
 jobs:
   terraform:
     name: "Terraform"
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/int' && 'rg-xhuma-int' || 'rg-xhuma-play' }}
+      name: ${{ github.base_ref == 'main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || 'rg-xhuma-int' }}
 
     defaults:
       run:

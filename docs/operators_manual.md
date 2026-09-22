@@ -25,9 +25,11 @@ We reuse the established INT bootstrap logic for new environments like `play`.
    ```bash
    export AZURE_SUBSCRIPTION_ID="<your-subscription>"
    export AZURE_TENANT_ID="<your-tenant>"
-   bash infra/bootstrap/setup-play.sh
+   export XHUMA_TARGET="play"
+   export XHUMA_RESOURCE_GROUP="rg-xhuma-play"
+   bash infra/bootstrap/setup-target.sh
    ```
-   This creates the `xtfrgxhumaplay` storage account (or equivalent for your target) in the `rg-xhuma-play` resource group, along with the `tfstate` and `tfplans` containers.
+   This creates the state storage account and containers in the target resource group. `tfplans` automatically expires files after 7 days to prevent unbounded plan retention.
 
 *(Note: Entra Blob authentication and OIDC are scheduled as separate, later hardening changes. We currently use interim storage-key authentication and long-lived Service Principal credentials.)*
 
@@ -86,12 +88,12 @@ Before functional verification can succeed, the environment's local Key Vault mu
 ## 5. Deployment Orchestration
 
 Deployment is handled by GitHub Actions (`.github/workflows/matrix-deploy.yml`), which enforces strict boundaries:
-- `feat/matrix-deployment-pilot` -> `play` environment
+- `rehearsal/play-deployment` -> `play` environment
 - `int` -> `int` environment
 - `main` -> `prd` environments
 
 ### 5.1 First Deployment & Protected Plans
-1. **Trigger**: Push code to the mapped branch (e.g., `feat/matrix-deployment-pilot`).
+1. **Trigger**: Push code to the mapped branch (e.g., `rehearsal/play-deployment`).
 2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are available in GitHub.
 3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary). Then, explicitly approve the infrastructure environment (`rg-xhuma-play-infra`).
 4. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
@@ -115,6 +117,7 @@ Deployment is deterministic. We record the previous digest before deploying and 
 ### 6.1 Safe Verification Boundaries
 - **Liveness Probe**: The `/health` endpoint is unauthenticated and returns a coarse HTTP 200 process-liveness signal. It does not leak secrets, tokens, or perform downstream NHS requests.
 - **Protected Readiness**: Startup configuration, database, and relay status are checked via Azure App Service health monitoring and Azure-side operational probes, rather than exposing an unauthenticated diagnostic endpoint.
+- **Manual Clinical Check**: Because the GitHub Actions runner does not possess the required mTLS certificates, a manual synthetic test must be run from a trusted clinical workstation to verify SOAP mTLS and audit capabilities after deployment.
 
 ### 6.2 Operator Checklist for New Environments
 - [ ] Target configuration defined in `infra/targets.json`.

@@ -24,7 +24,7 @@ def main():
         stage = t.get("stage")
 
         # Enforce strict branch-to-stage mapping
-        if branch in ("feat/matrix-deployment-pilot", "feat/matrix-deployment-pilot-integration"):
+        if branch == "rehearsal/play-deployment":
             if stage == "play":
                 selected_targets.append(t)
         elif branch == "dev":

@@ -27,11 +27,12 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.routing import APIRoute
 from starlette.background import BackgroundTask
 
+from app.audit.audit import attempt_audit
+from app.audit.models import AuditOutcome
+
 from ..audit.audit import process_saml_attributes
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
-from app.audit.audit import attempt_audit
-from app.audit.models import AuditOutcome
 from ..redis_connect import redis_connect
 from .responses import (
     create_envelope,

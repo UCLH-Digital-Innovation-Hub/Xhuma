@@ -1,24 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export XHUMA_SUBSCRIPTION_ID="${AZURE_SUBSCRIPTION_ID:-}"
-export XHUMA_TENANT_ID="${AZURE_TENANT_ID:-}"
-export XHUMA_TARGET="play"
-export XHUMA_LOCATION="uksouth"
-export XHUMA_RESOURCE_GROUP="rg-xhuma-play"
-export XHUMA_STATE_ACCOUNT="xtfrgxhumaplay"
+# Required variables: AZURE_SUBSCRIPTION_ID, AZURE_TENANT_ID, XHUMA_TARGET, XHUMA_RESOURCE_GROUP
 
-if [[ -z "$XHUMA_SUBSCRIPTION_ID" || -z "$XHUMA_TENANT_ID" ]]; then
-  echo "Missing subscription or tenant ID."
+if [[ -z "${AZURE_SUBSCRIPTION_ID:-}" || -z "${AZURE_TENANT_ID:-}" || -z "${XHUMA_TARGET:-}" || -z "${XHUMA_RESOURCE_GROUP:-}" ]]; then
+  echo "Missing required environment variables for bootstrap."
   exit 1
 fi
 
-az account set --subscription "$XHUMA_SUBSCRIPTION_ID"
+az account set --subscription "$AZURE_SUBSCRIPTION_ID"
 
 # Verify authenticated tenant and subscription match expected
 AUTH_TENANT=$(az account show --query tenantId -o tsv)
-if [[ "$AUTH_TENANT" != "$XHUMA_TENANT_ID" ]]; then
-  echo "Authenticated tenant $AUTH_TENANT does not match expected $XHUMA_TENANT_ID"
+if [[ "$AUTH_TENANT" != "$AZURE_TENANT_ID" ]]; then
+  echo "Authenticated tenant $AUTH_TENANT does not match expected $AZURE_TENANT_ID"
   exit 1
 fi
 
@@ -27,6 +22,10 @@ if ! az group show --name "$XHUMA_RESOURCE_GROUP" &>/dev/null; then
   echo "Resource Group $XHUMA_RESOURCE_GROUP does not exist. Please create it manually first."
   exit 1
 fi
+
+# Derive State Account Name deterministically (max 24 chars, lowercase alphanumeric)
+RG_CLEAN=$(echo "$XHUMA_RESOURCE_GROUP" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')
+XHUMA_STATE_ACCOUNT="xtf${RG_CLEAN:0:21}"
 
 echo "Ensuring Storage Account $XHUMA_STATE_ACCOUNT exists in $XHUMA_RESOURCE_GROUP..."
 SA_STATUS=$(az storage account show --name "$XHUMA_STATE_ACCOUNT" --resource-group "$XHUMA_RESOURCE_GROUP" --query "name" -o tsv 2>&1 || true)
@@ -57,11 +56,41 @@ if [[ "$P_STATUS" == *"NotFound"* ]] || [[ -z "$P_STATUS" ]]; then
   az storage container create --name tfplans --account-name "$XHUMA_STATE_ACCOUNT" --account-key "$ACCOUNT_KEY"
 fi
 
-echo "Enabling versioning and retention..."
+echo "Enabling versioning and retention on storage account..."
 az storage account blob-service-properties update \
   --account-name "$XHUMA_STATE_ACCOUNT" --resource-group "$XHUMA_RESOURCE_GROUP" \
   --enable-versioning true --enable-delete-retention true \
   --delete-retention-days 30 --enable-container-delete-retention true \
   --container-delete-retention-days 30
 
-echo "Setup for play complete."
+echo "Configuring lifecycle expiry specifically for tfplans..."
+az storage account management-policy create \
+  --account-name "$XHUMA_STATE_ACCOUNT" --resource-group "$XHUMA_RESOURCE_GROUP" \
+  --policy '{
+    "rules": [
+      {
+        "enabled": true,
+        "name": "expire-tfplans",
+        "type": "Lifecycle",
+        "definition": {
+          "actions": {
+            "baseBlob": {
+              "delete": { "daysAfterModificationGreaterThan": 7 }
+            },
+            "snapshot": {
+              "delete": { "daysAfterCreationGreaterThan": 7 }
+            },
+            "version": {
+              "delete": { "daysAfterCreationGreaterThan": 7 }
+            }
+          },
+          "filters": {
+            "blobTypes": ["blockBlob"],
+            "prefixMatch": ["tfplans/"]
+          }
+        }
+      }
+    ]
+  }'
+
+echo "Setup for $XHUMA_TARGET complete."
