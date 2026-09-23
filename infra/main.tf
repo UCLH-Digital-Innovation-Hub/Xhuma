@@ -5,6 +5,7 @@ data "azurerm_resource_group" "rg" {
 data "azurerm_client_config" "current" {}
 
 data "azurerm_key_vault" "shared_kv" {
+  provider            = azurerm.shared
   name                = var.shared_key_vault_name
   resource_group_name = var.shared_resource_group_name
 }

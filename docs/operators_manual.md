@@ -46,6 +46,7 @@ To allow GitHub Actions to deploy infrastructure and code, Xhuma currently relie
    - `AZURE_CLIENT_SECRET`
    - `AZURE_TENANT_ID`
    - `AZURE_SUBSCRIPTION_ID`
+   - `SHARED_SUBSCRIPTION_ID`
 
 ## 2. Setting Up Variables
 
@@ -57,7 +58,7 @@ The deployment relies on specific GitHub environments to orchestrate the provisi
 
 | GitHub environment    | Required secrets                                                                                                          |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `play-plan`           | Azure credential set; `CR_PAT`; `REGISTRY_ID`; `POSTGRES_PASSWORD`; `SHARED_KEY_VAULT_NAME`; `SHARED_RESOURCE_GROUP_NAME` |
+| `play-plan`           | Azure credential set; `CR_PAT`; `REGISTRY_ID`; `POSTGRES_PASSWORD`; `SHARED_KEY_VAULT_NAME`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_SUBSCRIPTION_ID` |
 | `rg-xhuma-play-infra` | Azure credential set                                                                                                      |
 | `rg-xhuma-play`       | Azure credential set                                                                                                      |
 

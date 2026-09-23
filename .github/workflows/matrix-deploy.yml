@@ -112,6 +112,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
+          terraform_wrapper: false
           terraform_version: 1.5.7
       - name: Verify Required Secrets
         env:
@@ -121,6 +122,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_PASSWORD }}
           TF_VAR_shared_resource_group_name: ${{ secrets.SHARED_RESOURCE_GROUP_NAME }}
+          TF_VAR_shared_subscription_id: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
           TF_VAR_shared_key_vault_name: ${{ secrets.SHARED_KEY_VAULT_NAME }}
           TF_VAR_registry_id: ${{ secrets.REGISTRY_ID }}
           TF_VAR_docker_registry_password: ${{ secrets.CR_PAT }}
@@ -132,6 +134,7 @@ jobs:
           [ -z "$ARM_SUBSCRIPTION_ID" ] && MISSING="$MISSING AZURE_SUBSCRIPTION_ID"
           [ -z "$TF_VAR_postgres_admin_password" ] && MISSING="$MISSING POSTGRES_PASSWORD"
           [ -z "$TF_VAR_shared_resource_group_name" ] && MISSING="$MISSING SHARED_RESOURCE_GROUP_NAME"
+          [ -z "$TF_VAR_shared_subscription_id" ] && MISSING="$MISSING SHARED_SUBSCRIPTION_ID"
           [ -z "$TF_VAR_shared_key_vault_name" ] && MISSING="$MISSING SHARED_KEY_VAULT_NAME"
           [ -z "$TF_VAR_registry_id" ] && MISSING="$MISSING REGISTRY_ID"
           [ -z "$TF_VAR_docker_registry_password" ] && MISSING="$MISSING CR_PAT"
@@ -177,6 +180,7 @@ jobs:
           TF_VAR_docker_registry_username: "${{ github.actor }}"
           TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
           TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
+          TF_VAR_shared_subscription_id: "${{ secrets.SHARED_SUBSCRIPTION_ID }}"
           TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
         run: |
           PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}.tfplan"
@@ -197,7 +201,20 @@ jobs:
             exit 1
           fi
 
-          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" > plan_output.txt
+          set +e
+          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" > plan_output.txt 2>&1
+          TF_EXIT=$?
+          set -e
+
+          if [ $TF_EXIT -ne 0 ]; then
+            echo "::error::Terraform plan failed with exit code $TF_EXIT"
+            echo "### Terraform Plan Error" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            # Publish actionable error, absent sensitive values
+            grep -E "Error:" -A 10 -B 2 plan_output.txt | grep -E -iv "password|secret|key|token|client|tenant|subscription" >> $GITHUB_STEP_SUMMARY || tail -n 20 plan_output.txt | grep -E -iv "password|secret|key|token|client|tenant|subscription" >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit $TF_EXIT
+          fi
 
           az storage blob upload \
             --account-name "$SA_NAME" \
@@ -255,6 +272,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
+          terraform_wrapper: false
           terraform_version: 1.5.7
       - name: Verify Required Secrets
         env:
