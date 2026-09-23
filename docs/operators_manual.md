@@ -142,3 +142,24 @@ Deployment is deterministic. We record the previous digest before deploying and 
 - [ ] Key rotation.
 - [ ] Run synthetic manual clinical check (SOAP/mTLS) from a trusted workstation.
 - [ ] Rollback exercise performed and documented.
+
+### 6.3 Key Vault Reference Verification
+
+A mandatory verification step must be performed post-Terraform and pre-functional-testing to ensure the App Service can resolve its `@Microsoft.KeyVault(...)` configuration references. Note that Terraform automatically provisions the App Service managed-identity access policy on the shared Key Vault.
+
+When the shared Key Vault is configured with `DefaultAction = Deny`, the target App Service integration subnet must explicitly be permitted by the vault's network ACL.
+
+**Verification Sequence:**
+1. Confirm the App Service system-assigned managed identity exists.
+2. Confirm the required secret permissions/access policy exist on the shared vault.
+3. Confirm the target App Service subnet is permitted by the shared vault's network ACL.
+4. Confirm the App Service Key Vault reference status is `Resolved`.
+5. **Do not proceed** to functional testing if the reference status is `AccessToKeyVaultDenied`, `SecretNotFound`, or any other unresolved state.
+
+---
+
+## 7. Assurance and Evidence Records
+
+Specific deployment rehearsals and assurance events are captured as immutable evidence records. These records are retained separately from this living operational runbook to preserve point-in-time factual observations.
+
+- [Play Matrix Deployment Rehearsal (23 September 2026)](./assurance/evidence/2026-09-23-play-matrix-deployment-rehearsal.md)
