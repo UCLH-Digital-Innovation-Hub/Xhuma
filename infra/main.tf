@@ -113,6 +113,10 @@ resource "azurerm_private_dns_zone_virtual_network_link" "pg_dns_link" {
   private_dns_zone_name = azurerm_private_dns_zone.pg_dns.name
   virtual_network_id    = azurerm_virtual_network.vnet.id
   resource_group_name   = data.azurerm_resource_group.rg.name
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_private_dns_zone" "redis_dns" {
@@ -129,6 +133,10 @@ resource "azurerm_private_dns_zone_virtual_network_link" "redis_dns_link" {
   private_dns_zone_name = azurerm_private_dns_zone.redis_dns.name
   virtual_network_id    = azurerm_virtual_network.vnet.id
   resource_group_name   = data.azurerm_resource_group.rg.name
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_service_plan" "plan" {
