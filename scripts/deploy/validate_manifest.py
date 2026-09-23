@@ -60,9 +60,14 @@ def main():
         sys.exit(1)
 
     # Validate backend coordinates against the file
-    backend_file = expected["backend_file"]
+    backend_file_relative = expected["backend_file"]
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+    backend_file = os.path.join(repo_root, backend_file_relative)
+
     if not os.path.exists(backend_file):
-        print(f"::error::Backend file does not exist at {backend_file}")
+        print(f"::error::Backend file does not exist at {backend_file_relative} (resolved: {backend_file})")
         sys.exit(1)
 
     backend_coords = {}

@@ -78,6 +78,29 @@ def test_valid_manifest_fixture_one():
     assert "Manifest verified successfully" in res.stdout
 
 
+def test_invoked_from_subdirectory():
+    # Simulate GitHub Actions which runs the script from ./infra
+    # but the manifest file references infra/backends/play.hcl
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json", dir="infra") as f:
+        json.dump(VALID_MANIFEST, f)
+        manifest_path = f.name
+
+    try:
+        env = os.environ.copy()
+        env.update(VALID_ENV)
+        # Run from infra directory
+        script_rel_path = "../scripts/deploy/validate_manifest.py"
+        manifest_basename = os.path.basename(manifest_path)
+
+        result = subprocess.run(
+            ["python", script_rel_path, manifest_basename], env=env, cwd="infra", capture_output=True, text=True
+        )
+        assert result.returncode == 0
+        assert "Manifest verified successfully" in result.stdout
+    finally:
+        os.remove(manifest_path)
+
+
 def test_valid_manifest_fixture_two():
     manifest = deepcopy(VALID_MANIFEST)
     env = deepcopy(VALID_ENV)
