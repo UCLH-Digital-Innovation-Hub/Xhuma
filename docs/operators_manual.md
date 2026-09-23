@@ -28,7 +28,7 @@
 
 ## 1. Architecture Overview
 
-Xhuma utilizes a **Target-isolated matrix deployment with centrally managed shared services**. Every target environment (e.g., `play`, `int`, production trusts) receives its own isolated cloud footprint for compute and data to prevent cross-contamination of health data and limit blast radius. 
+Xhuma utilises a **Target-isolated matrix deployment with centrally managed shared services**. Every target environment (e.g., `play`, `int`, production trusts) receives its own isolated cloud footprint for compute and data to prevent cross-contamination of health data and limit blast radius. 
 
 - **Shared Resources:** A centrally managed Azure Resource Group hosts shared services with separate lifecycle/ownership, such as the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault for global secrets (e.g., API keys, DM+D secrets).
 - **Target-Local Resources:** Each environment receives a dedicated Azure App Service, VNet, Managed Redis, PostgreSQL, and Local Key Vault.
@@ -40,7 +40,7 @@ Xhuma utilizes a **Target-isolated matrix deployment with centrally managed shar
 Terraform state and reviewed execution plans are stored securely in Azure Blob Storage. Each target has its own storage account within its target resource group.
 
 ### 2.1 Reused Bootstrapping Procedure
-We reuse the established bootstrap logic across environments. For `play`, we now utilize a target-agnostic script.
+We reuse the established bootstrap logic across environments. For `play`, we now utilise a target-agnostic script.
 
 1. **Target Configuration**: Verify your target configuration in `infra/targets.json` and backend coordinates in `infra/backends/play.hcl`.
 2. **Execution**: The `matrix-deploy.yml` workflow automatically runs the bootstrap script:
@@ -182,7 +182,7 @@ Do NOT proceed if you observe any of the following:
    ```bash
    git checkout <commit-sha>
    ```
-7. **Initialize Terraform locally without connecting to remote state:**
+7. **Initialise Terraform locally without connecting to remote state:**
    ```bash
    terraform init -backend=false -input=false
    ```

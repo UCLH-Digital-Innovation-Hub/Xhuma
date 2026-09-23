@@ -111,7 +111,7 @@ Metric Aggregation
 ↓
 Prometheus Storage
 ↓
-Grafana Visualization
+Grafana Visualisation
 ```
 
 ### 2. Error Tracking Flow
@@ -148,7 +148,7 @@ flowchart TD
     A[Cache Operations] -->|Stats| B[Metrics Collection]
     B -->|Store| C[Time Series DB]
     C -->|Query| D[Performance Analysis]
-    D -->|Alert| E[Cache Optimization]
+    D -->|Alert| E[Cache Optimisation]
 ```
 
 ## Security Data Flow

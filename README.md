@@ -198,7 +198,7 @@ Access the interactive API documentation at:
 ## Branch Strategy
 
 - `main`: Production releases (Triggers deployments to `rg-xhuma-uclh-prd` and future trust environments)
-- `int`: Integration/Stabilization branch (Triggers deployments to `rg-xhuma-int` for dry runs)
+- `int`: Integration/Stabilisation branch (Triggers deployments to `rg-xhuma-int` for dry runs)
 - `dev`: Active development and feature integration
 - `feature/*`: Feature branches
 
@@ -217,6 +217,6 @@ Tests are automatically run in the CI pipeline. To run tests locally using Docke
 docker-compose -f docker-compose.test.yml up --build
 ```
 
-## License
+## Licence
 
-This project is licensed under the terms of the license included in the [LICENSE](LICENSE) file.
+This project is licensed under the terms of the licence included in the [LICENSE](LICENSE) file.

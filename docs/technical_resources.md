@@ -94,10 +94,10 @@
   - Response times
   - Error rates
   - Cache hit/miss rates
-  - Resource utilization
+  - Resource utilisation
 
 ### Grafana
-- **Purpose**: Metrics visualization and alerting
+- **Purpose**: Metrics visualisation and alerting
 - **Documentation**: [Grafana Docs](https://grafana.com/docs/)
 - **Features**:
   - Custom dashboards
@@ -110,7 +110,7 @@
 - **Components**:
   - Elasticsearch: Log storage
   - Logstash: Log processing
-  - Kibana: Log visualization
+  - Kibana: Log visualisation
 - **Documentation**: [Elastic Docs](https://www.elastic.co/guide/index.html)
 
 ### OpenTelemetry

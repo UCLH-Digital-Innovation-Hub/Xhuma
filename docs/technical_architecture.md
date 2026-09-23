@@ -294,7 +294,7 @@ sequenceDiagram
     end
 ```
 
-## Security, Governance & Data Minimization
+## Security, Governance & Data Minimisation
 
 Xhuma implements strict data governance controls to align with NHS Information Governance (IG) frameworks and the National Data Sharing Arrangement (NDSA).
 
@@ -306,8 +306,8 @@ Xhuma relies on Epic Care Everywhere as the authoritative system of record for i
 ### Hardcoded Purpose of Use
 Xhuma strictly enforces the `directcare` purpose. The middleware explicitly blocks any attempts to query the GP Connect API for research, secondary uses, or population health analytics.
 
-### Data Minimization Scope
-To adhere to data minimization principles, Xhuma scopes its GP Connect structured record retrieval strictly to `patient/*.read`. It only requests the specific clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations), explicitly excluding sensitive or unnecessary administrative data where possible.
+### Data Minimisation Scope
+To adhere to data minimisation principles, Xhuma scopes its GP Connect structured record retrieval strictly to `patient/*.read`. It only requests the specific clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations), explicitly excluding sensitive or unnecessary administrative data where possible.
 
 ## Error Handling & Graceful Degradation
 
@@ -325,7 +325,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 ### Delta Summary & Assumptions
 
 **Changes from previous version:**
-- **Epic Ownership & Statelessness**: Shifted diagram labels and structures to identify Epic explicitly as the ultimate EHR UI, reconciling owner, and keeper of the patient link. Xhuma is now rigorously documented as a stateless orchestrator with cache used only for transient optimization.
+- **Epic Ownership & Statelessness**: Shifted diagram labels and structures to identify Epic explicitly as the ultimate EHR UI, reconciling owner, and keeper of the patient link. Xhuma is now rigorously documented as a stateless orchestrator with cache used only for transient optimisation.
 - **Workflow Separation**: Separated the single unified interactions into two distinct paths: Patient Discovery (ITI-55) & Identity Confirmation, followed by Document Query & Retrieval.
 - **Clinician Intervention visibility**: Updated the DFD Level 0/1 and Context diagram to show clinicians directly interacting with Epic with explicit human confirmation steps and manual reconciliation steps.
 - **Observability Stack Constraint**: Pared down monitoring boxes to explicitly respect the network architecture document baseline (eliminating extrapolated components).
@@ -418,16 +418,16 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 
 - **Resource Metrics**
   - CPU usage
-  - Memory utilization
+  - Memory utilisation
   - Network I/O
   - Disk operations
 
-### 2. Visualization (Grafana)
+### 2. Visualisation (Grafana)
 - **System Dashboards**
   - Real-time performance monitoring
   - Historical trends analysis
-  - Resource utilization tracking
-  - Error rate visualization
+  - Resource utilisation tracking
+  - Error rate visualisation
 
 - **Business Metrics**
   - Transaction success rates
@@ -452,7 +452,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
   - Indexed storage
   - Retention policies
   - Archival strategy
-  - Search optimization
+  - Search optimisation
 
 ### 4. Distributed Tracing (OpenTelemetry)
 - **Trace Collection**
@@ -465,12 +465,12 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
   - Latency analysis
   - Error tracking
   - Service mapping
-  - Performance optimization
+  - Performance optimisation
 
 ## Testing Architecture
 
 ### 1. Unit Testing
-- **Test Organization**
+- **Test Organisation**
   - Feature-based test suites
   - Integration test suites
   - Mock implementations
@@ -498,7 +498,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 ### 3. Performance Testing
 - **Load Testing**
   - Concurrent user simulation
-  - Resource utilization
+  - Resource utilisation
   - Response time analysis
   - Bottleneck identification
 
@@ -520,7 +520,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 - TLS 1.2+ for all communications
 - Data encryption at rest
 - Secure header handling
-- Input validation and sanitization
+- Input validation and sanitisation
 - Redis protected mode
 
 ### 3. Compliance
@@ -603,7 +603,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 - Memory usage checks
 
 ### 3. Startup Probes
-- Initialization checks
+- Initialisation checks
 - Configuration validation
 - Resource allocation
 - Service registration
