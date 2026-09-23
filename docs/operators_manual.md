@@ -76,8 +76,10 @@ To allow GitHub Actions to deploy infrastructure and code, Xhuma currently relie
 
 The deployment relies on specific GitHub environments to orchestrate the provisioning and rollout phases securely. 
 
-![Play matrix deployment pipeline](./assets/play-plan-review-gate.png)
-*Figure 1 — Successful Play matrix deployment showing the gated progression from CI and image build through Terraform Plan/Apply to immutable application deployment, paused pending operator review.*
+![Play matrix deployment pipeline](./assets/play-plan-approval-gate.png)
+*Figure 1 — Pre-plan approval gate — Run #32 paused before `Infra Plan - play` because the `play-plan` GitHub Environment required reviewer approval.*
+
+> **Control note:** During the September 2026 Play rehearsal, `play-plan` required reviewer approval. The workflow source currently describes the plan environment as having no manual approvers. Confirm the intended control model before INT migration.
 
 **Environment Configuration:**
 
@@ -217,14 +219,17 @@ Do NOT proceed if you observe any of the following:
 
 ### 6.4 Plan Retries & Image Deployment
 
+![Infrastructure Apply Approval Gate](./assets/play-infra-apply-approval-gate.png)
+*Figure 5 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `rg-xhuma-play-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
+
 ![Play Infrastructure Apply Success](./assets/play-infra-apply-success.png)
-*Figure 5 — Successful infrastructure Apply job, completing only after the strict plan review and GitHub Environment manual approval.*
+*Figure 6 — Successful infrastructure Apply job, completing only after the strict plan review and GitHub Environment manual approval.*
 
 1. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a completely new workflow run is required to generate and approve a new plan.
 2. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
 
 ![Play Deploy Digest](./assets/play-deploy-digest.png)
-*Figure 6 — The application image is deployed deterministically using the exact immutable SHA256 digest validated during the build stage.*
+*Figure 7 — The application image is deployed deterministically using the exact immutable SHA256 digest validated during the build stage.*
 
 ### 6.5 Digest Rollback & Recovery
 Deployment is deterministic. We record the previous digest before deploying and the new digest after.
@@ -298,7 +303,7 @@ cat /tmp/xhuma-health.json
 ```
 
 ![Final Health State](./assets/final-health-state.png)
-*Figure 7 — Post-deployment liveness verification: the Play App Service returned HTTP 200 with `{"status":"ok"}`. This is a coarse liveness signal, and does not replace deep clinical/readiness testing.*
+*Figure 8 — Post-deployment liveness verification: the Play App Service returned HTTP 200 with `{"status":"ok"}`. This is a coarse liveness signal, and does not replace deep clinical/readiness testing.*
 
 ---
 
@@ -369,3 +374,31 @@ Specific deployment rehearsals and assurance events are captured as immutable ev
 
 - [Play Matrix Deployment Rehearsal (23 September 2026)](./assurance/evidence/2026-09-23-play-matrix-deployment-rehearsal.md)
 
+
+---
+
+## Appendix — Xhuma Deployment for Tired Humans
+
+This quick-start guide is intentionally simple. For the authoritative, detailed runbook, see the sections above.
+
+1. Push code.
+2. Wait for CI & Tests, Prepare Targets and Build & Push to go green.
+3. If `play-plan` asks for approval, click View.
+4. Check/select the correct environment and approve only if the target/run is expected.
+
+![Plan-stage approval dialog](./assets/play-plan-approval-modal.png)
+*Figure 9 — Plan-stage approval dialog — the operator explicitly selects `play-plan` and approves the protected environment before the workflow can continue.*
+
+5. Wait for Terraform Plan.
+6. Read add/change/destroy counts and changed-resource summary.
+7. If you do not understand a change, STOP.
+8. Approve `rg-xhuma-play-infra` only after the immutable plan is understood.
+
+![Infrastructure Apply Approval Gate](./assets/play-infra-apply-approval-gate.png)
+*Figure 10 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `rg-xhuma-play-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
+
+9. Wait for Apply.
+10. Approve application deployment only after infrastructure is healthy.
+11. Verify immutable digest and `/health` HTTP 200.
+12. Remember: HTTP 200 proves liveness, not full clinical functionality.
+13. If confused, stop rather than improvise.
