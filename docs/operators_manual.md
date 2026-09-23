@@ -116,7 +116,11 @@ When reviewing an immutable saved plan for approval, operators must follow this 
 **E. Never dump the complete JSON Terraform plan:** Do not dump the plan into GitHub logs or documentation because Terraform plans may contain sensitive values.
 
 > **Example (Play Rehearsal, Sept 2026):**
-> A superficially safe plan showed: `0 to add, 15 to change, 0 to destroy`. Resource-level inspection looked non-destructive. However, attribute-path inspection revealed that Terraform intended to remove externally-managed organisational tags (e.g., CostCenter), Azure-managed integration metadata (Application Insights hidden links), and an existing subnet service endpoint (`Microsoft.Storage`). The Apply was rightfully withheld, and the Terraform ownership model was corrected via `ignore_changes` instead of blindly applying the drift.
+> A superficially safe plan showed: `0 to add, 15 to change, 0 to destroy`. 
+>
+> ![Play Plan Summary](./assets/play-plan-summary.png)
+> 
+> Resource-level inspection looked non-destructive. However, attribute-path inspection revealed that Terraform intended to remove externally-managed organisational tags (e.g., CostCenter), Azure-managed integration metadata (Application Insights hidden links), and an existing subnet service endpoint (`Microsoft.Storage`). The Apply was rightfully withheld, and the Terraform ownership model was corrected via `ignore_changes` instead of blindly applying the drift.
 
 4. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a completely new workflow run is required to generate and approve a new plan.
 5. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
