@@ -202,7 +202,7 @@ jobs:
           fi
 
           set +e
-          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" > plan_output.txt 2>&1
+          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" -json > plan_output.json 2>&1
           TF_EXIT=$?
           set -e
 
@@ -211,7 +211,7 @@ jobs:
             echo "### Terraform Plan Error" >> $GITHUB_STEP_SUMMARY
             echo '```text' >> $GITHUB_STEP_SUMMARY
             # Publish actionable error, absent sensitive values
-            python ../scripts/deploy/filter_tf_error.py $TF_EXIT plan_output.txt >> $GITHUB_STEP_SUMMARY
+            python ../scripts/deploy/filter_tf_error.py $TF_EXIT plan_output.json >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             exit $TF_EXIT
           fi
@@ -250,6 +250,7 @@ jobs:
           echo "**Expected Image Digest:** \`${{ needs.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
           echo '```text' >> $GITHUB_STEP_SUMMARY
           # Filter output to non-secret change summary
+          terraform show -no-color "$PLAN_FILE" > plan_output.txt
           grep -E "Plan: |No changes.|error" plan_output.txt >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
 

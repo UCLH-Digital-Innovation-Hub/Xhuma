@@ -1,3 +1,4 @@
+import json
 import re
 import sys
 
@@ -21,51 +22,94 @@ def main():
 
     found_diagnostics = False
 
-    # We want to deduplicate matches to avoid spamming the summary
     seen_sources = set()
     seen_resources = set()
-    seen_codes = set()
-    seen_statuses = set()
+    seen_errors = set()
 
     for line in lines:
-        # Match source filename and line
-        source_match = re.search(r"on ([\w\.\-\/]+) line (\d+)", line)
-        if source_match:
-            source = f"{source_match.group(1)} line {source_match.group(2)}"
-            if source not in seen_sources:
-                print(f"Source Location: {source}")
-                seen_sources.add(source)
-                found_diagnostics = True
+        line = line.strip()
+        if not line:
+            continue
 
-        # Match resource address
-        # Looks for azurerm_type.name or azurerm_type "name"
-        res_match = re.search(r"(azurerm_[a-zA-Z0-9_]+)[\"'\s\.]+([a-zA-Z0-9_]+)", line)
-        if res_match:
-            resource = f"{res_match.group(1)}.{res_match.group(2)}"
-            if resource not in seen_resources:
-                print(f"Resource Address: {resource}")
-                seen_resources.add(resource)
-                found_diagnostics = True
+        try:
+            log_entry = json.loads(line)
+            if log_entry.get("type") == "diagnostic" and log_entry.get("diagnostic", {}).get("severity") == "error":
+                diag = log_entry.get("diagnostic", {})
 
-        # Match Azure error codes/status
-        code_match = re.search(r"Code=[\"']?([A-Za-z0-9_]+)[\"']?", line)
-        if code_match:
-            code = code_match.group(1)
-            if code not in seen_codes:
-                print(f"Azure Error Code: {code}")
-                seen_codes.add(code)
-                found_diagnostics = True
+                # Extract address
+                address = diag.get("address")
+                if address and address not in seen_resources:
+                    print(f"Resource Address: {address}")
+                    seen_resources.add(address)
+                    found_diagnostics = True
 
-        status_match = re.search(r"Status=([0-9]+)", line)
-        if status_match:
-            status = status_match.group(1)
-            if status not in seen_statuses:
-                print(f"Azure Status: {status}")
-                seen_statuses.add(status)
-                found_diagnostics = True
+                # Extract source location
+                range_info = diag.get("range", {})
+                source_filename = range_info.get("filename")
+                start_line = range_info.get("start", {}).get("line")
+                if source_filename and start_line:
+                    source = f"{source_filename} line {start_line}"
+                    if source not in seen_sources:
+                        print(f"Source Location: {source}")
+                        seen_sources.add(source)
+                        found_diagnostics = True
+
+                # Extract safe labels from summary/detail
+                summary = diag.get("summary", "")
+                detail = diag.get("detail", "")
+                combined = f"{summary} {detail}"
+
+                label = None
+                if "AuthorizationFailed" in combined or "403" in combined:
+                    label = "Authorisation Error"
+                elif "SubscriptionNotFound" in combined or "subscription" in combined.lower():
+                    label = "Subscription Access Error"
+                elif "MissingResourceProviderRegistration" in combined or "registration" in combined.lower():
+                    label = "Provider Registration Error"
+                elif (
+                    "undeclared input variable" in combined
+                    or "Unsupported argument" in combined
+                    or "expected" in combined
+                ):
+                    label = "Configuration Error"
+                elif "Code=" in combined:
+                    code_match = re.search(r"Code=[\"']?([A-Za-z0-9_]+)[\"']?", combined)
+                    if code_match:
+                        label = f"Azure Error Code: {code_match.group(1)}"
+                elif "Status=" in combined:
+                    status_match = re.search(r"Status=([0-9]+)", combined)
+                    if status_match:
+                        label = f"Azure Status: {status_match.group(1)}"
+
+                if label and label not in seen_errors:
+                    print(f"Error Type: {label}")
+                    seen_errors.add(label)
+                    found_diagnostics = True
+
+        except json.JSONDecodeError:
+            # Fallback for plain text, but strictly look for Azure codes to avoid dumping raw text
+            code_match = re.search(r"Code=[\"']?([A-Za-z0-9_]+)[\"']?", line)
+            if code_match:
+                code = code_match.group(1)
+                label = f"Azure Error Code: {code}"
+                if label not in seen_errors:
+                    print(f"Error Type: {label}")
+                    seen_errors.add(label)
+                    found_diagnostics = True
+
+            status_match = re.search(r"Status=([0-9]+)", line)
+            if status_match:
+                status = status_match.group(1)
+                label = f"Azure Status: {status}"
+                if label not in seen_errors:
+                    print(f"Error Type: {label}")
+                    seen_errors.add(label)
+                    found_diagnostics = True
 
     if not found_diagnostics:
-        print("Unrecognised Error: The error could not be safely classified. Raw diagnostics are retained securely.")
+        print(
+            "Unrecognised Error: The error could not be safely classified. No persistence mechanism is currently implemented for raw diagnostics."
+        )
 
 
 if __name__ == "__main__":
