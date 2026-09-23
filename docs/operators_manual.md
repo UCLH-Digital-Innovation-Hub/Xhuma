@@ -8,6 +8,8 @@
 
 > **Note:** Screenshots included in this manual are illustrative evidence captured during the September 2026 Play rehearsal. Commands and configuration in this runbook are authoritative; UI screenshots may change as GitHub and Azure evolve.
 
+> **Tired? in a hurry?** See the [Xhuma Deployment for Tired Humans](./deployment_for_tired_humans.md) quick-start guide.
+
 ---
 
 ## Table of Contents
@@ -377,28 +379,3 @@ Specific deployment rehearsals and assurance events are captured as immutable ev
 
 ---
 
-## Appendix — Xhuma Deployment for Tired Humans
-
-This quick-start guide is intentionally simple. For the authoritative, detailed runbook, see the sections above.
-
-1. Push code.
-2. Wait for CI & Tests, Prepare Targets and Build & Push to go green.
-3. If `play-plan` asks for approval, click View.
-4. Check/select the correct environment and approve only if the target/run is expected.
-
-![Plan-stage approval dialog](./assets/play-plan-approval-modal.png)
-*Figure 9 — Plan-stage approval dialog — the operator explicitly selects `play-plan` and approves the protected environment before the workflow can continue.*
-
-5. Wait for Terraform Plan.
-6. Read add/change/destroy counts and changed-resource summary.
-7. If you do not understand a change, STOP.
-8. Approve `rg-xhuma-play-infra` only after the immutable plan is understood.
-
-![Infrastructure Apply Approval Gate](./assets/play-infra-apply-approval-gate.png)
-*Figure 10 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `rg-xhuma-play-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
-
-9. Wait for Apply.
-10. Approve application deployment only after infrastructure is healthy.
-11. Verify immutable digest and `/health` HTTP 200.
-12. Remember: HTTP 200 proves liveness, not full clinical functionality.
-13. If confused, stop rather than improvise.
