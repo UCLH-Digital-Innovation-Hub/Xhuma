@@ -97,7 +97,27 @@ Deployment is handled by GitHub Actions (`.github/workflows/matrix-deploy.yml`),
 ### 5.1 First Deployment & Protected Plans
 1. **Trigger**: Push code to the mapped branch (e.g., `rehearsal/play-deployment`).
 2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are available in GitHub. Plan generation will fail if a plan already exists for that run.
-3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary). Then, explicitly approve the infrastructure environment (`rg-xhuma-play-infra`).
+3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary) using the strict review hierarchy below. Then, explicitly approve the infrastructure environment (`rg-xhuma-play-infra`).
+
+#### Terraform Plan Review Hierarchy
+When reviewing an immutable saved plan for approval, operators must follow this strict hierarchy to prevent accidental disruption and avoid exposing sensitive state data:
+
+**A. Review headline counts:** Check the high-level summary (e.g., `X to add, Y to change, Z to destroy`).
+**B. Review changed resource addresses/actions:** Identify exactly which resources are being modified using the immutable saved plan.
+   ```bash
+   terraform show -json tfplan | jq '.resource_changes[] | {address, actions: .change.actions}'
+   ```
+**C. Inspect changed ATTRIBUTE PATHS only:** If a resource change is unexplained, inspect which specific attributes are changing, without looking at the values.
+   ```bash
+   # Example: extracting just the paths of changed attributes
+   terraform show -json tfplan | jq '.resource_changes[] | select(.change.actions != ["no-op"]) | {address, paths: (if .change.after_unknown then (.change.after_unknown | keys) else [] end) + (if .change.after then (.change.after | keys) else [] end)}'
+   ```
+**D. Selectively inspect non-sensitive before/after values:** If still unexplained, only inspect attributes known to be non-sensitive.
+**E. Never dump the complete JSON Terraform plan:** Do not dump the plan into GitHub logs or documentation because Terraform plans may contain sensitive values.
+
+> **Example (Play Rehearsal, Sept 2026):**
+> A superficially safe plan showed: `0 to add, 15 to change, 0 to destroy`. Resource-level inspection looked non-destructive. However, attribute-path inspection revealed that Terraform intended to remove externally-managed organisational tags (e.g., CostCenter), Azure-managed integration metadata (Application Insights hidden links), and an existing subnet service endpoint (`Microsoft.Storage`). The Apply was rightfully withheld, and the Terraform ownership model was corrected via `ignore_changes` instead of blindly applying the drift.
+
 4. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a completely new workflow run is required to generate and approve a new plan.
 5. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
 
