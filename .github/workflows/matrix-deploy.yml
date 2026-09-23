@@ -248,10 +248,27 @@ jobs:
           echo "**Plan Hash:** \`$PLAN_HASH\`" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
           echo "**Expected Image Digest:** \`${{ needs.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+          
+          # Highlight deletes/replacements using a GitHub warning
+          DESTRUCTIVE=$(terraform show -json "$PLAN_FILE" | jq -r '.resource_changes[]? | select(.change.actions | index("delete") or index("replace")) | .address')
+          if [ -n "$DESTRUCTIVE" ]; then
+            # Convert newlines to commas for the warning message
+            WARN_MSG=$(echo "$DESTRUCTIVE" | tr '\n' ',' | sed 's/,$//')
+            echo "::warning::The plan contains destructive actions (delete/replace) for the following resources: $WARN_MSG"
+          fi
+
           echo '```text' >> $GITHUB_STEP_SUMMARY
           # Filter output to non-secret change summary
           terraform show -no-color "$PLAN_FILE" > plan_output.txt
           grep -E "Plan: |No changes.|error" plan_output.txt >> $GITHUB_STEP_SUMMARY || true
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Safely append only the action and resource address of changed resources
+          terraform show -json "$PLAN_FILE" | jq -r '
+            .resource_changes[]? 
+            | select(.change.actions != ["no-op"] and .change.actions != ["read"]) 
+            | "\(.change.actions | join(", ")) \(.address)"
+          ' >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Manifest Artifact

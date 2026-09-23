@@ -2,13 +2,33 @@
 
 **Document Purpose:** This manual provides a comprehensive, end-to-end runbook for deploying, configuring, and maintaining the Xhuma middleware across NHS Trust environments, including the `play` environment rehearsal.
 
+**Security Rule for Operators:**
+> [!WARNING]
+> **Screenshots and Logs:** Screenshots and command outputs must **never** expose credentials, secret values, access/storage keys, tokens, full Terraform plans, connection strings, or sensitive application configuration.
+
+> **Note:** Screenshots included in this manual are illustrative evidence captured during the September 2026 Play rehearsal. Commands and configuration in this runbook are authoritative; UI screenshots may change as GitHub and Azure evolve.
+
 ---
 
-## 1. Matrix Deployment Overview
+## Table of Contents
+1. [Architecture Overview](#1-architecture-overview)
+2. [Infrastructure Bootstrapping and State Storage](#2-infrastructure-bootstrapping-and-state-storage)
+3. [Azure Service Principal & Permissions](#3-azure-service-principal--permissions)
+4. [Setting Up Variables](#4-setting-up-variables)
+5. [Key Vault Population](#5-key-vault-population)
+6. [Deployment Orchestration](#6-deployment-orchestration)
+7. [Verification and Health Checks](#7-verification-and-health-checks)
+8. [Shared Infrastructure Adoption (Terraform)](#8-shared-infrastructure-adoption-terraform)
+9. [Quick Operator Commands](#9-quick-operator-commands)
+10. [Assurance and Evidence Records](#10-assurance-and-evidence-records)
 
-Xhuma utilizes a **Shared-Nothing Matrix Deployment** strategy. Every target environment (e.g., `play`, `int`, production trusts) receives its own isolated cloud footprint to prevent cross-contamination of health data and limit blast radius.
+---
 
-- **Shared Resources:** A central Azure Resource Group hosts the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault for global secrets (e.g., API keys, DM+D secrets).
+## 1. Architecture Overview
+
+Xhuma utilizes a **Target-isolated matrix deployment with centrally managed shared services**. Every target environment (e.g., `play`, `int`, production trusts) receives its own isolated cloud footprint for compute and data to prevent cross-contamination of health data and limit blast radius. 
+
+- **Shared Resources:** A centrally managed Azure Resource Group hosts shared services with separate lifecycle/ownership, such as the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault for global secrets (e.g., API keys, DM+D secrets).
 - **Target-Local Resources:** Each environment receives a dedicated Azure App Service, VNet, Managed Redis, PostgreSQL, and Local Key Vault.
 
 ---
@@ -48,11 +68,16 @@ To allow GitHub Actions to deploy infrastructure and code, Xhuma currently relie
    - `AZURE_SUBSCRIPTION_ID`
    - `SHARED_SUBSCRIPTION_ID`
 
-## 2. Setting Up Variables
+---
 
-### Matrix Deployment Workflow
+## 4. Setting Up Variables
+
+### 4.1 Matrix Deployment Workflow
 
 The deployment relies on specific GitHub environments to orchestrate the provisioning and rollout phases securely. 
+
+![Play matrix deployment pipeline](./assets/play-plan-review-gate.png)
+*Figure 1 — Successful Play matrix deployment showing the gated progression from CI and image build through Terraform Plan/Apply to immutable application deployment, paused pending operator review.*
 
 **Environment Configuration:**
 
@@ -78,7 +103,7 @@ The `SHARED_SUBSCRIPTION_ID` is `c24b0c3e-9e09-4c7c-8687-75e8b654bc8e`. This cro
 
 ---
 
-## 4. Key Vault Population
+## 5. Key Vault Population
 
 Before functional verification can succeed, the environment's local Key Vault must be populated by an operator.
 
@@ -88,44 +113,120 @@ Before functional verification can succeed, the environment's local Key Vault mu
 
 ---
 
-## 5. Deployment Orchestration
+## 6. Deployment Orchestration
 
 Deployment is handled by GitHub Actions (`.github/workflows/matrix-deploy.yml`), which enforces strict boundaries:
 - `matrix-deploy.yml` currently orchestrates only the `play` environment from the `rehearsal/play-deployment` branch.
 - Legacy pipelines (`cd.yml` and `infra.yml`) still own the deployment to `int` and `prd` from the `int` and `main` branches.
 
-### 5.1 First Deployment & Protected Plans
+### 6.1 Continuous Integration and Build Controls
+
+Before any deployment plan is generated, the pipeline enforces strict quality and security gates:
+
+![Play CI tests](./assets/play-ci-tests.png)
+*Figure 2 — CI & Tests stage confirming all tests pass before proceeding.*
+
+![Play Build Security](./assets/play-build-security.png)
+*Figure 3 — Build & Push stage showing the immutable image build and Trivy vulnerability scan.*
+
+### 6.2 First Deployment & Protected Plans
 1. **Trigger**: Push code to the mapped branch (e.g., `rehearsal/play-deployment`).
 2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are available in GitHub. Plan generation will fail if a plan already exists for that run.
 3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary) using the strict review hierarchy below. Then, explicitly approve the infrastructure environment (`rg-xhuma-play-infra`).
 
-#### Terraform Plan Review Hierarchy
-When reviewing an immutable saved plan for approval, operators must follow this strict hierarchy to prevent accidental disruption and avoid exposing sensitive state data:
+### 6.3 Terraform Plan Review Before Approval
 
-**A. Review headline counts:** Check the high-level summary (e.g., `X to add, Y to change, Z to destroy`).
-**B. Review changed resource addresses/actions:** Identify exactly which resources are being modified using the immutable saved plan.
+When reviewing an immutable saved plan for approval, operators must follow this COMPLETE worked procedure to prevent accidental disruption and avoid exposing sensitive state data.
+
+**Explicit STOP Conditions:**
+Do NOT proceed if you observe any of the following:
+- Plan SHA mismatch
+- Wrong target/subscription/commit
+- Unexplained destroy/replacement
+- Unexplained resource or attribute drift
+- Unexpected shared/production resources in the plan
+- Unresolved Key Vault references
+- Failed health/digest verification
+
+**Step-by-step Review Procedure:**
+
+1. **Select the target Azure subscription:**
    ```bash
-   terraform show -json tfplan | jq '.resource_changes[] | {address, actions: .change.actions}'
+   az account set --subscription "<target-subscription-id>"
    ```
-**C. Inspect changed ATTRIBUTE PATHS only:** If a resource change is unexplained, inspect which specific attributes are changing, without looking at the values.
+2. **Securely obtain the plan storage credentials:**
    ```bash
-   # Example: extracting just the paths of changed attributes
-   terraform show -json tfplan | jq '.resource_changes[] | select(.change.actions != ["no-op"]) | {address, paths: (if .change.after_unknown then (.change.after_unknown | keys) else [] end) + (if .change.after then (.change.after | keys) else [] end)}'
+   RG_NAME="<backend-resource-group>"
+   SA_NAME="<backend-storage-account>"
+   ACCOUNT_KEY=$(az storage account keys list --resource-group "$RG_NAME" --account-name "$SA_NAME" --query '[0].value' -o tsv)
    ```
-**D. Selectively inspect non-sensitive before/after values:** If still unexplained, only inspect attributes known to be non-sensitive.
-**E. Never dump the complete JSON Terraform plan:** Do not dump the plan into GitHub logs or documentation because Terraform plans may contain sensitive values.
+3. **Download the exact immutable `.tfplan`:**
+   ```bash
+   PLAN_FILE="<plan-filename>"
+   az storage blob download --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" --container-name tfplans --name "$PLAN_FILE" --file "/tmp/$PLAN_FILE"
+   ```
+4. **SHA256 verification against the workflow manifest/job summary:**
+   ```bash
+   sha256sum "/tmp/$PLAN_FILE"
+   # Compare the output hash with the manifest or GitHub Actions job summary. STOP if SHA differs.
+   ```
+   *(Note: The plan hash verification is automatically performed by the CI pipeline, but operators should verify manually if performing manual applies).*
+
+5. **Determine and install the exact Terraform version used by the workflow:**
+   Check the workflow file for the pinned version (e.g., `1.5.7`). If Cloud Shell differs, temporarily install it.
+6. **Checkout the exact source commit SHA:**
+   ```bash
+   git checkout <commit-sha>
+   ```
+7. **Initialize Terraform locally without connecting to remote state:**
+   ```bash
+   terraform init -backend=false -input=false
+   ```
+8. **Review headline counts and changes against the immutable plan:**
+   Run `terraform show -json` against the immutable plan to review the changes. Check the high-level summary (`X add, Y change, Z destroy`).
+   
+   **Extract changed resource addresses/actions:**
+   ```bash
+   terraform show -json "/tmp/$PLAN_FILE" | jq '.resource_changes[] | {address, actions: .change.actions}'
+   ```
+   *(Note: This safe summary is also printed in the GitHub Actions step summary).*
+
+9. **Extract changed attribute PATHS only:** 
+   If a resource change is unexplained, inspect which specific attributes are changing, without looking at the values using the exact tested jq command:
+   ```bash
+   terraform show -json "/tmp/$PLAN_FILE" | jq -r '
+     .resource_changes[]
+     | select(.change.actions != ["no-op"])
+     | .address as $addr
+     | (.change.before // {}) as $before
+     | (.change.after // {}) as $after
+     | ([($before | paths(scalars)), ($after | paths(scalars))] | unique[]) as $p
+     | select(($before | getpath($p)) != ($after | getpath($p)))
+     | "\($addr)\t\($p | map(tostring) | join("."))"
+   '
+   ```
+10. **Selectively inspect non-sensitive before/after values:** If still unexplained, only inspect attributes known to be non-sensitive. Never dump the complete JSON Terraform plan into GitHub logs or documentation.
 
 > **Example (Play Rehearsal, Sept 2026):**
 > A superficially safe plan showed: `0 to add, 15 to change, 0 to destroy`. 
 >
 > ![Play Plan Summary](./assets/play-plan-summary.png)
+> *Figure 4 — Play rehearsal plan showing 0 add / 15 change / 0 destroy. Further inspection revealed unexplained drift and Apply was withheld.*
 > 
-> Resource-level inspection looked non-destructive. However, attribute-path inspection revealed that Terraform intended to remove externally-managed organisational tags (e.g., CostCenter), Azure-managed integration metadata (Application Insights hidden links), and an existing subnet service endpoint (`Microsoft.Storage`). The Apply was rightfully withheld, and the Terraform ownership model was corrected via `ignore_changes` instead of blindly applying the drift.
+> Resource-level inspection looked non-destructive (in-place updates). However, attribute-path inspection revealed that Terraform intended to remove externally-managed organisational tags, Azure-managed integration metadata (Application Insights hidden links), and an existing DB subnet `Microsoft.Storage` service endpoint. The Apply was rightfully withheld, and the Terraform ownership configuration was corrected via `ignore_changes` rather than blindly applying the drift.
 
-4. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a completely new workflow run is required to generate and approve a new plan.
-5. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
+### 6.4 Plan Retries & Image Deployment
 
-### 5.2 Digest Rollback & Recovery
+![Play Infrastructure Apply Success](./assets/play-infra-apply-success.png)
+*Figure 5 — Successful infrastructure Apply job, completing only after the strict plan review and GitHub Environment manual approval.*
+
+1. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a completely new workflow run is required to generate and approve a new plan.
+2. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
+
+![Play Deploy Digest](./assets/play-deploy-digest.png)
+*Figure 6 — The application image is deployed deterministically using the exact immutable SHA256 digest validated during the build stage.*
+
+### 6.5 Digest Rollback & Recovery
 Deployment is deterministic. We record the previous digest before deploying and the new digest after.
 
 1. **Recovery Ownership**: If a deployment introduces regressions, authorized operators can perform a rollback.
@@ -139,14 +240,14 @@ Deployment is deterministic. We record the previous digest before deploying and 
 
 ---
 
-## 6. Verification and Health Checks
+## 7. Verification and Health Checks
 
-### 6.1 Safe Verification Boundaries
+### 7.1 Safe Verification Boundaries
 - **Liveness Probe**: The `/health` endpoint is unauthenticated and returns a coarse HTTP 200 process-liveness signal. It does not leak secrets, tokens, or perform downstream NHS requests.
 - **Protected Readiness**: Startup configuration, database, and relay status are checked via Azure App Service health monitoring and Azure-side operational probes, rather than exposing an unauthenticated diagnostic endpoint.
 - **Manual Clinical Check**: Because the GitHub Actions runner does not possess the required mTLS certificates, a manual synthetic test must be run from a trusted clinical workstation to verify SOAP mTLS and audit capabilities after deployment.
 
-### 6.2 Operator Checklist for New Environments
+### 7.2 Operator Checklist for New Environments
 
 **Implemented Readiness Checks (Automated):**
 - [ ] Application liveness probe (HTTP 200).
@@ -161,14 +262,14 @@ Deployment is deterministic. We record the previous digest before deploying and 
 - [ ] App Service integration subnet ID added to `infra/shared/env/shared.tfvars` (Terraform-managed shared Key Vault network ACL onboarding).
 
 **Follow-ups / Manual Exercises:**
-- [ ] Trust-local authentication.
-- [ ] Audit retention/access policies.
-- [ ] Restore evidence.
-- [ ] Key rotation.
+- [ ] [TODO: automate] Trust-local authentication.
+- [ ] [TODO: automate] Audit retention/access policies.
+- [ ] [TODO: automate] Restore evidence.
+- [ ] [TODO: automate] Key rotation.
 - [ ] Run synthetic manual clinical check (SOAP/mTLS) from a trusted workstation.
 - [ ] Rollback exercise performed and documented.
 
-### 6.3 Key Vault Reference Verification
+### 7.3 Key Vault Reference Verification
 
 A mandatory verification step must be performed post-Terraform and pre-functional-testing to ensure the App Service can resolve its `@Microsoft.KeyVault(...)` configuration references. Note that Terraform automatically provisions the App Service managed-identity access policy on the shared Key Vault.
 
@@ -181,9 +282,27 @@ When the shared Key Vault is configured with `DefaultAction = Deny`, the target 
 4. Confirm the App Service Key Vault reference status is `Resolved`.
 5. **Do not proceed** to functional testing if the reference status is `AccessToKeyVaultDenied`, `SecretNotFound`, or any other unresolved state.
 
+*(Note: Verification can be performed via the Azure Portal or using the `az webapp config appsettings` command to verify values are appropriately retrieved rather than remaining as raw references).*
+
+### 7.4 Post-Deployment Health Verification
+
+Run the following reproducible command to verify application liveness:
+
+```bash
+curl -sS \
+  -o /tmp/xhuma-health.json \
+  -w 'HTTP %{http_code}\n' \
+  https://<app_service>.azurewebsites.net/health
+
+cat /tmp/xhuma-health.json
+```
+
+![Final Health State](./assets/final-health-state.png)
+*Figure 7 — Post-deployment liveness verification: the Play App Service returned HTTP 200 with `{"status":"ok"}`. This is a coarse liveness signal, and does not replace deep clinical/readiness testing.*
+
 ---
 
-## 7. Shared Infrastructure Adoption (Terraform)
+## 8. Shared Infrastructure Adoption (Terraform)
 
 When managing shared infrastructure components (such as the shared Key Vault `xhuma-shared-kv-int` network ACLs) in Terraform:
 - Ensure the resource includes a `lifecycle { prevent_destroy = true }` block.
@@ -192,8 +311,61 @@ When managing shared infrastructure components (such as the shared Key Vault `xh
 
 ---
 
-## 7. Assurance and Evidence Records
+## 9. Quick Operator Commands
+
+Use these safe generic commands to inspect environments. Replace placeholders (e.g. `<target-subscription-id>`, `<app_service>`, `<rg>`) with the actual environment values.
+
+- **Current Azure subscription:**
+  ```bash
+  az account show --query name -o tsv
+  ```
+- **App Service managed identity:**
+  ```bash
+  az webapp identity show --name <app_service> --resource-group <rg> --query principalId -o tsv
+  ```
+- **SHA256 verification:**
+  ```bash
+  sha256sum <target>-plan.tfplan
+  ```
+- **Changed Terraform resources/actions:**
+  ```bash
+  terraform show -json <target>-plan.tfplan | jq '.resource_changes[] | {address, actions: .change.actions}'
+  ```
+- **Changed Terraform attribute paths:**
+  ```bash
+  terraform show -json <target>-plan.tfplan | jq -r '
+    .resource_changes[]
+    | select(.change.actions != ["no-op"])
+    | .address as $addr
+    | (.change.before // {}) as $before
+    | (.change.after // {}) as $after
+    | ([($before | paths(scalars)), ($after | paths(scalars))] | unique[]) as $p
+    | select(($before | getpath($p)) != ($after | getpath($p)))
+    | "\($addr)\t\($p | map(tostring) | join("."))"
+  '
+  ```
+- **App Service health:**
+  ```bash
+  curl -s https://<app_service>.azurewebsites.net/health
+  ```
+- **Key Vault reference verification (list settings):**
+  ```bash
+  az webapp config appsettings list --name <app_service> --resource-group <rg> --query "[?contains(value, '@Microsoft.KeyVault')].{name:name, value:value}" -o table
+  ```
+- **Currently deployed container digest:**
+  ```bash
+  az webapp config show --name <app_service> --resource-group <rg> --query 'linuxFxVersion' -o tsv
+  ```
+- **Relevant workflow/run identifiers:**
+  ```bash
+  gh run view <run-id>
+  ```
+
+---
+
+## 10. Assurance and Evidence Records
 
 Specific deployment rehearsals and assurance events are captured as immutable evidence records. These records are retained separately from this living operational runbook to preserve point-in-time factual observations.
 
 - [Play Matrix Deployment Rehearsal (23 September 2026)](./assurance/evidence/2026-09-23-play-matrix-deployment-rehearsal.md)
+
