@@ -431,25 +431,33 @@ jobs:
           APP_URL="https://${{ matrix.target.app_service_name }}.azurewebsites.net/health"
           TIMEOUT=120
           INTERVAL=5
-          ELAPSED=0
           SUCCESS=0
+          START_TIME=$(date +%s)
+          DEADLINE=$((START_TIME + TIMEOUT))
 
-          while [ $ELAPSED -lt $TIMEOUT ]; do
-            # Use max-time for the connection/request
-            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$APP_URL" || echo "curl_failed")
+          while [ $(date +%s) -lt $DEADLINE ]; do
+            set +e
+            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$APP_URL")
+            CURL_EXIT_CODE=$?
+            set -e
 
-            if [ "$RESPONSE_CODE" == "200" ]; then
+            if [ $CURL_EXIT_CODE -ne 0 ]; then
+              echo "Health check blocked by network, WAF, or unreachable (Exit code: $CURL_EXIT_CODE)."
+              echo "::warning::Automated health check BLOCKED/NOT RUN. Operator must verify."
+              SUCCESS=2
+              break
+            elif [ "$RESPONSE_CODE" == "200" ]; then
               SUCCESS=1
               break
-            elif [ "$RESPONSE_CODE" == "403" ] || [ "$RESPONSE_CODE" == "000" ] || [ "$RESPONSE_CODE" == "curl_failed" ]; then
+            elif [ "$RESPONSE_CODE" == "403" ] || [ "$RESPONSE_CODE" == "000" ]; then
               echo "Health check blocked by network, WAF, or unreachable (Status: $RESPONSE_CODE)."
               echo "::warning::Automated health check BLOCKED/NOT RUN. Operator must verify."
               SUCCESS=2
               break
             fi
+
             sleep $INTERVAL
-            ELAPSED=$((ELAPSED + INTERVAL))
-            echo "Waiting... (elapsed ${ELAPSED}s)"
+            echo "Waiting... (elapsed $(( $(date +%s) - START_TIME ))s)"
           done
 
           if [ $SUCCESS -eq 0 ]; then

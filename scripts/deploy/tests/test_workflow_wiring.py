@@ -22,8 +22,36 @@ def test_infra_guard_script_working_directory():
 
 
 def test_legacy_refs_cannot_reach_azure():
-    # Implicitly tested by validate_branch.py logic
-    pass
+    workflow = load_workflow("infra.yml")
+    plan_job = workflow["jobs"]["terraform"]
+
+    steps = plan_job["steps"]
+    validate_idx = -1
+    azure_login_idx = -1
+    bootstrap_idx = -1
+    apply_idx = -1
+
+    for idx, step in enumerate(steps):
+        if step.get("name") == "Validate Branch and Event":
+            validate_idx = idx
+        elif step.get("name") == "Azure Login":
+            azure_login_idx = idx
+        elif step.get("name") == "Bootstrap Terraform State Storage":
+            bootstrap_idx = idx
+            assert step.get("if") == "github.event_name != 'pull_request'"
+        elif step.get("name") == "Terraform Apply":
+            apply_idx = idx
+            assert "github.event_name == 'push'" in step.get("if", "")
+
+    assert validate_idx != -1
+    assert azure_login_idx != -1
+    assert bootstrap_idx != -1
+    assert apply_idx != -1
+
+    # branch validation precedes Azure login/bootstrap/deployment
+    assert validate_idx < azure_login_idx
+    assert azure_login_idx < bootstrap_idx
+    assert bootstrap_idx < apply_idx
 
 
 def test_matrix_deploy_backend_path_exists():

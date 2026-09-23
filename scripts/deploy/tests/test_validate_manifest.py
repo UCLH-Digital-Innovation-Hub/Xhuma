@@ -14,9 +14,13 @@ VALID_MANIFEST = {
     "azure_tenant_id": "tenant-abc",
     "azure_subscription_id": "sub-123",
     "backend_file": "infra/backends/play.hcl",
-    "candidate_image_digest": "sha256:abcd",
+    "candidate_image_digest": "sha256:abcd" + "e" * 60,
     "plan_blob_path": "play-abc1234-999.tfplan",
     "plan_sha256": "0" * 64,
+    "backend_resource_group": "rg-xhuma-play",
+    "backend_storage_account": "xtfrgxhumaplay",
+    "backend_container": "tfstate",
+    "backend_key": "terraform.tfstate",
 }
 
 VALID_ENV = {
@@ -27,14 +31,25 @@ VALID_ENV = {
     "EXPECTED_TENANT": "tenant-abc",
     "EXPECTED_SUB": "sub-123",
     "EXPECTED_BACKEND": "infra/backends/play.hcl",
-    "EXPECTED_DIGEST": "sha256:abcd",
+    "EXPECTED_DIGEST": "sha256:abcd" + "e" * 60,
 }
 
 
-def run_script(manifest_dict, env_vars):
+def run_script(manifest_dict, env_vars, mock_backend=None):
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as f:
         json.dump(manifest_dict, f)
         manifest_path = f.name
+
+    backend_path = None
+    if mock_backend:
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".hcl") as f:
+            f.write(mock_backend)
+            backend_path = f.name
+        manifest_dict["backend_file"] = backend_path
+        env_vars["EXPECTED_BACKEND"] = backend_path
+        # write it again since we mutated it
+        with open(manifest_path, "w") as f:
+            json.dump(manifest_dict, f)
 
     try:
         env = os.environ.copy()
@@ -43,10 +58,36 @@ def run_script(manifest_dict, env_vars):
         return result
     finally:
         os.remove(manifest_path)
+        if backend_path:
+            os.remove(backend_path)
 
 
-def test_valid_manifest():
+def get_mock_backend():
+    return """
+resource_group_name  = "rg-xhuma-mock"
+storage_account_name = "xtfrgxhumamock"
+container_name       = "tfstate"
+key                  = "terraform.tfstate"
+"""
+
+
+def test_valid_manifest_fixture_one():
+    # Uses play.hcl already in repo
     res = run_script(VALID_MANIFEST, VALID_ENV)
+    assert res.returncode == 0
+    assert "Manifest verified successfully" in res.stdout
+
+
+def test_valid_manifest_fixture_two():
+    manifest = deepcopy(VALID_MANIFEST)
+    env = deepcopy(VALID_ENV)
+    manifest.update(
+        {
+            "backend_resource_group": "rg-xhuma-mock",
+            "backend_storage_account": "xtfrgxhumamock",
+        }
+    )
+    res = run_script(manifest, env, mock_backend=get_mock_backend())
     assert res.returncode == 0
     assert "Manifest verified successfully" in res.stdout
 
@@ -95,7 +136,7 @@ def test_mismatched_fields():
 
 def test_invalid_plan_hash_format():
     manifest = deepcopy(VALID_MANIFEST)
-    manifest["plan_sha256"] = "short"
+    manifest["plan_sha256"] = "z" * 64
     res = run_script(manifest, VALID_ENV)
     assert res.returncode == 1
     assert "Invalid plan_sha256 format" in res.stdout
@@ -113,7 +154,23 @@ def test_invalid_digest_format():
 
 def test_invalid_plan_path():
     manifest = deepcopy(VALID_MANIFEST)
-    manifest["plan_blob_path"] = "play.txt"
+    manifest["plan_blob_path"] = "../other.tfplan"
     res = run_script(manifest, VALID_ENV)
     assert res.returncode == 1
-    assert "Invalid plan_blob_path format" in res.stdout
+    assert "Invalid plan_blob_path" in res.stdout
+
+
+def test_missing_backend_coordinates():
+    manifest = deepcopy(VALID_MANIFEST)
+    del manifest["backend_resource_group"]
+    res = run_script(manifest, VALID_ENV)
+    assert res.returncode == 1
+    assert "Manifest backend field missing" in res.stdout
+
+
+def test_wrong_backend_coordinates():
+    manifest = deepcopy(VALID_MANIFEST)
+    manifest["backend_resource_group"] = "rg-wrong"
+    res = run_script(manifest, VALID_ENV)
+    assert res.returncode == 1
+    assert "Manifest mismatch for backend coordinate" in res.stdout

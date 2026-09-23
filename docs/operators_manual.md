@@ -121,9 +121,9 @@ Deployment is deterministic. We record the previous digest before deploying and 
 ### 6.2 Operator Checklist for New Environments
 
 **Implemented Readiness Checks (Automated):**
-- [x] Application liveness probe (HTTP 200).
-- [x] Key Vault reference resolution at application startup.
-- [x] Digest verification of the deployed container.
+- [ ] Application liveness probe (HTTP 200).
+- [ ] Status-only Key Vault resolution check (if supported by access model).
+- [ ] Digest verification of the deployed container.
 
 **Manual Prerequisites (To be done by Operator):**
 - [ ] Target configuration defined in `infra/targets.json`.
