@@ -211,7 +211,7 @@ jobs:
             echo "### Terraform Plan Error" >> $GITHUB_STEP_SUMMARY
             echo '```text' >> $GITHUB_STEP_SUMMARY
             # Publish actionable error, absent sensitive values
-            grep -E "Error:" -A 10 -B 2 plan_output.txt | grep -E -iv "password|secret|key|token|client|tenant|subscription" >> $GITHUB_STEP_SUMMARY || tail -n 20 plan_output.txt | grep -E -iv "password|secret|key|token|client|tenant|subscription" >> $GITHUB_STEP_SUMMARY || true
+            python ../scripts/deploy/filter_tf_error.py $TF_EXIT plan_output.txt >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             exit $TF_EXIT
           fi

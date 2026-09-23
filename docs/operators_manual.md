@@ -64,6 +64,9 @@ The deployment relies on specific GitHub environments to orchestrate the provisi
 
 *Note: The Azure credential set consists of `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`. Do not duplicate Terraform input secrets in the apply/deploy environments, as apply consumes the saved plan.*
 
+**Shared Resources Configuration:**
+The `SHARED_SUBSCRIPTION_ID` is `c24b0c3e-9e09-4c7c-8687-75e8b654bc8e`. This cross-subscription variable must be explicitly provided to the environments running Terraform Plan (e.g., `play-plan` for matrix deployments) and the legacy `infra.yml` workflow, which provisions INT and production infrastructure.
+
 **Actual Deployment Sequence:**
 
 1. **Configure GitHub Environments & Secrets:** Ensure the environments (`play-plan`, `rg-xhuma-play-infra`, `rg-xhuma-play`) exist and their secrets are securely stored. Environment names alone do not configure protection; you must set manual approvers on `rg-xhuma-play-infra` and `rg-xhuma-play`.

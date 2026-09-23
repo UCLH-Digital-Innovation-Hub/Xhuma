@@ -333,6 +333,7 @@ resource "azurerm_key_vault_access_policy" "app_local_policy" {
 
 # Access Policy for Shared Vault
 resource "azurerm_key_vault_access_policy" "app_shared_policy" {
+  provider     = azurerm.shared
   key_vault_id = data.azurerm_key_vault.shared_kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = azurerm_linux_web_app.app.identity[0].principal_id
@@ -353,6 +354,7 @@ resource "azurerm_key_vault_access_policy" "locust_local_policy" {
 
 # Locust MI Access Policy for Shared Vault
 resource "azurerm_key_vault_access_policy" "locust_shared_policy" {
+  provider     = azurerm.shared
   key_vault_id = data.azurerm_key_vault.shared_kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = azurerm_user_assigned_identity.locust_mi.principal_id
