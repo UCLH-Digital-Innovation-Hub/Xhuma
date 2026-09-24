@@ -66,6 +66,8 @@ X to add, Y to change, Z to destroy.
 
 During the Play rehearsal, the plan initially looked harmless (0 add / 15 change / 0 destroy), but deeper inspection found Terraform intended to remove externally managed tags, Azure-managed metadata, and an existing subnet service endpoint. Apply was rightfully withheld and the configuration was corrected. 
 
+*(Note: A later Run #35 convergence plan returned no infrastructure changes after the Terraform ownership corrections).*
+
 This is the main lesson of the guide.
 
 ## 4. Look at which resources are changing

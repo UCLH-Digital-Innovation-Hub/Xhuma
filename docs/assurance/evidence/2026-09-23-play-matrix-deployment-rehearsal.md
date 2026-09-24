@@ -82,3 +82,12 @@ Before functional clinical testing can commence in the `play` environment, an au
 
 ## 12. Evidence Conclusion
 The 23 September 2026 rehearsal successfully validated the Xhuma matrix deployment pipeline. It demonstrated secure Azure authentication, strict identity scoping, cryptographic plan validation, environment approval gating, and fail-closed runtime configuration behaviour. Full operational assurance, production readiness, and clinical safety approval are explicitly excluded from the scope of this rehearsal and remain subject to separate verification.
+
+---
+
+### Convergence Follow-up (24 September 2026)
+Following the Terraform ownership and drift corrections, a subsequent convergence check (Run #35) demonstrated:
+- Terraform returned no infrastructure changes;
+- the exact reviewed saved plan was Applied successfully;
+- no infrastructure mutation occurred;
+- application Deploy was deliberately not approved because the source change was documentation-only.

@@ -29,27 +29,33 @@ flowchart TD
 
 ## Observability Data Flows
 
-### 1. Metrics Collection Flow
+### 1. Production Metrics Flow (Azure Monitor)
 ```mermaid
 flowchart TD
-    A[Application Events] -->|Metrics| B[Prometheus Client]
-    B -->|Scrape| C[Prometheus Server]
-    C -->|Query| D[Grafana]
-    D -->|Alert| E[Alert Manager]
-    E -->|Notification| F[Alert Channels]
+    A[Application Events] -->|OpenTelemetry| B[Azure Application Insights]
+    B -->|Store| C[Azure Log Analytics Workspace]
+    C -->|Query & Analyse| D[Azure Monitor]
 
     G[System Metrics] -->|Resource Usage| B
     H[Redis Metrics] -->|Cache Stats| B
     I[Request Metrics] -->|Latency/Errors| B
 ```
 
-### 2. Logging Flow
+### 1a. Local Development Metrics Flow (Docker Compose Only)
+```mermaid
+flowchart TD
+    A[Application Events] -->|Metrics| B[Prometheus Client]
+    B -->|Scrape| C[Prometheus Server]
+    C -->|Query| D[Grafana]
+```
+
+### 2. Production Logging Flow (Azure Log Analytics)
 ```mermaid
 flowchart TD
     A[Application Logs] -->|JSON Format| B[PHI Regex Scrubber]
-    B -->|Redacted Logs| C[Logstash]
-    C -->|Process| D[Elasticsearch]
-    D -->|Query| E[Kibana]
+    B -->|Redacted Logs| C[Application Insights]
+    C -->|Store| D[Log Analytics Workspace]
+    D -->|Query| E[Azure Monitor / KQL]
 
     F[System Logs] -->|Structured| C
     G[Access Logs] -->|Parse| C
@@ -109,9 +115,9 @@ Timing Collection
 ↓
 Metric Aggregation
 ↓
-Prometheus Storage
+Azure Application Insights
 ↓
-Grafana Visualisation
+Azure Monitor Dashboards
 ```
 
 ### 2. Error Tracking Flow

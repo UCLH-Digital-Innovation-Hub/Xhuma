@@ -155,12 +155,12 @@ The `infra/` directory contains Terraform configuration for:
 - Azure Cache for Redis (Standard)
 - Azure Monitor (Application Insights & Log Analytics)
 
-### CI/CD Pipelines & Multi-Tenant Deployment
-The pipeline implements a **"Shared-Nothing" Bootstrapped State Architecture**, designed to deploy isolated infrastructure per NHS Trust with zero manual engineering.
+### CI/CD Pipelines & Matrix Deployment
+The deployment architecture is currently migrating to a **"Target-isolated matrix deployment with centrally managed shared services"** model.
 
-- **CI (`.github/workflows/ci.yml`)**: Runs code quality (Black, isort), CodeQL vulnerability scanning, and pytest suites. Triggers on `dev`, `int`, and `main`.
-- **Infrastructure (`.github/workflows/infra.yml`)**: Dynamically routes deployments based on the triggering branch (`int` deploys to `rg-xhuma-int`, `main` deploys to `rg-xhuma-uclh-prd`). Automatically bootstraps an isolated Azure Storage Account for Terraform state (`tfstate`) within the target Resource Group before running Terraform.
-- **Deployment (`.github/workflows/cd.yml`)**: Builds the Docker image, runs Trivy vulnerability scanning (CRITICAL/HIGH severities), pushes to GitHub Container Registry (GHCR), and deploys to the dynamically targeted Azure Web App.
+- **Matrix Pipeline (`.github/workflows/matrix-deploy.yml`)**: Currently orchestrates deployments to the `play` environment from the `rehearsal/play-deployment` branch. This pipeline enforces strict pre-plan and pre-apply approval gates and relies on immutable Docker image digests.
+- **Legacy Pipelines (`.github/workflows/infra.yml` and `cd.yml`)**: INT and PRD environments currently remain on legacy ownership pipelines and will be migrated to the matrix model in the future.
+- **Shared Infrastructure**: Adoption of a shared Terraform state (for cross-environment resources like the shared Key Vault) is currently incomplete and remains an outstanding migration step.
 
 ### Observability
 End-to-end traceability is implemented using **Azure Monitor OpenTelemetry**.
@@ -187,7 +187,7 @@ The service uses a production-ready Redis setup with:
 - Comprehensive monitoring
 - Security hardening
 
-Redis metrics are available through Prometheus and can be visualized in Grafana.
+*(Note: In local development, Redis metrics are available through Prometheus and can be visualized in Grafana. Production Azure target environments use Azure Monitor for managed Redis metrics).*
 
 ## API Documentation
 

@@ -219,19 +219,22 @@ Do NOT proceed if you observe any of the following:
 > 
 > Resource-level inspection looked non-destructive (in-place updates). However, attribute-path inspection revealed that Terraform intended to remove externally-managed organisational tags, Azure-managed integration metadata (Application Insights hidden links), and an existing DB subnet `Microsoft.Storage` service endpoint. The Apply was rightfully withheld, and the Terraform ownership configuration was corrected via `ignore_changes` rather than blindly applying the drift.
 
+![Play Convergence Check](./assets/play-convergence-no-changes.png)
+*Figure 5 — Play convergence check — Run #35. Following the Terraform ownership and drift corrections, the Play environment produced a clean Terraform plan with no infrastructure changes. The reviewed saved plan was then applied successfully through the protected infrastructure gate without mutating Azure resources.*
+
 ### 6.4 Plan Retries & Image Deployment
 
 ![Infrastructure Apply Approval Gate](./assets/play-infra-apply-approval-gate.png)
-*Figure 5 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `rg-xhuma-play-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
+*Figure 6 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `rg-xhuma-play-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
 
 ![Play Infrastructure Apply Success](./assets/play-infra-apply-success.png)
-*Figure 6 — Successful infrastructure Apply job, completing only after the strict plan review and GitHub Environment manual approval.*
+*Figure 7 — Successful infrastructure Apply job, completing only after the strict plan review and GitHub Environment manual approval.*
 
 1. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a completely new workflow run is required to generate and approve a new plan.
 2. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
 
 ![Play Deploy Digest](./assets/play-deploy-digest.png)
-*Figure 7 — The application image is deployed deterministically using the exact immutable SHA256 digest validated during the build stage.*
+*Figure 8 — The application image is deployed deterministically using the exact immutable SHA256 digest validated during the build stage.*
 
 ### 6.5 Digest Rollback & Recovery
 Deployment is deterministic. We record the previous digest before deploying and the new digest after.
@@ -243,7 +246,7 @@ Deployment is deterministic. We record the previous digest before deploying and 
      ```bash
      az webapp config container set --name <app_service> --resource-group <rg> --docker-custom-image-name ghcr.io/...@sha256:...
      ```
-   - Ensure older application code is compatible with the current Alembic database schema migrations.
+   - Ensure older application code is compatible with the current Alembic database schema migrations. Immutable image rollback is available, but image rollback is only safe when the previous application release is compatible with the schema already migrated by the newer release. The formal migration compatibility / downgrade policy remains a handover-readiness item. Operators must not assume that reverting the container digest also reverts PostgreSQL.
 
 ---
 
@@ -251,7 +254,11 @@ Deployment is deterministic. We record the previous digest before deploying and 
 
 ### 7.1 Safe Verification Boundaries
 - **Liveness Probe**: The `/health` endpoint is unauthenticated and returns a coarse HTTP 200 process-liveness signal. It does not leak secrets, tokens, or perform downstream NHS requests.
-- **Protected Readiness**: Startup configuration, database, and relay status are checked via Azure App Service health monitoring and Azure-side operational probes, rather than exposing an unauthenticated diagnostic endpoint.
+- **Protected Readiness**:
+  - **Implemented liveness**: the pipeline calls `/health` after deployment.
+  - **Implemented observability foundations**: Application Insights, Log Analytics and PostgreSQL diagnostics.
+  - **Application safety**: startup configuration failures fail closed.
+  - **Operational monitoring**: Xhuma uses Azure Monitor/Application Insights and Log Analytics for production telemetry. Alert rules also exist in the live Azure environment. The complete alert/routing configuration is not yet codified in the current Terraform deployment model; IaC reconciliation and routing standardisation are a planned operational-hardening activity.
 - **Manual Clinical Check**: Because the GitHub Actions runner does not possess the required mTLS certificates, a manual synthetic test must be run from a trusted clinical workstation to verify SOAP mTLS and audit capabilities after deployment.
 
 ### 7.2 Operator Checklist for New Environments
@@ -266,13 +273,14 @@ Deployment is deterministic. We record the previous digest before deploying and 
 - [ ] Scoped Azure SP access configured and credentials placed in GitHub.
 - [ ] GitHub Environment approvals configured for infra apply and container deployment.
 - [ ] Local Key Vault populated with `epic-ca-cert`.
-- [ ] App Service integration subnet ID added to `infra/shared/env/shared.tfvars` (Terraform-managed shared Key Vault network ACL onboarding).
+- [ ] App Service integration subnet ID added to the shared configuration. *(Note: The shared Terraform root has been implemented and an explicit shared tfvars/source-of-truth file is the intended configuration mechanism. However, creation of the live `shared.tfvars` configuration, import of the existing vault `xhuma-shared-kv-int`, reconciliation plan, and first Apply remain outstanding. Target states continue to own their App/Locust access policies, while shared state is intended to own the vault/network ACL lifecycle. Adoption must be proven without vault replacement, ACL loss, or removal of existing target access.)*
 
 **Follow-ups / Manual Exercises:**
 - [ ] [TODO: automate] Trust-local authentication.
 - [ ] [TODO: automate] Audit retention/access policies.
-- [ ] [TODO: automate] Restore evidence.
-- [ ] [TODO: automate] Key rotation.
+- [ ] PostgreSQL restore rehearsal and evidence (record recovery time/result and application recovery verification).
+- [ ] Service-principal credential rotation rehearsal.
+- [ ] Target Epic certificate rotation rehearsal (post-rotation deployment/mTLS verification).
 - [ ] Run synthetic manual clinical check (SOAP/mTLS) from a trusted workstation.
 - [ ] Rollback exercise performed and documented.
 
@@ -305,7 +313,7 @@ cat /tmp/xhuma-health.json
 ```
 
 ![Final Health State](./assets/final-health-state.png)
-*Figure 8 — Post-deployment liveness verification: the Play App Service returned HTTP 200 with `{"status":"ok"}`. This is a coarse liveness signal, and does not replace deep clinical/readiness testing.*
+*Figure 9 — Post-deployment liveness verification: the Play App Service returned HTTP 200 with `{"status":"ok"}`. This is a coarse liveness signal, and does not replace deep clinical/readiness testing.*
 
 ---
 

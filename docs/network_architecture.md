@@ -10,28 +10,23 @@ Xhuma's cloud infrastructure is provisioned via Terraform (`infra/main.tf`). The
 * **App Service (Linux Web App):** The main API container host. It runs the Dockerised FastAPI application and serves incoming HTTP/SOAP traffic over TLS. WebSockets are enabled to support outbound tunnelling.
 * **PostgreSQL Flexible Server:** Provides persistent relational storage for audit logging and service configuration. It is protected by internal Azure firewall rules.
 * **Redis Cache:** A managed memory cache used for storing transient data such as NHS OAuth Tokens, PDS demographic lookups, and generated CCDA documents to reduce redundant NHS API calls.
-* **Observability:** Azure Application Insights and a Log Analytics Workspace are used to store OpenTelemetry metrics, traces, and application logs.
+* **Observability Foundations:** Azure Application Insights and a Log Analytics Workspace are used to store OpenTelemetry metrics, traces, and application logs. (Note: These provide telemetry foundations, but proactive alert routing and escalation remain outstanding).
 
 ---
 
 ## 2. CI/CD Deployment Flow
 
-Xhuma uses GitHub Actions (`.github/workflows/cd.yml`) for automated deployment.
+Xhuma uses GitHub Actions for automated deployment. The architecture is currently migrating to a target-isolated matrix deployment model.
 
-```mermaid
-flowchart LR
-    A[Code Push to main/dev] --> B[GitHub Actions Runner]
-    B --> C[Build Docker Image]
-    C --> D[Push to GHCR]
-    D --> E[Azure Authenticate via SP]
-    E --> F[Trigger Azure WebApp Pull]
-    F --> G[Container Restarts with New Image]
-```
+- **Legacy Pipelines (`cd.yml` / `infra.yml`)**: Currently manage the integration (`int`) and production (`prd`) environments.
+- **Matrix Pipeline (`matrix-deploy.yml`)**: Currently manages the `play` rehearsal environment, introducing strict environment approvals, immutable Docker image digests, and centralised shared services.
 
-1. **Build:** Commits to protected branches (`int` and `main`) trigger the CD pipeline. The runner builds a new Docker image from the working directory.
-2. **Registry:** The built image is tagged with the Git SHA and pushed to the GitHub Container Registry (`ghcr.io/uclh-digital-innovation-hub/xhuma`).
-3. **Deploy:** The pipeline dynamically authenticates to the isolated Azure Resource Group tied to the branch (e.g., `rg-xhuma-int` or `rg-xhuma-uclh-prd`) and commands the dynamically targeted Azure Web App to pull the latest image.
-4. **Infrastructure State:** Terraform state is automatically bootstrapped into isolated Storage Accounts within each target Resource Group to ensure a strict "Shared-Nothing" boundary between trust environments.
+### General Deployment Flow (Matrix Example)
+
+1. **Build:** The CI pipeline builds the Docker image from the source branch.
+2. **Registry:** The built image is tagged with its SHA-256 digest and pushed to the GitHub Container Registry (`ghcr.io/uclh-digital-innovation-hub/xhuma`).
+3. **Plan & Infrastructure:** The workflow dynamically authenticates to Azure, bootstraps isolated state storage if needed, and generates a cryptographic Terraform plan. An authorised operator must review and approve this plan before infrastructure applies.
+4. **Deploy:** Once infrastructure is updated and healthy, a separate approval gate permits the deployment of the immutable container digest to the target Azure Web App.
 
 ---
 

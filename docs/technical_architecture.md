@@ -231,7 +231,7 @@ flowchart TD
     P6 -.->|API error| P11
     P7 -.->|validation error| P11
     P11 -->|safe failure response| Epic
-    P11 -->|alert/log| P10
+    P11 -->|telemetry/log| P10
     
     P1 -->|audit log| P10
     P9 -->|audit log| P10
@@ -401,58 +401,14 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 
 ## Monitoring & Observability Architecture
 
-### 1. Metrics Collection (Prometheus)
-- **Endpoint Metrics**
-  - Request counts and rates
-  - Response times
-  - Error rates by type
-  - Status code distribution
+Xhuma currently uses Azure Application Insights and Log Analytics to collect telemetry. The sections below outline the current foundation and the intended future tooling for advanced observability.
 
-- **Cache Metrics**
-  - Hit/miss rates
-  - Cache size and memory usage
-  - Eviction rates
-  - Connection pool statistics
-  - Operation latencies
-  - Error counts by type
+### 1. Current Telemetry (Azure Monitor / App Insights)
+- **Implemented:** Distributed tracing, request tracking, error logging, and Application Insights integration.
+- **Outstanding:** Proactive Azure alert rules, action groups, and automated operator notification are not yet fully codified in the current Terraform deployment model, but alert rules also exist in the live Azure environment.
 
-- **Resource Metrics**
-  - CPU usage
-  - Memory utilisation
-  - Network I/O
-  - Disk operations
-
-### 2. Visualisation (Grafana)
-- **System Dashboards**
-  - Real-time performance monitoring
-  - Historical trends analysis
-  - Resource utilisation tracking
-  - Error rate visualisation
-
-- **Business Metrics**
-  - Transaction success rates
-  - API usage patterns
-  - Cache efficiency
-  - Service availability
-
-### 3. Logging Architecture (ELK Stack)
-- **Log Collection**
-  - Application logs
-  - System logs
-  - Access logs
-  - Error logs
-
-- **Log Processing**
-  - Structured log formatting
-  - Log enrichment
-  - Pattern detection
-  - Alert generation
-
-- **Log Storage**
-  - Indexed storage
-  - Retention policies
-  - Archival strategy
-  - Search optimisation
+### 2. Local Development Tooling (Prometheus & Grafana)
+Prometheus and Grafana are available in the local Docker Compose development stack. Production target environments currently use the Azure Monitor / Application Insights / Log Analytics stack.
 
 ### 4. Distributed Tracing (OpenTelemetry)
 - **Trace Collection**
@@ -537,14 +493,10 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 │   ├── FastAPI Application
 │   ├── Uvicorn Server
 │   └── Application Dependencies
-├── Redis Container
-│   ├── Redis Server (v7.2)
-│   ├── Custom Configuration
-│   └── Persistence Volumes
-└── Monitoring Stack
-    ├── Prometheus
-    ├── Grafana
-    └── OpenTelemetry Collector
+└── Redis Container
+    ├── Redis Server (v7.2)
+    ├── Custom Configuration
+    └── Persistence Volumes
 ```
 
 ### Network Configuration
@@ -552,8 +504,6 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 - Exposed ports:
   - 8000: Application API
   - 6379: Redis (internal only)
-  - 9090: Prometheus metrics
-  - 3000: Grafana dashboards
 
 ## Error Handling Architecture
 
