@@ -1,5 +1,6 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
 import app.main
@@ -132,8 +133,9 @@ async def test_iti38_audit_failure_blocks_cache_hit(
 @patch("app.pds.pds.redis_client.exists")
 @patch("app.pds.pds.attempt_audit", new_callable=AsyncMock)
 async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redis_exists, mock_async_client):
-    from app.pds.pds import lookup_patient
     from fastapi import HTTPException
+
+    from app.pds.pds import lookup_patient
 
     mock_redis_exists.return_value = True
 
@@ -164,6 +166,7 @@ async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redi
 @patch("app.audit.store.insert_audit_event", new_callable=AsyncMock)
 async def test_audit_failure_exception_hides_sql(mock_insert, caplog):
     import logging
+
     from app.audit.audit import attempt_audit
 
     # Simulate DB error with sensitive SQL param

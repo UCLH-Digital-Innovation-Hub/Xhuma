@@ -1,14 +1,15 @@
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
-from fastapi.testclient import TestClient
 import os
-from app.audit.models import SAMLAttributes
-from app.ccda.models.datatypes import CD
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+
 import app.main
 from app.audit.audit import AuditFailureException
-from app.audit.models import AuditOutcome
-from app.audit.store import insert_audit_event
 from app.audit.build import build_audit_event
+from app.audit.models import AuditOutcome, SAMLAttributes
+from app.audit.store import insert_audit_event
+from app.ccda.models.datatypes import CD
 
 
 @pytest.fixture
@@ -214,9 +215,9 @@ async def test_redis_publication_audit_failure_interaction(mock_lookup, mock_pip
 
                     mock_attempt_audit.side_effect = audit_side_effect
 
-                    from app.gpconnect import _fetch_gpconnect_record
                     from app.audit.models import SAMLAttributes
                     from app.ccda.models.datatypes import CD
+                    from app.gpconnect import _fetch_gpconnect_record
 
                     saml = SAMLAttributes(
                         subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code")
@@ -246,9 +247,9 @@ async def test_iti38_cache_miss_audit_failure_propagation(mock_redis_get, mock_g
     mock_gpconnect.side_effect = AuditFailureException("Failed to persist audit event")
 
     # Test iti_38_response
-    from app.soap.responses.iti_38 import iti_38_response
     from app.audit.models import SAMLAttributes
     from app.ccda.models.datatypes import CD
+    from app.soap.responses.iti_38 import iti_38_response
 
     saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
     request = MagicMock()

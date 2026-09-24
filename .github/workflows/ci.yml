@@ -43,10 +43,10 @@ jobs:
         run: uv sync --locked --dev
 
       - name: Run Ruff lint
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
 
       - name: Run Ruff format check
-        run: uv run ruff format --check .
+        run: uv run --locked ruff format --check .
 
   test:
     name: Tests

@@ -59,6 +59,8 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         structured_notes_text = "\n".join(misc_notes)
 
         comment_activity = EntryRelationship()
+        # TODO: Build an Act with typed code/text rather than assigning a dict;
+        # immunization notes tests emit PydanticSerializationUnexpectedValue for act.
         comment_activity.act = {
             "code": {
                 "@code": "48767-8",

@@ -9,7 +9,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
-  
+
 concurrency:
   group: xhuma-play-release
   cancel-in-progress: false
@@ -29,9 +29,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev
       - name: Ruff Check
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
       - name: Ruff Format Check
-        run: uv run ruff format --check .
+        run: uv run --locked ruff format --check .
       - name: Run Tests
         run: uv run coverage run -m pytest
 
@@ -143,18 +143,18 @@ jobs:
             echo "::error::Missing required secrets:$MISSING"
             exit 1
           fi
-          
+
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-      
+
       - name: Bootstrap State Storage
         env:
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: bash infra/bootstrap/setup-play.sh
-        
+
       - name: Terraform Init
         working-directory: ./infra
         env:
@@ -165,7 +165,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="../${{ matrix.target.backend_file }}"
-            
+
       - name: Terraform Plan
         id: plan
         working-directory: ./infra
@@ -184,7 +184,7 @@ jobs:
         run: |
           PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tfplan"
           terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" > plan_output.txt
-          
+
           # Upload Plan
           ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
           echo "::add-mask::$ACCOUNT_KEY"
@@ -195,11 +195,11 @@ jobs:
             --name "$PLAN_FILE" \
             --file "$PLAN_FILE" \
             --overwrite
-            
+
           PLAN_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')
           echo "plan_hash=$PLAN_HASH" >> $GITHUB_OUTPUT
           echo "plan_file=$PLAN_FILE" >> $GITHUB_OUTPUT
-          
+
           echo "### Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Plan Hash:** \`$PLAN_HASH\`" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
@@ -239,12 +239,12 @@ jobs:
             echo "::error::Missing required secrets:$MISSING"
             exit 1
           fi
-          
+
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-      
+
       - name: Download and Verify Plan
         working-directory: ./infra
         run: |
@@ -257,14 +257,14 @@ jobs:
             --container-name tfplans \
             --name "$PLAN_FILE" \
             --file "$PLAN_FILE"
-            
+
           DOWNLOADED_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')
           if [ "$DOWNLOADED_HASH" != "${{ needs.infra-plan.outputs.plan_hash }}" ]; then
             echo "::error::Plan hash mismatch! Expected ${{ needs.infra-plan.outputs.plan_hash }}, got $DOWNLOADED_HASH"
             exit 1
           fi
           echo "Plan hash verified: $DOWNLOADED_HASH"
-            
+
       - name: Terraform Init
         working-directory: ./infra
         env:
@@ -275,7 +275,7 @@ jobs:
         run: |
           terraform init \
             -backend-config="../${{ matrix.target.backend_file }}"
-            
+
       - name: Terraform Apply
         working-directory: ./infra
         env:
@@ -312,12 +312,12 @@ jobs:
             echo "::error::Missing required secrets:$MISSING"
             exit 1
           fi
-          
+
       - name: Azure Login
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
-          
+
       - name: Capture Previous Digest
         id: prev_digest
         run: |
@@ -326,13 +326,13 @@ jobs:
           # Normalize Azure prefix
           PREV_DIGEST="${PREV_DIGEST#DOCKER|}"
           echo "PREV_DIGEST=$PREV_DIGEST" >> $GITHUB_ENV
-          
+
       - name: Deploy Container to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ matrix.target.app_service_name }}
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}'
-          
+
       - name: Verify New Digest
         run: |
           NEW_DIGEST=$(az webapp config container show --name "${{ matrix.target.app_service_name }}" --resource-group "${{ matrix.target.resource_group }}" --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" -o tsv || echo "none")
@@ -340,14 +340,14 @@ jobs:
              echo "::error::Failed to retrieve new digest from Azure"
              exit 1
           fi
-          
+
           NEW_DIGEST="${NEW_DIGEST#DOCKER|}"
           EXPECTED_DIGEST="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
           if [[ "$NEW_DIGEST" != "$EXPECTED_DIGEST" ]]; then
              echo "::error::Deployed digest $NEW_DIGEST does not match expected $EXPECTED_DIGEST"
              exit 1
           fi
-          
+
           echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Previous Image:** \`$PREV_DIGEST\`" >> $GITHUB_STEP_SUMMARY
           echo "**New Image:** \`$NEW_DIGEST\`" >> $GITHUB_STEP_SUMMARY
