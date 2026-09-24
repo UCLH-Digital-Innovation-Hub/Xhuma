@@ -1,7 +1,12 @@
+import xml.etree.ElementTree as ET
+
 import pytest
 from fhirclient.models import bundle
 
 from app.ccda import fhir2ccda
+from app.ccda.helpers import select_patient_name
+from app.soap.responses.iti_47 import iti_47_response
+from app.soap.responses.iti_55 import iti_55_response
 
 
 def create_bundle_dict(names):
@@ -32,26 +37,51 @@ def create_bundle_dict(names):
     }
 
 
+@pytest.mark.parametrize(
+    "uses, expected_index",
+    [
+        (["official", "usual"], 1),
+        (["nickname", "official"], 1),
+        (["official"], 0),
+        (["nickname", None], 0),
+        ([None, None], 0),
+        (["usual", "usual"], 0),
+        (["official", "official"], 0),
+    ],
+)
 @pytest.mark.asyncio
-async def test_usual_name_selected_over_official():
+async def test_patient_name_priority_across_ccda_and_soap(uses, expected_index):
     names = [
-        {"use": "official", "family": "OfficialFamily", "given": ["OfficialGiven"]},
-        {"use": "usual", "family": "UsualFamily", "given": ["UsualGiven"]},
+        {"family": f"Family{i}", "given": [f"Given{i}"], **({"use": use} if use else {})} for i, use in enumerate(uses)
     ]
     b = bundle.Bundle(create_bundle_dict(names))
     index = {"Organization/1": b.entry[1].resource}
-
     result = await fhir2ccda.convert_bundle(b, index)
     name_dict = result["ClinicalDocument"]["recordTarget"]["patientRole"]["patient"]["name"]
-    assert name_dict["family"]["#text"] == "UsualFamily"
-    assert name_dict["given"]["#text"] == "UsualGiven"
+    assert name_dict["family"]["#text"] == names[expected_index]["family"]
+    assert name_dict["given"]["#text"] == names[expected_index]["given"][0]
+
+    patient = {
+        "id": "12345",
+        "name": names,
+        "gender": "female",
+        "birthDate": "1990-01-01",
+        "address": [{"line": ["123 Fake St"], "postalCode": "12345"}],
+        "generalPractitioner": [{"identifier": {"value": "TEST"}}],
+    }
+    query = {"queryId": {"@root": "test"}}
+    responses = [
+        await iti_55_response("message", patient, query),
+        await iti_47_response("message", patient, "ceid", query),
+    ]
+    for response in responses:
+        root = ET.fromstring(response)
+        name = root.find(".//{urn:hl7-org:v3}patientPerson/{urn:hl7-org:v3}name")
+        assert name.find("{urn:hl7-org:v3}family").text == names[expected_index]["family"]
+        assert name.find("{urn:hl7-org:v3}given").text == names[expected_index]["given"][0]
 
 
-@pytest.mark.asyncio
-async def test_usual_name_missing_raises_error():
-    names = [{"use": "official", "family": "OfficialFamily", "given": ["OfficialGiven"]}]
-    b = bundle.Bundle(create_bundle_dict(names))
-    index = {"Organization/1": b.entry[1].resource}
-
-    with pytest.raises(ValueError, match="Patient record missing required 'usual' name component"):
-        await fhir2ccda.convert_bundle(b, index)
+@pytest.mark.parametrize("names", [None, []])
+def test_missing_names_raise_explicit_error(names):
+    with pytest.raises(ValueError, match="Patient record contains no names"):
+        select_patient_name(names)

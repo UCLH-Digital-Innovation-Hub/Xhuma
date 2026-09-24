@@ -5,9 +5,26 @@ import xmltodict
 from defusedxml import ElementTree
 from fastapi import HTTPException
 from fhirclient.models import coding, fhirdate, identifier, organization, period
+from fhirclient.models.humanname import HumanName
 
 from .models.admin import AssignedAuthor, AuthorParticipation
 from .models.datatypes import CD, II, SXCM_TS
+
+
+def select_patient_name(names: list[HumanName] | None) -> HumanName:
+    """Select usual, then official, then the first supplied FHIR patient name.
+
+    Return the original HumanName, preserving source order within each use.
+    Raise ValueError when no names were supplied rather than inventing a name.
+    """
+    if not names:
+        raise ValueError("Patient record contains no names")
+
+    for preferred_use in ("usual", "official"):
+        for name in names:
+            if name.use == preferred_use:
+                return name
+    return names[0]
 
 
 def validateNHSnumber(number: int) -> bool:

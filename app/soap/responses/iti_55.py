@@ -2,18 +2,12 @@ import uuid
 from datetime import datetime
 
 import xmltodict
+from fhirclient.models.humanname import HumanName
+
+from app.ccda.helpers import select_patient_name
 
 from .constants import COMMUNITY_ID
 from .helpers import create_envelope, create_header, create_id
-
-
-def _select_usual_name(patient: dict) -> dict:
-    """Select the FHIR ``usual`` name, falling back for legacy patient data."""
-
-    names = patient["name"]
-    # Some older PDS fixtures do not carry a use code. Retaining the first-name
-    # fallback avoids rejecting those patients while preferring the intended name.
-    return next((name for name in names if name.get("use") == "usual"), names[0])
 
 
 async def iti_55_response(message_id, patient, query):
@@ -39,7 +33,7 @@ async def iti_55_response(message_id, patient, query):
     else:
         gender = "UNK"
 
-    usual_name = _select_usual_name(patient)
+    selected_name = select_patient_name([HumanName(name) for name in patient.get("name") or []])
 
     ids = []
     ids.append(create_id("2.16.840.1.113883.2.1.4.1", patient["id"]))
@@ -120,8 +114,8 @@ async def iti_55_response(message_id, patient, query):
                                 "@classCode": "PSN",
                                 "@determinerCode": "INSTANCE",
                                 "name": {
-                                    "given": {"#text": usual_name["given"][0]},
-                                    "family": {"#text": usual_name["family"]},
+                                    "given": {"#text": selected_name.given[0]},
+                                    "family": {"#text": selected_name.family},
                                 },
                                 "administrativeGenderCode": {"@code": gender},
                                 # birthTime is ISO 8601 format
