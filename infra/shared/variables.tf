@@ -45,10 +45,22 @@ variable "enabled_for_disk_encryption" {
   default     = true
 }
 
+variable "enabled_for_deployment" {
+  description = "Whether deployment is enabled"
+  type        = bool
+  default     = true
+}
+
+variable "enabled_for_template_deployment" {
+  description = "Whether template deployment is enabled"
+  type        = bool
+  default     = true
+}
+
 variable "soft_delete_retention_days" {
   description = "Soft delete retention days"
   type        = number
-  default     = 7
+  default     = 90
 }
 
 variable "purge_protection_enabled" {
