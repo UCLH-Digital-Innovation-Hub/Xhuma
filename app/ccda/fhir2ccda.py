@@ -402,6 +402,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 if warning_text:
                     comp["section"]["text"]["paragraph"]["#text"] = warning_text
 
+            if list.title == "Allergies and adverse reactions":
+                paragraph = comp["section"]["text"]["paragraph"]
+                paragraph["#text"] = "Some allergies may be recorded as problems.<br />" + paragraph.get("#text", "")
+
             if hasattr(list, "note") and list.note is not None:
                 note_text = "".join(list.note[i].text + "<br />" for i in range(len(list.note)))
                 existing_text = comp["section"]["text"]["paragraph"].get("#text", "")
