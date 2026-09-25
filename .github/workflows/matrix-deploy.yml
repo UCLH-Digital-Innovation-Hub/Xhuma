@@ -298,12 +298,18 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          SHARED_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+          SHARED_RESOURCE_GROUP_NAME: ${{ secrets.SHARED_RESOURCE_GROUP_NAME }}
+          SHARED_KEY_VAULT_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
         run: |
           MISSING=""
           [ -z "$ARM_CLIENT_ID" ] && MISSING="$MISSING AZURE_CLIENT_ID"
           [ -z "$ARM_CLIENT_SECRET" ] && MISSING="$MISSING AZURE_CLIENT_SECRET"
           [ -z "$ARM_TENANT_ID" ] && MISSING="$MISSING AZURE_TENANT_ID"
           [ -z "$ARM_SUBSCRIPTION_ID" ] && MISSING="$MISSING AZURE_SUBSCRIPTION_ID"
+          [ -z "$SHARED_SUBSCRIPTION_ID" ] && MISSING="$MISSING SHARED_SUBSCRIPTION_ID"
+          [ -z "$SHARED_RESOURCE_GROUP_NAME" ] && MISSING="$MISSING SHARED_RESOURCE_GROUP_NAME"
+          [ -z "$SHARED_KEY_VAULT_NAME" ] && MISSING="$MISSING SHARED_KEY_VAULT_NAME"
           if [ -n "$MISSING" ]; then
             echo "::error::Missing required secrets:$MISSING"
             exit 1
@@ -418,7 +424,7 @@ jobs:
               shared_key_vault_name: $kv,
               tenant_id: $tenant,
               approved_ip_rules: [($acls.ipRules[]?.value // empty)],
-              approved_subnet_ids: ([($acls.virtualNetworkRules[]?.id // empty), $target_subnet] | unique)
+              approved_subnet_ids: ([($acls.virtualNetworkRules[]?.id // empty), $target_subnet] | map(ascii_downcase) | unique)
             }' > /tmp/shared-reconcile.tfvars.json
           chmod 600 /tmp/shared-reconcile.tfvars.json
 
@@ -478,6 +484,43 @@ jobs:
              exit 1
           fi
           echo "Target subnet successfully verified in shared Key Vault."
+
+      - name: Refresh and Verify App Service Key Vault References
+        env:
+          APP_RESOURCE_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Web/sites/${{ matrix.target.app_service_name }}"
+          SHARED_KV_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
+          TARGET_ID: ${{ matrix.target.id }}
+        run: |
+          echo "Forcing App Service to refresh Key Vault references..."
+          az rest --method post --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings/refresh?api-version=2022-03-01"
+
+          echo "Querying updated Key Vault reference statuses..."
+          az rest --method get --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings?api-version=2022-03-01" > kv_refs.json
+
+          echo "Validating SHARED Key Vault references..."
+          # jq query: find any reference whose referenceId points to the shared KV, and check its status.
+          # EPIC_CA_CERT is explicitly excepted only for the 'play' target.
+
+          FAILED_REFS=$(jq -r \
+            --arg shared "$SHARED_KV_NAME" \
+            --arg target "$TARGET_ID" \
+            '
+            .properties | to_entries[]
+            | select(.value.referenceId != null)
+            | select(.value.referenceId | contains($shared))
+            | select(.value.status != "Resolved")
+            | select(.key != "EPIC_CA_CERT" or $target != "play")
+            | .key
+            ' kv_refs.json)
+
+          if [ -n "$FAILED_REFS" ]; then
+             # Format newlines for GitHub actions warning
+             FORMATTED=$(echo "$FAILED_REFS" | tr '\n' ',' | sed 's/,$//')
+             echo "::error::The following shared Key Vault references failed to resolve: $FORMATTED"
+             exit 1
+          fi
+
+          echo "All required shared Key Vault references are Resolved."
 
       - name: Cleanup Ephemeral Shared Config
         if: always()
