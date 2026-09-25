@@ -402,22 +402,23 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
-          SHARED_APPROVED_IP_RULES_JSON: ${{ secrets.SHARED_APPROVED_IP_RULES_JSON }}
-          SHARED_APPROVED_SUBNET_IDS_JSON: ${{ secrets.SHARED_APPROVED_SUBNET_IDS_JSON }}
+          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
         run: |
+          LIVE_NETWORK_ACLS=$(az keyvault show --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" --query "properties.networkAcls" -o json)
+
           # Generate ephemeral tfvars
           jq -n \
             --arg rg "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
             --arg kv "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
             --arg tenant "${{ secrets.AZURE_TENANT_ID }}" \
-            --argjson ip "$SHARED_APPROVED_IP_RULES_JSON" \
-            --argjson sub "$SHARED_APPROVED_SUBNET_IDS_JSON" \
+            --arg target_subnet "$TARGET_SUBNET_ID" \
+            --argjson acls "$LIVE_NETWORK_ACLS" \
             '{
               shared_resource_group_name: $rg,
               shared_key_vault_name: $kv,
               tenant_id: $tenant,
-              approved_ip_rules: $ip,
-              approved_subnet_ids: $sub
+              approved_ip_rules: [($acls.ipRules[]?.value // empty)],
+              approved_subnet_ids: ([($acls.virtualNetworkRules[]?.id // empty), $target_subnet] | unique)
             }' > /tmp/shared-reconcile.tfvars.json
           chmod 600 /tmp/shared-reconcile.tfvars.json
 
@@ -428,8 +429,7 @@ jobs:
           set -e
           if [ $TF_EXIT -ne 0 ]; then
             echo "::error::Shared plan failed"
-            cat shared_plan_output.json
-            rm /tmp/shared-reconcile.tfvars.json
+            python ../../scripts/deploy/filter_tf_error.py $TF_EXIT shared_plan_output.json
             exit $TF_EXIT
           fi
 
@@ -438,11 +438,12 @@ jobs:
 
       - name: Guard Shared Infrastructure Plan
         working-directory: ./infra/shared
+        env:
+          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
         run: |
-          python ../../scripts/deploy/guard_shared_plan.py shared_plan.json
+          python ../../scripts/deploy/guard_shared_plan.py shared_plan.json "$TARGET_SUBNET_ID"
           if [ $? -ne 0 ]; then
             echo "::error::Shared infrastructure guard rejected the plan."
-            rm /tmp/shared-reconcile.tfvars.json
             exit 1
           fi
 
@@ -455,24 +456,32 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
         run: |
           terraform apply -input=false -auto-approve "shared.tfplan"
-          rm /tmp/shared-reconcile.tfvars.json
 
       - name: Verify Shared Key Vault Configuration
         env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
           TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
         run: |
           az keyvault network-rule list \
             --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
             --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
             --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" \
-            --query "virtualNetworkRules[?id=='$TARGET_SUBNET_ID']" \
             -o json > subnet_rules.json
 
-          if [ "$(jq 'length' subnet_rules.json)" -eq 0 ]; then
+          TARGET_LOWER=$(echo "$TARGET_SUBNET_ID" | tr '[:upper:]' '[:lower:]')
+          FOUND=$(jq -r --arg tgt "$TARGET_LOWER" '.virtualNetworkRules[]?.id | ascii_downcase | select(. == $tgt)' subnet_rules.json)
+          if [ -z "$FOUND" ]; then
              echo "::error::Post-apply verification failed: Target subnet $TARGET_SUBNET_ID is missing from the shared Key Vault network rules."
              exit 1
           fi
           echo "Target subnet successfully verified in shared Key Vault."
+
+      - name: Cleanup Ephemeral Shared Config
+        if: always()
+        run: rm -f /tmp/shared-reconcile.tfvars.json
 
   deploy:
     name: Deploy - ${{ matrix.target.id }}
