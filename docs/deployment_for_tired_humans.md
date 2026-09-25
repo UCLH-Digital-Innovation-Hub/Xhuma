@@ -152,7 +152,20 @@ HTTP 200 means Xhuma is alive. It does NOT prove:
 - every NHS/downstream dependency works;
 - clinical acceptance is complete.
 
-## 9. If something breaks
+## 9. Environment onboarding before external connectivity
+
+- [ ] custom domain bound and Secured
+- [ ] DNS verification retained
+- [ ] `epic-ca-cert` populated
+- [ ] Key Vault reference Resolved
+- [ ] `ALLOWED_HOSTS` appropriate
+- [ ] relay endpoint configured
+- [ ] health over intended FQDN
+- [ ] SOAP/mTLS functional acceptance
+
+*(Refer to the [Operator's Manual](./operators_manual.md) for precise steps).*
+
+## 10. If something breaks
 
 Simple rules:
 - Don't randomly change Azure until you know why it failed.
@@ -162,7 +175,7 @@ Simple rules:
 - Don't delete the target resource group because it contains Terraform state/bootstrap infrastructure.
 - If unsure, stop and use the full [Operator's Manual](./operators_manual.md).
 
-## 10. The 30-second version
+## 11. The 30-second version
 
 ```mermaid
 flowchart TD

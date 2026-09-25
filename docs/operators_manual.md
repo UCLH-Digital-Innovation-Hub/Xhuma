@@ -88,7 +88,7 @@ The deployment relies on specific GitHub environments to orchestrate the provisi
 | GitHub environment    | Required secrets                                                                                                          |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `play-plan`           | Azure credential set; `CR_PAT`; `REGISTRY_ID`; `POSTGRES_PASSWORD`; `SHARED_KEY_VAULT_NAME`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_SUBSCRIPTION_ID` |
-| `rg-xhuma-play-infra` | Azure credential set                                                                                                      |
+| `rg-xhuma-play-infra` | Azure credential set; `SHARED_SUBSCRIPTION_ID`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_KEY_VAULT_NAME` |
 | `rg-xhuma-play`       | Azure credential set                                                                                                      |
 
 *Note: The Azure credential set consists of `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`. Do not duplicate Terraform input secrets in the apply/deploy environments, as apply consumes the saved plan.*
@@ -109,10 +109,10 @@ The `SHARED_SUBSCRIPTION_ID` is `c24b0c3e-9e09-4c7c-8687-75e8b654bc8e`. This cro
 
 ## 5. Key Vault Population
 
-Before functional verification can succeed, the environment's local Key Vault must be populated by an operator.
+Infrastructure and application liveness can be established before the target-local Epic CA is populated. However, `epic-ca-cert` is required before Epic/SOAP/mTLS functional acceptance.
 
 1. `epic-ca-cert`: The target-specific Epic Root CA certificate (Base64 PEM) used for mutual TLS (mTLS).
-2. **Populating the Vault**: Use the Azure Portal or CLI to add the secret to the newly provisioned Local Key Vault (e.g., `kv-xhuma-play-...`).
+2. **Populating the Vault**: Use the Azure Portal or CLI to add the secret to the newly provisioned Local Key Vault (e.g., `<app_service_name>-kv`, for example `xhuma-app-play-kv`).
    *Note: Ensure multi-line PEM files are formatted correctly (newlines replaced if pasting into the Azure Portal).*
 
 ---
@@ -284,7 +284,67 @@ Deployment is deterministic. We record the previous digest before deploying and 
 - [ ] Run synthetic manual clinical check (SOAP/mTLS) from a trusted workstation.
 - [ ] Rollback exercise performed and documented.
 
-### 7.3 Key Vault Reference Verification
+### 7.3 Custom Domain / DNS / TLS Onboarding
+
+Assigning the externally agreed environment FQDN (e.g., `int.uclh.xhuma.co.uk`) to the Azure App Service is a critical post-provisioning step. 
+
+> **Current IaC Limitation:** Custom-domain DNS, App Service hostname binding, and managed-certificate onboarding are currently operator-managed post-provisioning steps. The current Terraform root does not manage the custom hostname binding or certificate. Therefore, a destructive App Service recreation can require the custom hostname/TLS binding to be manually re-established. Future IaC adoption is planned as an operational hardening item.
+
+**Azure Portal Procedure:**
+1. Navigate to your target App Service.
+2. Select **Custom domains** > **Add custom domain**.
+3. For the domain (e.g. `xhuma.co.uk`), use:
+   - **Domain provider:** All other domain services
+   - **TLS/SSL certificate:** App Service Managed Certificate
+   - **TLS/SSL type:** SNI SSL
+4. For a subdomain, document the normal DNS pattern exactly as instructed by Azure:
+   - **CNAME:** `<environment hostname>` -> `<app-service-name>.azurewebsites.net`
+   - **TXT:** `asuid.<environment hostname>` -> Azure Custom Domain Verification ID
+
+*Note: Exact DNS record labels depend on whether the authoritative zone is `xhuma.co.uk` or a delegated child zone. Operators must use the exact records displayed by Azure. The TXT ownership-verification record should be retained permanently.*
+
+**Validation:**
+- DNS resolves correctly.
+- Azure custom-domain validation passes.
+- App Service hostname binding exists.
+- App Service Managed Certificate reaches `Secured`.
+- HTTPS works on the custom FQDN.
+- `/health` returns HTTP 200 over the intended endpoint.
+
+*(Optional CLI reference for hostname binding)*:
+```bash
+az webapp config hostname add \
+  --webapp-name <app-name> \
+  --resource-group <resource-group> \
+  --hostname <fqdn>
+```
+
+### 7.4 ALLOWED_HOSTS Coupling
+
+The application uses `TrustedHostMiddleware` via the `ALLOWED_HOSTS` configuration. 
+
+For INT/PRD environments, when `ALLOWED_HOSTS` is tightened from `"*"`, it **must** include the external custom FQDN. 
+
+> **Operator Check:** If the deployment pipeline continues to health-check the default Azure hostname (`.azurewebsites.net`), that default hostname must also remain permitted in `ALLOWED_HOSTS` until the CI/CD workflow is made custom-domain aware.
+
+### 7.5 Epic / Relay Acceptance Sequence
+
+Complete this sequence to achieve external environment functional acceptance:
+1. Agree/register the external FQDN.
+2. Create the necessary DNS records.
+3. Bind the custom hostname to the App Service.
+4. Provision and verify the TLS certificate.
+5. Populate the target-local `epic-ca-cert`.
+6. Refresh the App Service Key Vault references.
+7. Verify that `EPIC_CA_CERT` = `Resolved`.
+8. Configure the relay/Epic-facing endpoint to use the agreed custom FQDN.
+9. Verify `/health` over the custom FQDN.
+10. Perform a SOAP/mTLS functional request.
+11. Record evidence.
+
+*Make clear that `"Using HSCN Relay"` in startup logs is configuration evidence only and does not prove relay connectivity.*
+
+### 7.6 Key Vault Reference Verification
 
 A mandatory verification step must be performed post-Terraform and pre-functional-testing to ensure the App Service can resolve its `@Microsoft.KeyVault(...)` configuration references. Note that Terraform automatically provisions the App Service managed-identity access policy on the shared Key Vault.
 
@@ -299,7 +359,7 @@ When the shared Key Vault is configured with `DefaultAction = Deny`, the target 
 
 *(Note: Verification can be performed via the Azure Portal or using the `az webapp config appsettings` command to verify values are appropriately retrieved rather than remaining as raw references).*
 
-### 7.4 Post-Deployment Health Verification
+### 7.7 Post-Deployment Health Verification
 
 Run the following reproducible command to verify application liveness:
 
@@ -319,10 +379,18 @@ cat /tmp/xhuma-health.json
 
 ## 8. Shared Infrastructure Adoption (Terraform)
 
+The shared Key Vault is now adopted into a separate shared Terraform state. The matrix workflow automatically:
+- reads the current network ACL;
+- preserves existing rules;
+- adds only the current target app subnet;
+- guards the shared plan to fail-closed if unexpected changes are proposed;
+- verifies the target subnet is successfully added post-apply.
+
+Run #36 demonstrated automatic restoration of this network link after the Play subnet was deliberately destroyed.
+
 When managing shared infrastructure components (such as the shared Key Vault `xhuma-shared-kv-int` network ACLs) in Terraform:
 - Ensure the resource includes a `lifecycle { prevent_destroy = true }` block.
 - **Note:** `prevent_destroy` does not guarantee Terraform will never *propose* replacement. Instead, any proposed destruction or replacement of the imported shared Key Vault will be blocked by `prevent_destroy` during the apply phase.
-- Therefore, the initial reconciliation plan must be clean and contain no proposed destruction or replacement of the vault before any apply is attempted.
 
 ---
 

@@ -59,14 +59,20 @@ Due to NHS England restrictions on GP Connect via the public internet, Xhuma lev
 
 An HSCN-connected agent (e.g., via Azure Private Link or an internal NHS VPN Gateway) establishes a WebSocket connection inbound to the Xhuma Azure App Service. GP Connect requests are securely tunnelled back down this WebSocket to the agent, which executes the query natively against HSCN. This allows Xhuma's main infrastructure to remain purely cloud-native while satisfying strict NHS network requirements.
 
+> **Note on Custom Domains:** External integration endpoints (including Epic and the Relay) do not target the default Azure App Service hostname directly. They target an externally agreed environment custom FQDN (e.g., `int.uclh.xhuma.co.uk`), which is then bound to the Xhuma App Service via an operator-managed Azure hostname binding. DNS and the associated custom TLS certificates are currently managed manually outside of the Terraform infrastructure lifecycle.
+
 ```mermaid
 flowchart TD
     subgraph Client [Epic Trust Environment]
         A["Epic EHR System (SOAP)"]
     end
 
+    subgraph DNS [External DNS / TLS Boundary]
+        FQDN["Environment Custom FQDN\n(Operator Managed)"]
+    end
+
     subgraph AzureAppService [Xhuma Azure Environment]
-        B[Xhuma API / WebSocket Server Hub]
+        B["Azure App Service\nHostname Binding -> Xhuma API"]
     end
 
     subgraph Connectivity [HSCN Boundary]
@@ -80,10 +86,11 @@ flowchart TD
         F[PDS / SDS APIs]
     end
 
-    A -->|mTLS over Public Internet| B
+    A -->|mTLS over Public Internet| FQDN
+    FQDN -->|Azure Hostname Binding| B
     B -->|OAuth / Internet Routing| F
     
-    C -->|WebSocket Connection to Azure App| B
+    C -->|WebSocket Connection to Custom FQDN| FQDN
     B -.->|Tunnels GP Connect Protocol| C
     C -->|HSCN Network| E
     D -.->|Alternative Backup to HSCN| E
