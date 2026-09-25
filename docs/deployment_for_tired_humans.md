@@ -1,5 +1,15 @@
 # Xhuma Deployment for Tired Humans
 
+> [!IMPORTANT]
+> **INT Migration Notice:** The `INT` environment is the first brownfield matrix migration.
+> - It explicitly reuses existing `INT` Terraform state.
+> - The `int-plan` GitHub Environment is protected during migration.
+> - The existing-state preflight is mandatory and will block execution if state is missing.
+> - The first plan is expected to include PostgreSQL audit convergence.
+> - The existing custom domain `int.uclh.xhuma.co.uk` already exists and must survive.
+> - `EPIC_CA_CERT` is already populated and resolved.
+> - The `main`/`PRD` environment remains on the legacy pipeline and is untouched.
+
 > The short version for when you need to deploy Xhuma without reading the entire Operator's Manual first.
 
 > [!WARNING]

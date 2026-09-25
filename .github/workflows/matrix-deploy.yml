@@ -4,13 +4,14 @@ on:
   push:
     branches:
       - rehearsal/play-deployment
+      - int
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
 
 concurrency:
-  group: xhuma-play-release
+  group: xhuma-matrix-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -147,6 +148,48 @@ jobs:
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Existing State Preflight
+        if: ${{ matrix.target.require_existing_state == true }}
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          echo "Preflighting existing state for target ${{ matrix.target.id }}"
+          RG_NAME=$(grep 'resource_group_name' "${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          SA_NAME=$(grep 'storage_account_name' "${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          CONTAINER_NAME=$(grep 'container_name' "${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          STATE_KEY=$(grep 'key' "${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+
+          MISSING=0
+          if ! az group show -n "$RG_NAME" &>/dev/null; then
+            echo "::error::Resource group $RG_NAME not found."
+            MISSING=1
+          fi
+
+          if ! az storage account show -n "$SA_NAME" -g "$RG_NAME" &>/dev/null; then
+            echo "::error::Storage account $SA_NAME not found in $RG_NAME."
+            MISSING=1
+          fi
+
+          if [ $MISSING -eq 0 ]; then
+            ACCOUNT_KEY=$(az storage account keys list -g "$RG_NAME" -n "$SA_NAME" --query "[0].value" -o tsv)
+            echo "::add-mask::$ACCOUNT_KEY"
+            if ! az storage container show -n "$CONTAINER_NAME" --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" &>/dev/null; then
+              echo "::error::Container $CONTAINER_NAME not found in storage account $SA_NAME."
+              MISSING=1
+            else
+              if ! az storage blob show -c "$CONTAINER_NAME" -n "$STATE_KEY" --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" &>/dev/null; then
+                echo "::error::State blob $STATE_KEY not found in container $CONTAINER_NAME."
+                MISSING=1
+              fi
+            fi
+          fi
+
+          if [ $MISSING -eq 1 ]; then
+            echo "::error::Target requires existing state, but preflight failed. Aborting to prevent empty state initialization."
+            exit 1
+          fi
+          echo "Existing state verified successfully."
 
       - name: Bootstrap State Storage
         env:
