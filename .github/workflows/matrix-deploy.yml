@@ -489,7 +489,6 @@ jobs:
         env:
           APP_RESOURCE_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Web/sites/${{ matrix.target.app_service_name }}"
           SHARED_KV_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
-          TARGET_ID: ${{ matrix.target.id }}
         run: |
           echo "Forcing App Service to refresh Key Vault references..."
           az rest --method post --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings/refresh?api-version=2022-03-01"
@@ -498,19 +497,14 @@ jobs:
           az rest --method get --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings?api-version=2022-03-01" > kv_refs.json
 
           echo "Validating SHARED Key Vault references..."
-          # jq query: find any reference whose referenceId points to the shared KV, and check its status.
-          # EPIC_CA_CERT is explicitly excepted only for the 'play' target.
 
           FAILED_REFS=$(jq -r \
             --arg shared "$SHARED_KV_NAME" \
-            --arg target "$TARGET_ID" \
             '
-            .properties | to_entries[]
-            | select(.value.referenceId != null)
-            | select(.value.referenceId | contains($shared))
-            | select(.value.status != "Resolved")
-            | select(.key != "EPIC_CA_CERT" or $target != "play")
-            | .key
+            .value[]
+            | select((.properties.vaultName // "" | ascii_downcase) == ($shared | ascii_downcase))
+            | select(.properties.status != "Resolved")
+            | .name
             ' kv_refs.json)
 
           if [ -n "$FAILED_REFS" ]; then
