@@ -4,7 +4,7 @@
     {
       "id": "play",
       "stage": "play",
-      "source_branch": "dev",
+      "source_branch": "rehearsal/play-deployment",
       "enabled": true,
       "hold": false,
       "rollout_ring": 0,

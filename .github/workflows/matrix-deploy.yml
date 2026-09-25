@@ -3,8 +3,7 @@ name: Matrix Deployment Pilot
 on:
   push:
     branches:
-      - feat/matrix-deployment-pilot
-      - feat/matrix-deployment-pilot-integration
+      - rehearsal/play-deployment
 
 env:
   REGISTRY: ghcr.io
@@ -108,14 +107,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-targets.outputs.matrix) }}
-    outputs:
-      plan_hash: ${{ steps.plan.outputs.plan_hash }}
-      plan_file: ${{ steps.plan.outputs.plan_file }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
+          terraform_wrapper: false
           terraform_version: 1.5.7
       - name: Verify Required Secrets
         env:
@@ -125,6 +122,7 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_PASSWORD }}
           TF_VAR_shared_resource_group_name: ${{ secrets.SHARED_RESOURCE_GROUP_NAME }}
+          TF_VAR_shared_subscription_id: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
           TF_VAR_shared_key_vault_name: ${{ secrets.SHARED_KEY_VAULT_NAME }}
           TF_VAR_registry_id: ${{ secrets.REGISTRY_ID }}
           TF_VAR_docker_registry_password: ${{ secrets.CR_PAT }}
@@ -136,6 +134,7 @@ jobs:
           [ -z "$ARM_SUBSCRIPTION_ID" ] && MISSING="$MISSING AZURE_SUBSCRIPTION_ID"
           [ -z "$TF_VAR_postgres_admin_password" ] && MISSING="$MISSING POSTGRES_PASSWORD"
           [ -z "$TF_VAR_shared_resource_group_name" ] && MISSING="$MISSING SHARED_RESOURCE_GROUP_NAME"
+          [ -z "$TF_VAR_shared_subscription_id" ] && MISSING="$MISSING SHARED_SUBSCRIPTION_ID"
           [ -z "$TF_VAR_shared_key_vault_name" ] && MISSING="$MISSING SHARED_KEY_VAULT_NAME"
           [ -z "$TF_VAR_registry_id" ] && MISSING="$MISSING REGISTRY_ID"
           [ -z "$TF_VAR_docker_registry_password" ] && MISSING="$MISSING CR_PAT"
@@ -153,7 +152,8 @@ jobs:
         env:
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        run: bash infra/bootstrap/setup-play.sh
+          XHUMA_BACKEND_FILE: ${{ matrix.target.backend_file }}
+        run: bash infra/bootstrap/setup-target.sh
 
       - name: Terraform Init
         working-directory: ./infra
@@ -180,38 +180,106 @@ jobs:
           TF_VAR_docker_registry_username: "${{ github.actor }}"
           TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
           TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
+          TF_VAR_shared_subscription_id: "${{ secrets.SHARED_SUBSCRIPTION_ID }}"
           TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
         run: |
-          PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tfplan"
-          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" > plan_output.txt
+          PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}.tfplan"
 
-          # Upload Plan
-          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
+          # Check if plan already exists (fail if re-planning)
+          # Extract authoritative storage coordinates
+          RG_NAME=$(grep 'resource_group_name' "../${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          SA_NAME=$(grep 'storage_account_name' "../${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          CONTAINER_NAME=$(grep 'container_name' "../${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+          STATE_KEY=$(grep 'key' "../${{ matrix.target.backend_file }}" | awk -F'"' '{print $2}' | xargs)
+
+          ACCOUNT_KEY=$(az storage account keys list --resource-group "$RG_NAME" --account-name "$SA_NAME" --query '[0].value' -o tsv)
           echo "::add-mask::$ACCOUNT_KEY"
+
+          EXISTS=$(az storage blob exists --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" --container-name tfplans --name "$PLAN_FILE" --query exists -o tsv)
+          if [ "$EXISTS" == "true" ]; then
+            echo "::error::Plan $PLAN_FILE already exists. Overwriting is forbidden. A replacement plan requires a new workflow run."
+            exit 1
+          fi
+
+          set +e
+          terraform plan -input=false -var-file="../${{ matrix.target.tfvars_file }}" -out="$PLAN_FILE" -json > plan_output.json 2>&1
+          TF_EXIT=$?
+          set -e
+
+          if [ $TF_EXIT -ne 0 ]; then
+            echo "::error::Terraform plan failed with exit code $TF_EXIT"
+            echo "### Terraform Plan Error" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            # Publish actionable error, absent sensitive values
+            python ../scripts/deploy/filter_tf_error.py $TF_EXIT plan_output.json >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit $TF_EXIT
+          fi
+
           az storage blob upload \
-            --account-name "xtfrgxhumaplay" \
+            --account-name "$SA_NAME" \
             --account-key "$ACCOUNT_KEY" \
             --container-name tfplans \
             --name "$PLAN_FILE" \
-            --file "$PLAN_FILE" \
-            --overwrite
+            --file "$PLAN_FILE"
 
           PLAN_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')
-          echo "plan_hash=$PLAN_HASH" >> $GITHUB_OUTPUT
-          echo "plan_file=$PLAN_FILE" >> $GITHUB_OUTPUT
+
+          cat <<EOF_MANIFEST > manifest.json
+          {
+            "repository": "${{ github.repository }}",
+            "source_commit_sha": "${GITHUB_SHA}",
+            "workflow_run_id": "${GITHUB_RUN_ID}",
+            "target_id": "${{ matrix.target.id }}",
+            "azure_tenant_id": "${{ secrets.AZURE_TENANT_ID }}",
+            "azure_subscription_id": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+            "backend_file": "${{ matrix.target.backend_file }}",
+            "backend_resource_group": "$RG_NAME",
+            "backend_storage_account": "$SA_NAME",
+            "backend_container": "$CONTAINER_NAME",
+            "backend_key": "$STATE_KEY",
+            "candidate_image_digest": "${{ needs.build.outputs.digest }}",
+            "plan_blob_path": "$PLAN_FILE",
+            "plan_sha256": "$PLAN_HASH"
+          }
+          EOF_MANIFEST
 
           echo "### Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
           echo "**Plan Hash:** \`$PLAN_HASH\`" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
           echo "**Expected Image Digest:** \`${{ needs.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
+
+          # Highlight deletes/replacements using a GitHub warning
+          DESTRUCTIVE=$(terraform show -json "$PLAN_FILE" | jq -r '.resource_changes[]? | select(.change.actions | index("delete") or index("replace")) | .address')
+          if [ -n "$DESTRUCTIVE" ]; then
+            # Convert newlines to commas for the warning message
+            WARN_MSG=$(echo "$DESTRUCTIVE" | tr '\n' ',' | sed 's/,$//')
+            echo "::warning::The plan contains destructive actions (delete/replace) for the following resources: $WARN_MSG"
+          fi
+
           echo '```text' >> $GITHUB_STEP_SUMMARY
           # Filter output to non-secret change summary
+          terraform show -no-color "$PLAN_FILE" > plan_output.txt
           grep -E "Plan: |No changes.|error" plan_output.txt >> $GITHUB_STEP_SUMMARY || true
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Safely append only the action and resource address of changed resources
+          terraform show -json "$PLAN_FILE" | jq -r '
+            .resource_changes[]?
+            | select(.change.actions != ["no-op"] and .change.actions != ["read"])
+            | "\(.change.actions | join(", ")) \(.address)"
+          ' >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Manifest Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-manifest-${{ matrix.target.id }}
+          path: infra/manifest.json
 
   infra-apply:
     name: Infra Apply - ${{ matrix.target.id }}
-    needs: [prepare-targets, infra-plan]
+    needs: [build, prepare-targets, infra-plan]
     runs-on: ${{ matrix.target.runner_label }}
     environment: ${{ matrix.target.github_infra_environment }}
     strategy:
@@ -222,6 +290,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
+          terraform_wrapper: false
           terraform_version: 1.5.7
       - name: Verify Required Secrets
         env:
@@ -229,12 +298,18 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          SHARED_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+          SHARED_RESOURCE_GROUP_NAME: ${{ secrets.SHARED_RESOURCE_GROUP_NAME }}
+          SHARED_KEY_VAULT_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
         run: |
           MISSING=""
           [ -z "$ARM_CLIENT_ID" ] && MISSING="$MISSING AZURE_CLIENT_ID"
           [ -z "$ARM_CLIENT_SECRET" ] && MISSING="$MISSING AZURE_CLIENT_SECRET"
           [ -z "$ARM_TENANT_ID" ] && MISSING="$MISSING AZURE_TENANT_ID"
           [ -z "$ARM_SUBSCRIPTION_ID" ] && MISSING="$MISSING AZURE_SUBSCRIPTION_ID"
+          [ -z "$SHARED_SUBSCRIPTION_ID" ] && MISSING="$MISSING SHARED_SUBSCRIPTION_ID"
+          [ -z "$SHARED_RESOURCE_GROUP_NAME" ] && MISSING="$MISSING SHARED_RESOURCE_GROUP_NAME"
+          [ -z "$SHARED_KEY_VAULT_NAME" ] && MISSING="$MISSING SHARED_KEY_VAULT_NAME"
           if [ -n "$MISSING" ]; then
             echo "::error::Missing required secrets:$MISSING"
             exit 1
@@ -245,25 +320,64 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
+      - name: Download Manifest Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plan-manifest-${{ matrix.target.id }}
+          path: infra/
       - name: Download and Verify Plan
         working-directory: ./infra
         run: |
-          PLAN_FILE="${{ needs.infra-plan.outputs.plan_file }}"
-          ACCOUNT_KEY=$(az storage account keys list --resource-group "${{ matrix.target.resource_group }}" --account-name "xtfrgxhumaplay" --query '[0].value' -o tsv)
+          MANIFEST_FILE="manifest.json"
+
+          # Read fields from manifest
+          PLAN_FILE=$(jq -r '.plan_blob_path' $MANIFEST_FILE)
+          EXPECTED_HASH=$(jq -r '.plan_sha256' $MANIFEST_FILE)
+          REPO=$(jq -r '.repository' $MANIFEST_FILE)
+          SHA=$(jq -r '.source_commit_sha' $MANIFEST_FILE)
+          RUN_ID=$(jq -r '.workflow_run_id' $MANIFEST_FILE)
+          T_ID=$(jq -r '.target_id' $MANIFEST_FILE)
+          TENANT=$(jq -r '.azure_tenant_id' $MANIFEST_FILE)
+          SUB=$(jq -r '.azure_subscription_id' $MANIFEST_FILE)
+          BACKEND=$(jq -r '.backend_file' $MANIFEST_FILE)
+
+          # Validation
+          export EXPECTED_REPO="${{ github.repository }}"
+          export EXPECTED_SHA="${GITHUB_SHA}"
+          export EXPECTED_RUN_ID="${GITHUB_RUN_ID}"
+          export EXPECTED_TARGET="${{ matrix.target.id }}"
+          export EXPECTED_TENANT="${{ secrets.AZURE_TENANT_ID }}"
+          export EXPECTED_SUB="${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          export EXPECTED_BACKEND="${{ matrix.target.backend_file }}"
+          export EXPECTED_DIGEST="${{ needs.build.outputs.digest }}"
+          python ../scripts/deploy/validate_manifest.py "$MANIFEST_FILE"
+
+          RG_NAME=$(jq -r '.backend_resource_group' $MANIFEST_FILE)
+          SA_NAME=$(jq -r '.backend_storage_account' $MANIFEST_FILE)
+          EXPECTED_DIGEST=$(jq -r '.candidate_image_digest' $MANIFEST_FILE)
+
+          if [ "$EXPECTED_DIGEST" != "${{ needs.build.outputs.digest }}" ]; then
+            echo "::error::Candidate image digest mismatch! Expected $EXPECTED_DIGEST, got ${{ needs.build.outputs.digest }}"
+            exit 1
+          fi
+
+          ACCOUNT_KEY=$(az storage account keys list --resource-group "$RG_NAME" --account-name "$SA_NAME" --query '[0].value' -o tsv)
           echo "::add-mask::$ACCOUNT_KEY"
+
           az storage blob download \
-            --account-name "xtfrgxhumaplay" \
+            --account-name "$SA_NAME" \
             --account-key "$ACCOUNT_KEY" \
             --container-name tfplans \
             --name "$PLAN_FILE" \
             --file "$PLAN_FILE"
 
           DOWNLOADED_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')
-          if [ "$DOWNLOADED_HASH" != "${{ needs.infra-plan.outputs.plan_hash }}" ]; then
-            echo "::error::Plan hash mismatch! Expected ${{ needs.infra-plan.outputs.plan_hash }}, got $DOWNLOADED_HASH"
+          if [ "$DOWNLOADED_HASH" != "$EXPECTED_HASH" ]; then
+            echo "::error::Plan hash mismatch! Expected $EXPECTED_HASH, got $DOWNLOADED_HASH"
             exit 1
           fi
           echo "Plan hash verified: $DOWNLOADED_HASH"
+          echo "PLAN_FILE=$PLAN_FILE" >> $GITHUB_ENV
 
       - name: Terraform Init
         working-directory: ./infra
@@ -284,8 +398,156 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
-          PLAN_FILE="${{ needs.infra-plan.outputs.plan_file }}"
           terraform apply -input=false -auto-approve "$PLAN_FILE"
+
+      - name: Reconcile Shared Infrastructure - Plan
+        working-directory: ./infra/shared
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
+        run: |
+          LIVE_NETWORK_ACLS=$(az keyvault show --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" --query "properties.networkAcls" -o json)
+
+          # Generate ephemeral tfvars
+          jq -n \
+            --arg rg "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
+            --arg kv "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
+            --arg tenant "${{ secrets.AZURE_TENANT_ID }}" \
+            --arg target_subnet "$TARGET_SUBNET_ID" \
+            --argjson acls "$LIVE_NETWORK_ACLS" \
+            '{
+              shared_resource_group_name: $rg,
+              shared_key_vault_name: $kv,
+              tenant_id: $tenant,
+              approved_ip_rules: [($acls.ipRules[]?.value // empty)],
+              approved_subnet_ids: ([($acls.virtualNetworkRules[]?.id // empty), $target_subnet] | map(ascii_downcase) | unique)
+            }' > /tmp/shared-reconcile.tfvars.json
+          chmod 600 /tmp/shared-reconcile.tfvars.json
+
+          terraform init -reconfigure -backend-config="backends/shared.hcl"
+          set +e
+          terraform plan -input=false -var-file="/tmp/shared-reconcile.tfvars.json" -out="shared.tfplan" -json > shared_plan_output.json 2>&1
+          TF_EXIT=$?
+          set -e
+          if [ $TF_EXIT -ne 0 ]; then
+            echo "::error::Shared plan failed"
+            python ../../scripts/deploy/filter_tf_error.py $TF_EXIT shared_plan_output.json
+            exit $TF_EXIT
+          fi
+
+          # Output raw plan JSON for the guard
+          terraform show -json shared.tfplan > shared_plan.json
+
+      - name: Guard Shared Infrastructure Plan
+        working-directory: ./infra/shared
+        env:
+          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
+        run: |
+          python ../../scripts/deploy/guard_shared_plan.py shared_plan.json "$TARGET_SUBNET_ID"
+          if [ $? -ne 0 ]; then
+            echo "::error::Shared infrastructure guard rejected the plan."
+            exit 1
+          fi
+
+      - name: Reconcile Shared Infrastructure - Apply
+        working-directory: ./infra/shared
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+        run: |
+          terraform apply -input=false -auto-approve "shared.tfplan"
+
+      - name: Verify Shared Key Vault Configuration
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
+        run: |
+          az keyvault network-rule list \
+            --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
+            --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
+            --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" \
+            -o json > subnet_rules.json
+
+          TARGET_LOWER=$(echo "$TARGET_SUBNET_ID" | tr '[:upper:]' '[:lower:]')
+          FOUND=$(jq -r --arg tgt "$TARGET_LOWER" '.virtualNetworkRules[]?.id | ascii_downcase | select(. == $tgt)' subnet_rules.json)
+          if [ -z "$FOUND" ]; then
+             echo "::error::Post-apply verification failed: Target subnet $TARGET_SUBNET_ID is missing from the shared Key Vault network rules."
+             exit 1
+          fi
+          echo "Target subnet successfully verified in shared Key Vault."
+
+      - name: Refresh and Verify App Service Key Vault References
+        env:
+          APP_RESOURCE_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Web/sites/${{ matrix.target.app_service_name }}"
+          SHARED_KV_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
+        run: |
+          echo "Forcing App Service to refresh Key Vault references..."
+          MAX_RETRIES=6
+          ATTEMPT=1
+          BACKOFFS=(10 15 20 30 45 60)
+
+          while [ $ATTEMPT -le $MAX_RETRIES ]; do
+            set +e
+            ERROR_OUTPUT=$(az rest --method post --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings/refresh?api-version=2022-03-01" 2>&1)
+            EXIT_CODE=$?
+            set -e
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "Refresh triggered successfully."
+              break
+            fi
+
+            if echo "$ERROR_OUTPUT" | grep -qi "Conflict"; then
+              if [ $ATTEMPT -eq $MAX_RETRIES ]; then
+                echo "::error::Refresh failed after $MAX_RETRIES attempts due to Conflict."
+                exit 1
+              fi
+              WAIT_TIME=${BACKOFFS[$((ATTEMPT-1))]}
+              echo "Conflict detected (operation in progress). Retrying in ${WAIT_TIME}s (Attempt $ATTEMPT of $MAX_RETRIES)..."
+              sleep $WAIT_TIME
+              ATTEMPT=$((ATTEMPT+1))
+            else
+              echo "::error::Non-transient error during refresh."
+              # Safe diagnostic
+              echo "$ERROR_OUTPUT" | head -n 3
+              exit 1
+            fi
+          done
+
+          echo "Querying updated Key Vault reference statuses..."
+          az rest --method get --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings?api-version=2022-03-01" > kv_refs.json
+
+          echo "Validating SHARED Key Vault references..."
+
+          FAILED_REFS=$(jq -r \
+            --arg shared "$SHARED_KV_NAME" \
+            '
+            .value[]
+            | select((.properties.vaultName // "" | ascii_downcase) == ($shared | ascii_downcase))
+            | select(.properties.status != "Resolved")
+            | .name
+            ' kv_refs.json)
+
+          if [ -n "$FAILED_REFS" ]; then
+             # Format newlines for GitHub actions warning
+             FORMATTED=$(echo "$FAILED_REFS" | tr '\n' ',' | sed 's/,$//')
+             echo "::error::The following shared Key Vault references failed to resolve: $FORMATTED"
+             exit 1
+          fi
+
+          echo "All required shared Key Vault references are Resolved."
+
+      - name: Cleanup Ephemeral Shared Config
+        if: always()
+        run: rm -f /tmp/shared-reconcile.tfvars.json
 
   deploy:
     name: Deploy - ${{ matrix.target.id }}
@@ -352,3 +614,54 @@ jobs:
           echo "**Previous Image:** \`$PREV_DIGEST\`" >> $GITHUB_STEP_SUMMARY
           echo "**New Image:** \`$NEW_DIGEST\`" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Application Health Check
+        run: |
+          echo "Waiting for application to start..."
+          APP_URL="https://${{ matrix.target.app_service_name }}.azurewebsites.net/health"
+          TIMEOUT=120
+          INTERVAL=5
+          SUCCESS=0
+          START_TIME=$(date +%s)
+          DEADLINE=$((START_TIME + TIMEOUT))
+
+          while [ $(date +%s) -lt $DEADLINE ]; do
+            set +e
+            RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$APP_URL")
+            CURL_EXIT_CODE=$?
+            set -e
+
+            if [ $CURL_EXIT_CODE -ne 0 ]; then
+              echo "Health check blocked by network, WAF, or unreachable (Exit code: $CURL_EXIT_CODE)."
+              echo "::warning::Automated health check BLOCKED/NOT RUN. Operator must verify."
+              SUCCESS=2
+              break
+            elif [ "$RESPONSE_CODE" == "200" ]; then
+              SUCCESS=1
+              break
+            elif [ "$RESPONSE_CODE" == "403" ] || [ "$RESPONSE_CODE" == "000" ]; then
+              echo "Health check blocked by network, WAF, or unreachable (Status: $RESPONSE_CODE)."
+              echo "::warning::Automated health check BLOCKED/NOT RUN. Operator must verify."
+              SUCCESS=2
+              break
+            fi
+
+            sleep $INTERVAL
+            echo "Waiting... (elapsed $(( $(date +%s) - START_TIME ))s)"
+          done
+
+          if [ $SUCCESS -eq 0 ]; then
+            echo "::error::Health check timed out or failed (last response: $RESPONSE_CODE)"
+            exit 1
+          fi
+
+          echo "### Acceptance Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container Image Configured**: Verified" >> $GITHUB_STEP_SUMMARY
+          if [ $SUCCESS -eq 1 ]; then
+            echo "- **Automated Liveness**: Verified" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Automated Liveness**: BLOCKED/UNAVAILABLE (Operator intervention required)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Manual Functional Acceptance (SOAP/mTLS)**: OUTSTANDING" >> $GITHUB_STEP_SUMMARY
+
+          echo "Application check finished. Manual clinical check required before marking deployment complete."

@@ -59,137 +59,44 @@
   - ITI-39: Cross Gateway Retrieve
 - **Documentation**: [IHE ITI Technical Framework](https://www.ihe.net/resources/technical_frameworks/#IT)
 
-## Development Stack
+## System Architecture & Technologies
 
-### FastAPI
-- **Usage**: Main web framework
-- **Documentation**: [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- **Key Features Used**:
-  - Custom routing for SOAP endpoints
-  - Request/Response handling
-  - Background tasks
-  - Logging middleware
+### Production / Target Runtime
+Technologies actively used in deployed Azure target environments:
 
-### Redis
-- **Usage**: Caching and temporary storage
-- **Documentation**: [Redis Documentation](https://redis.io/documentation)
-- **Key Features Used**:
-  - Key-value storage for documents
-  - NHS number to CEID mapping
-  - Session management
+- **FastAPI / Python**: Main web framework and application language.
+- **Azure App Service**: Container hosting environment.
+- **Azure Managed PostgreSQL**: Persistent storage for audit logs and system configuration.
+- **Azure Managed Redis**: Transient caching for NHS number mappings, documents, and PDS/SDS results.
+- **Azure Key Vault**: Secure storage for secrets, certificates (Epic mTLS CA), and tokens.
+- **Application Insights & Log Analytics**: Azure Monitor components for production telemetry, distributed tracing, and request logging.
+- **OpenTelemetry**: Instrumentation for distributed tracing and performance metrics.
+- **GitHub Actions**: Matrix CI/CD pipeline orchestration.
+- **Terraform**: Infrastructure as Code (IaC) for deterministic target provisioning.
+- **GHCR (GitHub Container Registry)**: Immutable container image storage and digest verification.
 
-### Python Libraries
-- **xmltodict**: XML parsing and generation
-- **jwcrypto**: JWT key management
-- **pydantic**: Data validation
-- **fhirclient**: FHIR data models
+### Local Development / Test Tooling
+Technologies used strictly for local engineering, testing, and continuous integration:
 
-## Monitoring & Observability
-
-### Prometheus
-- **Purpose**: Metrics collection and storage
-- **Documentation**: [Prometheus Docs](https://prometheus.io/docs/introduction/overview/)
-- **Key Metrics**:
-  - Request counts
-  - Response times
-  - Error rates
-  - Cache hit/miss rates
-  - Resource utilization
-
-### Grafana
-- **Purpose**: Metrics visualization and alerting
-- **Documentation**: [Grafana Docs](https://grafana.com/docs/)
-- **Features**:
-  - Custom dashboards
-  - Alert management
-  - Data exploration
-  - Annotation support
-
-### ELK Stack
-- **Purpose**: Log aggregation and analysis
-- **Components**:
-  - Elasticsearch: Log storage
-  - Logstash: Log processing
-  - Kibana: Log visualization
-- **Documentation**: [Elastic Docs](https://www.elastic.co/guide/index.html)
-
-### OpenTelemetry
-- **Purpose**: Distributed tracing
-- **Documentation**: [OpenTelemetry Docs](https://opentelemetry.io/docs/)
-- **Features**:
-  - Request tracing
-  - Performance monitoring
-  - Error tracking
-  - Service dependencies
-
-## Testing Tools
-
-### Unit Testing
-- **pytest**: Primary testing framework
-  - [Documentation](https://docs.pytest.org/)
-  - Test discovery
-  - Fixture support
-  - Parameterized testing
-
-### API Fuzzing & Resilience Testing
-- **schemathesis**: API Fuzzing framework
-  - Automatically generates edge-case HTTP requests based on the OpenAPI schema.
-  - Used in CI (via `pytest`) to ensure the API never returns unhandled 500 exceptions.
-- **hypothesis**: Property-Based Testing
-  - Generates random payload structures (`@given`) for internal FHIR/C-CDA mappers.
-  - Ensures deep parsing logic fails gracefully rather than crashing.
-
-### Integration Testing
-- **pytest-asyncio**: Async test support
-- **aiohttp**: HTTP client testing
-- **testcontainers**: Container-based testing
-  - Redis integration tests
-  - Service mocking
-
-### Performance Testing
-- **locust**: Load testing
-  - [Documentation](https://docs.locust.io/)
-  - Concurrent user simulation
-  - Performance metrics
-  - Real-time monitoring
-
-### Code Quality
-- **black**: Code formatting
-- **flake8**: Style guide enforcement
-- **mypy**: Type checking
-- **bandit**: Security linting
-
-## Deployment & Infrastructure
-
-### Docker
-- **Documentation**: [Docker Docs](https://docs.docker.com/)
-- **Components**:
-  - Multi-stage builds
-  - Health checks
-  - Volume management
-  - Network configuration
-
-### Docker Compose
-- **Documentation**: [Compose Docs](https://docs.docker.com/compose/)
-- **Features**:
-  - Service orchestration
-  - Environment variables
-  - Volume mapping
-  - Network setup
+- **Docker Compose**: Local service orchestration and environment parity.
+- **Prometheus & Grafana**: Local metric collection and visualisation stack (not deployed to production targets).
+- **pytest & pytest-asyncio**: Primary testing framework for unit and async integration tests.
+- **schemathesis**: API Fuzzing framework generating edge-case requests from the OpenAPI schema.
+- **hypothesis**: Property-Based Testing for internal FHIR/C-CDA mapping resilience.
+- **testcontainers**: Container-based testing for Redis integration.
+- **locust**: Load and performance testing.
+- **black, flake8, mypy, bandit**: Code formatting, style enforcement, type checking, and security linting.
 
 ### Health Checks
 - **Endpoints**:
-  - /health/live: Liveness probe
-  - /health/ready: Readiness probe
-  - /metrics: Prometheus metrics
-- **Implementation**: FastAPI endpoints
+  - `/health`: Primary coarse liveness probe checked by the deployment pipeline.
+- **Implementation**: FastAPI endpoint.
 
 ## Security Tools
 
 ### JWT Management
 - **python-jose**: JWT implementation
 - **cryptography**: Cryptographic operations
-- **Key rotation**: Automated key management
 
 ### API Security
 - **Rate limiting**: FastAPI middleware

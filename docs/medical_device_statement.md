@@ -25,7 +25,7 @@ Xhuma performs the following functions:
 - **Stateless Orchestration:** It temporarily caches routing endpoints and discovery information purely for system performance, but does not persistently store clinical records.
 
 Xhuma **does not** perform the following functions:
-- **No Clinical Decision Support:** Xhuma does not analyze the GP Connect data to generate new clinical insights, trigger clinical alerts, or recommend treatments.
+- **No Clinical Decision Support:** Xhuma does not analyse the GP Connect data to generate new clinical insights, trigger clinical alerts, or recommend treatments.
 - **No Diagnostic or Therapeutic Calculation:** Xhuma does not alter the clinical meaning of the data it retrieves. The data presented to the clinician is a direct, structural mapping of the source data provided by the patient's GP practice.
 - **No Independent Medical Purpose:** Xhuma serves an IT infrastructural purpose (interoperability and translation). It relies entirely on the clinical logic and decision-making capabilities of the human clinician and the endpoint EHR (Epic).
 
