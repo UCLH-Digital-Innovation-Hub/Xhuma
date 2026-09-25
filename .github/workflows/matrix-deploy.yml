@@ -248,7 +248,7 @@ jobs:
           echo "**Plan Hash:** \`$PLAN_HASH\`" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** ${{ matrix.target.id }}" >> $GITHUB_STEP_SUMMARY
           echo "**Expected Image Digest:** \`${{ needs.build.outputs.digest }}\`" >> $GITHUB_STEP_SUMMARY
-          
+
           # Highlight deletes/replacements using a GitHub warning
           DESTRUCTIVE=$(terraform show -json "$PLAN_FILE" | jq -r '.resource_changes[]? | select(.change.actions | index("delete") or index("replace")) | .address')
           if [ -n "$DESTRUCTIVE" ]; then
@@ -262,11 +262,11 @@ jobs:
           terraform show -no-color "$PLAN_FILE" > plan_output.txt
           grep -E "Plan: |No changes.|error" plan_output.txt >> $GITHUB_STEP_SUMMARY || true
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
           # Safely append only the action and resource address of changed resources
           terraform show -json "$PLAN_FILE" | jq -r '
-            .resource_changes[]? 
-            | select(.change.actions != ["no-op"] and .change.actions != ["read"]) 
+            .resource_changes[]?
+            | select(.change.actions != ["no-op"] and .change.actions != ["read"])
             | "\(.change.actions | join(", ")) \(.address)"
           ' >> $GITHUB_STEP_SUMMARY || true
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -394,6 +394,85 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           terraform apply -input=false -auto-approve "$PLAN_FILE"
+
+      - name: Reconcile Shared Infrastructure - Plan
+        working-directory: ./infra/shared
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+          SHARED_APPROVED_IP_RULES_JSON: ${{ secrets.SHARED_APPROVED_IP_RULES_JSON }}
+          SHARED_APPROVED_SUBNET_IDS_JSON: ${{ secrets.SHARED_APPROVED_SUBNET_IDS_JSON }}
+        run: |
+          # Generate ephemeral tfvars
+          jq -n \
+            --arg rg "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
+            --arg kv "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
+            --arg tenant "${{ secrets.AZURE_TENANT_ID }}" \
+            --argjson ip "$SHARED_APPROVED_IP_RULES_JSON" \
+            --argjson sub "$SHARED_APPROVED_SUBNET_IDS_JSON" \
+            '{
+              shared_resource_group_name: $rg,
+              shared_key_vault_name: $kv,
+              tenant_id: $tenant,
+              approved_ip_rules: $ip,
+              approved_subnet_ids: $sub
+            }' > /tmp/shared-reconcile.tfvars.json
+          chmod 600 /tmp/shared-reconcile.tfvars.json
+
+          terraform init -reconfigure -backend-config="backends/shared.hcl"
+          set +e
+          terraform plan -input=false -var-file="/tmp/shared-reconcile.tfvars.json" -out="shared.tfplan" -json > shared_plan_output.json 2>&1
+          TF_EXIT=$?
+          set -e
+          if [ $TF_EXIT -ne 0 ]; then
+            echo "::error::Shared plan failed"
+            cat shared_plan_output.json
+            rm /tmp/shared-reconcile.tfvars.json
+            exit $TF_EXIT
+          fi
+
+          # Output raw plan JSON for the guard
+          terraform show -json shared.tfplan > shared_plan.json
+
+      - name: Guard Shared Infrastructure Plan
+        working-directory: ./infra/shared
+        run: |
+          python ../../scripts/deploy/guard_shared_plan.py shared_plan.json
+          if [ $? -ne 0 ]; then
+            echo "::error::Shared infrastructure guard rejected the plan."
+            rm /tmp/shared-reconcile.tfvars.json
+            exit 1
+          fi
+
+      - name: Reconcile Shared Infrastructure - Apply
+        working-directory: ./infra/shared
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+        run: |
+          terraform apply -input=false -auto-approve "shared.tfplan"
+          rm /tmp/shared-reconcile.tfvars.json
+
+      - name: Verify Shared Key Vault Configuration
+        env:
+          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
+        run: |
+          az keyvault network-rule list \
+            --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
+            --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
+            --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" \
+            --query "virtualNetworkRules[?id=='$TARGET_SUBNET_ID']" \
+            -o json > subnet_rules.json
+
+          if [ "$(jq 'length' subnet_rules.json)" -eq 0 ]; then
+             echo "::error::Post-apply verification failed: Target subnet $TARGET_SUBNET_ID is missing from the shared Key Vault network rules."
+             exit 1
+          fi
+          echo "Target subnet successfully verified in shared Key Vault."
 
   deploy:
     name: Deploy - ${{ matrix.target.id }}
