@@ -491,7 +491,37 @@ jobs:
           SHARED_KV_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
         run: |
           echo "Forcing App Service to refresh Key Vault references..."
-          az rest --method post --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings/refresh?api-version=2022-03-01"
+          MAX_RETRIES=6
+          ATTEMPT=1
+          BACKOFFS=(10 15 20 30 45 60)
+
+          while [ $ATTEMPT -le $MAX_RETRIES ]; do
+            set +e
+            ERROR_OUTPUT=$(az rest --method post --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings/refresh?api-version=2022-03-01" 2>&1)
+            EXIT_CODE=$?
+            set -e
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "Refresh triggered successfully."
+              break
+            fi
+
+            if echo "$ERROR_OUTPUT" | grep -qi "Conflict"; then
+              if [ $ATTEMPT -eq $MAX_RETRIES ]; then
+                echo "::error::Refresh failed after $MAX_RETRIES attempts due to Conflict."
+                exit 1
+              fi
+              WAIT_TIME=${BACKOFFS[$((ATTEMPT-1))]}
+              echo "Conflict detected (operation in progress). Retrying in ${WAIT_TIME}s (Attempt $ATTEMPT of $MAX_RETRIES)..."
+              sleep $WAIT_TIME
+              ATTEMPT=$((ATTEMPT+1))
+            else
+              echo "::error::Non-transient error during refresh."
+              # Safe diagnostic
+              echo "$ERROR_OUTPUT" | head -n 3
+              exit 1
+            fi
+          done
 
           echo "Querying updated Key Vault reference statuses..."
           az rest --method get --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings?api-version=2022-03-01" > kv_refs.json
