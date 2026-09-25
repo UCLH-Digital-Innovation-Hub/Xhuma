@@ -110,6 +110,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Do not ignore non-secret tfvars
+!infra/env/
+!infra/env/play.tfvars
+
 # Spyder project settings
 .spyderproject
 .spyproject

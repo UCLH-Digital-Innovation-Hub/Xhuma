@@ -5,7 +5,7 @@ from app.main import app
 
 client = TestClient(app)
 
-ENDPOINTS = ["/SOAP/iti38", "/SOAP/iti39", "/SOAP/iti47", "/SOAP/iti55"]
+ENDPOINTS = ["/SOAP/iti38", "/SOAP/iti39", "/SOAP/iti55"]
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +26,9 @@ def mock_dependencies(monkeypatch):
         )(),
     )
     monkeypatch.setattr("app.soap.soap.lookup_patient", lambda *args, **kwargs: {"id": "test"})
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr("app.soap.soap.attempt_audit", AsyncMock())
 
     # mock the responses so they don't fail later in the pipeline
     async def mock_response(*args, **kwargs):
@@ -33,7 +36,6 @@ def mock_dependencies(monkeypatch):
 
     monkeypatch.setattr("app.soap.soap.iti_38_response", mock_response)
     monkeypatch.setattr("app.soap.soap.iti_39_response", mock_response)
-    monkeypatch.setattr("app.soap.soap.iti_47_response", mock_response)
     monkeypatch.setattr("app.soap.soap.iti_55_response", mock_response)
 
 

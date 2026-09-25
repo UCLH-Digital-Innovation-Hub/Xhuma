@@ -231,7 +231,7 @@ flowchart TD
     P6 -.->|API error| P11
     P7 -.->|validation error| P11
     P11 -->|safe failure response| Epic
-    P11 -->|alert/log| P10
+    P11 -->|telemetry/log| P10
     
     P1 -->|audit log| P10
     P9 -->|audit log| P10
@@ -294,7 +294,7 @@ sequenceDiagram
     end
 ```
 
-## Security, Governance & Data Minimization
+## Security, Governance & Data Minimisation
 
 Xhuma implements strict data governance controls to align with NHS Information Governance (IG) frameworks and the National Data Sharing Arrangement (NDSA).
 
@@ -306,8 +306,8 @@ Xhuma relies on Epic Care Everywhere as the authoritative system of record for i
 ### Hardcoded Purpose of Use
 Xhuma strictly enforces the `directcare` purpose. The middleware explicitly blocks any attempts to query the GP Connect API for research, secondary uses, or population health analytics.
 
-### Data Minimization Scope
-To adhere to data minimization principles, Xhuma scopes its GP Connect structured record retrieval strictly to `patient/*.read`. It only requests the specific clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations), explicitly excluding sensitive or unnecessary administrative data where possible.
+### Data Minimisation Scope
+To adhere to data minimisation principles, Xhuma scopes its GP Connect structured record retrieval strictly to `patient/*.read`. It only requests the specific clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations), explicitly excluding sensitive or unnecessary administrative data where possible.
 
 ## Error Handling & Graceful Degradation
 
@@ -325,7 +325,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 ### Delta Summary & Assumptions
 
 **Changes from previous version:**
-- **Epic Ownership & Statelessness**: Shifted diagram labels and structures to identify Epic explicitly as the ultimate EHR UI, reconciling owner, and keeper of the patient link. Xhuma is now rigorously documented as a stateless orchestrator with cache used only for transient optimization.
+- **Epic Ownership & Statelessness**: Shifted diagram labels and structures to identify Epic explicitly as the ultimate EHR UI, reconciling owner, and keeper of the patient link. Xhuma is now rigorously documented as a stateless orchestrator with cache used only for transient optimisation.
 - **Workflow Separation**: Separated the single unified interactions into two distinct paths: Patient Discovery (ITI-55) & Identity Confirmation, followed by Document Query & Retrieval.
 - **Clinician Intervention visibility**: Updated the DFD Level 0/1 and Context diagram to show clinicians directly interacting with Epic with explicit human confirmation steps and manual reconciliation steps.
 - **Observability Stack Constraint**: Pared down monitoring boxes to explicitly respect the network architecture document baseline (eliminating extrapolated components).
@@ -401,58 +401,14 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 
 ## Monitoring & Observability Architecture
 
-### 1. Metrics Collection (Prometheus)
-- **Endpoint Metrics**
-  - Request counts and rates
-  - Response times
-  - Error rates by type
-  - Status code distribution
+Xhuma currently uses Azure Application Insights and Log Analytics to collect telemetry. The sections below outline the current foundation and the intended future tooling for advanced observability.
 
-- **Cache Metrics**
-  - Hit/miss rates
-  - Cache size and memory usage
-  - Eviction rates
-  - Connection pool statistics
-  - Operation latencies
-  - Error counts by type
+### 1. Current Telemetry (Azure Monitor / App Insights)
+- **Implemented:** Distributed tracing, request tracking, error logging, and Application Insights integration.
+- **Outstanding:** Proactive Azure alert rules, action groups, and automated operator notification are not yet fully codified in the current Terraform deployment model, but alert rules also exist in the live Azure environment.
 
-- **Resource Metrics**
-  - CPU usage
-  - Memory utilization
-  - Network I/O
-  - Disk operations
-
-### 2. Visualization (Grafana)
-- **System Dashboards**
-  - Real-time performance monitoring
-  - Historical trends analysis
-  - Resource utilization tracking
-  - Error rate visualization
-
-- **Business Metrics**
-  - Transaction success rates
-  - API usage patterns
-  - Cache efficiency
-  - Service availability
-
-### 3. Logging Architecture (ELK Stack)
-- **Log Collection**
-  - Application logs
-  - System logs
-  - Access logs
-  - Error logs
-
-- **Log Processing**
-  - Structured log formatting
-  - Log enrichment
-  - Pattern detection
-  - Alert generation
-
-- **Log Storage**
-  - Indexed storage
-  - Retention policies
-  - Archival strategy
-  - Search optimization
+### 2. Local Development Tooling (Prometheus & Grafana)
+Prometheus and Grafana are available in the local Docker Compose development stack. Production target environments currently use the Azure Monitor / Application Insights / Log Analytics stack.
 
 ### 4. Distributed Tracing (OpenTelemetry)
 - **Trace Collection**
@@ -465,12 +421,12 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
   - Latency analysis
   - Error tracking
   - Service mapping
-  - Performance optimization
+  - Performance optimisation
 
 ## Testing Architecture
 
 ### 1. Unit Testing
-- **Test Organization**
+- **Test Organisation**
   - Feature-based test suites
   - Integration test suites
   - Mock implementations
@@ -498,7 +454,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 ### 3. Performance Testing
 - **Load Testing**
   - Concurrent user simulation
-  - Resource utilization
+  - Resource utilisation
   - Response time analysis
   - Bottleneck identification
 
@@ -520,7 +476,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 - TLS 1.2+ for all communications
 - Data encryption at rest
 - Secure header handling
-- Input validation and sanitization
+- Input validation and sanitisation
 - Redis protected mode
 
 ### 3. Compliance
@@ -537,14 +493,10 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 │   ├── FastAPI Application
 │   ├── Uvicorn Server
 │   └── Application Dependencies
-├── Redis Container
-│   ├── Redis Server (v7.2)
-│   ├── Custom Configuration
-│   └── Persistence Volumes
-└── Monitoring Stack
-    ├── Prometheus
-    ├── Grafana
-    └── OpenTelemetry Collector
+└── Redis Container
+    ├── Redis Server (v7.2)
+    ├── Custom Configuration
+    └── Persistence Volumes
 ```
 
 ### Network Configuration
@@ -552,8 +504,6 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 - Exposed ports:
   - 8000: Application API
   - 6379: Redis (internal only)
-  - 9090: Prometheus metrics
-  - 3000: Grafana dashboards
 
 ## Error Handling Architecture
 
@@ -603,7 +553,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 - Memory usage checks
 
 ### 3. Startup Probes
-- Initialization checks
+- Initialisation checks
 - Configuration validation
 - Resource allocation
 - Service registration

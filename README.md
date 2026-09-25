@@ -44,10 +44,10 @@ sequenceDiagram
     end
 
 
-    EHR->>Fast API: ITI 47 Request
+    EHR->>Fast API: ITI 55 Request
     Fast API->>PDS: FHIR PDS lookup
     PDS->>Fast API: PDS response
-    Fast API->>EHR: ITI 47 Response
+    Fast API->>EHR: ITI 55 Response
     Fast API->>Redis: Check for cached SDS lookup
     opt if no cached SDS lookup
     Fast API--)SDS: ASID Lookup
@@ -76,16 +76,26 @@ sequenceDiagram
 - NHS Digital API access credentials
 
 ## Development
-1. install pipenv
+1. Install uv.
 
-2. install development dependencies
+2. Install development dependencies from the lockfile.
 ```bash
-pipenv install --dev
+uv sync --locked --dev
 ```
 
 3. install pre-commit hooks to ensure consistency
 ```bash
-pre-commit install
+uv run --locked pre-commit install
+```
+
+The Ruff hooks check the whole repository using the version in `uv.lock` and
+the rules in `pyproject.toml`, matching CI. They automatically fix lint and
+formatting issues where possible; review and stage those edits before retrying
+the commit. To run the same read-only checks as CI:
+
+```bash
+uv run --locked ruff check .
+uv run --locked ruff format --check .
 ```
 
 4. configure environmental variables and use docker as below
@@ -155,12 +165,12 @@ The `infra/` directory contains Terraform configuration for:
 - Azure Cache for Redis (Standard)
 - Azure Monitor (Application Insights & Log Analytics)
 
-### CI/CD Pipelines & Multi-Tenant Deployment
-The pipeline implements a **"Shared-Nothing" Bootstrapped State Architecture**, designed to deploy isolated infrastructure per NHS Trust with zero manual engineering.
+### CI/CD Pipelines & Matrix Deployment
+The deployment architecture is currently migrating to a **"Target-isolated matrix deployment with centrally managed shared services"** model.
 
-- **CI (`.github/workflows/ci.yml`)**: Runs code quality (Black, isort), CodeQL vulnerability scanning, and pytest suites. Triggers on `dev`, `int`, and `main`.
-- **Infrastructure (`.github/workflows/infra.yml`)**: Dynamically routes deployments based on the triggering branch (`int` deploys to `rg-xhuma-int`, `main` deploys to `rg-xhuma-uclh-prd`). Automatically bootstraps an isolated Azure Storage Account for Terraform state (`tfstate`) within the target Resource Group before running Terraform.
-- **Deployment (`.github/workflows/cd.yml`)**: Builds the Docker image, runs Trivy vulnerability scanning (CRITICAL/HIGH severities), pushes to GitHub Container Registry (GHCR), and deploys to the dynamically targeted Azure Web App.
+- **Matrix Pipeline (`.github/workflows/matrix-deploy.yml`)**: Currently orchestrates deployments to the `play` environment from the `rehearsal/play-deployment` branch. This pipeline enforces strict pre-plan and pre-apply approval gates and relies on immutable Docker image digests.
+- **Legacy Pipelines (`.github/workflows/infra.yml` and `cd.yml`)**: INT and PRD environments currently remain on legacy ownership pipelines and will be migrated to the matrix model in the future.
+- **Shared Infrastructure**: Adoption of a shared Terraform state (for cross-environment resources like the shared Key Vault) is currently incomplete and remains an outstanding migration step.
 
 ### Observability
 End-to-end traceability is implemented using **Azure Monitor OpenTelemetry**.
@@ -187,7 +197,7 @@ The service uses a production-ready Redis setup with:
 - Comprehensive monitoring
 - Security hardening
 
-Redis metrics are available through Prometheus and can be visualized in Grafana.
+*(Note: In local development, Redis metrics are available through Prometheus and can be visualized in Grafana. Production Azure target environments use Azure Monitor for managed Redis metrics).*
 
 ## API Documentation
 
@@ -198,7 +208,7 @@ Access the interactive API documentation at:
 ## Branch Strategy
 
 - `main`: Production releases (Triggers deployments to `rg-xhuma-uclh-prd` and future trust environments)
-- `int`: Integration/Stabilization branch (Triggers deployments to `rg-xhuma-int` for dry runs)
+- `int`: Integration/Stabilisation branch (Triggers deployments to `rg-xhuma-int` for dry runs)
 - `dev`: Active development and feature integration
 - `feature/*`: Feature branches
 
@@ -217,6 +227,6 @@ Tests are automatically run in the CI pipeline. To run tests locally using Docke
 docker-compose -f docker-compose.test.yml up --build
 ```
 
-## License
+## Licence
 
-This project is licensed under the terms of the license included in the [LICENSE](LICENSE) file.
+This project is licensed under the terms of the licence included in the [LICENSE](LICENSE) file.

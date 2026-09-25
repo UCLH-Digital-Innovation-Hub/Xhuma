@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import Response
@@ -9,6 +9,13 @@ from app.tests.configure_tests import get_nhs_ids, load_bundle, load_pds
 from app.tests.fixtures.saml_attributes import saml
 
 pytest_plugins = ("pytest_asyncio",)
+
+
+def get_mock_request():
+    mock_request = MagicMock()
+    mock_request.app.state.SessionLocal = MagicMock()
+    mock_request.app.state.ccda_expiry_hours = 4.0
+    return mock_request
 
 
 def fake_sds_device_trace():
@@ -38,9 +45,10 @@ def fake_sds_endpoint_trace():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("nhsno", get_nhs_ids())
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.convert_bundle", new_callable=AsyncMock)
 @patch("app.gpconnect.base64_xml")
-@patch("app.gpconnect.redis_client.setex")
+@patch("app.gpconnect.redis_client.pipeline")
 @patch("app.gpconnect.create_nhs_ssl_context")
 @patch("app.gpconnect.httpx.AsyncClient")
 @patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
@@ -50,9 +58,10 @@ async def test_gpconnect_with_nhs_data(
     mock_sds_trace,
     mock_async_client,
     mock_create_nhs_ssl_context,
-    mock_redis_setex,
+    mock_redis_pipeline,
     mock_base64_xml,
     mock_convert_bundle,
+    mock_attempt_audit,
     nhsno,
 ):
     fake_bundle = load_bundle(nhsno)
@@ -81,25 +90,28 @@ async def test_gpconnect_with_nhs_data(
 
     mock_base64_xml.return_value = "mocked_base64_doc"
 
-    result = await gpconnect(nhsno, saml_attrs=saml)
+    result = await gpconnect(nhsno, saml_attrs=saml, request=get_mock_request())
     body = json.loads(result.body)
 
     assert result.status_code == 200
     assert body["success"] is True
     assert "document_id" in body
 
-    mock_lookup_patient.assert_called_once_with(nhsno, request=None)
+    mock_lookup_patient.assert_called_once_with(
+        nhsno, request=mock_lookup_patient.call_args.kwargs["request"], saml=saml
+    )
     assert mock_sds_trace.call_count == 2
     mock_client.post.assert_called_once()
     mock_convert_bundle.assert_called_once()
     mock_base64_xml.assert_called_once()
-    assert mock_redis_setex.call_count == 2
+    mock_redis_pipeline.return_value.execute.assert_called_once()
 
 
 @pytest.mark.asyncio
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
-async def test_gpconnect_returns_400_for_invalid_nhs_number(mock_lookup_patient):
-    result = await gpconnect(1234567890, saml_attrs=saml)
+async def test_gpconnect_returns_400_for_invalid_nhs_number(mock_lookup_patient, mock_attempt_audit):
+    result = await gpconnect(1234567890, saml_attrs=saml, request=get_mock_request())
     body = json.loads(result.body)
 
     assert result.status_code == 400
@@ -110,11 +122,12 @@ async def test_gpconnect_returns_400_for_invalid_nhs_number(mock_lookup_patient)
 
 
 @pytest.mark.asyncio
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
-async def test_gpconnect_returns_502_when_pds_lookup_fails(mock_lookup_patient):
+async def test_gpconnect_returns_502_when_pds_lookup_fails(mock_lookup_patient, mock_attempt_audit):
     mock_lookup_patient.side_effect = Exception("PDS unavailable")
 
-    result = await gpconnect(9690937278, saml_attrs=saml)
+    result = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
     body = json.loads(result.body)
 
     assert result.status_code == 502
@@ -123,14 +136,15 @@ async def test_gpconnect_returns_502_when_pds_lookup_fails(mock_lookup_patient):
 
 
 @pytest.mark.asyncio
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
-async def test_gpconnect_returns_403_when_patient_restricted(mock_lookup_patient):
+async def test_gpconnect_returns_403_when_patient_restricted(mock_lookup_patient, mock_attempt_audit):
     fake_pds = load_pds(9690937278)
     fake_pds["meta"]["security"][0]["code"] = "R"
 
     mock_lookup_patient.return_value = fake_pds
 
-    result = await gpconnect(9690937278, saml_attrs=saml)
+    result = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
     body = json.loads(result.body)
 
     assert result.status_code == 403
@@ -139,18 +153,20 @@ async def test_gpconnect_returns_403_when_patient_restricted(mock_lookup_patient
 
 
 @pytest.mark.asyncio
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_returns_502_when_sds_trace_fails(
     mock_lookup_patient,
     mock_sds_trace,
+    mock_attempt_audit,
 ):
     fake_pds = load_pds(9690937278)
 
     mock_lookup_patient.return_value = fake_pds
     mock_sds_trace.side_effect = Exception("SDS unavailable")
 
-    result = await gpconnect(9690937278, saml_attrs=saml)
+    result = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
     body = json.loads(result.body)
 
     assert result.status_code == 502

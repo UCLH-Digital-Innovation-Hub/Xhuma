@@ -1,12 +1,13 @@
 from datetime import datetime
+from typing import List
 
 import xmltodict
 from defusedxml import ElementTree
 from fastapi import HTTPException
-from fhirclient.models import coding, organization, period
+from fhirclient.models import coding, fhirdate, identifier, organization, period
 
 from .models.admin import AssignedAuthor, AuthorParticipation
-from .models.datatypes import CD, SXCM_TS
+from .models.datatypes import CD, II, SXCM_TS
 
 
 def validateNHSnumber(number: int) -> bool:
@@ -24,7 +25,7 @@ def validateNHSnumber(number: int) -> bool:
     numbers = [int(c) for c in str(number)]
 
     total = 0
-    for idx in range(9):
+    for idx in range(0, 9):
         multiplier = 10 - idx
         total += numbers[idx] * multiplier
 
@@ -52,7 +53,7 @@ def generate_code(coding: coding.Coding) -> dict:
     return code
 
 
-def code_with_translations(codings: list[coding.Coding]) -> CD:
+def code_with_translations(codings: List[coding.Coding]) -> CD:
     """
     Takes a list of coding objects and returns a CD object with translations
     Args:
@@ -99,6 +100,13 @@ def templateId(root: str, extension: str) -> list:
     return template
 
 
+def id_helper(identities: identifier.Identifier) -> list[II]:
+    """
+    takes list of dicts with root and extension and returns list of II objects
+    """
+    return [II(**{"@root": item.system, "@extension": item.value}) for item in identities]
+
+
 def date_helper(isodate):
     """
     takes iso string and returns to format valid for ccda
@@ -109,7 +117,16 @@ def date_helper(isodate):
     return new_date
 
 
-def effective_time_helper(effective_period: period.Period) -> list[SXCM_TS]:
+def datetime_helper(fhirdate: fhirdate.FHIRDate) -> str:
+    """
+    takes a FHIRDate object and returns a string in the format YYYYMMDDHHMMSS
+    """
+    if fhirdate is None:
+        return None
+    return datetime.strptime(fhirdate.isostring[:10], "%Y-%m-%d").strftime("%Y%m%d%H%M%S")
+
+
+def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
     """
     Takes a FHIR effective period and returns a list of SXCM_TS objects
     """

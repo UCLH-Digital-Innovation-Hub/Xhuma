@@ -10,28 +10,23 @@ Xhuma's cloud infrastructure is provisioned via Terraform (`infra/main.tf`). The
 * **App Service (Linux Web App):** The main API container host. It runs the Dockerised FastAPI application and serves incoming HTTP/SOAP traffic over TLS. WebSockets are enabled to support outbound tunnelling.
 * **PostgreSQL Flexible Server:** Provides persistent relational storage for audit logging and service configuration. It is protected by internal Azure firewall rules.
 * **Redis Cache:** A managed memory cache used for storing transient data such as NHS OAuth Tokens, PDS demographic lookups, and generated CCDA documents to reduce redundant NHS API calls.
-* **Observability:** Azure Application Insights and a Log Analytics Workspace are used to store OpenTelemetry metrics, traces, and application logs.
+* **Observability Foundations:** Azure Application Insights and a Log Analytics Workspace are used to store OpenTelemetry metrics, traces, and application logs. (Note: These provide telemetry foundations, but proactive alert routing and escalation remain outstanding).
 
 ---
 
 ## 2. CI/CD Deployment Flow
 
-Xhuma uses GitHub Actions (`.github/workflows/cd.yml`) for automated deployment.
+Xhuma uses GitHub Actions for automated deployment. The architecture is currently migrating to a target-isolated matrix deployment model.
 
-```mermaid
-flowchart LR
-    A[Code Push to main/dev] --> B[GitHub Actions Runner]
-    B --> C[Build Docker Image]
-    C --> D[Push to GHCR]
-    D --> E[Azure Authenticate via SP]
-    E --> F[Trigger Azure WebApp Pull]
-    F --> G[Container Restarts with New Image]
-```
+- **Legacy Pipelines (`cd.yml` / `infra.yml`)**: Currently manage the integration (`int`) and production (`prd`) environments.
+- **Matrix Pipeline (`matrix-deploy.yml`)**: Currently manages the `play` rehearsal environment, introducing strict environment approvals, immutable Docker image digests, and centralised shared services.
 
-1. **Build:** Commits to protected branches (`int` and `main`) trigger the CD pipeline. The runner builds a new Docker image from the working directory.
-2. **Registry:** The built image is tagged with the Git SHA and pushed to the GitHub Container Registry (`ghcr.io/uclh-digital-innovation-hub/xhuma`).
-3. **Deploy:** The pipeline dynamically authenticates to the isolated Azure Resource Group tied to the branch (e.g., `rg-xhuma-int` or `rg-xhuma-uclh-prd`) and commands the dynamically targeted Azure Web App to pull the latest image.
-4. **Infrastructure State:** Terraform state is automatically bootstrapped into isolated Storage Accounts within each target Resource Group to ensure a strict "Shared-Nothing" boundary between trust environments.
+### General Deployment Flow (Matrix Example)
+
+1. **Build:** The CI pipeline builds the Docker image from the source branch.
+2. **Registry:** The built image is tagged with its SHA-256 digest and pushed to the GitHub Container Registry (`ghcr.io/uclh-digital-innovation-hub/xhuma`).
+3. **Plan & Infrastructure:** The workflow dynamically authenticates to Azure, bootstraps isolated state storage if needed, and generates a cryptographic Terraform plan. An authorised operator must review and approve this plan before infrastructure applies.
+4. **Deploy:** Once infrastructure is updated and healthy, a separate approval gate permits the deployment of the immutable container digest to the target Azure Web App.
 
 ---
 
@@ -64,14 +59,20 @@ Due to NHS England restrictions on GP Connect via the public internet, Xhuma lev
 
 An HSCN-connected agent (e.g., via Azure Private Link or an internal NHS VPN Gateway) establishes a WebSocket connection inbound to the Xhuma Azure App Service. GP Connect requests are securely tunnelled back down this WebSocket to the agent, which executes the query natively against HSCN. This allows Xhuma's main infrastructure to remain purely cloud-native while satisfying strict NHS network requirements.
 
+> **Note on Custom Domains:** External integration endpoints (including Epic and the Relay) do not target the default Azure App Service hostname directly. They target an externally agreed environment custom FQDN (e.g., `int.uclh.xhuma.co.uk`), which is then bound to the Xhuma App Service via an operator-managed Azure hostname binding. DNS and the associated custom TLS certificates are currently managed manually outside of the Terraform infrastructure lifecycle.
+
 ```mermaid
 flowchart TD
     subgraph Client [Epic Trust Environment]
         A["Epic EHR System (SOAP)"]
     end
 
+    subgraph DNS [External DNS / TLS Boundary]
+        FQDN["Environment Custom FQDN\n(Operator Managed)"]
+    end
+
     subgraph AzureAppService [Xhuma Azure Environment]
-        B[Xhuma API / WebSocket Server Hub]
+        B["Azure App Service\nHostname Binding -> Xhuma API"]
     end
 
     subgraph Connectivity [HSCN Boundary]
@@ -85,10 +86,11 @@ flowchart TD
         F[PDS / SDS APIs]
     end
 
-    A -->|mTLS over Public Internet| B
+    A -->|mTLS over Public Internet| FQDN
+    FQDN -->|Azure Hostname Binding| B
     B -->|OAuth / Internet Routing| F
     
-    C -->|WebSocket Connection to Azure App| B
+    C -->|WebSocket Connection to Custom FQDN| FQDN
     B -.->|Tunnels GP Connect Protocol| C
     C -->|HSCN Network| E
     D -.->|Alternative Backup to HSCN| E
