@@ -145,14 +145,77 @@ The following are explicitly marked as OUTSTANDING at the time of drafting:
 
 The startup log `"Using HSCN Relay"` is configuration/startup evidence only, not proof that connectivity has been successfully exercised.
 
-## 9. Conclusion
+## 9. Final post-dev reconciliation regression — Run #38
+
+**GitHub Actions:** Matrix Deployment Pilot
+**Run ID:** 36144317169
+**Source commit:** `1fe99fc5c72ebc7869ee05d48c39ddf0fbd39e6c`
+
+Before Run #38, the current `origin/dev` application/HIE changes were merged into the proven `rehearsal/play-deployment` branch.
+
+Combined local validation before push:
+- 199 tests passed
+- 0 failed
+- `ruff check` passed
+- `ruff format --check` passed
+- `infra` Terraform validate passed
+- `infra/shared` Terraform validate passed
+
+Run #38 successfully completed:
+- Prepare Targets
+- CI & Tests
+- Build & Push
+- Trivy vulnerability gate
+- Terraform Plan
+- Terraform Apply
+- Shared Infrastructure Plan
+- Shared plan guard
+- Shared Infrastructure Apply
+- Shared Key Vault verification
+- App Service Key Vault reference refresh/verification
+- Deploy
+- immutable digest verification
+- Application Health Check
+
+**Terraform result:** `No changes. Your infrastructure matches the configuration.`
+
+This provides observed evidence that the target infrastructure remained convergent after incorporating the latest dev application/HIE changes.
+
+Additionally observed:
+- CodeQL succeeded on the same commit.
+- Coveralls reported 78.607% coverage.
+
+Observed application runtime evidence from 25 September 2026:
+- `2026-09-25T14:09:13` database migration initialisation started;
+- `2026-09-25T14:09:20` PostgreSQL reported `PostgresqlImpl`;
+- `2026-09-25T14:09:20` transactional DDL was assumed;
+- no new Alembic upgrade revisions were shown during this final deployment;
+- `2026-09-25T14:09:21` Uvicorn started successfully;
+- `2026-09-25T14:09:35` Application Insights OpenTelemetry instrumentation enabled successfully;
+- `2026-09-25T14:09:35` application reported `"Using HSCN Relay"`;
+- server process started;
+- `2026-09-25T14:09:38` application startup completed;
+- Uvicorn served on port 80;
+- `2026-09-25T14:09:40` `/health` returned HTTP 200 after startup;
+- `/health` returned HTTP 200 on repeated requests;
+- `2026-09-25T14:09:39` `/robots933456.txt` returned HTTP 403 because `X-ARR-ClientCert` was absent;
+- the previous container shut down cleanly as part of the Azure App Service container replacement sequence.
+
+Interpretation of runtime evidence:
+- HTTP 200 on `/health` = application liveness evidence.
+- HTTP 403 without `X-ARR-ClientCert` = observed mTLS middleware rejection of an unauthenticated request.
+- `"Using HSCN Relay"` = configuration/startup evidence only.
+- This does **not** claim successful end-to-end HSCN, Epic, GP Connect or SOAP/mTLS interoperability.
+- This does **not** claim production readiness.
+
+## 10. Conclusion
 The Play rehearsal provides observed evidence that Xhuma target infrastructure can be destroyed and reconstructed through the controlled deployment pipeline without manual Azure infrastructure repair, including automatic restoration of the target's required shared Key Vault network relationship.
 
-The subsequent deployment converged with no Terraform target changes and successfully completed shared-infrastructure verification, immutable application deployment, and automated health verification.
+The subsequent deployment converged with no Terraform target changes and successfully completed shared-infrastructure verification, immutable application deployment, and automated health verification. The final regression remained convergent after reconciliation with current dev.
 
 Production readiness is not asserted by this evidence. Environment-specific credentials, certificates, connectivity, functional interoperability and production assurance remain separately required.
 
-## 10. Evidence table
+## 11. Evidence table
 
 | Phase | Description | Reference / Identity |
 |-------|-------------|----------------------|
@@ -168,5 +231,6 @@ Production readiness is not asserted by this evidence. Environment-specific cred
 | Application startup | Database migrations, Uvicorn, and OpenTelemetry initialized | App Insights startup logs |
 | mTLS rejection | Middleware rejected missing `X-ARR-ClientCert` | HTTP 403 on `/robots933456.txt` |
 | Epic functional test | **OUTSTANDING**: Interoperability test for HSCN/Epic | N/A |
+| Final post-dev regression | Combined dev + deployment head remained convergent and healthy | Run #38 / 36144317169 / commit `1fe99fc5...` |
 
 *For prior run contexts, see [2026-09-23-play-matrix-deployment-rehearsal.md](./2026-09-23-play-matrix-deployment-rehearsal.md).*
