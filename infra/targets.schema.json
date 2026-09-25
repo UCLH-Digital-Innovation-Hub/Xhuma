@@ -36,6 +36,7 @@
           "tfvars_file": { "type": "string" },
           "backend_file": { "type": "string" },
           "runner_label": { "type": "string" },
+          "require_existing_state": { "type": "boolean" },
           "owner": { "type": "string" },
           "support_route": { "type": "string" }
         }
