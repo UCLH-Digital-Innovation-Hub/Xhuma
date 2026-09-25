@@ -28,9 +28,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev
       - name: Ruff Check
-        run: uv run ruff check .
+        run: uv run --locked ruff check .
       - name: Ruff Format Check
-        run: uv run ruff format --check .
+        run: uv run --locked ruff format --check .
       - name: Run Tests
         run: uv run coverage run -m pytest
 
@@ -325,7 +325,6 @@ jobs:
         with:
           name: plan-manifest-${{ matrix.target.id }}
           path: infra/
-
       - name: Download and Verify Plan
         working-directory: ./infra
         run: |

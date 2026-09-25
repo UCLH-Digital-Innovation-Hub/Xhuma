@@ -49,6 +49,8 @@ def observation_entry(entry, index: dict, section_name: Union[str, int]) -> Entr
         structured_obs_notes = "\n".join(obs_notes)
 
         comment_activity = EntryRelationship()
+        # TODO: Build an Act with typed code/text rather than assigning a dict;
+        # test_observation_entry_xmltext_validation emits a serializer warning for act.
         comment_activity.act = {
             "code": {
                 "@code": "48767-8",

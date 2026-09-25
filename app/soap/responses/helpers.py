@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
 
+from ..models import Identifier, ResponseHeader, SecurityHeader, SecurityTimestamp, SoapEnvelope, TextElement
+
 
 def create_security():
     current_time = datetime.now()
@@ -8,43 +10,21 @@ def create_security():
     current_timestamp = current_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
     expiration_timestamp = expiration_time.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
-    security = {
-        "@s:mustUnderstand": 1,
-        "@xmlns:o": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd",
-        "u:Timestamp": {
-            "@u:Id": "_0",
-            "u:Created": {"#text": current_timestamp},
-            "u:Expires": {"#text": expiration_timestamp},
-        },
-    }
-
-    return security
+    return SecurityHeader(
+        timestamp=SecurityTimestamp(
+            created=TextElement(text=current_timestamp),
+            expires=TextElement(text=expiration_timestamp),
+        )
+    ).to_xml_dict()
 
 
 def create_header(message_urn: str, message_id: str):
-    header = {
-        "a:Action": {
-            "@s:mustUnderstand": 1,
-            "#text": message_urn,
-        },
-        "a:RelatesTo": {"#text": message_id},
-        # "o:Security": create_security(),
-    }
-    return header
+    return ResponseHeader.create(message_urn, message_id).to_xml_dict()
 
 
 def create_envelope(header, body):
-    envelope = {
-        "s:Envelope": {
-            "@xmlns:s": "http://www.w3.org/2003/05/soap-envelope",
-            "@xmlns:a": "http://www.w3.org/2005/08/addressing",
-            "@xmlns:u": "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd",
-            "s:Header": header,
-            "s:Body": body,
-        }
-    }
-    return envelope
+    return SoapEnvelope.create(header, body).to_xml_dict()
 
 
 def create_id(root, extension):
-    return {"@root": root, "@extension": extension}
+    return Identifier(root=root, extension=extension).to_xml_dict()

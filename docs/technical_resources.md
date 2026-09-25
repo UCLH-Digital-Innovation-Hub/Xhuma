@@ -13,7 +13,7 @@
 
 ### SOAP Services
 - **IHE ITI Profiles Implementation**:
-  - ITI-47: Patient Demographics Query
+  - ITI-55: Cross Gateway Patient Discovery
   - ITI-38: Cross Gateway Query
   - ITI-39: Cross Gateway Retrieve
 - **SOAP Headers**:
@@ -54,7 +54,7 @@
 
 ### IHE ITI
 - **Profiles Implemented**:
-  - ITI-47: Patient Demographics Query
+  - ITI-55: Cross Gateway Patient Discovery
   - ITI-38: Cross Gateway Query
   - ITI-39: Cross Gateway Retrieve
 - **Documentation**: [IHE ITI Technical Framework](https://www.ihe.net/resources/technical_frameworks/#IT)

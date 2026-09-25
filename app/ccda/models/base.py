@@ -31,6 +31,8 @@ class ManufacturedMaterial(BaseModel):
 class ManufacturedProduct(BaseModel):
     manufacturedMaterial: ManufacturedMaterial
     templateId: List[II] = Field(default_factory=list)
+    # TODO: Use an II default factory rather than an unvalidated dict; immunization
+    # tests emit PydanticSerializationUnexpectedValue for manufacturedProduct.id.
     id: II = {"@root": str(uuid4())}
     classCode: str = Field(default="MANU", alias="@classCode")
 
@@ -212,6 +214,8 @@ class SubstanceAdministration(BaseModel):
         # print(time_list)
 
 
+# TODO: Replace deprecated Extra.allow with Pydantic v2 configuration;
+# importing this model emits PydanticDeprecatedSince20 in the test suite.
 class EntryRelationship(BaseModel, extra=Extra.allow):
     # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
@@ -245,6 +249,8 @@ class Section(BaseModel):
     text: Optional[str] = None
     entry: List[Entry] = Field(default_factory=list)
 
+    # TODO: Replace class-based Config with ConfigDict; importing Section emits
+    # PydanticDeprecatedSince20 in the test suite.
     class Config:
         arbitrary_types_allowed = True
 
