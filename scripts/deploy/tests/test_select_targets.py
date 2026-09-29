@@ -10,7 +10,7 @@ def run_script(branch):
 
 
 def test_integration_branch_selects_only_play():
-    res = run_script("feat/matrix-deployment-pilot-integration")
+    res = run_script("rehearsal/play-deployment")
     assert res.returncode == 0
     targets = json.loads(res.stdout)
     assert len(targets) == 1
@@ -27,7 +27,7 @@ def test_integration_branch_rejects_int_production():
     # If the integration branch tried to select INT or PRD, it wouldn't happen because targets.json
     # defines play, and the branch mapping restricts it.
     # We prove it by checking the selected targets only contain play.
-    res = run_script("feat/matrix-deployment-pilot-integration")
+    res = run_script("rehearsal/play-deployment")
     targets = json.loads(res.stdout)
     for t in targets:
         assert t["stage"] not in ["int", "prd"]

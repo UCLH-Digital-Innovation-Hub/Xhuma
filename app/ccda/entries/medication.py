@@ -186,7 +186,9 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         #         },
         #     },
         # }
-        # TODO use proper PQ model instead of dict
+        # TODO: Build a PQ/IVL_PQ instance (including typed translations) rather
+        # than assigning a dict; test_meds/test_prn_meds emit Pydantic serializer
+        # warnings for doseQuantity. Preserve the subsequent dose-conversion logic.
         substance_administration.doseQuantity = {
             "@xsi:type": "PQ",
             "@value": entry.dosage[0].doseQuantity.value,
@@ -207,6 +209,8 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
     if entry.dosage[0].asNeededBoolean:
         # populate precondition
+        # TODO: Build a list of Precondition models rather than a single dict;
+        # structured-dosage/PRN tests warn that precondition expects list[Precondition].
         substance_administration.precondition = {
             "@typeCode": "PRCN",
             "criterion": {
@@ -253,6 +257,8 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         denominator = entry.dosage[0].maxDosePerPeriod.denominator
         if numerator and denominator:
             try:
+                # TODO: Build an RTO_PQ_PQ model with PQ numerator/denominator;
+                # test_prn_meds emits a serializer warning for this dict assignment.
                 substance_administration.maxDoseQuantity = {
                     "@xsi:type": "RTO_PQ_PQ",
                     "numerator": {

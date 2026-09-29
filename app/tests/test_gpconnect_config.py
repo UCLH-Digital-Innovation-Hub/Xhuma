@@ -155,3 +155,35 @@ async def test_startup_config_validation():
             del os.environ["CCDA_EXPIRY_HOURS"]
         async with lifespan(app):
             pass
+
+
+@pytest.mark.asyncio
+async def test_lifespan_unresolved_keyvault_secret():
+    """Test that application startup fails if Azure Key Vault fails to resolve a required secret."""
+    app = FastAPI()
+
+    # Standard format
+    with patch.dict(
+        os.environ,
+        {
+            "API_KEY": "@Microsoft.KeyVault(SecretUri=https://xhuma.vault.azure.net/secrets/apikey/)",
+            "ORG_ASID": "123",
+            "ORG_CODE": "RRV00",
+        },
+    ):
+        with pytest.raises(RuntimeError, match="Unresolved KeyVault reference for required configuration: API_KEY"):
+            async with lifespan(app):
+                pass
+
+    # With surrounding whitespace
+    with patch.dict(
+        os.environ,
+        {
+            "API_KEY": "   @Microsoft.KeyVault(SecretUri=https://xhuma.vault.azure.net/secrets/apikey/)  ",
+            "ORG_ASID": "123",
+            "ORG_CODE": "RRV00",
+        },
+    ):
+        with pytest.raises(RuntimeError, match="Unresolved KeyVault reference for required configuration: API_KEY"):
+            async with lifespan(app):
+                pass

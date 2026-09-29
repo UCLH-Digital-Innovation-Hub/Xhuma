@@ -5,6 +5,7 @@ data "azurerm_resource_group" "rg" {
 data "azurerm_client_config" "current" {}
 
 data "azurerm_key_vault" "shared_kv" {
+  provider            = azurerm.shared
   name                = var.shared_key_vault_name
   resource_group_name = var.shared_resource_group_name
 }
@@ -19,6 +20,10 @@ resource "azurerm_key_vault" "local_kv" {
   purge_protection_enabled    = false
 
   sku_name = "standard"
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_virtual_network" "vnet" {
@@ -26,6 +31,10 @@ resource "azurerm_virtual_network" "vnet" {
   location            = data.azurerm_resource_group.rg.location
   resource_group_name = data.azurerm_resource_group.rg.name
   address_space       = ["10.1.0.0/16"]
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_subnet" "app_subnet" {
@@ -55,6 +64,8 @@ resource "azurerm_subnet" "db_subnet" {
       actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
     }
   }
+
+  service_endpoints = ["Microsoft.Storage"]
 }
 
 resource "azurerm_subnet" "pe_subnet" {
@@ -82,11 +93,19 @@ resource "azurerm_user_assigned_identity" "locust_mi" {
   location            = data.azurerm_resource_group.rg.location
   name                = "${var.app_service_name}-locust-mi"
   resource_group_name = data.azurerm_resource_group.rg.name
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_private_dns_zone" "pg_dns" {
   name                = "privatelink.postgres.database.azure.com"
   resource_group_name = data.azurerm_resource_group.rg.name
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "pg_dns_link" {
@@ -94,11 +113,19 @@ resource "azurerm_private_dns_zone_virtual_network_link" "pg_dns_link" {
   private_dns_zone_name = azurerm_private_dns_zone.pg_dns.name
   virtual_network_id    = azurerm_virtual_network.vnet.id
   resource_group_name   = data.azurerm_resource_group.rg.name
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_private_dns_zone" "redis_dns" {
   name                = "privatelink.redis.cache.windows.net"
   resource_group_name = data.azurerm_resource_group.rg.name
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_private_dns_zone_virtual_network_link" "redis_dns_link" {
@@ -106,6 +133,10 @@ resource "azurerm_private_dns_zone_virtual_network_link" "redis_dns_link" {
   private_dns_zone_name = azurerm_private_dns_zone.redis_dns.name
   virtual_network_id    = azurerm_virtual_network.vnet.id
   resource_group_name   = data.azurerm_resource_group.rg.name
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_service_plan" "plan" {
@@ -114,6 +145,10 @@ resource "azurerm_service_plan" "plan" {
   location            = data.azurerm_resource_group.rg.location
   os_type             = "Linux"
   sku_name            = "B1" # Can be scaled up to S1 or P1v2 as needed
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_log_analytics_workspace" "law" {
@@ -122,6 +157,10 @@ resource "azurerm_log_analytics_workspace" "law" {
   resource_group_name = data.azurerm_resource_group.rg.name
   sku                 = "PerGB2018"
   retention_in_days   = 30
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_application_insights" "appinsights" {
@@ -130,6 +169,10 @@ resource "azurerm_application_insights" "appinsights" {
   resource_group_name = data.azurerm_resource_group.rg.name
   workspace_id        = azurerm_log_analytics_workspace.law.id
   application_type    = "web"
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
 }
 
 resource "azurerm_redis_cache" "redis" {
@@ -147,6 +190,10 @@ resource "azurerm_redis_cache" "redis" {
     maxmemory_reserved = 125
     maxmemory_delta    = 125
     maxmemory_policy   = "allkeys-lru"
+  }
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
   }
 }
 
@@ -166,6 +213,10 @@ resource "azurerm_private_endpoint" "redis_pe" {
   private_dns_zone_group {
     name                 = "redis-dns-group"
     private_dns_zone_ids = [azurerm_private_dns_zone.redis_dns.id]
+  }
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
   }
 }
 
@@ -188,7 +239,8 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
   lifecycle {
     ignore_changes = [
       zone,
-      high_availability.0.standby_availability_zone
+      high_availability.0.standby_availability_zone,
+      tags["CostCenter"]
     ]
   }
 }
@@ -215,7 +267,9 @@ resource "azurerm_linux_web_app" "app" {
     ignore_changes = [
       site_config[0].application_stack[0].docker_image,
       site_config[0].application_stack[0].docker_image_tag,
-      app_settings["WEBSITE_VNET_ROUTE_ALL"]
+      app_settings["WEBSITE_VNET_ROUTE_ALL"],
+      tags["CostCenter"],
+      tags["hidden-link: /app-insights-resource-id"]
     ]
   }
 
@@ -332,6 +386,7 @@ resource "azurerm_key_vault_access_policy" "app_local_policy" {
 
 # Access Policy for Shared Vault
 resource "azurerm_key_vault_access_policy" "app_shared_policy" {
+  provider     = azurerm.shared
   key_vault_id = data.azurerm_key_vault.shared_kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = azurerm_linux_web_app.app.identity[0].principal_id
@@ -352,6 +407,7 @@ resource "azurerm_key_vault_access_policy" "locust_local_policy" {
 
 # Locust MI Access Policy for Shared Vault
 resource "azurerm_key_vault_access_policy" "locust_shared_policy" {
+  provider     = azurerm.shared
   key_vault_id = data.azurerm_key_vault.shared_kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = azurerm_user_assigned_identity.locust_mi.principal_id

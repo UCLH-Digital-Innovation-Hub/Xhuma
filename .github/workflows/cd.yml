@@ -13,7 +13,7 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/int' && 'rg-xhuma-int' || 'rg-xhuma-play' }}
+      name: ${{ github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || 'rg-xhuma-int' }}
     permissions:
       contents: read
       packages: write
@@ -21,6 +21,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate Branch
+        run: python scripts/deploy/validate_branch.py cd "${{ github.event_name }}" "${{ github.ref }}" "${{ github.base_ref }}"
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -64,6 +67,6 @@ jobs:
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || github.ref == 'refs/heads/int' && 'xhuma-app-int' || 'xhuma-app-play' }}
+          app-name: ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || 'xhuma-app-int' }}
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}'
           # Service principal login configured by azure/login above

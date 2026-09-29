@@ -235,6 +235,8 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
             # TODO: Emit separate referenceRange wrappers with exactly one
             # observationRange each (CONF:1198-7151), and supply a value for
             # text-only ranges (CONF:1198-32175).
+            # TODO: Construct list[ReferenceRange] with ObservationRange models;
+            # test_results emits Pydantic serializer warnings for this dict assignment.
             result_component.referenceRange = {"observationRange": observation_ranges}
 
             # create string with each reference range on a new line

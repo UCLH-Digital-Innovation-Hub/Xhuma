@@ -5,21 +5,46 @@ import uuid
 import xmltodict
 from fastapi import Request
 
-from ...audit.audit import attempt_audit
+from ...audit.audit import AuditFailureException, attempt_audit
 from ...audit.models import AuditOutcome, SAMLAttributes
 from ...gpconnect import gpconnect
 from ...redis_connect import redis_client
+from ..models import (
+    XDS_DEFERRED_CREATION_STATUS,
+    XDS_ERROR_SEVERITY,
+    XDS_FAILURE_STATUS,
+    XDS_ON_DEMAND_DOCUMENT_ENTRY,
+    AdhocQueryResponse,
+    Classification,
+    ExternalIdentifier,
+    ExtrinsicObject,
+    InternationalString,
+    ITI38ResponseBody,
+    LocalizedString,
+    RegistryError,
+    RegistryErrorList,
+    RegistryObjectList,
+    ResponseHeader,
+    Slot,
+    SoapEnvelope,
+)
 from .constants import REGISTRY_ID
-from .helpers import create_envelope, create_header
 
 
 async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes):
+    response = AdhocQueryResponse()
 
-    body = {}
-    body["AdhocQueryResponse"] = {
-        "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Success",
-        "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0",
-    }
+    def set_failure(code_context: str) -> None:
+        response.status = XDS_FAILURE_STATUS
+        response.registry_error_list = RegistryErrorList(
+            highest_severity=XDS_ERROR_SEVERITY,
+            error=RegistryError(
+                error_code="XDSRegistryError",
+                code_context=code_context,
+                location="",
+                severity=XDS_ERROR_SEVERITY,
+            ),
+        )
 
     # check the redis cache if there's an existing ccda
     docid = redis_client.get(nhsno)
@@ -28,8 +53,6 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
     if docid is None:
         # no cached ccda
         try:
-            from ...audit.audit import AuditFailureException
-
             r = await gpconnect(nhsno, saml_attrs, request=request)
 
             # print("-" * 40)
@@ -39,36 +62,16 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
             raise
         except Exception as e:
             logging.error(f"Error: {e}")
-            # print(f"iti_38_error: {e}")
             r = {
                 "success": False,
                 "error": f"Internal error retrieving structured record for patient. error: {e}",
             }
-            body["AdhocQueryResponse"]["@status"] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-            body["AdhocQueryResponse"]["RegistryErrorList"] = {
-                "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                "RegistryError": {
-                    "@errorCode": "XDSRegistryError",
-                    "@codeContext": "Unable to locate SCR for patient",
-                    "@location": "",
-                    "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                },
-            }
+            set_failure("Unable to locate SCR for patient")
 
         if not r.get("success"):
             logging.warning(f"gpconnect failed for patient: {r.get('error')}")
-            body["AdhocQueryResponse"]["@status"] = "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
-            body["AdhocQueryResponse"]["RegistryErrorList"] = {
-                "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                "RegistryError": {
-                    "@errorCode": "XDSRegistryError",
-                    "@codeContext": r.get("error", "Unknown error"),
-                    "@location": "",
-                    "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                },
-            }
+            set_failure(r.get("error", "Unknown error"))
         else:
-            # print(r)
             docid = r["document_id"]
 
     await attempt_audit(
@@ -86,116 +89,92 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
         if isinstance(docid, bytes):
             docid = docid.decode("utf-8")
 
-        # add the ccda as registry object list
-        # object_id = f"CCDA_{docid}"
         object_id = docid
-        # create list of slots
-        slots = []
-
-        def create_slot(name: str, value) -> dict:
-            slot_dict = {"@name": name, "ValueList": {"Value": {"#text": value}}}
-            return slot_dict
 
         def create_classification(
             classification_scheme: str,
             noderep: str,
             value,
             localized_string: str,
-        ) -> dict:
-            classification = {
-                "@classificationScheme": classification_scheme,
-                "@classifiedObject": object_id,
-                "@id": f"urn:uuid:{uuid.uuid4()}",
-                "@nodeRepresentation": noderep,
-                "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:Classification",
-                "Slot": create_slot("codingScheme", value),
-                "Name": {"LocalizedString": {"@value": localized_string}},
-            }
-            return classification
+        ) -> Classification:
+            return Classification(
+                classification_scheme=classification_scheme,
+                classified_object=object_id,
+                identifier=f"urn:uuid:{uuid.uuid4()}",
+                node_representation=noderep,
+                object_type=("urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:Classification"),
+                slot=Slot.create("codingScheme", value),
+                name=InternationalString(localized_string=LocalizedString(value=localized_string)),
+            )
 
-        # slots.append(create_slot("creationTime", str(int(datetime.now().timestamp()))))
-
-        # ceid will be in form \'UHL5MFM2ZLPQCW5^^^&amp;1.2.840.114350.1.13.525.3.7.3.688884.100&amp;ISO\'
-        # slots.append(
-        #     create_slot(
-        #         "sourcePatientId",
-        #         f"{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO",
-        #     )
-        # )
-
-        slots.append(
-            create_slot(
+        # This is an on-demand entry: ITI-38 advertises enough metadata to locate
+        # it, while ITI-39 returns the document assembled/cached by GP Connect.
+        # No hash is advertised because the final content is not stable yet. The
+        # legacy size value of "1" is retained for wire compatibility.
+        slots = [
+            Slot.create(
                 "sourcePatientId",
                 f"{nhsno}^^^&2.16.840.1.113883.2.1.4.1&ISO",
-            )
-        )
-
-        slots.append(
-            create_slot(
+            ),
+            Slot.create(
                 "sourcePatientInfo",
                 f"PID-3|{nhsno}^^^&2.16.840.1.113883.2.1.4.1&ISO;{ceid}^^^&1.2.840.114350.1.13.525.3.7.3.688884.100&ISO",
-            )
-        )
-        slots.append(create_slot("languageCode", "en-GB"))
-        # No hash for on demand document
-        # slots.append(create_slot("hash", "4cf4f82d78b5e2aac35c31bca8cb79fe6bd6a41e"))
-        slots.append(create_slot("size", "1"))
-        slots.append(create_slot("repositoryUniqueId", REGISTRY_ID))
-
-        classifications = []
-        classifications.append(
+            ),
+            Slot.create("languageCode", "en-GB"),
+            Slot.create("size", "1"),
+            Slot.create("repositoryUniqueId", REGISTRY_ID),
+        ]
+        classifications = [
             create_classification(
                 "urn:uuid:41a5887f-8865-4c09-adf7-e362475b143a",
                 "34133-9",
                 "2.16.840.1.113883.6.1",
                 "XDSDocumentEntry.classCode",
-            )
-        )
-        classifications.append(
+            ),
             create_classification(
                 "urn:uuid:a09d5840-386c-46f2-b5ad-9c3699a4309d",
                 "",
                 "urn:hl7-org:sdwg:ccda-structuredBody:1.1",
                 "XDSDocumentEntry.formatCode",
+            ),
+        ]
+        external_identifier_type = "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier"
+        response.registry_object_list = RegistryObjectList(
+            extrinsic_object=ExtrinsicObject(
+                identifier=object_id,
+                # DeferredCreation plus the On-Demand DocumentEntry UUID tells
+                # the consumer that retrieval triggers document materialisation.
+                status=XDS_DEFERRED_CREATION_STATUS,
+                object_type=XDS_ON_DEMAND_DOCUMENT_ENTRY,
+                mime_type="text/xml",
+                slots=slots,
+                classifications=classifications,
+                external_identifiers=[
+                    ExternalIdentifier(
+                        identification_scheme=("urn:uuid:2e82c1f6-a085-4c72-9da3-8640a32e42ab"),
+                        value=docid,
+                        identifier=docid,
+                        registry_object=object_id,
+                        object_type=external_identifier_type,
+                        name=InternationalString(localized_string=LocalizedString(value="XDSDocumentEntry.uniqueId")),
+                    ),
+                    ExternalIdentifier(
+                        identification_scheme=("urn:uuid:58a6f841-87b3-4a3e-92fd-a8ffeff98427"),
+                        value=f"{nhsno}^^^&2.16.840.1.113883.2.1.4.99.1&ISO",
+                        identifier=f"PID-{nhsno}",
+                        registry_object=object_id,
+                        object_type=external_identifier_type,
+                        name=InternationalString(localized_string=LocalizedString(value="XDSDocumentEntry.patientId")),
+                    ),
+                ],
             )
         )
 
-        body["AdhocQueryResponse"]["RegistryObjectList"] = {
-            "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0",
-            "ExtrinsicObject": {
-                "@id": object_id,
-                # "@status": "urn:oasis:names:tc:ebxml-regrep:StatusType:Approved",
-                "@status": "urn:ihe:iti:2010:StatusType:DeferredCreation",
-                "@objectType": "urn:uuid:34268e47-fdf5-41a6-ba33-82133c465248",  # On Demand
-                "@mimeType": "text/xml",
-                "Slot": slots,
-                "Classification": classifications,
-                # UNIQUE ID SECTION
-                "ExternalIdentifier": [
-                    {
-                        "@identificationScheme": "urn:uuid:2e82c1f6-a085-4c72-9da3-8640a32e42ab",
-                        "@value": docid,
-                        # "@id": f"CCDA-{docid}",
-                        "@id": docid,
-                        "@registryObject": object_id,
-                        "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier",
-                        "Name": {"LocalizedString": {"@value": "XDSDocumentEntry.uniqueId"}},
-                    },
-                    {
-                        "@identificationScheme": "urn:uuid:58a6f841-87b3-4a3e-92fd-a8ffeff98427",
-                        "@value": f"{nhsno}^^^&2.16.840.1.113883.2.1.4.99.1&ISO",
-                        "@id": f"PID-{nhsno}",
-                        "@registryObject": object_id,
-                        "@objectType": "urn:oasis:names:tc:ebxml-regrep:ObjectType:RegistryObject:ExternalIdentifier",
-                        "Name": {"LocalizedString": {"@value": "XDSDocumentEntry.patientId"}},
-                    },
-                ],
-            },
-        }
-
     else:
-        body["AdhocQueryResponse"]["RegistryObjectList"] = {}
+        response.registry_object_list = {}
 
-    soap_response = create_envelope(create_header("urn:ihe:iti:2007:CrossGatewayQueryResponse", queryid), body)
-
-    return xmltodict.unparse(soap_response, pretty=True)
+    soap_response = SoapEnvelope.create(
+        ResponseHeader.create("urn:ihe:iti:2007:CrossGatewayQueryResponse", queryid),
+        ITI38ResponseBody(response=response),
+    )
+    return xmltodict.unparse(soap_response.to_xml_dict(), pretty=True)

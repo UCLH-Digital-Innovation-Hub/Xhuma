@@ -59,6 +59,11 @@ variable "shared_resource_group_name" {
   type        = string
 }
 
+variable "shared_subscription_id" {
+  description = "The subscription ID hosting the shared Key Vault"
+  type        = string
+}
+
 variable "shared_key_vault_name" {
   description = "The name of the global shared Key Vault"
   type        = string

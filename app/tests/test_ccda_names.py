@@ -5,7 +5,6 @@ from fhirclient.models import bundle
 
 from app.ccda import fhir2ccda
 from app.ccda.helpers import select_patient_name
-from app.soap.responses.iti_47 import iti_47_response
 from app.soap.responses.iti_55 import iti_55_response
 
 
@@ -70,15 +69,11 @@ async def test_patient_name_priority_across_ccda_and_soap(uses, expected_index):
         "generalPractitioner": [{"identifier": {"value": "TEST"}}],
     }
     query = {"queryId": {"@root": "test"}}
-    responses = [
-        await iti_55_response("message", patient, query),
-        await iti_47_response("message", patient, "ceid", query),
-    ]
-    for response in responses:
-        root = ET.fromstring(response)
-        name = root.find(".//{urn:hl7-org:v3}patientPerson/{urn:hl7-org:v3}name")
-        assert name.find("{urn:hl7-org:v3}family").text == names[expected_index]["family"]
-        assert name.find("{urn:hl7-org:v3}given").text == names[expected_index]["given"][0]
+    response = await iti_55_response("message", patient, query)
+    root = ET.fromstring(response)
+    name = root.find(".//{urn:hl7-org:v3}patientPerson/{urn:hl7-org:v3}name")
+    assert name.find("{urn:hl7-org:v3}family").text == names[expected_index]["family"]
+    assert name.find("{urn:hl7-org:v3}given").text == names[expected_index]["given"][0]
 
 
 @pytest.mark.parametrize("names", [None, []])

@@ -2,60 +2,67 @@ import uuid
 
 import xmltodict
 
+from ..models import (
+    XDS_ERROR_SEVERITY,
+    XDS_FAILURE_STATUS,
+    ITI39DocumentResponse,
+    ITI39ErrorResponseBody,
+    ITI39ErrorRetrieveDocumentSetResponse,
+    ITI39RegistryErrorList,
+    ITI39RegistryResponse,
+    ITI39ResponseBody,
+    RegistryError,
+    ResponseHeader,
+    RetrieveDocumentSetResponse,
+    SoapEnvelope,
+    TextElement,
+)
 from .constants import COMMUNITY_ID, REGISTRY_ID
-from .helpers import create_envelope, create_header
 
 
 async def iti_39_response(message_id: str, document_id: str, document):
+    """Generate a successful ITI-39 document retrieval response."""
 
-    # base64 encode the document
-    # base64_bytes = base64.b64encode(document.encode("utf-8")).decode("utf-8")
-    # print(type(base64_bytes))
-    body = {
-        "ns4:RetrieveDocumentSetResponse": {
-            "@xmlns:ns4": "urn:ihe:iti:xds-b:2007",
-            "@xmlns:ns8": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-            "ns8:RegistryResponse": {
-                "@id": uuid.uuid4(),
-                "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Success",
-                # "@xmlns": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-            },
-            "ns4:DocumentResponse": {
-                "ns4:HomeCommunityId": {"#text": f"urn:oid:{COMMUNITY_ID}"},
-                "ns4:RepositoryUniqueId": {"#text": REGISTRY_ID},
-                "ns4:DocumentUniqueId": {"#text": document_id},
-                "ns4:mimeType": {"#text": "text/xml"},
-                "ns4:Document": document,
-            },
-        },
-    }
+    body = ITI39ResponseBody(
+        response=RetrieveDocumentSetResponse(
+            registry_response=ITI39RegistryResponse(
+                identifier=str(uuid.uuid4()),
+            ),
+            document_response=ITI39DocumentResponse(
+                home_community_id=TextElement(text=f"urn:oid:{COMMUNITY_ID}"),
+                repository_unique_id=TextElement(text=REGISTRY_ID),
+                document_unique_id=TextElement(text=document_id),
+                document=document,
+            ),
+        )
+    )
+    soap_response = SoapEnvelope.create(
+        ResponseHeader.create("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id),
+        body,
+    )
+    return xmltodict.unparse(soap_response.to_xml_dict(), pretty=True)
 
-    soap_response = create_envelope(create_header("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id), body)
 
-    # print(f"ITI39 response: {soap_response}")
+async def iti_39_error(message_id: str, document_id: str) -> str:
+    """Generate an ITI-39 missing-document registry error response."""
 
-    # soap_response = create_envelope(
-    #     create_header("urn:ihe:iti:2007:RetrieveDocumentSetResponse", "test"), body
-    # )
-
-    # Verify that all values are serializable
-    # TODO DELETE THIS?
-    def ensure_serializable(data):
-        if isinstance(data, bytes):
-            return data.decode("utf-8")  # Decode bytes to string
-        elif isinstance(data, dict):
-            return {k: ensure_serializable(v) for k, v in data.items()}  # Recurse
-        elif isinstance(data, list):
-            return [ensure_serializable(item) for item in data]  # Recurse for lists
-        else:
-            return data  # Return as-is for strings, numbers, etc.
-
-    soap_response = ensure_serializable(soap_response)
-
-    # pprint.pprint(soap_response)
-    # print(type(soap_response))
-
-    # with open(f"{document_id}.xml", "w") as output:
-    #     output.write(xmltodict.unparse(soap_response, pretty=True))
-
-    return xmltodict.unparse(soap_response, pretty=True)
+    body = ITI39ErrorResponseBody(
+        response=ITI39ErrorRetrieveDocumentSetResponse(
+            registry_response=ITI39RegistryResponse(
+                status=XDS_FAILURE_STATUS,
+                registry_error_list=ITI39RegistryErrorList(
+                    highest_severity=XDS_ERROR_SEVERITY,
+                    error=RegistryError(
+                        error_code="XDSDocumentUniqueIdError",
+                        code_context=f"Document with Id {document_id} not found",
+                        severity=XDS_ERROR_SEVERITY,
+                    ),
+                ),
+            )
+        ),
+    )
+    soap_response = SoapEnvelope.create(
+        ResponseHeader.create("urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id),
+        body,
+    )
+    return xmltodict.unparse(soap_response.to_xml_dict(), full_document=False, pretty=True)
