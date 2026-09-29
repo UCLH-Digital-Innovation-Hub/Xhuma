@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from fhirclient.models import diagnosticreport as dr
 from fhirclient.models import observation as obs
+from fhirclient.models.specimen import Specimen
 
 from ..helpers import (
     code_with_translations,
@@ -86,18 +87,87 @@ def create_xml_table(table: ResultTable) -> dict:
     return table_dict
 
 
+def degraded_original_name(observation: obs.Observation) -> str | None:
+    """Return the original label only for an explicitly transfer-degraded code."""
+    code = observation.code
+    if (
+        code
+        and code.text
+        and any(c.system == "http://snomed.info/sct" and c.code == TRANSFER_DEGRADED for c in code.coding or [])
+    ):
+        return code.text
+    return None
+
+
+def specimen_notes_table(report: dr.DiagnosticReport, index: dict) -> dict | None:
+    """Collect notes from this report's specimens in a separate, labelled table.
+
+    Repeat the specimen label for each note so that several samples cannot be
+    confused. Deduplicate references to the same resource, not identical text
+    from distinct specimens. Never use specimens from an unrelated report.
+    """
+    rows = []
+    seen = set()
+    for reference in report.specimen or []:
+        specimen = index.get(reference.reference)
+        if not isinstance(specimen, Specimen) or id(specimen) in seen:
+            continue
+        seen.add(id(specimen))
+        specimen_type = specimen.type
+        label = (
+            specimen_type.text or next((c.display for c in specimen_type.coding or [] if c.display), None)
+            if specimen_type
+            else None
+        )
+        accession = specimen.accessionIdentifier.value if specimen.accessionIdentifier else None
+        identifier = accession or next((i.value for i in specimen.identifier or [] if i.value), None) or specimen.id
+        label = " — ".join(value for value in (label, identifier) if value) or "Specimen"
+        for note in specimen.note or []:
+            if note.text:
+                rows.append({"td": [label, note.text]})
+    if not rows:
+        return None
+    return {
+        "caption": "Specimen notes",
+        "thead": {"tr": {"th": ["Specimen", "Notes"]}},
+        "tbody": {"tr": rows},
+    }
+
+
+def result_status(status: str | None, *, organizer: bool = False) -> CS:
+    """Map FHIR laboratory workflow to CDA, never equating unknown with final.
+
+    Amended/corrected/appended are changes after finalisation in FHIR STU3.
+    Cancellation does not distinguish before/after activation, so use aborted.
+    Result Observation's restricted status vocabulary has no nullified code;
+    represent entered-in-error as OTH there and retain its source status in text.
+    Organizers use ActStatus and can represent nullified directly.
+    """
+    mapped = {
+        "registered": "active",
+        "partial": "active",
+        "preliminary": "active",
+        "final": "completed",
+        "amended": "completed",
+        "corrected": "completed",
+        "appended": "completed",
+        "cancelled": "aborted",
+    }
+    if status in mapped:
+        return CS(code=mapped[status])
+    if status == "entered-in-error" and organizer:
+        return CS(code="nullified")
+    if status in (None, "", "unknown"):
+        return CS(nullFlavor="UNK")
+    return CS(nullFlavor="OTH")
+
+
 async def create_result_component(observation: obs.Observation, group_time: IVL_TS = None) -> ResultWithRow:
     result_component = ResultObservation(
         code=code_with_translations(observation.code.coding),
         id=id_helper(observation.identifier) if observation.identifier else None,
-        statusCode=CS(code=observation.status) if observation.status else None,
+        statusCode=result_status(observation.status),
     )
-
-    # TODO: Map FHIR statuses to CDA Result Status codes, using lowercase
-    # "completed" (HL7 ActStatus is case-sensitive).
-    # change final to completed for better mapping to CDA status codes
-    if result_component.statusCode and result_component.statusCode.code == "final":
-        result_component.statusCode.code = "Completed"
 
     if group_time:
         result_component.effectiveTime = group_time
@@ -108,13 +178,18 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
             else None
         )
     table_row = ResultTableRow(cells=[None, None, None, None])
-    table_row.cells.insert(0, result_component.code.displayName)
+    original_name = degraded_original_name(observation)
+    if original_name:
+        # Keep the supplied generic coding and its display intact. CDA's
+        # originalText carries the original test name without recoding it.
+        result_component.code.originalText = original_name
+    table_row.cells[0] = original_name or result_component.code.displayName
 
     # block for value/comment
 
     if observation.valueString:
         result_component.value = {"@value": observation.valueString}
-        table_row.cells.insert(1, observation.valueString)
+        table_row.cells[1] = observation.valueString
 
     elif observation.valueQuantity:
         vq = observation.valueQuantity
@@ -145,7 +220,7 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
                 # high bound for greater than physical measurement is infinity
                 value["high"] = {"@nullFlavor": "PINF"}
             result_component.value = value
-            table_row.cells.insert(1, f"{vq.comparator} {vq.value} {vq.unit if vq.unit else ''}")
+            table_row.cells[1] = f"{vq.comparator} {vq.value} {vq.unit if vq.unit else ''}"
         else:
             result_component.value = PQ(
                 value=vq.value,
@@ -182,13 +257,8 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
                 if not has_numeric_range:
                     outside_reference_range = False
 
-            table_row.cells.insert(
-                1,
-                (
-                    {"content": {"@styleCode": "flagData", "#text": value_text}}
-                    if outside_reference_range
-                    else value_text
-                ),
+            table_row.cells[1] = (
+                {"content": {"@styleCode": "flagData", "#text": value_text}} if outside_reference_range else value_text
             )
 
     if observation.comment:
@@ -202,9 +272,14 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
             ],
         }
         # content.append(comment_dict)
-        table_row.cells.insert(3, {"content": comment_dict})
+        table_row.cells[3] = {"content": comment_dict}
 
-    # table_row.cells.insert(1, {"content": content})
+    if result_component.statusCode.nullFlavor == "OTH":
+        # Keep an explicit withdrawal/unrecognised status visible even where
+        # the restricted CDA result vocabulary cannot express that state.
+        status_note = f"Source result status: {observation.status}"
+        result_component.text = "\n".join(filter(None, (status_note, observation.comment)))
+        table_row.cells[3] = {"#text": result_component.text}
 
     if hasattr(observation, "interpretation") and observation.interpretation:
         result_component.interpretationCode = code_with_translations(observation.interpretation.coding)
@@ -261,7 +336,7 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
                     for r in observation_ranges
                 ]
             )
-            table_row.cells.insert(2, {"#text": reference_range_str})
+            table_row.cells[2] = {"#text": reference_range_str}
 
     return ResultWithRow(entry=result_component, row=table_row)
 
@@ -314,18 +389,13 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
                         )
 
     organizer = ResultsOrganizer(
-        statusCode=(CS(code=diagnostic_report.status) if diagnostic_report.status else None),
+        statusCode=result_status(diagnostic_report.status, organizer=True),
         id=id_helper(diagnostic_report.identifier),
         code=(code_with_translations(test_group_headers[0].code.coding) if test_group_headers else None),
         # this should be the specimen collection time if available, but for now will use report issued time
         effectiveTime=report_issued_time,
     )
 
-    # TODO: Map FHIR statuses to CDA Result Status codes, using lowercase
-    # "completed" (HL7 ActStatus is case-sensitive).
-    # change final to completed for better mapping to CDA status codes
-    if organizer.statusCode and organizer.statusCode.code == "final":
-        organizer.statusCode.code = "Completed"
     grouping = group_investigation(diagnostic_report, index)
     table_rows = []
     components = []
@@ -403,7 +473,23 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
         rows=table_rows,
     )
 
+    table = create_xml_table(result_table)
+    if diagnostic_report.conclusion:
+        # Report conclusions belong to the whole report, not to an invented
+        # analyte or one particular test group. Place them before the tables.
+        table = {
+            "caption": table["caption"],
+            "paragraph": [
+                {"content": {"@styleCode": "Bold", "#text": "Report conclusion"}},
+                diagnostic_report.conclusion,
+            ],
+            "table": table["table"],
+        }
+    specimen_table = specimen_notes_table(diagnostic_report, index)
+    if specimen_table:
+        table["table"].append(specimen_table)
+
     return InvestigationWithTable(
         organizer=organizer.model_dump(by_alias=True, exclude_none=True),
-        table=create_xml_table(result_table),
+        table=table,
     )

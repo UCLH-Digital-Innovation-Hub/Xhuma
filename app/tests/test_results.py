@@ -97,7 +97,7 @@ async def test_fbc_report_flags_out_of_range_values(investigation_reports):
     assert len(processed_report.organizer["component"]) == 14  # Retain the unlinked heading as well.
     assert platelet_row["td"][1] == {"content": {"@styleCode": "flagData", "#text": "497 10^9/L"}}
     assert platelet_row["td"][2] == {"#text": "150 - 450 10^9/L"}
-    assert "Above high reference limit" in platelet_row["td"][4]["content"]["content"][0]["#text"]
+    assert "Above high reference limit" in platelet_row["td"][3]["content"]["content"][0]["#text"]
 
 
 @pytest.mark.parametrize(

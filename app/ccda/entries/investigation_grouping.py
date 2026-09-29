@@ -24,7 +24,12 @@ def observation_label(observation: Observation) -> str:
 
 def has_result_value(observation: Observation) -> bool:
     """Detect any supplied FHIR value, including zero and false."""
-    return any(name.startswith("value") and value is not None for name, value in observation.as_json().items())
+    # Inspect typed FHIR fields without serialising/revalidating unrelated
+    # mandatory fields, so a missing status can still map to an unknown status.
+    return any(
+        json_name.startswith("value") and getattr(observation, name) is not None
+        for name, json_name, *_ in observation.elementProperties()
+    )
 
 
 @dataclass

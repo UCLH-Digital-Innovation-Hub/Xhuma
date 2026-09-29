@@ -131,6 +131,7 @@ class CD(ANY):
     codeSystem: Optional[str] = Field(alias="@codeSystem", default=None)
     codeSystemName: Optional[str] = Field(alias="@codeSystemName", default=None)
     displayName: Optional[str] = Field(alias="@displayName", default=None)
+    originalText: Optional[str] = None
     translation: Optional[List["CD"]] = None  # Forward reference
 
     @model_validator(mode="before")
@@ -183,6 +184,9 @@ class PQR(CV):
 
 
 class CS(CV):
+    # CDA permits an unknown coded status via nullFlavor without a code.
+    code: Optional[str] = Field(alias="@code", default=None)
+
     resource_type: str = Field(
         "CS",
         description="Coded data, consists of a code, display name, code system, and original "

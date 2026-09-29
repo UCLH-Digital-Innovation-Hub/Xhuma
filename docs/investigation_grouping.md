@@ -164,7 +164,7 @@ Records transferred between systems may have a generic transfer code while prese
 }
 ```
 
-**Summary behaviour:** use the supplied text for the group heading and follow its result links. The transfer code does not prevent grouping. The saved EMIS FBC example demonstrates why this matters: skipping a degraded heading can hide its child results.
+**Summary behaviour:** use the supplied text for the group heading and follow its result links. Individual transfer-degraded results also retain their original names in the result rows and in the structured code’s `originalText`; the supplied code and its coded display remain unchanged. The transfer code does not prevent grouping. The saved EMIS FBC example demonstrates why this matters: skipping a degraded heading can hide its child results.
 
 ## Unusual or incomplete relationships
 
@@ -184,8 +184,23 @@ Zero and false count as supplied values when deciding whether a group has conten
 
 The readable CCDA section now shows the detected groups and associated comments. Each source report still produces one CCDA organizer (the structured container for that report). Individual result components remain flat inside it: this change does not introduce nested CDA organizers or claim that Epic will reconstruct every displayed group from structured data alone.
 
-The earlier report-caption and category-selection rules remain for this change. A caption may therefore be less descriptive than the group headings beneath it. Existing date, status, value and reference-range mappings are unchanged. Report conclusions and other previously identified metadata gaps are separate work.
+The earlier report-caption and category-selection rules remain for this change. A caption may therefore be less descriptive than the group headings beneath it. Result rows use four fixed columns: component, value, reference range and comments. Headings and annotations span all four columns. Existing date, value and reference-range mappings are unchanged. Report conclusions now appear above the report’s results table. Notes from specimens referenced by that report appear in a separate “Specimen notes” table beneath it, labelled with specimen type and identifier where supplied. Multiple notes and their line breaks are retained. These conclusions and specimen notes are narrative additions, not invented test results. The incomplete-record-transfer warning and other previously identified metadata gaps remain separate work.
 
 The [comparison CCDAs](assurance/evidence/investigation-grouping-comparison/README.md) show the reviewed before-and-after behaviour. The [assessment](assurance/evidence/2026-09-29-investigations-assessment.md) records the original findings and wider converter issues; it is historical evidence rather than a description of the current grouping code.
 
 For clinical review, check that group headings describe their linked tests, comments remain with the correct result or group, transferred headings retain their children, and flat reports do not imply unsupported relationships. A successful XML conversion alone does not confirm clinical correctness or Epic display behaviour.
+
+## Laboratory status mapping
+
+The structured CCDA status describes laboratory progress, not whether the GP has reviewed or filed the report. This mapping does not filter out non-final reports or change the separate Epic finalised-results policy.
+
+| Incoming FHIR status | CDA status |
+| --- | --- |
+| `registered`, `partial`, `preliminary` | `active` |
+| `final`, `amended`, `corrected`, `appended` | `completed` |
+| `cancelled` | `aborted` |
+| `entered-in-error` | Organizer: `nullified`; individual result: `nullFlavor="OTH"`, with the original status displayed in its comments and structured text |
+| `unknown` or missing | `nullFlavor="UNK"`, without a code |
+| An unrecognised value | `nullFlavor="OTH"`; individual result status retained in comments and structured text |
+
+The mappings are implementation choices based on the [FHIR STU3 report status definitions](https://hl7.org/fhir/STU3/codesystem-diagnostic-report-status.html) and [CDA result status guidance](https://hl7.org/fhir/us/ccda/en/ConceptMap-CF-ResultStatus.html). FHIR cancellation does not distinguish cancellation before work starts from abandonment after work starts; `aborted` is used conservatively. Corrections and amendments occur after finalisation. The restricted CDA Result Status vocabulary does not include `nullified`, so a withdrawn individual result uses an explicit non-mappable status and visible source wording. Unknown is never converted to completed.
