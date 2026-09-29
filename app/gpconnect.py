@@ -493,6 +493,8 @@ async def _fetch_gpconnect_record(
         try:
             addr = f"{entry.resource.resource_type}/{entry.resource.id}"
             bundle_index[addr] = entry.resource
+            if entry.fullUrl:
+                bundle_index[entry.fullUrl] = entry.resource
         except Exception:
             pass
 

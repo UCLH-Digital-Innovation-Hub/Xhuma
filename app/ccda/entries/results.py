@@ -1,4 +1,4 @@
-import asyncio
+import logging
 from dataclasses import dataclass
 
 from fhirclient.models import diagnosticreport as dr
@@ -11,7 +11,10 @@ from ..helpers import (
 )
 from ..models.base import ResultObservation, ResultsOrganizer
 from ..models.datatypes import CD, CS, II, IVL_TS, IVXB_TS, PQ
+from .investigation_grouping import group_investigation, has_result_value, is_filing_comment, observation_label
 from .types import EntryWithRow
+
+logger = logging.getLogger(__name__)
 
 COMMENT_NOTE_SNOMED = ["37331000000100", "364712009"]  # SNOMED codes for comment note
 INVESTIGATION_RESULT = "24641000000107"
@@ -51,7 +54,7 @@ def is_comment_note(observation: obs.Observation) -> bool:
 
 
 def is_test_group_header(observation: obs.Observation) -> bool:
-    # test group headers have no value and are not comment notes
+    """Legacy caption/category heuristic; never use this to select or drop results."""
 
     if is_comment_note(observation):
         return False
@@ -264,35 +267,21 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
 
 
 async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> InvestigationWithTable:
+    """Render one report with explicit groups and locally associated filing comments."""
 
     observations: list[obs.Observation] = (
-        [index[x.reference] for x in diagnostic_report.result] if diagnostic_report.result else []
+        [index[x.reference] for x in diagnostic_report.result if isinstance(index.get(x.reference), obs.Observation)]
+        if diagnostic_report.result
+        else []
     )
 
     report_issued_time = IVL_TS(low=IVXB_TS(value=datetime_helper(diagnostic_report.issued)))
     test_group_headers = [o for o in observations if is_test_group_header(o)]
 
-    # add results in test group headers to observations list
-    seen = {id(o) for o in observations}
-    for header in test_group_headers:
-        members = list(getattr(header, "hasMember", None) or [])
-        members.extend(
-            relation.target
-            for relation in getattr(header, "related", None) or []
-            if relation.type == "has-member" and relation.target is not None
-        )
-        for member in members:
-            observation = index[member.reference]
-            if id(observation) not in seen:
-                observations.append(observation)
-                seen.add(id(observation))
-    comment_observations = [o for o in observations if is_comment_note(o)]
-
     category_observation = None
     if len(test_group_headers) == 0 or len(test_group_headers) > 1:
         test_title = "Diagnostic Report"
-        # treat all non comments as test results and ignore test group headers
-        test_results = [o for o in observations if not is_comment_note(o)]
+
     else:
         test_title = test_group_headers[0].code.coding[0].display if test_group_headers else "Diagnostic Report"
 
@@ -324,9 +313,6 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
                             effectiveTime=report_issued_time,
                         )
 
-        # remaining observations are test results
-        test_results = [o for o in observations if not is_comment_note(o) and not is_test_group_header(o)]
-
     organizer = ResultsOrganizer(
         statusCode=(CS(code=diagnostic_report.status) if diagnostic_report.status else None),
         id=id_helper(diagnostic_report.identifier),
@@ -340,17 +326,76 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
     # change final to completed for better mapping to CDA status codes
     if organizer.statusCode and organizer.statusCode.code == "final":
         organizer.statusCode.code = "Completed"
-    result_components = asyncio.gather(*[create_result_component(o, report_issued_time) for o in test_results])
-    organizer.component = [{"observation": c.entry} for c in await result_components]
+    grouping = group_investigation(diagnostic_report, index)
+    table_rows = []
+    components = []
+    emitted = set()
+
+    def narrative_row(text):
+        """Place a heading or annotation across the existing four columns."""
+        table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "#text": text}]))
+
+    async def render(reference, path=()):
+        """Render each assertion once while retaining shared group associations."""
+        observation = grouping.observations[reference]
+        if reference in path:
+            grouping.issues.append(f"Cyclic test grouping at {reference}")
+            narrative_row(f"Grouping could not be resolved for: {observation_label(observation)}")
+            return
+        if reference in emitted:
+            narrative_row(f"Also associated: {observation_label(observation)} (shown above)")
+            return
+        emitted.add(reference)
+        if is_filing_comment(observation):
+            narrative_row(f"Filing comments: {observation_label(observation)}")
+            if observation.valueString is not None:
+                narrative_row(observation.valueString)
+            if observation.comment is not None:
+                narrative_row(observation.comment)
+            return
+
+        members = grouping.members.get(reference, [])
+        has_value = has_result_value(observation)
+        if members:
+            narrative_row(f"Test group: {observation_label(observation)}")
+            if not has_value and observation.comment:
+                narrative_row(observation.comment)
+            if not has_value and observation.interpretation:
+                interpretation = observation.interpretation
+                text = interpretation.text or "; ".join(c.display or c.code or "" for c in interpretation.coding or [])
+                narrative_row(f"Group interpretation: {text}")
+
+        # Only explicit membership makes a group. String-valued and narrative-
+        # only standalone observations remain results. Keep unexpected values
+        # on groups too, using the existing serializer without changing mapping.
+        if not members or has_value:
+            converted = await create_result_component(observation, report_issued_time)
+            components.append({"observation": converted.entry})
+            table_rows.append(converted.row)
+        for comment in grouping.comments.get(reference, []):
+            await render(comment, path + (reference,))
+        for member in members:
+            await render(member, path + (reference,))
+
+    for reference, observation in grouping.observations.items():
+        if reference not in grouping.parents and not is_filing_comment(observation):
+            await render(reference)
+    for reference in grouping.direct:
+        if is_filing_comment(grouping.observations[reference]) and reference not in grouping.attached_comments:
+            narrative_row("Report-level filing")
+            await render(reference)
+    # Cyclic and otherwise unplaced items must not disappear from the report.
+    for reference in grouping.observations:
+        if reference not in emitted:
+            narrative_row("Unplaced source item")
+            await render(reference)
+    if grouping.issues:
+        narrative_row("Some investigation relationships could not be resolved; available results are shown.")
+        for issue in grouping.issues:
+            logger.warning("Investigation %s: %s", diagnostic_report.id, issue)
+    organizer.component = components
     if category_observation:
         organizer.component.append({"observation": category_observation})
-    table_rows = [c.row for c in await result_components]
-
-    for comment in comment_observations:
-        comment_row = ResultTableRow(cells=[{"@colspan": 4, "#text": comment.comment}])
-        if comment.valueString:
-            table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "#text": comment.valueString}]))
-        table_rows.append(comment_row)
 
     result_table = ResultTable(
         title=f"{test_title} {diagnostic_report.issued.date}",

@@ -1,0 +1,191 @@
+# How investigation results are grouped
+
+## Purpose
+
+A laboratory report can contain several groups of tests, individual results and comments added when a clinician files the report. We want the summary to preserve those relationships without losing results that arrive in an unusual format.
+
+**We identify a test group from the links supplied by the GP system. A test name, an empty value or its position in a list is not enough to establish a group.**
+
+This document describes the implemented grouping behaviour. It follows the [GP Connect investigations guidance, version 1.6.2](https://simplifier.net/guide/gp-connect-access-record-structured/Home/Design/Investigations-guidance?version=1.6.2) and the linked [Observation population guidance](https://simplifier.net/guide/gpconnect-data-model/Home/FHIR-Assets/All-assets/Profiles/Profile--CareConnect-GPC-Observation-1?version=current). The latter link is maintained as the current profile, rather than a fixed 1.6.2 snapshot.
+
+## What arrives from the GP system
+
+| Clinical concept | Name in the incoming FHIR data | Meaning |
+| --- | --- | --- |
+| Report | `DiagnosticReport` | The report that holds the results together |
+| Test group | `Observation` | A panel or profile, such as full blood count |
+| Individual result | `Observation` | An individual test, whether grouped or standalone |
+| Filing comment | `Observation` | Information recorded when a report, group or result is filed |
+| Specimen | `Specimen` | Information about the sample |
+| Request summary | `ProcedureRequest` | Summary of the original request |
+
+Group headings, results and filing comments all arrive as Observations. Their shared name does not mean they have the same clinical role.
+
+```mermaid
+flowchart TD
+    list["Investigations list"] --> report["Laboratory report"]
+    report --> request["Request summary"]
+    report --> specimen["Specimen"]
+    report --> group["Test group: e.g. full blood count"]
+    report --> standalone["Standalone result"]
+    report --> reportComment["Report filing comments"]
+    group -->|has-member: contains| result["Individual test result"]
+    result -->|derived-from: belongs to| group
+    groupComment["Group filing comments"] -->|derived-from: comments on| group
+    resultComment["Result filing comments"] -->|derived-from: comments on| result
+    standaloneComment["Standalone filing comments"] -->|derived-from: comments on| standalone
+```
+
+The arrows describe relationships, not the order of items in the incoming message. The original report document and supporting images are outside the scope of this GP Connect version. Patient and clinician attribution are omitted from the diagram for readability.
+
+## The decision process
+
+1. **Keep each report separate.** Reports are not merged because they share a laboratory number or date.
+2. **Read the supplied links.** A group can point to its results, and a result can point back to its group. Either direction provides evidence of membership.
+3. **Separate filing comments from tests.** A comment linked to a result does not turn that result into a panel.
+4. **Display the group and its members together.** Keep group comments with the group and result comments with the result. Show report-level filing comments separately.
+5. **Keep ungrouped content.** If there is no evidence of membership, retain the observation without assigning nearby results to it.
+6. **Show available information when links are broken.** Do not silently discard a report because some relationships cannot be resolved.
+
+Source reference order is retained where possible, but grouping brings related items together. No clinical relationship is inferred from bundle entry order, matching timestamps or similar names.
+
+## Reading the examples
+
+The examples below are shortened, invented FHIR fragments. They show only the fields needed to explain grouping and are not complete patient records. Names such as `fbc` and `hb` are local labels used to link items together.
+
+- `has-member` means “contains this result”.
+- `derived-from` means “belongs to this group” for a result, or “comments on this item” for a filing comment in this GP Connect model.
+- `reference` identifies the other item. It is not a clinical value.
+
+### A panel with individual results
+
+The FBC heading points to haemoglobin. Haemoglobin points back to FBC.
+
+```json
+[
+  {
+    "resourceType": "Observation",
+    "id": "fbc",
+    "code": {"text": "Full blood count"},
+    "related": [{"type": "has-member", "target": {"reference": "Observation/hb"}}]
+  },
+  {
+    "resourceType": "Observation",
+    "id": "hb",
+    "code": {"text": "Haemoglobin"},
+    "valueQuantity": {"value": 137, "unit": "g/L"},
+    "related": [{"type": "derived-from", "target": {"reference": "Observation/fbc"}}]
+  }
+]
+```
+
+**Summary behaviour:** display “Test group: Full blood count”, followed by haemoglobin. The two arrows describe one relationship; they do not produce two haemoglobin results. If only one direction is present, the available link is still used.
+
+The same approach handles multiple panels in one report. Each gets its own heading and linked results. The report itself remains one report.
+
+### A result with an attached filing comment
+
+Here the comment points to haemoglobin. The comment code identifies its role; it is not another blood test.
+
+```json
+{
+  "resourceType": "Observation",
+  "id": "filing-note",
+  "code": {
+    "coding": [{"system": "http://snomed.info/sct", "code": "37331000000100"}]
+  },
+  "comment": "Discussed with patient; repeat as planned.",
+  "related": [{"type": "derived-from", "target": {"reference": "Observation/hb"}}]
+}
+```
+
+**Summary behaviour:** place the comment with haemoglobin. Do not create a group simply because a result has a comment attached. Some supplier messages instead link from the result to the comment using `has-member`; this association is also recognised.
+
+A comment directly referenced by the report, with no result/group association, is displayed as report-level filing information. A filing comment can contain a coded value identifying the test that was filed: that value must not be treated as a new analyte result. This grouping change does not add a complete mapping of filing dates, authors or coded filing values.
+
+### A standalone result expressed in words
+
+```json
+{
+  "resourceType": "Observation",
+  "id": "inr",
+  "code": {"text": "International normalised ratio"},
+  "valueString": "Ap 2.400",
+  "comment": "Treatment bands supplied by the laboratory."
+}
+```
+
+**Summary behaviour:** retain the result and its comment. A result does not have to contain a numeric quantity to count as a result. In the saved EMIS example, the old heading rule dropped this INR result; relationship-based grouping retains it.
+
+A result can also exist entirely in a comment:
+
+```json
+{
+  "resourceType": "Observation",
+  "id": "oestradiol",
+  "code": {"text": "Oestradiol"},
+  "comment": "Result 8.8; units and reference information supplied in source text."
+}
+```
+
+The text is retained. The converter does not extract a new numeric measurement from this prose.
+
+### A report supplied as a flat list
+
+```json
+{
+  "resourceType": "DiagnosticReport",
+  "id": "report-1",
+  "result": [
+    {"reference": "Observation/chemistry-heading"},
+    {"reference": "Observation/sodium"},
+    {"reference": "Observation/potassium"}
+  ]
+}
+```
+
+If these Observations contain no membership links, the list alone does not establish that sodium and potassium belong to the apparent chemistry heading.
+
+**Summary behaviour:** retain all three observations in the supplied report order. Do not invent a group. This matters for the saved TPP data, where many reports are flat. A familiar panel name is not enough to reconstruct the original layout confidently.
+
+### A transferred record with a degraded heading
+
+Records transferred between systems may have a generic transfer code while preserving the original heading as text.
+
+```json
+{
+  "resourceType": "Observation",
+  "id": "transferred-fbc",
+  "code": {
+    "coding": [{"system": "http://snomed.info/sct", "code": "196411000000103"}],
+    "text": "Full blood count - FBC"
+  },
+  "related": [{"type": "has-member", "target": {"reference": "Observation/hb"}}]
+}
+```
+
+**Summary behaviour:** use the supplied text for the group heading and follow its result links. The transfer code does not prevent grouping. The saved EMIS FBC example demonstrates why this matters: skipping a degraded heading can hide its child results.
+
+## Unusual or incomplete relationships
+
+| Situation | Summary behaviour |
+| --- | --- |
+| A group contains another group | Follow the links recursively and show both headings with their results |
+| The same result belongs to two groups | Show the result once within the report and an “Also associated” note at the other location |
+| A group unexpectedly contains its own value | Keep the heading, members and the supplied value through the existing value converter |
+| A link points to an unavailable observation | Show available content and a notice that some relationships could not be resolved; do not invent the missing result |
+| Links form a loop | Stop following the loop, show available items once and display a grouping notice |
+| An observation cannot be placed under a normal heading | Retain it under “Unplaced source item” |
+| A link would pull in an item directly assigned only to another report | Keep the reports separate and flag the unresolved association |
+
+Zero and false count as supplied values when deciding whether a group has content to retain. This does not mean every FHIR value type has a completed CDA mapping; value conversion is a separate concern.
+
+## What this change does and does not establish
+
+The readable CCDA section now shows the detected groups and associated comments. Each source report still produces one CCDA organizer (the structured container for that report). Individual result components remain flat inside it: this change does not introduce nested CDA organizers or claim that Epic will reconstruct every displayed group from structured data alone.
+
+The earlier report-caption and category-selection rules remain for this change. A caption may therefore be less descriptive than the group headings beneath it. Existing date, status, value and reference-range mappings are unchanged. Report conclusions and other previously identified metadata gaps are separate work.
+
+The [comparison CCDAs](assurance/evidence/investigation-grouping-comparison/README.md) show the reviewed before-and-after behaviour. The [assessment](assurance/evidence/2026-09-29-investigations-assessment.md) records the original findings and wider converter issues; it is historical evidence rather than a description of the current grouping code.
+
+For clinical review, check that group headings describe their linked tests, comments remain with the correct result or group, transferred headings retain their children, and flat reports do not imply unsupported relationships. A successful XML conversion alone does not confirm clinical correctness or Epic display behaviour.
