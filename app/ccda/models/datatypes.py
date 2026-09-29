@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 # TODO: add Enums
 
@@ -17,7 +17,9 @@ class ANY(BaseModel):
         description="This field provides a description for each date type",
         alias="@xsi:type",
     )
-    nullFlavor: Optional[str] = None  # enumeration
+    nullFlavor: Optional[str] = Field(
+        default=None, alias="@nullFlavor", validation_alias=AliasChoices("@nullFlavor", "nullFlavor")
+    )
 
 
 class BIN(ANY):
@@ -133,6 +135,8 @@ class CD(ANY):
 
     @model_validator(mode="before")
     def set_code_system_from_name(cls, values):
+        if not isinstance(values, dict):
+            return values
         cs = values.get("codeSystemName")
         if cs and not values.get("codeSystem"):
             values["codeSystem"] = CODE_SYSTEM_NAMES.get(cs)

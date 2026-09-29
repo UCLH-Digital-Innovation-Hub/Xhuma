@@ -1,4 +1,7 @@
 import xmltodict
+from fhirclient.models.humanname import HumanName
+
+from app.ccda.helpers import select_patient_name
 
 from ..models import (
     Acknowledgement,
@@ -29,20 +32,11 @@ from ..models import (
 from .constants import COMMUNITY_ID
 
 
-def _select_usual_name(patient: dict) -> dict:
-    """Select the FHIR ``usual`` name, falling back for legacy patient data."""
-
-    names = patient["name"]
-    # Some older PDS fixtures do not carry a use code. Retaining the first-name
-    # fallback avoids rejecting those patients while preferring the intended name.
-    return next((name for name in names if name.get("use") == "usual"), names[0])
-
-
 async def iti_55_response(message_id, patient, query):
     """Generate a successful ITI-55 patient discovery response."""
 
     gp = patient["generalPractitioner"][0]
-    usual_name = _select_usual_name(patient)
+    selected_name = select_patient_name([HumanName(name) for name in patient.get("name") or []])
     gender = {"male": "M", "female": "F"}.get(patient["gender"], "UNK")
     # The second identifier is the service's internal correlation identifier;
     # the first remains the nationally assigned NHS number.
@@ -72,8 +66,8 @@ async def iti_55_response(message_id, patient, query):
                             identifiers=patient_ids,
                             patient_person=PatientPerson(
                                 name=PersonName(
-                                    given=TextElement(text=usual_name["given"][0]),
-                                    family=TextElement(text=usual_name["family"]),
+                                    given=TextElement(text=selected_name.given[0]),
+                                    family=TextElement(text=selected_name.family),
                                 ),
                                 gender=CodeElement(code=gender),
                                 birth_time=ValueElement(value=patient["birthDate"].replace("-", "")),

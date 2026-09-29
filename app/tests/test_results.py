@@ -167,3 +167,30 @@ def test_result_value_preserves_cda_datatype_through_serialization(value):
     assert restored.model_dump(by_alias=True, exclude_none=True) == serialized
     xml = xmltodict.unparse({"organizer": serialized})
     assert f'xsi:type="{expected["@xsi:type"]}"' in xml
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category", [None, [], [{"text": "Laboratory"}]])
+async def test_investigations_without_coded_header_category_keep_results(category):
+    from fhirclient.models.codeableconcept import CodeableConcept
+
+    from app.ccda.entries.results import is_test_group_header
+
+    data = load_bundle("9690937286")
+    data["entry"] = [entry for entry in data["entry"] if "fhir_comments" not in entry]
+    source = bundle.Bundle(data)
+    index = {f"{entry.resource.resource_type}/{entry.resource.id}": entry.resource for entry in source.entry}
+    reports = [entry.resource for entry in source.entry if entry.resource.resource_type == "DiagnosticReport"]
+    assert reports
+    missing_category_reports = 0
+    for report in reports:
+        headers = [index[r.reference] for r in report.result or [] if is_test_group_header(index[r.reference])]
+        if len(headers) == 1 and headers[0].category is None:
+            missing_category_reports += 1
+            headers[0].category = None if category is None else [CodeableConcept(c) for c in category]
+        result = await investigation(report, index)
+        # Both legacy reports reference the same panel of 18 has-member results.
+        assert len(result.organizer["component"]) == 18
+        assert len(result.table["table"][0]["tbody"]["tr"]) >= 18
+        assert "<table>" in xmltodict.unparse({"results": result.table})
+    assert missing_category_reports

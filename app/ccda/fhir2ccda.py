@@ -12,8 +12,9 @@ from fhirclient.models import list as fhirlist
 from app.gp_connect_config import get_gp_connect_inclusions
 
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
+from .entries.allergy import allergy_onset_sort_key
 from .entries.results import investigation
-from .helpers import date_helper, templateId
+from .helpers import date_helper, select_patient_name, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -47,15 +48,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # patient
     # TODO refine address parsing as may have multiple
 
-    # loop through names to find official name
-    official_name = None
-    for name in subject[0].name:
-        if name.use == "usual":
-            official_name = name
-            break
-
-    if official_name is None:
-        raise ValueError("Patient record missing required 'usual' name component")
+    selected_name = select_patient_name(subject[0].name)
 
     patient_dict = {
         "patientRole": {
@@ -66,8 +59,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "patient": {
                 "name": {
                     "@use": "L",
-                    "given": {"#text": " ".join(official_name.given)},
-                    "family": {"#text": official_name.family},
+                    "given": {"#text": " ".join(selected_name.given)},
+                    "family": {"#text": selected_name.family},
                 },
                 "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
             },
@@ -212,11 +205,19 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 return valid_items
 
             def parse_allergies(lst):
+                """Convert allergy-list resources in onset order, logging failed items.
+
+                Return paired structured entries and narrative rows so both share
+                the same order. Non-AllergyIntolerance resources use the observation
+                converter, which supports records such as 'No known allergy'.
+                """
                 valid_items = []
-                for entry in lst:
+                # Sort both structured entries and narrative rows by onset, oldest first.
+                # Keep source order for ties and put unknown onsets last (see sort key).
+                for entry in sorted(lst, key=allergy_onset_sort_key):
                     try:
                         if entry.__class__.__name__ == "AllergyIntolerance":
-                            valid_items.append(allergy(entry))
+                            valid_items.append(allergy(entry, index))
                         else:
                             valid_items.append(observation_entry(entry, index, "Allergies and adverse reactions"))
                     except Exception as e:
@@ -250,10 +251,12 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             section_setup = {
                 "Allergies and adverse reactions": {
                     "section_headers": [
-                        "Start Date",
-                        "Status",
+                        "Dates",
                         "Description",
+                        "Status",
                         "Reaction",
+                        "Severity",
+                        "Notes",
                     ],
                     "parser": parse_allergies,
                 },
@@ -336,29 +339,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 #     row.append({data})
                 return {"td": entry_data}
 
-            # if list has attribute empty reason
-            # check if the list is empty
-            # if hasattr(list, "emptyReason"):
-            #     print(f"list {list.title} is empty")
-            #     # if the list is empty
-            #     comp["section"]["text"] = {
-            #         "table": {
-            #             "thead": create_headers(list.title),
-            #             "tbody": {
-            #                 "tr": {
-            #                     "td": {
-            #                         "@colspan": len(table_headers[list.title]),
-            #                         # "#text": list.emptyReason[0].text,
-            #                         "#text": "No Information Available",
-            #                     }
-            #                 }
-            #             },
-            #         }
-            #     }
-            #     return comp
             if not list.entry:
-                # if there are no entries
-                # Initialize empty table with appropriate headers based on section
+                # An empty allergy list means no information was received;
+                # absence of records must not imply a no-known-allergy assertion.
                 comp["section"]["text"] = {
                     "paragraph": {"@styleCode": "flagData"},
                     "table": {
@@ -367,7 +350,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                             "tr": {
                                 "td": {
                                     "@colspan": len(section_setup[list.title]["section_headers"]),
-                                    "#text": "No Information Available",
+                                    "#text": "No information received"
+                                    if list.title == "Allergies and adverse reactions"
+                                    else "No Information Available",
                                 }
                             }
                         },
@@ -416,6 +401,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
                 if warning_text:
                     comp["section"]["text"]["paragraph"]["#text"] = warning_text
+
+            if list.title == "Allergies and adverse reactions":
+                paragraph = comp["section"]["text"]["paragraph"]
+                paragraph["#text"] = "Some allergies may be recorded as problems.<br />" + paragraph.get("#text", "")
 
             if hasattr(list, "note") and list.note is not None:
                 note_text = "".join(list.note[i].text + "<br />" for i in range(len(list.note)))
@@ -610,7 +599,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9692140466.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None

@@ -5,52 +5,55 @@ import xmltodict
 from defusedxml import ElementTree
 from fastapi import HTTPException
 from fhirclient.models import coding, fhirdate, identifier, organization, period
+from fhirclient.models.humanname import HumanName
 
 from .models.admin import AssignedAuthor, AuthorParticipation
 from .models.datatypes import CD, II, SXCM_TS
 
 
-def validateNHSnumber(number: int) -> bool:
-    """validates NHS number
+def clean_number(x):
+    # if x is a float and is an integer, convert to int
+    if isinstance(x, float) and x.is_integer():
+        return int(x)
+    return x
+
+
+def clean_soap(
+    soap_request,
+    namespaces: dict = {
+        "http://www.w3.org/2003/05/soap-envelope": None,
+        "http://www.w3.org/2005/08/addressing": None,
+        "urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0": None,
+        "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0": None,
+        "urn:ihe:iti:xds-b:2007": None,
+        "urn:hl7-org:v3": None,
+        "soap": None,
+        "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd": None,
+        "urn:oasis:names:tc:SAML:2.0:assertion": None,
+    },
+) -> dict:
+    """
+    Takes raw soap requests and cleans
 
     Args:
-        NHs number as integer
+        - soap_request: XML IHE soap request
+        - namespaces: dict of namespaces to process
 
-    Returns:
-        Boolean if NHS number is valid or not
+    Returns
+        - Soap envelope as dict
     """
-    if len(str(number)) != 10 or not str(number).isdigit():
-        return False
+    try:
+        dom = ElementTree.fromstring(soap_request)
+        # root = dom.getroot()
 
-    numbers = [int(c) for c in str(number)]
-
-    total = 0
-    for idx in range(0, 9):
-        multiplier = 10 - idx
-        total += numbers[idx] * multiplier
-
-    _, modtot = divmod(total, 11)
-    checkdig = 11 - modtot
-
-    if checkdig == 11:
-        checkdig = 0
-
-    return checkdig == numbers[9]
-
-
-def generate_code(coding: coding.Coding) -> dict:
-    code = {
-        "@code": coding.code,
-        "@displayName": coding.display,
-        "@codeSystemName": coding.system,
-    }
-
-    if coding.system == "http://snomed.info/sct":
-        code["@codeSystem"] = "2.16.840.1.113883.6.96"
-    elif coding.system == "https://fhir.hl7.org.uk/Id/multilex-drug-codes":
-        code["@codeSystem"] = "2.16.840.1.113883.2.1.6.4"
-
-    return code
+        xmldict = xmltodict.parse(
+            ElementTree.tostring(dom),
+            process_namespaces=True,
+            namespaces=namespaces,
+        )
+        return xmldict["Envelope"]
+    except Exception:
+        raise HTTPException(status_code=400, detail="Malformed XML in request body")
 
 
 def code_with_translations(codings: List[coding.Coding]) -> CD:
@@ -88,23 +91,6 @@ def code_with_translations(codings: List[coding.Coding]) -> CD:
         ]
 
     return cd
-
-
-def templateId(root: str, extension: str) -> list:
-    """
-    takes root and extensions and returns list for proper
-    ccda formatting
-    """
-    template = [{"@root": root}, {"@root": root, "@extension": extension}]
-
-    return template
-
-
-def id_helper(identities: identifier.Identifier) -> list[II]:
-    """
-    takes list of dicts with root and extension and returns list of II objects
-    """
-    return [II(**{"@root": item.system, "@extension": item.value}) for item in identities]
 
 
 def date_helper(isodate):
@@ -151,53 +137,6 @@ def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
     return sxcm_ts_list
 
 
-def readable_date(date):
-    """
-    takes date string in YYYYMMDD format and returns to more readable format
-    """
-    new_date = datetime.strptime(date, "%Y%m%d").strftime("%d/%m/%Y")
-
-    return new_date
-
-
-def clean_soap(
-    soap_request,
-    namespaces: dict = {
-        "http://www.w3.org/2003/05/soap-envelope": None,
-        "http://www.w3.org/2005/08/addressing": None,
-        "urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0": None,
-        "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0": None,
-        "urn:ihe:iti:xds-b:2007": None,
-        "urn:hl7-org:v3": None,
-        "soap": None,
-        "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd": None,
-        "urn:oasis:names:tc:SAML:2.0:assertion": None,
-    },
-) -> dict:
-    """
-    Takes raw soap requests and cleans
-
-    Args:
-        - soap_request: XML IHE soap request
-        - namespaces: dict of namespaces to process
-
-    Returns
-        - Soap envelope as dict
-    """
-    try:
-        dom = ElementTree.fromstring(soap_request)
-        # root = dom.getroot()
-
-        xmldict = xmltodict.parse(
-            ElementTree.tostring(dom),
-            process_namespaces=True,
-            namespaces=namespaces,
-        )
-        return xmldict["Envelope"]
-    except Exception:
-        raise HTTPException(status_code=400, detail="Malformed XML in request body")
-
-
 def extract_soap_request(message):
     """
     Extracts the SOAP request from a MIME message.
@@ -213,6 +152,28 @@ def extract_soap_request(message):
             return line
     # if can't find a soap envelope raise an error
     raise ValueError("SOAP envelope not found in the message.")
+
+
+def generate_code(coding: coding.Coding) -> dict:
+    code = {
+        "@code": coding.code,
+        "@displayName": coding.display,
+        "@codeSystemName": coding.system,
+    }
+
+    if coding.system == "http://snomed.info/sct":
+        code["@codeSystem"] = "2.16.840.1.113883.6.96"
+    elif coding.system == "https://fhir.hl7.org.uk/Id/multilex-drug-codes":
+        code["@codeSystem"] = "2.16.840.1.113883.2.1.6.4"
+
+    return code
+
+
+def id_helper(identities: identifier.Identifier) -> list[II]:
+    """
+    takes list of dicts with root and extension and returns list of II objects
+    """
+    return [II(**{"@root": item.system, "@extension": item.value}) for item in identities]
 
 
 def organization_to_author(
@@ -247,8 +208,64 @@ def organization_to_author(
     return org
 
 
-def clean_number(x):
-    # if x is a float and is an integer, convert to int
-    if isinstance(x, float) and x.is_integer():
-        return int(x)
-    return x
+def readable_date(date):
+    """
+    takes date string in YYYYMMDD format and returns to more readable format
+    """
+    new_date = datetime.strptime(date, "%Y%m%d").strftime("%d/%m/%Y")
+
+    return new_date
+
+
+def select_patient_name(names: list[HumanName] | None) -> HumanName:
+    """Select usual, then official, then the first supplied FHIR patient name.
+
+    Return the original HumanName, preserving source order within each use.
+    Raise ValueError when no names were supplied rather than inventing a name.
+    """
+    if not names:
+        raise ValueError("Patient record contains no names")
+
+    for preferred_use in ("usual", "official"):
+        for name in names:
+            if name.use == preferred_use:
+                return name
+    return names[0]
+
+
+def templateId(root: str, extension: str) -> list:
+    """
+    takes root and extensions and returns list for proper
+    ccda formatting
+    """
+    template = [{"@root": root}, {"@root": root, "@extension": extension}]
+
+    return template
+
+
+def validateNHSnumber(number: int) -> bool:
+    """validates NHS number
+
+    Args:
+        NHs number as integer
+
+    Returns:
+        Boolean if NHS number is valid or not
+    """
+    if len(str(number)) != 10 or not str(number).isdigit():
+        return False
+
+    numbers = [int(c) for c in str(number)]
+
+    total = 0
+    for idx in range(0, 9):
+        multiplier = 10 - idx
+        total += numbers[idx] * multiplier
+
+    _, modtot = divmod(total, 11)
+    checkdig = 11 - modtot
+
+    if checkdig == 11:
+        checkdig = 0
+
+    return checkdig == numbers[9]

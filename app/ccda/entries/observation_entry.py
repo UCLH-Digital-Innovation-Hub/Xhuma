@@ -77,7 +77,7 @@ def observation_entry(entry, index: dict, section_name: Union[str, int]) -> Entr
                 name_val = coding.display
                 break
 
-    if obs_notes:
+    if obs_notes and section_name != "Allergies and adverse reactions":
         name_val = f"{name_val}<br />Notes: " + "<br />".join(obs_notes)
 
     # Build row based on the specific section layout
@@ -86,7 +86,11 @@ def observation_entry(entry, index: dict, section_name: Union[str, int]) -> Entr
     elif section_name == "Problems":
         row = [date_val, "N/A", name_val]
     elif section_name == "Allergies and adverse reactions":
-        row = [date_val, "N/A", name_val, "N/A"]
+        # An Observation (e.g. "No known allergy") has an effective date and an
+        # observation status, not an AllergyIntolerance assertion/clinical status.
+        dates = f"Effective: {date_val}" if date_val != "N/A" else ""
+        status = f"Observation status: {entry.status}" if getattr(entry, "status", None) else ""
+        row = [dates, name_val, status, "N/A", "N/A", "<br />".join(obs_notes)]
     else:
         # Fallback to old behavior if a simple integer length is passed
         row = [date_val, name_val]
