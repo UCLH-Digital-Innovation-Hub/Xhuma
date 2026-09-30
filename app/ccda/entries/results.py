@@ -6,13 +6,15 @@ from fhirclient.models import observation as obs
 from fhirclient.models.specimen import Specimen
 
 from ..helpers import (
+    cda_time_interval,
     code_with_translations,
-    datetime_helper,
     id_helper,
 )
 from ..models.base import ResultObservation, ResultsOrganizer
-from ..models.datatypes import CD, CS, II, IVL_TS, IVXB_TS, PQ
+from ..models.datatypes import CD, CS, II, IVL_TS
 from .investigation_grouping import group_investigation, has_result_value, is_filing_comment, observation_label
+from .result_context import cda_specimen, organizer_collection_time, report_issue_time, report_specimens
+from .result_values import map_result_value
 from .types import EntryWithRow
 
 logger = logging.getLogger(__name__)
@@ -122,14 +124,22 @@ def specimen_notes_table(report: dr.DiagnosticReport, index: dict) -> dict | Non
         accession = specimen.accessionIdentifier.value if specimen.accessionIdentifier else None
         identifier = accession or next((i.value for i in specimen.identifier or [] if i.value), None) or specimen.id
         label = " — ".join(value for value in (label, identifier) if value) or "Specimen"
-        for note in specimen.note or []:
-            if note.text:
-                rows.append({"td": [label, note.text]})
+        collection = specimen.collection
+        collected = "Not supplied"
+        if collection and collection.collectedDateTime:
+            collected = collection.collectedDateTime.as_json()
+        elif collection and collection.collectedPeriod:
+            period = collection.collectedPeriod
+            collected = f"{period.start.as_json() if period.start else 'Unknown start'} – {period.end.as_json() if period.end else 'Unknown end'}"
+        received = specimen.receivedTime.as_json() if specimen.receivedTime else "Not supplied"
+        notes = [note.text for note in specimen.note or [] if note.text]
+        for note in notes or [""]:
+            rows.append({"td": [label, note, collected, received]})
     if not rows:
         return None
     return {
         "caption": "Specimen notes",
-        "thead": {"tr": {"th": ["Specimen", "Notes"]}},
+        "thead": {"tr": {"th": ["Specimen", "Notes", "Collected", "Received"]}},
         "tbody": {"tr": rows},
     }
 
@@ -173,7 +183,7 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
         result_component.effectiveTime = group_time
     else:
         result_component.effectiveTime = (
-            IVL_TS(low=IVXB_TS(value=datetime_helper(observation.effectiveDateTime)))
+            cda_time_interval(observation.effectiveDateTime, observation.effectiveDateTime)
             if observation.effectiveDateTime
             else None
         )
@@ -185,81 +195,21 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
         result_component.code.originalText = original_name
     table_row.cells[0] = original_name or result_component.code.displayName
 
-    # block for value/comment
+    mapped_value = map_result_value(observation)
+    result_component.value = mapped_value.value
+    table_row.cells[1] = mapped_value.text
 
-    if observation.valueString:
-        result_component.value = {"@value": observation.valueString}
-        table_row.cells[1] = observation.valueString
-
-    elif observation.valueQuantity:
-        vq = observation.valueQuantity
-        # Handle comparator logic
-        if getattr(vq, "comparator", None):
-            # comparator means IVL_PQ
-            value = {"@xsi:type": "IVL_PQ"}
-            if "<" in vq.comparator:
-                value["high"] = {
-                    "@value": vq.value,
-                    "@unit": vq.unit,
-                }
-                if "=" in vq.comparator:
-                    value["high"]["@inclusive"] = "true"
-                # lower bound for physical measurement is 0
-                value["low"] = {
-                    "@value": 0,
-                    "@unit": vq.unit,
-                    "@inclusive": "true",
-                }
-            elif ">" in vq.comparator:
-                value["low"] = {
-                    "@value": vq.value,
-                    "@unit": vq.unit,
-                }
-                if "=" in vq.comparator:
-                    value["low"]["@inclusive"] = "true"
-                # high bound for greater than physical measurement is infinity
-                value["high"] = {"@nullFlavor": "PINF"}
-            result_component.value = value
-            table_row.cells[1] = f"{vq.comparator} {vq.value} {vq.unit if vq.unit else ''}"
-        else:
-            result_component.value = PQ(
-                value=vq.value,
-                unit=(vq.unit if vq.unit else None),
-            )
-            value_text = f"{vq.value} {vq.unit if vq.unit else ''}"
-
-            outside_reference_range = False
-            if observation.referenceRange:
-                has_numeric_range = False
-                for reference_range in observation.referenceRange:
-                    low = getattr(reference_range, "low", None)
-                    high = getattr(reference_range, "high", None)
-                    low_value = getattr(low, "value", None)
-                    high_value = getattr(high, "value", None)
-
-                    # Handle single-bound ranges
-                    if low_value is not None and high_value is None:
-                        has_numeric_range = True
-                        if vq.value < low_value:
-                            outside_reference_range = True
-                            break
-                    elif high_value is not None and low_value is None:
-                        has_numeric_range = True
-                        if vq.value > high_value:
-                            outside_reference_range = True
-                            break
-                    elif low_value is not None and high_value is not None:
-                        has_numeric_range = True
-                        if not (low_value <= vq.value <= high_value):
-                            outside_reference_range = True
-                            break
-
-                if not has_numeric_range:
-                    outside_reference_range = False
-
-            table_row.cells[1] = (
-                {"content": {"@styleCode": "flagData", "#text": value_text}} if outside_reference_range else value_text
-            )
+    # Keep the existing numeric abnormal emphasis, without comparing absent
+    # quantities or attempting to interpret comparator/text values numerically.
+    quantity = observation.valueQuantity
+    if quantity and quantity.value is not None and not quantity.comparator:
+        outside_reference_range = any(
+            (r.low is not None and r.low.value is not None and quantity.value < r.low.value)
+            or (r.high is not None and r.high.value is not None and quantity.value > r.high.value)
+            for r in observation.referenceRange or []
+        )
+        if outside_reference_range:
+            table_row.cells[1] = {"content": {"@styleCode": "flagData", "#text": mapped_value.text}}
 
     if observation.comment:
         result_component.text = observation.comment
@@ -350,7 +300,7 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
         else []
     )
 
-    report_issued_time = IVL_TS(low=IVXB_TS(value=datetime_helper(diagnostic_report.issued)))
+    report_issued_time = report_issue_time(diagnostic_report)
     test_group_headers = [o for o in observations if is_test_group_header(o)]
 
     category_observation = None
@@ -392,8 +342,8 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
         statusCode=result_status(diagnostic_report.status, organizer=True),
         id=id_helper(diagnostic_report.identifier),
         code=(code_with_translations(test_group_headers[0].code.coding) if test_group_headers else None),
-        # this should be the specimen collection time if available, but for now will use report issued time
-        effectiveTime=report_issued_time,
+        effectiveTime=organizer_collection_time(diagnostic_report, index),
+        specimen=[cda_specimen(s) for s in report_specimens(diagnostic_report, index)] or None,
     )
 
     grouping = group_investigation(diagnostic_report, index)
@@ -468,7 +418,7 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
         organizer.component.append({"observation": category_observation})
 
     result_table = ResultTable(
-        title=f"{test_title} {diagnostic_report.issued.date}",
+        title=f"{test_title} {diagnostic_report.issued.date if diagnostic_report.issued else 'Issue time not supplied'}",
         headers=["Component", "Value", "Reference Range", "Comments"],
         rows=table_rows,
     )

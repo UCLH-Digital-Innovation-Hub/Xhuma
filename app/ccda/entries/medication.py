@@ -6,10 +6,11 @@ from fhirclient.models import medicationrequest, medicationstatement
 
 from ..dmd import dmd_lookup
 from ..helpers import (
+    cda_time_bound,
     clean_number,
     code_with_translations,
-    date_helper,
     effective_time_helper,
+    fhir_to_cda_timestamp,
     readable_date,
     templateId,
 )
@@ -325,8 +326,16 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         substance_administration.entryRelationship.append(instruction_entry)
     # find effective time entry with operator of low
 
-    low_time = [et.value for et in substance_administration.effectiveTime if getattr(et, "operator", None) == "low"]
-    high_time = [et.value for et in substance_administration.effectiveTime if getattr(et, "operator", None) == "high"]
+    low_time = [
+        et.low.value
+        for et in substance_administration.effectiveTime
+        if isinstance(et, IVL_TS) and et.low and et.low.value
+    ]
+    high_time = [
+        et.high.value
+        for et in substance_administration.effectiveTime
+        if isinstance(et, IVL_TS) and et.high and et.high.value
+    ]
     med_name = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.displayName
 
     # check if snomed code is in cache and if so add to med name
@@ -407,7 +416,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 ext.url
                 == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
             ):
-                last_issued_date = readable_date(date_helper(ext.valueDateTime.isostring))
+                last_issued_date = readable_date(fhir_to_cda_timestamp(ext.valueDateTime))
                 prescription_information.append(f"Last issued date: {last_issued_date}")
 
     # look for prescription type in medication request
@@ -499,7 +508,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         supply_order.substanceAdministration.moodCode = "EVN"
         if based_on_request.dispenseRequest.validityPeriod.end:
             supply_order.substanceAdministration.effectiveTime = [
-                IVL_TS(high={"@value": date_helper(based_on_request.dispenseRequest.validityPeriod.end.isostring)})
+                IVL_TS(high=cda_time_bound(based_on_request.dispenseRequest.validityPeriod.end))
             ]
 
         if remaining_repeats is not None:

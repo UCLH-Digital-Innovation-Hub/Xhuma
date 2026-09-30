@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Union
 
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_serializer, model_validator
 
 # TODO: add Enums
 
@@ -20,6 +20,35 @@ class ANY(BaseModel):
     nullFlavor: Optional[str] = Field(
         default=None, alias="@nullFlavor", validation_alias=AliasChoices("@nullFlavor", "nullFlavor")
     )
+
+
+class ST(ANY):
+    """CDA string content, serialized as XML text rather than a value attribute."""
+
+    resource_type: str = Field("ST", alias="@xsi:type")
+    text: Optional[str] = Field(default=None, alias="#text")
+    model_config = {"populate_by_name": True}
+
+
+class BL(ANY):
+    """CDA Boolean with an XML Schema boolean lexical representation."""
+
+    resource_type: str = Field("BL", alias="@xsi:type")
+    value: Optional[bool] = Field(default=None, alias="@value")
+    model_config = {"populate_by_name": True}
+
+    @field_serializer("value")
+    def serialize_value(self, value):
+        """Emit lowercase true/false for XML, including a supplied false."""
+        return None if value is None else "true" if value else "false"
+
+
+class INT(ANY):
+    """CDA integer result, retaining zero as a supplied value."""
+
+    resource_type: str = Field("INT", alias="@xsi:type")
+    value: Optional[int] = Field(default=None, alias="@value")
+    model_config = {"populate_by_name": True}
 
 
 class BIN(ANY):
@@ -127,7 +156,7 @@ class CD(ANY):
         "or more translations into different coding systems.",
         alias="@xsi:type",
     )
-    code: str = Field(alias="@code")
+    code: Optional[str] = Field(alias="@code", default=None)
     codeSystem: Optional[str] = Field(alias="@codeSystem", default=None)
     codeSystemName: Optional[str] = Field(alias="@codeSystemName", default=None)
     displayName: Optional[str] = Field(alias="@displayName", default=None)
@@ -180,7 +209,7 @@ class PQR(CV):
         "system. Used to show alternative representation for a physical "
         "quantity.",
     )
-    value: Optional[float] = None
+    value: Optional[float] = Field(default=None, alias="@value")
 
 
 class CS(CV):
@@ -210,8 +239,11 @@ class PQ(QTY):
 
 
 class TS(QTY):
+    model_config = {"populate_by_name": True}
+
     resource_type: str = Field(
         "TS",
+        alias="@xsi:type",
         description="A quantity specifying a point on the axis of natural time. A point "
         "in time is most often represented as a calendar expression.",
     )
@@ -241,8 +273,15 @@ class IVXB_TS(SXCM_TS):
 
 
 class IVXB_PQ(PQ):
+    """Physical-quantity boundary with explicitly serialized inclusivity."""
+
     resource_type: str = Field("IVXB_PQ", description="", alias="@xsi:type")
-    inclusive: Optional[bool] = Field(None, description="Specifies whether the limit is included in the interval.")
+    inclusive: Optional[bool] = Field(default=None, alias="@inclusive")
+
+    @field_serializer("inclusive")
+    def serialize_inclusive(self, value):
+        """Emit XML boolean values, not Python's capitalized spelling."""
+        return None if value is None else "true" if value else "false"
 
 
 class IVL_PQ(ANY):

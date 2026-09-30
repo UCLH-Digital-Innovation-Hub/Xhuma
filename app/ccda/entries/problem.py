@@ -2,7 +2,7 @@ import uuid
 
 from fhirclient.models import condition
 
-from ..helpers import date_helper, readable_date, templateId
+from ..helpers import cda_time_bound, readable_date, templateId
 from .types import EntryWithRow
 
 
@@ -20,7 +20,9 @@ def problem(entry: condition.Condition) -> EntryWithRow:
     prob["act"]["code"] = {"@code": "CONC", "@codeSystem": "2.16.840.1.113883.5.6"}
 
     prob["act"]["statusCode"] = {"@code": entry.clinicalStatus}
-    prob["act"]["effectiveTime"] = {"low": {"@value": date_helper(entry.assertedDate.isostring)}}
+    prob["act"]["effectiveTime"] = {
+        "low": cda_time_bound(entry.assertedDate).model_dump(by_alias=True, exclude_none=True)
+    }
     prob["act"]["entryRelationship"] = {"@typeCode": "SUBJ"}
 
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.4.html
@@ -42,7 +44,9 @@ def problem(entry: condition.Condition) -> EntryWithRow:
         },
     ]
     observation["statusCode"] = {"@code": "completed"}
-    observation["effectiveTime"] = {"low": {"@value": date_helper(entry.assertedDate.isostring)}}
+    observation["effectiveTime"] = {
+        "low": cda_time_bound(entry.assertedDate).model_dump(by_alias=True, exclude_none=True)
+    }
     observation["value"] = {
         "@xsi:type": "CD",
         "@code": entry.code.coding[0].code,
@@ -54,7 +58,7 @@ def problem(entry: condition.Condition) -> EntryWithRow:
     prob["act"]["entryRelationship"]["observation"] = observation
 
     problem_row = [
-        readable_date(prob["act"]["effectiveTime"].get("low", {}).get("@value", "")),
+        readable_date(prob["act"]["effectiveTime"]["low"]["@value"]) if entry.assertedDate else "",
         prob["act"]["statusCode"].get("@code", ""),
         observation["value"].get("@displayName", ""),
     ]

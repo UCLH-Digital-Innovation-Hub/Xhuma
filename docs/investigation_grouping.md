@@ -184,7 +184,7 @@ Zero and false count as supplied values when deciding whether a group has conten
 
 The readable CCDA section now shows the detected groups and associated comments. Each source report still produces one CCDA organizer (the structured container for that report). Individual result components remain flat inside it: this change does not introduce nested CDA organizers or claim that Epic will reconstruct every displayed group from structured data alone.
 
-The earlier report-caption and category-selection rules remain for this change. A caption may therefore be less descriptive than the group headings beneath it. Result rows use four fixed columns: component, value, reference range and comments. Headings and annotations span all four columns. Existing date, value and reference-range mappings are unchanged. Report conclusions now appear above the report’s results table. Notes from specimens referenced by that report appear in a separate “Specimen notes” table beneath it, labelled with specimen type and identifier where supplied. Multiple notes and their line breaks are retained. These conclusions and specimen notes are narrative additions, not invented test results. The incomplete-record-transfer warning and other previously identified metadata gaps remain separate work.
+The earlier report-caption and category-selection rules remain for this change. A caption may therefore be less descriptive than the group headings beneath it. Result rows use four fixed columns: component, value, reference range and comments. Headings and annotations span all four columns. Reference-range mappings are unchanged. The date mapping is explained below. Result value mapping is described below. Report conclusions now appear above the report’s results table. Notes from specimens referenced by that report appear in a separate “Specimen notes” table beneath it, labelled with specimen type and identifier where supplied. Multiple notes and their line breaks are retained. These conclusions and specimen notes are narrative additions, not invented test results. The incomplete-record-transfer warning and other previously identified metadata gaps remain separate work.
 
 The [comparison CCDAs](assurance/evidence/investigation-grouping-comparison/README.md) show the reviewed before-and-after behaviour. The [assessment](assurance/evidence/2026-09-29-investigations-assessment.md) records the original findings and wider converter issues; it is historical evidence rather than a description of the current grouping code.
 
@@ -204,3 +204,47 @@ The structured CCDA status describes laboratory progress, not whether the GP has
 | An unrecognised value | `nullFlavor="OTH"`; individual result status retained in comments and structured text |
 
 The mappings are implementation choices based on the [FHIR STU3 report status definitions](https://hl7.org/fhir/STU3/codesystem-diagnostic-report-status.html) and [CDA result status guidance](https://hl7.org/fhir/us/ccda/en/ConceptMap-CF-ResultStatus.html). FHIR cancellation does not distinguish cancellation before work starts from abandonment after work starts; `aborted` is used conservatively. Corrections and amendments occur after finalisation. The restricted CDA Result Status vocabulary does not include `nullified`, so a withdrawn individual result uses an explicit non-mappable status and visible source wording. Unknown is never converted to completed.
+
+## Result values
+
+The value converter produces structured CDA and the matching “Value” cell together. It keeps supplied numbers and words; it does not extract a new measurement from a comment.
+
+| Source value | Structured CDA | Readable result |
+| --- | --- | --- |
+| Quantity | `PQ` | Source number and unit wording |
+| Quantity with a comparator | `IVL_PQ` | Source comparator, number and unit wording |
+| String | `ST` text content | Original text, including line breaks |
+| Coded concept | `CD`, original text and additional codings where representable | Original text or supplied display/code |
+| Boolean | `BL` | True or False, including a supplied false |
+| Integer, if exposed by the input model | `INT` | Integer, including zero; the current STU3 Observation model does not accept `valueInteger` in incoming JSON |
+| Range | `IVL_PQ` | Supplied bounds and their units |
+| Ratio | `RTO_PQ_PQ` | Numerator and denominator, with their respective units |
+
+For upper-bound quantities, the agreed zero lower-bound convention is retained. Strict `<` and `>` bounds explicitly use `inclusive="false"`; `<=` and `>=` use `inclusive="true"`. If zero would create an inverted or empty interval (for example `< -5` or `< 0`), the original quantity is retained as labelled unmapped text for review. Actual FHIR Range values retain only their supplied bounds. These choices follow the [HL7 quantity mapping guidance](https://build.fhir.org/ig/HL7/ccda-on-fhir/en/mappingGuidance.html#ranges-of-physical-quantities).
+
+A supplied UCUM code is used for the structured unit while the source wording remains in the table. Where UCUM is not declared, only a small set of recognised unit spellings is accepted directly. Other units, or missing units, retain the magnitude and source wording in a CDA quantity translation. This is deliberately not a general unit-conversion service and does not assume a missing unit means dimensionless.
+
+Known coding systems and explicit OIDs are retained as CDA codes. Codes without a known OID are preserved as labelled source text in translations rather than inventing a coding system. Text-only concepts use an explicit null flavour and original text.
+
+Where a data-absent reason is supplied, the readable result explains it and the CDA carries a corresponding null flavour. A missing quantity is not zero. A comment-only observation without a separate value remains comment-only. Unsupported value types (including attachments, sampled data and date/time values) and malformed ratios are retained as labelled source text and logged for review, rather than decoded or discarded. This preserves content but does not promise that Epic can process it as that original datatype. An empty string is explicitly shown as such.
+
+
+## Specimens, authors and dates
+
+The structured report can contain several specimens and several authors. Specimens retain their source identifiers and coded sample type, such as serum. Supporting several authors in the model does not make a laboratory performer an author: authorship still requires source evidence of that role.
+
+Section 7 of *Requirements to Enable Happy Together Labs for Other Vendors* gives the two result timestamps different meanings:
+
+| CCDA location | Meaning for Epic | Source used |
+| --- | --- | --- |
+| Report organizer effective time | Specimen collection time | The referenced specimen's collected date/time or collection period |
+| Each result observation's effective time | The report's finalising instant, shared by all components | DiagnosticReport.issued, as the available report issue-time proxy |
+| Author time | When the author authored the information | Authorship information, when supplied; this is separate from both laboratory timestamps |
+
+An issue timestamp is not proof that a report is final. This mapping does not introduce a new finalised-results filter. Laboratory receipt time and GP filing time are not substituted for collection or finalisation.
+
+The organizer time has both a lower and an upper bound. For a single collection instant they are equal. For a collection period they retain its start and end; an absent endpoint is explicitly unknown. If several specimens share the same collection interval, that interval can be used. If their collection times differ, a specimen cannot be resolved, or no collection time is supplied, the organizer has unknown bounds rather than an arbitrarily selected date. Individual collection and receipt dates remain visible in the specimen table beneath the results, alongside the specimen notes.
+
+Dates retain their supplied precision and timezone. A year-only date stays a year; it is not turned into 1 January. Missing report issue time stays unknown for every component rather than borrowing an individual test's date.
+
+This follows Epic's collection-time interpretation of the organizer. The general [C-CDA Result Organizer definition](https://build.fhir.org/ig/HL7/CDA-ccda-2.1-sd/StructureDefinition-ResultOrganizer.html) describes its effective time as spanning its component observations instead. The model comments make this distinction explicit so that the Epic mapping is not accidentally replaced by a different interpretation.

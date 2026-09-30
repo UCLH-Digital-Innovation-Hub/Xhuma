@@ -1,3 +1,5 @@
+import re
+from datetime import date as CalendarDate
 from datetime import datetime
 from typing import List
 
@@ -8,7 +10,7 @@ from fhirclient.models import coding, fhirdate, identifier, organization, period
 from fhirclient.models.humanname import HumanName
 
 from .models.admin import AssignedAuthor, AuthorParticipation
-from .models.datatypes import CD, II, SXCM_TS
+from .models.datatypes import CD, II, IVL_TS, IVXB_TS, TS
 
 
 def clean_number(x):
@@ -93,48 +95,68 @@ def code_with_translations(codings: List[coding.Coding]) -> CD:
     return cd
 
 
-def date_helper(isodate):
-    """
-    takes iso string and returns to format valid for ccda
+def fhir_to_cda_timestamp(date: fhirdate.FHIRDate | None) -> str | None:
+    """Preserve FHIR date precision, fractional seconds and offset in CDA syntax.
 
+    Use the original JSON value: isostring may add a month/day or lose fractions.
+    This only formats the supplied date; callers choose its clinical meaning.
     """
-    new_date = datetime.strptime(isodate[:10], "%Y-%m-%d").strftime("%Y%m%d")
-
-    return new_date
-
-
-def datetime_helper(fhirdate: fhirdate.FHIRDate) -> str:
-    """
-    takes a FHIRDate object and returns a string in the format YYYYMMDDHHMMSS
-    """
-    if fhirdate is None:
+    source = date.as_json() if date is not None else None
+    if not source:
         return None
-    return datetime.strptime(fhirdate.isostring[:10], "%Y-%m-%d").strftime("%Y%m%d%H%M%S")
+    day, _, time = source.partition("T")
+    return day.replace("-", "") + time.replace(":", "").replace("Z", "+0000")
 
 
-def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
+def cda_timestamp(date: fhirdate.FHIRDate | None) -> TS:
+    """Build a standalone timestamp, explicitly marking an absent date unknown."""
+    value = fhir_to_cda_timestamp(date)
+    return TS(value=value) if value is not None else TS(nullFlavor="UNK")
+
+
+def cda_time_bound(date: fhirdate.FHIRDate | None) -> IVXB_TS:
+    """Build an interval endpoint, explicitly marking an absent date unknown."""
+    value = fhir_to_cda_timestamp(date)
+    return IVXB_TS(value=value) if value is not None else IVXB_TS(nullFlavor="UNK")
+
+
+def cda_time_interval(start: fhirdate.FHIRDate | None, end: fhirdate.FHIRDate | None) -> IVL_TS:
+    """Build an interval with explicit bounds; missing endpoints are unknown.
+
+    Pass the same date twice for an instant. Callers that deliberately omit an
+    endpoint should construct IVL_TS themselves instead of using this helper.
     """
-    Takes a FHIR effective period and returns a list of SXCM_TS objects
-    """
-    # effective_period = effective_period.as_json()
-    start = effective_period.start
-    # end = effective_period.get("end")
-    # print(effective_period.as_json())
-    # print(date_helper(start.isostring))
+    return IVL_TS(low=cda_time_bound(start), high=cda_time_bound(end))
 
-    # Create the SXCM_TS objects
-    sxcm_ts_list = []
-    if start:
-        low_value = SXCM_TS(operator="low")
-        low_value.value = date_helper(start.isostring)
-        sxcm_ts_list.append(low_value)
-    if effective_period.end:
-        high_value = SXCM_TS(operator="high")
-        high_value.value = date_helper(effective_period.end.isostring)
-        sxcm_ts_list.append(high_value)
-        # sxcm_ts_list.append(SXCM_TS(operator="high", value=date_helper(effective_period.end.isostring)))
-    # Example usage of as_dict
-    return sxcm_ts_list
+
+def effective_time_helper(effective_period: period.Period | None) -> list[IVL_TS]:
+    """Build medication duration, omitting endpoints absent from the source."""
+    if effective_period is None:
+        return []
+    start, end = effective_period.start, effective_period.end
+    if start is None and end is None:
+        return []
+    return [
+        IVL_TS(
+            low=cda_time_bound(start) if start is not None else None,
+            high=cda_time_bound(end) if end is not None else None,
+        )
+    ]
+
+
+def fhir_date_is_after(value: fhirdate.FHIRDate | None, reference_date: CalendarDate) -> bool:
+    """Compare calendar dates only at the precision supplied by FHIR.
+
+    A future year/month qualifies; the current year/month alone cannot establish
+    a future end date. Preserve the source calendar day without timezone shifting.
+    Missing values return False; malformed source dates are not silently ignored.
+    """
+    source = value.as_json() if value is not None else None
+    if not source:
+        return False
+    parts = tuple(int(part) for part in source.partition("T")[0].split("-"))
+    reference = (reference_date.year, reference_date.month, reference_date.day)
+    return parts > reference[: len(parts)]
 
 
 def extract_soap_request(message):
@@ -208,13 +230,39 @@ def organization_to_author(
     return org
 
 
-def readable_date(date):
-    """
-    takes date string in YYYYMMDD format and returns to more readable format
-    """
-    new_date = datetime.strptime(date, "%Y%m%d").strftime("%d/%m/%Y")
+def readable_date(value: str) -> str:
+    """Display a valid CDA timestamp as a date without adding missing precision.
 
-    return new_date
+    Full dates display DD/MM/YYYY; partial dates retain YYYY or YYYY-MM. Time
+    and offset are validated but omitted from display, without timezone shifting.
+    Empty or malformed inputs raise ValueError; callers handle absent dates.
+    """
+    match = re.fullmatch(
+        r"(?P<year>[0-9]{4})(?:(?P<month>[0-9]{2})(?:(?P<day>[0-9]{2})"
+        r"(?:(?P<hour>[0-9]{2})(?:(?P<minute>[0-9]{2})(?:(?P<second>[0-9]{2})"
+        r"(?P<fraction>\.[0-9]+)?)?)?(?P<zone>[+-][0-9]{4})?)?)?)?",
+        value,
+    )
+    if match is None:
+        raise ValueError(f"Invalid CDA timestamp: {value!r}")
+    fields = match.groupdict()
+    # Validate calendar and clock components; defaults are for validation only.
+    datetime(
+        int(fields["year"]),
+        int(fields["month"] or 1),
+        int(fields["day"] or 1),
+        int(fields["hour"] or 0),
+        int(fields["minute"] or 0),
+        int(fields["second"] or 0),
+    )
+    zone = fields["zone"]
+    if zone and (int(zone[1:3]) > 14 or int(zone[3:]) > 59 or (zone[1:3] == "14" and zone[3:] != "00")):
+        raise ValueError(f"Invalid CDA timezone: {zone!r}")
+    if fields["day"]:
+        return f"{fields['day']}/{fields['month']}/{fields['year']}"
+    if fields["month"]:
+        return f"{fields['year']}-{fields['month']}"
+    return fields["year"]
 
 
 def select_patient_name(names: list[HumanName] | None) -> HumanName:

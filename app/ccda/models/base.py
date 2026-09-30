@@ -16,11 +16,13 @@ from .datatypes import (
     IVL_INT,
     IVL_PQ,
     IVL_TS,
+    IVXB_TS,
     PIVL_TS,
     PQ,
     RTO_PQ_PQ,
     SXCM_TS,
 )
+from .specimen import Specimen
 
 
 class ManufacturedMaterial(BaseModel):
@@ -62,6 +64,7 @@ class Act(BaseModel):
     code: Optional[CD] = None
     text: Optional[ED] = None
     statusCode: Optional[CS] = None
+    # Generic act timing; not either Epic laboratory timestamp.
     effectiveTime: Optional[IVL_TS] = None
 
 
@@ -77,6 +80,7 @@ class Observation(BaseModel):
     code: Optional[CD] = None
     text: Optional[str] = None
     statusCode: Optional[CS] = None
+    # Clinical observation time. ResultObservation documents its Epic-specific use.
     effectiveTime: Optional[IVL_TS] = None
     value: Optional[Any] = None
     entryRelationship: Optional[List["EntryRelationship"]] = Field(default=None)
@@ -109,6 +113,11 @@ class ResultObservation(Observation):
             )
         ]
     )
+    # Epic 7(a): every component in one report shares its finalising instant.
+    # This is not the analyte's performed time, specimen collection/receipt,
+    # or the GP filing date. The converter uses report.issued as its available
+    # issue-time proxy; this alone does not establish that a report is final.
+    effectiveTime: Optional[IVL_TS] = None
     referenceRange: Optional[List[ReferenceRange]] = None
     interpretationCode: Optional[CE] = None
     methodCode: Optional[CE] = None
@@ -193,25 +202,8 @@ class SubstanceAdministration(BaseModel):
 
     @field_serializer("effectiveTime")
     def serialize_effective_time(self, sxcm_ts_list: List[Union[SXCM_TS, IVL_TS, PIVL_TS, EIVL_TS]]) -> List:
-        """
-        Takes a list of SXCM_TS objects and returns a dictionary with operator as key
-        """
-        # print(sxcm_ts_list)
-        time_list = []
-        sxcm = {}
-        for eff_time in sxcm_ts_list:
-            # print(f"eff_time: {eff_time}")
-            # print(isinstance(eff_time, SXCM_TS))
-            if eff_time.resource_type == "SXCM_TS" and getattr(eff_time, "operator", None):
-                # add the operator to the dictionary
-                sxcm[eff_time.operator] = {"@value": eff_time.value}
-            else:
-                time_list.append(eff_time.model_dump(by_alias=True, exclude_none=True))
-        # append the sxcm dictionary to the time_list at the start
-        if sxcm:
-            time_list.insert(0, sxcm)
-        return time_list
-        # print(time_list)
+        """Serialize each duration or dosing schedule using its concrete CDA type."""
+        return [time.model_dump(by_alias=True, exclude_none=True) for time in sxcm_ts_list]
 
 
 # TODO: Replace deprecated Extra.allow with Pydantic v2 configuration;
@@ -255,6 +247,21 @@ class Section(BaseModel):
         arbitrary_types_allowed = True
 
 
+class ResultOrganizerTime(IVL_TS):
+    """Organizer interval with the two bounds required by the result template.
+
+    For Epic Happy Together section 7(b), these bounds refer to specimen
+    collection, not receipt, GP filing, or report finalisation. A single known
+    collection instant has identical low/high values. A collection period keeps
+    its source bounds; unknown bounds use nullFlavor, never a fabricated date.
+    The generic C-CDA profile instead describes an interval spanning results;
+    the converter deliberately uses Epic's collection-time interpretation.
+    """
+
+    low: IVXB_TS
+    high: IVXB_TS
+
+
 class ResultsOrganizer(BaseModel):
     """
     Representation of a CDA Results Organizer model object.
@@ -280,8 +287,11 @@ class ResultsOrganizer(BaseModel):
     id: Optional[List[II]] = Field(default_factory=list)
     code: Optional[CD] = None
     statusCode: Optional[CS] = None
-    effectiveTime: Optional[IVL_TS] = None
-    author: Optional[AuthorParticipation] = None
+    # Epic 7(b): specimen collection interval, with both bounds when supplied.
+    # This is not the shared component finalising instant described in 7(a).
+    effectiveTime: Optional[ResultOrganizerTime] = None
+    specimen: Optional[List[Specimen]] = None
+    author: Optional[List[AuthorParticipation]] = None
     component: List[Dict[str, ResultObservation]] = Field(default_factory=list)
 
 

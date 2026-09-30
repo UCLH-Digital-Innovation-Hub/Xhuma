@@ -1,6 +1,6 @@
 from fhirclient.models import allergyintolerance
 
-from ..helpers import code_with_translations, readable_date
+from ..helpers import cda_time_bound, code_with_translations, fhir_to_cda_timestamp, readable_date
 from ..models.allergy import (
     Allergy,
     AllergyComment,
@@ -19,7 +19,7 @@ from ..models.allergy import (
     SeverityObservation,
 )
 from ..models.datatypes import CD, ED, II, IVL_TS, IVXB_TS
-from .allergy_metadata import cda_time, date_value, source_author, source_informant
+from .allergy_metadata import source_author, source_informant
 from .types import EntryWithRow
 
 # SNOMED concepts from the HL7 C-CDA Allergy and Intolerance Type mappings.
@@ -61,7 +61,7 @@ def _no_known_allergy_type(entry: allergyintolerance.AllergyIntolerance) -> CD |
 
 def _date_low(date) -> IVXB_TS:
     """Build an interval's low timestamp, preserving precision or marking it UNK."""
-    return cda_time(date)
+    return cda_time_bound(date)
 
 
 def allergy_onset_sort_key(entry):
@@ -75,7 +75,7 @@ def allergy_onset_sort_key(entry):
     period = getattr(entry, "onsetPeriod", None)
     if onset is None and period is not None:
         onset = period.start
-    value = date_value(onset)
+    value = onset.as_json() if onset is not None else None
     # Oldest onset date first, with partial dates ordered by their supplied precision.
     # Undated/age-only/text-only onsets (and non-allergy Observations) come last.
     # Python's stable sort preserves source order for equal dates and unknowns;
@@ -87,13 +87,10 @@ def _display_date(date):
     """Format a full date as DD/MM/YYYY, retain partial dates, or return blank.
 
     Time components are omitted from the narrative date; structured timestamps
-    are handled separately by cda_time and retain the supplied time and offset.
+    are handled separately by cda_time_bound and retain the supplied time and offset.
     """
-    value = date_value(date)
-    if not value:
-        return ""
-    day = value.split("T")[0]
-    return readable_date(day.replace("-", "")) if len(day) == 10 else day
+    value = fhir_to_cda_timestamp(date)
+    return readable_date(value) if value else ""
 
 
 def _lines(values):

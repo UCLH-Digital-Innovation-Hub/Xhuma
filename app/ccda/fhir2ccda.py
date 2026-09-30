@@ -14,7 +14,7 @@ from app.gp_connect_config import get_gp_connect_inclusions
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
 from .entries.allergy import allergy_onset_sort_key
 from .entries.results import investigation
-from .helpers import date_helper, select_patient_name, templateId
+from .helpers import fhir_date_is_after, fhir_to_cda_timestamp, select_patient_name, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -62,7 +62,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "given": {"#text": " ".join(selected_name.given)},
                     "family": {"#text": selected_name.family},
                 },
-                "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
+                "birthTime": {"@value": fhir_to_cda_timestamp(subject[0].birthDate)},
             },
         }
     }
@@ -109,7 +109,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "@classCode": "PCPR",
             "effectiveTime": {
                 "low": {
-                    "@value": date_helper(subject[0].birthDate.isostring),
+                    "@value": fhir_to_cda_timestamp(subject[0].birthDate),
                 },
                 "high": {"@value": datetime.date.today().strftime("%Y%m%d")},
             },
@@ -458,33 +458,17 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         active = []
         past = []
         future_meds = 0
+        today = datetime.date.today()
 
         for med in medications.entry:
             # print(med)
             referenced_med = index[med.item.reference]
             effective_period = getattr(referenced_med, "effectivePeriod", None)
             effective_end = getattr(effective_period, "end", None)
-            effective_end_date = None
-
-            # ensure is the correct type for comparison
-            if effective_end is not None:
-                if isinstance(effective_end, datetime.datetime):
-                    effective_end_date = effective_end.date()
-                elif isinstance(effective_end, datetime.date):
-                    effective_end_date = effective_end
-                else:
-                    # consider just enforcing this route
-                    effective_end_iso = getattr(effective_end, "isostring", effective_end)
-                    effective_end_date = datetime.date.fromisoformat(str(effective_end_iso)[:10])
-            # print(referenced_med)
             # status active or end date in the future
             if referenced_med.status == "active":
                 active.append(med)
-            elif (
-                referenced_med.status == "completed"
-                and effective_end_date is not None
-                and effective_end_date > datetime.date.today()
-            ):
+            elif referenced_med.status == "completed" and fhir_date_is_after(effective_end, today):
                 active.append(med)
                 future_meds += 1
             else:
