@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh the 13 allergy test-pack fixtures through the audited GP Connect path."""
+"""Refresh clinical test-pack fixtures through the audited GP Connect path."""
 
 import argparse
 import asyncio
@@ -12,26 +12,50 @@ from tempfile import NamedTemporaryFile, TemporaryDirectory
 from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
-FIXTURES = ROOT / "app/tests/fixtures/bundles/allergies"
+BUNDLE_ROOT = ROOT / "app/tests/fixtures/bundles"
+MANIFEST = Path(__file__).with_name("test_pack_patients.json")
+DOMAIN_TITLES = {
+    "allergies": "Allergies and adverse reactions",
+    "medication": "Medications and medical devices",
+    "investigations": "Investigations and results",
+    "immunisations": "Immunisations",
+    "problems": "Problems",
+}
+DOMAINS = (*DOMAIN_TITLES, "uncategorised", "additional")
+# Preserve imports used by the original allergy refresh tests and tooling.
+FIXTURES = BUNDLE_ROOT / "allergies"
 PATIENTS = {
-    "9738345251": "EMIS",
-    "9738345367": "EMIS",
-    "9738345286": "EMIS",
-    "9738345510": "EMIS",
-    "9738345308": "EMIS",
-    "9738345316": "EMIS",
-    "9738345278": "TPP",
-    "9738345375": "TPP",
-    "9738345324": "TPP",
-    "9738345529": "TPP",
-    "9738345340": "TPP",
-    "9738345359": "TPP",
-    "9738345405": "TPP",
+    p["nhs_number"]: p["supplier"] for p in json.loads(MANIFEST.read_text())["patients"] if p["domain"] == "allergies"
 }
 
 
-def validate_bundle(payload: bytes, nhs_number: str) -> None:
-    """Require a parseable FHIR bundle for the requested patient with an allergy list."""
+def select_patients(manifest: dict, domains: list[str], supplier: str | None = None) -> list[dict]:
+    """Select unique domain/patient requests from the reviewed spreadsheet manifest."""
+    selected = {}
+    for patient in manifest["patients"]:
+        if patient["domain"] in domains and (supplier is None or patient["supplier"] == supplier):
+            selected[(patient["domain"], patient["nhs_number"])] = patient
+    return list(selected.values())
+
+
+def configure_domain(domain: str) -> dict:
+    """Select the request and conversion domains together for a sequential refresh.
+
+    Additional tests span clinical domains, so request all supported domains.
+    Uncategorised data has no request/converter support in the application yet.
+    """
+    if domain == "uncategorised":
+        raise ValueError("Uncategorised data is not supported by the current GP Connect request configuration")
+    inclusions = {}
+    for name in DOMAIN_TITLES:
+        enabled = domain in (name, "additional")
+        os.environ[f"GP_CONNECT_INCLUDE_{name.upper()}"] = str(enabled).lower()
+        inclusions[f"include_{name}"] = enabled
+    return inclusions
+
+
+def validate_bundle(payload: bytes, nhs_number: str, domain: str = "allergies") -> None:
+    """Require a parseable FHIR bundle for the requested patient with the requested domain list."""
     from fhirclient.models.bundle import Bundle
 
     data = json.loads(payload)
@@ -44,10 +68,10 @@ def validate_bundle(payload: bytes, nhs_number: str) -> None:
         for i in patients[0].get("identifier", [])
     ):
         raise ValueError("Response patient does not match the requested NHS number")
-    if not any(
-        r.get("resourceType") == "List" and r.get("title") == "Allergies and adverse reactions" for r in resources
-    ):
-        raise ValueError("Response does not contain an allergy list")
+    expected = set(DOMAIN_TITLES.values()) if domain == "additional" else {DOMAIN_TITLES[domain]}
+    actual = {r.get("title") for r in resources if r.get("resourceType") == "List"}
+    if not expected.issubset(actual):
+        raise ValueError("Response is missing a requested domain list")
     # Mirror the GP Connect parser's handling of a standalone comments entry,
     # without changing the original bytes saved in the fixture.
     for index, entry in enumerate(data.get("entry", [])):
@@ -61,6 +85,7 @@ def replace_fixture(destination: Path, payload: bytes) -> None:
     """Atomically replace a fixture using a temporary file on the same filesystem."""
     temporary = None
     try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
         with NamedTemporaryFile(dir=destination.parent, prefix=f".{destination.name}.", delete=False) as stream:
             temporary = Path(stream.name)
             stream.write(payload)
@@ -70,31 +95,32 @@ def replace_fixture(destination: Path, payload: bytes) -> None:
             temporary.unlink(missing_ok=True)
 
 
-async def refresh_fixture(nhs_number, fetch, request, saml, destination, timeout=120):
+async def refresh_fixture(nhs_number, fetch, request, saml, destination, timeout=120, domain="allergies"):
     """Save the raw response only after the audited request and conversion succeed.
 
     The shared GP Connect implementation logs response bodies before converting
     them. Its request headers and other temporary logs are removed on exit.
     A failed request, conversion, audit or validation leaves the fixture intact.
     """
-    with TemporaryDirectory(prefix="xhuma-allergy-refresh-") as logs:
+    with TemporaryDirectory(prefix="xhuma-fixture-refresh-") as logs:
         response = await asyncio.wait_for(fetch(int(nhs_number), saml, log_dir=logs, request=request), timeout=timeout)
         result = json.loads(response.body)
         if response.status_code != 200 or result.get("success") is not True:
             raise RuntimeError(f"GP Connect failed (HTTP {response.status_code}); fixture retained")
         payload = (Path(logs) / "200_response.json").read_bytes()
-        validate_bundle(payload, nhs_number)
+        validate_bundle(payload, nhs_number, domain)
         replace_fixture(destination, payload)
 
 
-async def refresh_all(subject: str) -> int:
-    """Request each fixed integration-test patient with normal audit persistence."""
+async def refresh_all(subject: str, patients: list[dict], output_dir: Path = BUNDLE_ROOT) -> int:
+    """Request each selected integration-test patient with normal audit persistence."""
     from fastapi import FastAPI, Request
 
+    from app import gpconnect
     from app.audit.models import SAMLAttributes
     from app.ccda.models.datatypes import CD
     from app.db import make_engine, make_sessionmaker
-    from app.gpconnect import _fetch_gpconnect_record
+    from app.gp_connect_config import build_gp_connect_parameters
 
     engine = make_engine()
     app = FastAPI()
@@ -103,7 +129,17 @@ async def refresh_all(subject: str) -> int:
     app.state.jwk_json = {"kid": os.environ["KID"]}
     failures = 0
     try:
-        for nhs_number, vendor in PATIENTS.items():
+        for patient in patients:
+            nhs_number, vendor, domain = patient["nhs_number"], patient["supplier"], patient["domain"]
+            if domain == "uncategorised":
+                failures += 1
+                print(
+                    "SKIPPED uncategorised: application request/converter support is not implemented", file=sys.stderr
+                )
+                continue
+            # GP Connect imports these parameters once; update its local reference
+            # as well as the conversion flags. Requests are deliberately sequential.
+            gpconnect.GP_CONNECT_PARAMETERS = build_gp_connect_parameters(configure_domain(domain))
             request = Request(
                 {
                     "type": "http",
@@ -118,7 +154,7 @@ async def refresh_all(subject: str) -> int:
                 }
             )
             saml = SAMLAttributes(
-                subject_id=f"{subject} (allergy fixture refresh)",
+                subject_id=f"{subject} ({domain} fixture refresh)",
                 organization="UCLH - University College London Hospitals - TST",
                 organization_id="urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
                 home_community_id="urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
@@ -131,10 +167,15 @@ async def refresh_all(subject: str) -> int:
                 purpose_of_use=CD(code="TREATMENT", codeSystem="2.16.840.1.113883.3.18.7.1"),
                 resource_id=nhs_number,
             )
-            print(f"Requesting {vendor} {nhs_number}", flush=True)
+            print(f"Requesting {domain} {vendor} {nhs_number}", flush=True)
             try:
                 await refresh_fixture(
-                    nhs_number, _fetch_gpconnect_record, request, saml, FIXTURES / f"{nhs_number}.json"
+                    nhs_number,
+                    gpconnect._fetch_gpconnect_record,
+                    request,
+                    saml,
+                    output_dir / domain / f"{nhs_number}.json",
+                    domain=domain,
                 )
             except Exception as exc:
                 failures += 1
@@ -143,16 +184,49 @@ async def refresh_all(subject: str) -> int:
                 print(f"Updated {nhs_number}.json", flush=True)
     finally:
         await engine.dispose()
-    print(f"Updated {len(PATIENTS) - failures}/{len(PATIENTS)} fixtures; {failures} failed.")
+    print(f"Updated {len(patients) - failures}/{len(patients)} fixtures; {failures} failed.")
     return 1 if failures else 0
 
 
 def main() -> int:
-    """Load local credentials and run an integration-only, active-allergy refresh."""
+    """Select spreadsheet patients and run an integration-only audited refresh."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--org-asid", help="Requesting ASID; otherwise use ORG_ASID from the environment/.env")
     parser.add_argument("--subject", default=getpass.getuser(), help="Audit caller identity (default: local username)")
+    parser.add_argument(
+        "--domain",
+        nargs="+",
+        choices=("all", *DOMAINS),
+        default=["all"],
+        help="Domains to refresh (default: all); additional requests all supported domains",
+    )
+    parser.add_argument("--supplier", choices=("EMIS", "TPP"), help="Limit to one supplier")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="List requests and coverage gaps without credentials or network calls"
+    )
+    parser.add_argument(
+        "--output-dir", type=Path, default=BUNDLE_ROOT, help="Parent directory for domain fixture folders"
+    )
     args = parser.parse_args()
+    domains = list(DOMAINS) if "all" in args.domain else args.domain
+    manifest = json.loads(MANIFEST.read_text())
+    patients = select_patients(manifest, domains, args.supplier)
+    for gap in manifest["gaps"]:
+        if gap["domain"] in domains and (args.supplier is None or gap["supplier"] == args.supplier):
+            print(f"GAP {gap['supplier']} {gap['sheet']}: {gap['reason']}", file=sys.stderr)
+    for domain in domains:
+        count = sum(p["domain"] == domain for p in patients)
+        print(f"{domain}: {count} patient(s)")
+    if args.dry_run:
+        for patient in patients:
+            print(f"{patient['domain']} {patient['supplier']} {patient['nhs_number']}")
+        if "uncategorised" in domains:
+            print("Uncategorised requests are unsupported and will be skipped.")
+        return 0
+    if not patients:
+        print("No identified patients to refresh for this selection.", file=sys.stderr)
+        return 1
+    output_dir = args.output_dir.resolve()
 
     from dotenv import load_dotenv
 
@@ -166,13 +240,10 @@ def main() -> int:
     # are calculated at import time. This script always uses direct integration TLS.
     os.environ["ENV"] = "int"
     os.environ["USE_RELAY"] = "false"
-    os.environ["GP_CONNECT_INCLUDE_ALLERGIES"] = "true"
-    for domain in ("MEDICATION", "PROBLEMS", "INVESTIGATIONS", "IMMUNISATIONS"):
-        os.environ[f"GP_CONNECT_INCLUDE_{domain}"] = "false"
     sys.path.insert(0, str(ROOT))
     os.chdir(ROOT)  # Existing signing-key and TLS-certificate paths are relative.
     os.umask(0o077)
-    return asyncio.run(refresh_all(args.subject))
+    return asyncio.run(refresh_all(args.subject, patients, output_dir))
 
 
 if __name__ == "__main__":
