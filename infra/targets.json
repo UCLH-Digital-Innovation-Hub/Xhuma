@@ -19,6 +19,26 @@
       "runner_label": "ubuntu-latest",
       "owner": "platform-team",
       "support_route": "slack-channel-play"
+    },
+    {
+      "id": "int",
+      "stage": "int",
+      "source_branch": "int",
+      "enabled": true,
+      "hold": false,
+      "rollout_ring": 0,
+      "github_environment": "rg-xhuma-int",
+      "github_infra_environment": "rg-xhuma-int-infra",
+
+      "resource_group": "rg-xhuma-int",
+      "location": "uksouth",
+      "app_service_name": "xhuma-app-int",
+      "tfvars_file": "infra/env/int.tfvars",
+      "backend_file": "infra/backends/int.hcl",
+      "runner_label": "ubuntu-latest",
+      "require_existing_state": true,
+      "owner": "TBC",
+      "support_route": "TBC"
     }
   ]
 }

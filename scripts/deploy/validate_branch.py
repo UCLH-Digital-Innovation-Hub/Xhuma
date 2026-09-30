@@ -12,17 +12,17 @@ def main():
     base_ref = sys.argv[4] if len(sys.argv) > 4 else ""
 
     if workflow_type == "cd":
-        if ref not in ["refs/heads/int", "refs/heads/main"]:
+        if ref not in ["refs/heads/main"]:
             print(f"::error::Unsupported branch for CD pipeline: {ref}")
             sys.exit(1)
 
     elif workflow_type == "infra":
         if event_name in ["push", "workflow_dispatch"]:
-            if ref not in ["refs/heads/int", "refs/heads/main"]:
+            if ref not in ["refs/heads/main"]:
                 print(f"::error::Unsupported branch for push/dispatch in infra pipeline: {ref}")
                 sys.exit(1)
         elif event_name == "pull_request":
-            if base_ref not in ["int", "main"]:
+            if base_ref not in ["main"]:
                 print(f"::error::Unsupported base branch for PR in infra pipeline: {base_ref}")
                 sys.exit(1)
         else:
