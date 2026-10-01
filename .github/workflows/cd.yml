@@ -2,7 +2,7 @@ name: CD
 
 on:
   push:
-    branches: [ int, main ]
+    branches: [ dev, int, main ]
   workflow_dispatch:
 
 env:
@@ -13,7 +13,7 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || 'rg-xhuma-int' }}
+      name: ${{ github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/dev' && 'rg-xhuma-uclh-play' || 'rg-xhuma-int' }}
     permissions:
       contents: read
       packages: write
@@ -67,6 +67,6 @@ jobs:
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v2
         with:
-          app-name: ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || 'xhuma-app-int' }}
+          app-name: ${{ github.ref == 'refs/heads/main' && 'xhuma-app-prd' || github.ref == 'refs/heads/dev' && 'xhuma-app-play' || 'xhuma-app-int' }}
           images: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}'
           # Service principal login configured by azure/login above
