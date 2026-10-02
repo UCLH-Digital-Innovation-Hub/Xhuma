@@ -9,8 +9,9 @@ The service implements a stateless architecture with Redis caching and supports 
 profiles for healthcare interoperability.
 """
 
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from uuid import uuid4
 
 from fastapi import FastAPI, Form, Request
@@ -41,12 +42,13 @@ from .audit.db_models import AuditEventRow
 from .audit.models import _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
 from .middleware.mtls import MTLSMiddleware
-from .redis_connect import redis_client
+from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
 from .security import verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
+from .telemetry import monitor_event_loop
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
@@ -85,71 +87,78 @@ async def lifespan(app: FastAPI):
     except (ValueError, OverflowError) as e:
         raise RuntimeError(f"Invalid CCDA_EXPIRY_HOURS configuration: {e}")
 
-    # Initialize Postgres connection pool
-    engine = make_engine()
-    SessionLocal = make_sessionmaker(engine)
+    async with AsyncExitStack() as resources:
+        # Initialize Postgres connection pool
+        engine = make_engine()
+        resources.push_async_callback(engine.dispose)
+        resources.push_async_callback(redis_client.close)
+        resources.push_async_callback(snomed_client.close)
+        SessionLocal = make_sessionmaker(engine)
 
-    app.state.engine = engine
-    app.state.SessionLocal = SessionLocal
+        app.state.engine = engine
+        app.state.SessionLocal = SessionLocal
 
-    # Store registry ID in Redis with 24 hour expiry
-    try:
-        redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
-    except Exception as e:
-        print(f"Warning: Failed to connect to Redis during startup: {e}")
-
-    # Handle JWK generation/verification securely entirely in-memory
-    jwt_key = os.getenv("JWTKEY")
-    app.state.jwk_json = {}
-
-    if jwt_key:
+        # Store registry ID in Redis with 24 hour expiry
         try:
-            # Reformat env var newlines safely and convert to JWK
-            from app.security import fix_pem_formatting
-
-            private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
-            public_jwk = jwk.JWK.from_pem(private_pem)
-            jwk_dict = public_jwk.export_public(as_dict=True)
-            jwk_dict["alg"] = "RS512"
-            jwk_dict["use"] = "sig"
-            app.state.jwk_json = jwk_dict
+            await redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
         except Exception as e:
-            print(f"Warning: Failed to load JWTKEY from environment: {e}")
-    elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
-        # Local development fallback
-        print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
-        with open("keys/test-1.pem", "rb") as pemfile:
-            private_pem = pemfile.read()
-            public_jwk = jwk.JWK.from_pem(data=private_pem)
-            jwk_dict = public_jwk.export_public(as_dict=True)
-            jwk_dict["alg"] = "RS512"
-            jwk_dict["use"] = "sig"
-            app.state.jwk_json = jwk_dict
-    else:
-        print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
+            print(f"Warning: Failed to connect to Redis during startup: {e}")
 
-    # Set up OpenTelemetry metrics
-    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
-    metric_exporter = OTLPMetricExporter(
-        endpoint=otlp_endpoint.replace("http://", "").replace("https://", ""),
-        insecure=True,
-    )
+        # Handle JWK generation/verification securely entirely in-memory
+        jwt_key = os.getenv("JWTKEY")
+        app.state.jwk_json = {}
 
-    reader = PeriodicExportingMetricReader(
-        exporter=metric_exporter,
-        export_interval_millis=int(os.getenv("OTEL_METRIC_EXPORT_INTERVAL_MS", "5000")),
-    )
-    meter_provider = MeterProvider(metric_readers=[reader])
-    metrics.set_meter_provider(meter_provider)
+        if jwt_key:
+            try:
+                # Reformat env var newlines safely and convert to JWK
+                from app.security import fix_pem_formatting
 
-    # meter = metrics.get_meter("xhuma.business", "1.0.0")
-    # app.state.metrics = build_business_metrics(meter)
-    try:
-        yield
-    finally:
-        # --- Shutdown logic ---
-        # meter_provider.shutdown()
-        await engine.dispose()
+                private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
+                public_jwk = jwk.JWK.from_pem(private_pem)
+                jwk_dict = public_jwk.export_public(as_dict=True)
+                jwk_dict["alg"] = "RS512"
+                jwk_dict["use"] = "sig"
+                app.state.jwk_json = jwk_dict
+            except Exception as e:
+                print(f"Warning: Failed to load JWTKEY from environment: {e}")
+        elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
+            # Local development fallback
+            print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
+            with open("keys/test-1.pem", "rb") as pemfile:
+                private_pem = pemfile.read()
+                public_jwk = jwk.JWK.from_pem(data=private_pem)
+                jwk_dict = public_jwk.export_public(as_dict=True)
+                jwk_dict["alg"] = "RS512"
+                jwk_dict["use"] = "sig"
+                app.state.jwk_json = jwk_dict
+        else:
+            print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
+
+        # Set up OpenTelemetry metrics
+        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+        metric_exporter = OTLPMetricExporter(
+            endpoint=otlp_endpoint.replace("http://", "").replace("https://", ""),
+            insecure=True,
+        )
+
+        reader = PeriodicExportingMetricReader(
+            exporter=metric_exporter,
+            export_interval_millis=int(os.getenv("OTEL_METRIC_EXPORT_INTERVAL_MS", "5000")),
+        )
+        meter_provider = MeterProvider(metric_readers=[reader])
+        metrics.set_meter_provider(meter_provider)
+
+        # meter = metrics.get_meter("xhuma.business", "1.0.0")
+        # app.state.metrics = build_business_metrics(meter)
+        loop_monitor = asyncio.create_task(monitor_event_loop())
+        try:
+            yield
+        finally:
+            loop_monitor.cancel()
+            with suppress(asyncio.CancelledError):
+                await loop_monitor
+            # --- Shutdown logic ---
+            # meter_provider.shutdown()
 
 
 # Initialize FastAPI application

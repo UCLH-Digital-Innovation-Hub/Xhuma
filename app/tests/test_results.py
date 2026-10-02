@@ -85,7 +85,7 @@ async def test_glucose_tolerance_report_keeps_category_and_comment_rows(
 
 
 @pytest.mark.asyncio
-async def test_fbc_report_flags_out_of_range_values(investigation_reports):
+async def test_fbc_report_preserves_interpretation_without_inventing_range_units(investigation_reports):
     reports, bundle_index = investigation_reports
     fbc_report = next(report for report in reports if report.id == "c200000000000000_6437000000000000")
 
@@ -95,8 +95,8 @@ async def test_fbc_report_flags_out_of_range_values(investigation_reports):
 
     assert processed_report.table["caption"] == ("FBC - full blood count 2024-01-20 10:46:00+00:00")
     assert len(processed_report.organizer["component"]) == 14  # Retain the unlinked heading as well.
-    assert platelet_row["td"][1] == {"content": {"@styleCode": "flagData", "#text": "497 10^9/L"}}
-    assert platelet_row["td"][2] == {"#text": "150 - 450 10^9/L"}
+    assert platelet_row["td"][1] == "497 10^9/L"  # Source range boundaries have no units.
+    assert platelet_row["td"][2] == {"#text": "150 – 450"}
     assert "Above high reference limit" in platelet_row["td"][3]["content"]["content"][0]["#text"]
 
 

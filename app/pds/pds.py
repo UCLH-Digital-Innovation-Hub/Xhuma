@@ -15,6 +15,7 @@ from app.audit.models import AuditOutcome, SAMLAttributes
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
 from app.security import pds_jwt
+from app.telemetry import measure, record_cache
 
 BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
@@ -55,7 +56,10 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         raise ValueError("Missing SAML attributes: Clinical lookup cannot continue unaudited.")
 
     cache_key = pds_cache_key(nhsno)
-    cached_patient = redis_client.get(cache_key)
+    with measure("pds.cache.read") as span:
+        cached_patient = await redis_client.get(cache_key)
+        span.set_attribute("cache.hit", bool(cached_patient))
+    record_cache("pds", bool(cached_patient))
     if cached_patient:
         logging.info("Cache hit for PDS patient query")
         if isinstance(cached_patient, bytes):
@@ -79,7 +83,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
     logging.info("Cache miss for PDS patient query. Fetching from PDS API.")
 
-    def get_pds_token(kid: str):
+    async def get_pds_token(kid: str):
         full_path = f"{BASE_PATH}oauth2/token"
         jwt_token = pds_jwt(API_KEY, API_KEY, full_path, kid)
         # print(f"jwt_token: {jwt_token}")
@@ -89,7 +93,8 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
             "client_assertion": jwt_token,
         }
-        r = httpx.post(full_path, data=oauth_params)
+        async with httpx.AsyncClient() as client:
+            r = await client.post(full_path, data=oauth_params)
 
         response_dict = json.loads(r.text)
         if "access_token" not in response_dict:
@@ -100,23 +105,24 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
         nhs_token = response_dict["access_token"]
 
-        redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
+        await redis_client.setex("access_token", response_dict["expires_in"], nhs_token)
         return nhs_token
 
     # if nhs token expired or not request, get one and cache
 
     try:
-        if not redis_client.exists("access_token"):
+        cached_token = await redis_client.get("access_token")
+        if not cached_token:
             logging.info("NHS token expired or not found, getting new one")
             # Extract dynamically generated Key ID, fallback to 'test-1'
             kid = "test-1"
             if request and hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
                 kid = request.app.state.jwk_json.get("kid", "test-1")
 
-            nhs_token = get_pds_token(kid)
+            nhs_token = await get_pds_token(kid)
         else:
             logging.info("NHS token found in cache")
-            nhs_token = redis_client.get("access_token").decode("utf-8")
+            nhs_token = cached_token.decode("utf-8") if isinstance(cached_token, bytes) else cached_token
     except AuditFailureException:
         raise
     except Exception as e:
@@ -175,7 +181,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         detail={"cache_hit": False, "status_code": r.status_code},
     )
 
-    redis_client.setex(cache_key, PDS_CACHE_HOURS * 60 * 60, json.dumps(patient_dict))
+    await redis_client.setex(cache_key, PDS_CACHE_HOURS * 60 * 60, json.dumps(patient_dict))
     return patient_dict
 
 
@@ -193,7 +199,10 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     """
     partykey = kwargs.get("mhsparty")
     cache_key = sds_cache_key(ods, endpoint, partykey)
-    cached_trace = redis_client.get(cache_key)
+    with measure("sds.cache.read") as span:
+        cached_trace = await redis_client.get(cache_key)
+        span.set_attribute("cache.hit", bool(cached_trace))
+    record_cache("sds", bool(cached_trace))
     if cached_trace:
         logging.info("Cache hit for SDS query %s", cache_key)
         if isinstance(cached_trace, bytes):
@@ -233,12 +242,13 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
         "accept": "application/fhir+json",
         "apikey": api_key,
     }
-    r = httpx.get(url, headers=headers, params=parameters)
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url, headers=headers, params=parameters)
     if r.status_code != 200:
         raise Exception(f"{r.status_code}: {r.text}")
 
     trace = json.loads(r.text)
-    redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
+    await redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
     return trace
 
 

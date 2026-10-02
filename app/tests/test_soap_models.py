@@ -212,7 +212,7 @@ async def test_iti55_response_with_pds_fixture(fixture_name, given, family, gp_c
 
 @pytest.mark.asyncio
 async def test_iti38_response_preserves_registry_metadata_shape(monkeypatch):
-    monkeypatch.setattr(iti_38.redis_client, "get", lambda _: b"document-id")
+    monkeypatch.setattr(iti_38.redis_client, "get", AsyncMock(return_value=b"document-id"))
     monkeypatch.setattr(iti_38, "attempt_audit", AsyncMock())
 
     xml = await responses.iti_38_response(

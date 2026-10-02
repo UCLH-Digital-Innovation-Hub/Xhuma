@@ -2,6 +2,7 @@ from typing import Any
 
 from app.audit.models import SAMLAttributes
 from app.ccda.models.datatypes import CD  # adjust path
+from app.telemetry import measure
 
 
 def process_saml_attributes(saml_header: dict) -> SAMLAttributes:
@@ -86,22 +87,23 @@ async def attempt_audit(
         raise AuditFailureException("Audit persistence context missing")
 
     try:
-        async with SessionLocal() as session:
-            ev = await build_audit_event(
-                request=request,
-                session=session,
-                nhs_number=nhs_number,
-                saml=saml,
-                action=action,
-                outcome=outcome,
-                error_code=error_code,
-                detail=detail,
-                message_id=message_id,
-                document_id=document_id,
-                request_id=request_id,
-            )
-            await insert_audit_event(session, ev)
-            await session.commit()
+        with measure("audit.persist"):
+            async with SessionLocal() as session:
+                ev = await build_audit_event(
+                    request=request,
+                    session=session,
+                    nhs_number=nhs_number,
+                    saml=saml,
+                    action=action,
+                    outcome=outcome,
+                    error_code=error_code,
+                    detail=detail,
+                    message_id=message_id,
+                    document_id=document_id,
+                    request_id=request_id,
+                )
+                await insert_audit_event(session, ev)
+                await session.commit()
     except Exception:
         # Do not log raw database exceptions containing SQL parameters.
         logging.error("AuditFailure: Database persistence failed")

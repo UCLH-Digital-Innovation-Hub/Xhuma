@@ -391,6 +391,9 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                             # substance_administration.routeCode.translation = (
                             #     route_translation
                             # )
+                            # add a warning note about the route being automatically mapped
+                            warning_text = f'Xhuma: Route automatically mapped to {dmd_data.route.displayName} from "Take" via dm+d lookup'
+                            misc_notes.append(warning_text)
 
             except Exception as e:
                 logging.error(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")

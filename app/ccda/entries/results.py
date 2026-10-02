@@ -5,6 +5,8 @@ from fhirclient.models import diagnosticreport as dr
 from fhirclient.models import observation as obs
 from fhirclient.models.specimen import Specimen
 
+from app.telemetry import measure
+
 from ..helpers import (
     cda_time_interval,
     code_with_translations,
@@ -12,8 +14,15 @@ from ..helpers import (
 )
 from ..models.base import ResultObservation, ResultsOrganizer
 from ..models.datatypes import CD, CS, II, IVL_TS
-from .investigation_grouping import group_investigation, has_result_value, is_filing_comment, observation_label
+from .investigation_grouping import (
+    InvestigationGraph,
+    group_investigation,
+    has_result_value,
+    is_filing_comment,
+    observation_label,
+)
 from .result_context import cda_specimen, organizer_collection_time, report_issue_time, report_specimens
+from .result_ranges import outside_reference_range, reference_range
 from .result_values import map_result_value
 from .types import EntryWithRow
 
@@ -199,17 +208,8 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
     result_component.value = mapped_value.value
     table_row.cells[1] = mapped_value.text
 
-    # Keep the existing numeric abnormal emphasis, without comparing absent
-    # quantities or attempting to interpret comparator/text values numerically.
-    quantity = observation.valueQuantity
-    if quantity and quantity.value is not None and not quantity.comparator:
-        outside_reference_range = any(
-            (r.low is not None and r.low.value is not None and quantity.value < r.low.value)
-            or (r.high is not None and r.high.value is not None and quantity.value > r.high.value)
-            for r in observation.referenceRange or []
-        )
-        if outside_reference_range:
-            table_row.cells[1] = {"content": {"@styleCode": "flagData", "#text": mapped_value.text}}
+    if outside_reference_range(observation):
+        table_row.cells[1] = {"content": {"@styleCode": "flagData", "#text": mapped_value.text}}
 
     if observation.comment:
         result_component.text = observation.comment
@@ -234,64 +234,17 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
     if hasattr(observation, "interpretation") and observation.interpretation:
         result_component.interpretationCode = code_with_translations(observation.interpretation.coding)
 
-    # reference range
     if observation.referenceRange:
-        observation_ranges = []
-        unit = observation.valueQuantity.unit if observation.valueQuantity else None
-
-        for reference_range in observation.referenceRange:
-            if getattr(reference_range, "text", None):
-                observation_ranges.append({"text": reference_range.text})
-
-            low = getattr(reference_range, "low", None)
-            high = getattr(reference_range, "high", None)
-            if low or high:
-                range_value = {"@xsi:type": "IVL_PQ"}
-                if low:
-                    range_value["low"] = {
-                        "@value": low.value,
-                        "@unit": unit,
-                    }
-                if high:
-                    range_value["high"] = {
-                        "@value": high.value,
-                        "@unit": unit,
-                    }
-                observation_ranges.append({"value": range_value})
-
-        if observation_ranges:
-            # TODO: Emit separate referenceRange wrappers with exactly one
-            # observationRange each (CONF:1198-7151), and supply a value for
-            # text-only ranges (CONF:1198-32175).
-            # TODO: Construct list[ReferenceRange] with ObservationRange models;
-            # test_results emits Pydantic serializer warnings for this dict assignment.
-            result_component.referenceRange = {"observationRange": observation_ranges}
-
-            # create string with each reference range on a new line
-            reference_range_str = "\n".join(
-                [
-                    (
-                        f"{r['text']}"
-                        if "text" in r
-                        else (
-                            f"{r['value']['low']['@value']} - {r['value']['high']['@value']} {unit}"
-                            if "low" in r["value"] and "high" in r["value"]
-                            else (
-                                f">= {r['value']['low']['@value']} {unit}"
-                                if "low" in r["value"]
-                                else f"<= {r['value']['high']['@value']} {unit}"
-                            )
-                        )
-                    )
-                    for r in observation_ranges
-                ]
-            )
-            table_row.cells[2] = {"#text": reference_range_str}
+        mapped_ranges = [reference_range(r) for r in observation.referenceRange]
+        result_component.referenceRange = [model for model, _ in mapped_ranges]
+        table_row.cells[2] = {"#text": "\n".join(text for _, text in mapped_ranges if text)}
 
     return ResultWithRow(entry=result_component, row=table_row)
 
 
-async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> InvestigationWithTable:
+async def investigation(
+    diagnostic_report: dr.DiagnosticReport, index: dict, graph: InvestigationGraph | None = None
+) -> InvestigationWithTable:
     """Render one report with explicit groups and locally associated filing comments."""
 
     observations: list[obs.Observation] = (
@@ -346,100 +299,104 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
         specimen=[cda_specimen(s) for s in report_specimens(diagnostic_report, index)] or None,
     )
 
-    grouping = group_investigation(diagnostic_report, index)
-    table_rows = []
-    components = []
-    emitted = set()
+    with measure("investigations.group") as span:
+        grouping = group_investigation(diagnostic_report, graph if graph is not None else index)
+        span.set_attribute("report.observations", len(grouping.observations))
+        span.set_attribute("report.grouping_issues", len(grouping.issues))
+    with measure("investigations.render"):
+        table_rows = []
+        components = []
+        emitted = set()
 
-    def narrative_row(text):
-        """Place a heading or annotation across the existing four columns."""
-        table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "#text": text}]))
+        def narrative_row(text):
+            """Place a heading or annotation across the existing four columns."""
+            table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "#text": text}]))
 
-    async def render(reference, path=()):
-        """Render each assertion once while retaining shared group associations."""
-        observation = grouping.observations[reference]
-        if reference in path:
-            grouping.issues.append(f"Cyclic test grouping at {reference}")
-            narrative_row(f"Grouping could not be resolved for: {observation_label(observation)}")
-            return
-        if reference in emitted:
-            narrative_row(f"Also associated: {observation_label(observation)} (shown above)")
-            return
-        emitted.add(reference)
-        if is_filing_comment(observation):
-            narrative_row(f"Filing comments: {observation_label(observation)}")
-            if observation.valueString is not None:
-                narrative_row(observation.valueString)
-            if observation.comment is not None:
-                narrative_row(observation.comment)
-            return
+        async def render(reference, path=()):
+            """Render each assertion once while retaining shared group associations."""
+            observation = grouping.observations[reference]
+            if reference in path:
+                grouping.issues.append(f"Cyclic test grouping at {reference}")
+                narrative_row(f"Grouping could not be resolved for: {observation_label(observation)}")
+                return
+            if reference in emitted:
+                narrative_row(f"Also associated: {observation_label(observation)} (shown above)")
+                return
+            emitted.add(reference)
+            if is_filing_comment(observation):
+                narrative_row(f"Filing comments: {observation_label(observation)}")
+                if observation.valueString is not None:
+                    narrative_row(observation.valueString)
+                if observation.comment is not None:
+                    narrative_row(observation.comment)
+                return
 
-        members = grouping.members.get(reference, [])
-        has_value = has_result_value(observation)
-        if members:
-            narrative_row(f"Test group: {observation_label(observation)}")
-            if not has_value and observation.comment:
-                narrative_row(observation.comment)
-            if not has_value and observation.interpretation:
-                interpretation = observation.interpretation
-                text = interpretation.text or "; ".join(c.display or c.code or "" for c in interpretation.coding or [])
-                narrative_row(f"Group interpretation: {text}")
+            members = grouping.members.get(reference, [])
+            has_value = has_result_value(observation)
+            if members:
+                narrative_row(f"Test group: {observation_label(observation)}")
+                if not has_value and observation.comment:
+                    narrative_row(observation.comment)
+                if not has_value and observation.interpretation:
+                    interpretation = observation.interpretation
+                    text = interpretation.text or "; ".join(
+                        c.display or c.code or "" for c in interpretation.coding or []
+                    )
+                    narrative_row(f"Group interpretation: {text}")
 
-        # Only explicit membership makes a group. String-valued and narrative-
-        # only standalone observations remain results. Keep unexpected values
-        # on groups too, using the existing serializer without changing mapping.
-        if not members or has_value:
-            converted = await create_result_component(observation, report_issued_time)
-            components.append({"observation": converted.entry})
-            table_rows.append(converted.row)
-        for comment in grouping.comments.get(reference, []):
-            await render(comment, path + (reference,))
-        for member in members:
-            await render(member, path + (reference,))
+            # Only explicit membership makes a group. String-valued and narrative-
+            # only standalone observations remain results. Keep unexpected values
+            # on groups too, using the existing serializer without changing mapping.
+            if not members or has_value:
+                converted = await create_result_component(observation, report_issued_time)
+                components.append({"observation": converted.entry})
+                table_rows.append(converted.row)
+            for comment in grouping.comments.get(reference, []):
+                await render(comment, path + (reference,))
+            for member in members:
+                await render(member, path + (reference,))
 
-    for reference, observation in grouping.observations.items():
-        if reference not in grouping.parents and not is_filing_comment(observation):
+        for reference in grouping.roots:
             await render(reference)
-    for reference in grouping.direct:
-        if is_filing_comment(grouping.observations[reference]) and reference not in grouping.attached_comments:
+        for reference in grouping.report_comments:
             narrative_row("Report-level filing")
             await render(reference)
-    # Cyclic and otherwise unplaced items must not disappear from the report.
-    for reference in grouping.observations:
-        if reference not in emitted:
-            narrative_row("Unplaced source item")
-            await render(reference)
-    if grouping.issues:
-        narrative_row("Some investigation relationships could not be resolved; available results are shown.")
-        for issue in grouping.issues:
-            logger.warning("Investigation %s: %s", diagnostic_report.id, issue)
-    organizer.component = components
-    if category_observation:
-        organizer.component.append({"observation": category_observation})
+        # Cyclic and otherwise unplaced items must not disappear from the report.
+        for reference in grouping.observations:
+            if reference not in emitted:
+                narrative_row("Unplaced source item")
+                await render(reference)
+        if grouping.issues:
+            narrative_row("Some investigation relationships could not be resolved; available results are shown.")
+            for issue in grouping.issues:
+                logger.warning("Investigation %s: %s", diagnostic_report.id, issue)
+        organizer.component = components
+        if category_observation:
+            organizer.component.append({"observation": category_observation})
 
-    result_table = ResultTable(
-        title=f"{test_title} {diagnostic_report.issued.date if diagnostic_report.issued else 'Issue time not supplied'}",
-        headers=["Component", "Value", "Reference Range", "Comments"],
-        rows=table_rows,
-    )
+        result_table = ResultTable(
+            title=f"{test_title} {diagnostic_report.issued.date if diagnostic_report.issued else 'Issue time not supplied'}",
+            headers=["Component", "Value", "Reference Range", "Comments"],
+            rows=table_rows,
+        )
 
-    table = create_xml_table(result_table)
-    if diagnostic_report.conclusion:
-        # Report conclusions belong to the whole report, not to an invented
-        # analyte or one particular test group. Place them before the tables.
-        table = {
-            "caption": table["caption"],
-            "paragraph": [
-                {"content": {"@styleCode": "Bold", "#text": "Report conclusion"}},
-                diagnostic_report.conclusion,
-            ],
-            "table": table["table"],
-        }
-    specimen_table = specimen_notes_table(diagnostic_report, index)
-    if specimen_table:
-        table["table"].append(specimen_table)
+        table = create_xml_table(result_table)
+        if diagnostic_report.conclusion:
+            # Report conclusions belong to the whole report, not to an invented
+            # analyte or one particular test group. Place them before the tables.
+            table = {
+                "caption": table["caption"],
+                "paragraph": [
+                    {"content": {"@styleCode": "Bold", "#text": "Report conclusion"}},
+                    diagnostic_report.conclusion,
+                ],
+                "table": table["table"],
+            }
+        specimen_table = specimen_notes_table(diagnostic_report, index)
+        if specimen_table:
+            table["table"].append(specimen_table)
 
-    return InvestigationWithTable(
-        organizer=organizer.model_dump(by_alias=True, exclude_none=True),
-        table=table,
-    )
+        return InvestigationWithTable(
+            organizer=organizer.model_dump(by_alias=True, exclude_none=True),
+            table=table,
+        )

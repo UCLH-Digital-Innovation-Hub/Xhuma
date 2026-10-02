@@ -20,6 +20,7 @@ from .datatypes import (
     PIVL_TS,
     PQ,
     RTO_PQ_PQ,
+    ST,
     SXCM_TS,
 )
 from .specimen import Specimen
@@ -90,7 +91,7 @@ class ObservationRange(BaseModel):
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN.CRT")
     text: Optional[str] = None
-    value: Optional[Any] = None
+    value: Union[IVL_PQ, ST]
 
 
 class ReferenceRange(BaseModel):

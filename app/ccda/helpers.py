@@ -70,10 +70,8 @@ def code_with_translations(codings: List[coding.Coding]) -> CD:
     if not codings:
         return None
 
-    # sort for SNOMED first
-    # codings.sort(key=lambda x: x.get("system") == "http://snomed.info/sct")
-
-    codings.sort(key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
+    # Prefer SNOMED as the canonical CDA code without reordering the source list.
+    codings = sorted(codings, key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
 
     # Create the CD object
     cd = CD(

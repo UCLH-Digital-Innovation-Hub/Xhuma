@@ -184,7 +184,7 @@ Zero and false count as supplied values when deciding whether a group has conten
 
 The readable CCDA section now shows the detected groups and associated comments. Each source report still produces one CCDA organizer (the structured container for that report). Individual result components remain flat inside it: this change does not introduce nested CDA organizers or claim that Epic will reconstruct every displayed group from structured data alone.
 
-The earlier report-caption and category-selection rules remain for this change. A caption may therefore be less descriptive than the group headings beneath it. Result rows use four fixed columns: component, value, reference range and comments. Headings and annotations span all four columns. Reference-range mappings are unchanged. The date mapping is explained below. Result value mapping is described below. Report conclusions now appear above the report’s results table. Notes from specimens referenced by that report appear in a separate “Specimen notes” table beneath it, labelled with specimen type and identifier where supplied. Multiple notes and their line breaks are retained. These conclusions and specimen notes are narrative additions, not invented test results. The incomplete-record-transfer warning and other previously identified metadata gaps remain separate work.
+The earlier report-caption and category-selection rules remain for this change. A caption may therefore be less descriptive than the group headings beneath it. Result rows use four fixed columns: component, value, reference range and comments. Headings and annotations span all four columns. Reference ranges use typed wrappers with one observation range per source range; source bounds retain their own units. The date mapping is explained below. Result value mapping is described below. Report conclusions now appear above the report’s results table. Notes from specimens referenced by that report appear in a separate “Specimen notes” table beneath it, labelled with specimen type and identifier where supplied. Multiple notes and their line breaks are retained. These conclusions and specimen notes are narrative additions, not invented test results. Provider List.note warnings, including incomplete-record-transfer notices, appear above the investigation reports, including when the list is empty. Other previously identified metadata gaps remain separate work.
 
 The [comparison CCDAs](assurance/evidence/investigation-grouping-comparison/README.md) show the reviewed before-and-after behaviour. The [assessment](assurance/evidence/2026-09-29-investigations-assessment.md) records the original findings and wider converter issues; it is historical evidence rather than a description of the current grouping code.
 
@@ -248,3 +248,116 @@ The organizer time has both a lower and an upper bound. For a single collection 
 Dates retain their supplied precision and timezone. A year-only date stays a year; it is not turned into 1 January. Missing report issue time stays unknown for every component rather than borrowing an individual test's date.
 
 This follows Epic's collection-time interpretation of the organizer. The general [C-CDA Result Organizer definition](https://build.fhir.org/ig/HL7/CDA-ccda-2.1-sd/StructureDefinition-ResultOrganizer.html) describes its effective time as spanning its component observations instead. The model comments make this distinction explicit so that the Epic mapping is not accidentally replaced by a different interpretation.
+
+
+## Reference ranges and malformed responses
+
+Each source reference range has its own structured CDA wrapper. Numeric bounds retain their own units and zero values; absent endpoints are omitted. Text-only ranges have a string value. Source text, range type, population and age qualifiers remain in the range narrative. Units missing from a range are not copied from the measured result. Unrecognised units are retained using the same translation handling as result quantities.
+
+Numeric abnormal highlighting requires one unqualified range and known matching units for the result and the compared boundary. Multiple ranges, age/population/type qualifiers, missing units and mismatched units do not trigger inferred highlighting. No unit conversion is attempted. Source interpretation codes and comments remain available independently.
+
+Malformed GP Connect JSON or FHIR bundles return HTTP 502 with `success: false` and an error beginning `FHIR bundle malformed:`, followed by the validation error. The existing application-failure telemetry records the exception and the audit trail records a failed `validate_fhir_bundle` event with the request correlation and error details. The upstream HTTP success audit remains distinct from this validation failure. Failed validation does not proceed to conversion or caching, and audit-persistence failures still propagate. Supplier data is not repaired silently.
+
+
+## Performance and scaling considerations
+
+These measurements describe the grouping implementation reviewed on 1 October 2026 and the subsequent shared-graph change. They are engineering observations, not clinical acceptance evidence. Graph preparation is shared across reports. The indexed traversal measurements below record the subsequent optimization.
+
+### Baseline: repeated graph preparation
+
+Before the shared-graph change, [`group_investigation()`](../app/ccda/entries/investigation_grouping.py) rebuilt its observation identity map, other-report roots and relationship edges for every diagnostic report. Each call scanned the bundle index, including aliases, and the observations' `has-member` and `derived-from` relationships. Scope expansion repeatedly scanned all edges until no more observations entered the report, followed by another edge scan to build groups and comments. The shared-graph implementation retains those traversal scans to preserve ordering, while removing the repeated preparation.
+
+For R reports, N index entries, D report-result references scanned through the index and E observation relationships, the baseline repeated preparation was approximately O(R × (N + D + E)). Scope expansion adds full-edge passes whose number depends on link depth and source ordering. List membership checks used for deduplication can add further cost for large panels. Doubling the number of reports and observations can therefore require substantially more than twice the grouping work.
+
+A local experiment used independent in-memory copies of the existing `investigations/9465700088.json` fixture, with resource IDs, fullUrl aliases and references rewritten for each copy. Each bundle was parsed and indexed before timing all its reports through `group_investigation()`. These are medians of five runs on Python 3.14.7; they exclude FHIR parsing, result rendering, XML serialization and external I/O.
+
+| Synthetic fixture copies | Resources | Reports | Grouping time |
+| --- | ---: | ---: | ---: |
+| 1 | 452 | 34 | 17 ms |
+| 2 | 904 | 68 | 69 ms |
+| 4 | 1,808 | 136 | 309 ms |
+| 8 | 3,616 | 272 | 1,464 ms |
+
+The timings demonstrate superlinear growth in this experiment. They are not production throughput estimates: the container uses Python 3.13, and representative supplier workloads and deployment hardware must be measured separately.
+
+### Implemented shared investigation graph
+
+[`build_investigation_graph(index)`](../app/ccda/entries/investigation_grouping.py) now prepares an `InvestigationGraph` from the complete bundle reference index. [`convert_bundle()`](../app/ccda/fhir2ccda.py) builds it on reaching the first non-empty investigation section, then passes the same graph to every report and any subsequent investigation sections. Bundles with no investigation entries do not build a graph.
+
+The graph contains:
+
+- Canonical observation references and alias resolution based on resource identity. Distinct resources remain distinct even when URL suffixes or resource IDs match.
+- Each unique report's ordered, deduplicated direct observations and unresolved direct references. Report aliases are deduplicated by identity.
+- Observation-to-report ownership. Boundary checks use this map instead of rescanning other reports or rebuilding an exclusion set. An observation directly referenced by the current report remains eligible even if other reports also reference it. All indexed reports contribute ownership, including reports outside the rendered section.
+- Relationship edges in their original order, with the source, target and relationship type retained.
+- Missing targets grouped by source observation, so unrelated damage does not leak into a report's warnings.
+
+The graph's containers are read-only mappings, tuples and frozen sets. The FHIR resources themselves are borrowed rather than copied: references and relationships must not change after graph construction. Per-report scope, direct-reference lists, warnings and rendering state are newly allocated, so one report cannot change another's grouping state. The graph is local to one conversion and is not stored in a process-global cache.
+
+`investigation(report, index, graph)` uses the resource index for other metadata and the graph for grouping. Existing two-argument `investigation(report, index)` calls remain supported and build a graph for that standalone call. Likewise, `group_investigation(report, index)` remains supported alongside `group_investigation(report, graph)`. Callers converting several reports should build and pass a shared graph to receive the performance benefit. Standalone reports absent from the resource index can still resolve their direct references using the graph's aliases.
+
+### Measured effect of sharing graph preparation
+
+The same synthetic fixture procedure was rerun against the original grouping function and the shared-graph implementation in one local session. These are medians of five runs on Python 3.14.7. The shared time includes graph construction once plus grouping every report; both columns exclude parsing, rendering, XML serialization and external I/O.
+
+| Resources | Reports | Original grouping | Shared graph plus grouping | Graph construction alone |
+| --- | ---: | ---: | ---: | ---: |
+| 452 | 34 | 16.14 ms | 4.85 ms | 0.50 ms |
+| 904 | 68 | 66.53 ms | 16.85 ms | 1.06 ms |
+| 1,808 | 136 | 309.04 ms | 62.45 ms | 2.07 ms |
+| 3,616 | 272 | 1,401.48 ms | 250.22 ms | 4.66 ms |
+
+Grouping was approximately 3.3–5.6 times faster in this experiment. These are grouping improvements, not equivalent end-to-end conversion speedups. At that stage, growth remained superlinear because each report still scanned the complete ordered edge sequence. The largest graph retained approximately 607 KiB of additional traced Python allocations, with approximately 981 KiB peak allocations during construction, excluding already parsed resources; these figures are not process RSS.
+
+Before/after checks compared every grouping field, mapping order, structured organizer and narrative table across 86 reports from the three valid investigation fixtures. The intentionally malformed fixture was excluded at FHIR parsing. An additional 1,200 randomized report groupings matched the original implementation, covering aliases, overlapping roots, missing links and cycles. Persistent regression tests cover report-state isolation, shared direct observations, distinct resources with matching IDs, existing edge discovery order, standalone callers, and one graph build across multiple non-empty investigation sections.
+
+### Implemented indexed traversal
+
+The graph builder now also prepares ordered discovery adjacency, source-edge adjacency for diagnostics, filing-comment classification and deduplicated downward associations. Each association records its owner, child, whether it is a comment and its first source edge position. Reciprocal `has-member`/`derived-from` links are normalised once. Read-only containers and frozen association records retain the per-conversion lifetime.
+
+All direct report references seed one ordered work queue. `has-member` permits source-to-target discovery; `derived-from` permits discovery from either endpoint. Each reachable source edge is scheduled at most once, and report ownership is checked before accepting a candidate. The queue uses `(scan pass, source edge position)` priorities to reproduce the former repeated-scan discovery order without scanning unrelated edges. This deliberately preserves display order rather than introducing a new breadth-first ordering policy.
+
+Once scope is known, only its indexed associations and outgoing diagnostic edges are examined. Associations are filtered to the report's scope and sorted by their original positions; missing-link and boundary diagnostics retain their former order. The resulting report view includes explicit display `roots` and unattached `report_comments`. Rendering starts from these roots and follows members/comments downward, retaining its shared-result notes and cyclic/unplaced-item fallback. A report reference to a child can still discover its parent and siblings during scope resolution; a downward-only discovery walk would lose those observations.
+
+Shared preparation remains O(N + D + E). For a report with Vᵣ reachable observations and Eᵣ incident relationships, resolution visits local adjacency rather than the whole bundle. Queue and association ordering add up to O(Eᵣ log Eᵣ) work; root selection is O(Vᵣ). Shared observations may legitimately be visited in several reports. No ancestor/descendant transitive closure or process-global report cache is introduced. Standalone callers still build a graph per call, so callers processing multiple reports should pass the shared graph.
+
+### Measured effect of indexed traversal
+
+The [raw A/B measurements](investigation-indexed-benchmark-2026-10-01.json) compare the working-tree shared-graph implementation immediately before this change with indexed traversal. The baseline source hash is recorded because it included earlier uncommitted work. These are medians of nine alternating A/B runs, after warm-up, on Python 3.14.7. Independent copies of the 452-resource fixture have IDs and references rewritten before parsing. Timings include one shared graph build plus grouping all reports, and exclude parsing, rendering, serialization and external I/O. Individual stage medians need not sum to the median total.
+
+| Resources | Reports | Before: shared graph + grouping | After: indexed graph + grouping | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| 452 | 34 | 7.103 ms | 3.061 ms | 2.32× |
+| 904 | 68 | 17.503 ms | 4.454 ms | 3.93× |
+| 1,808 | 136 | 69.273 ms | 10.568 ms | 6.55× |
+| 3,616 | 272 | 256.693 ms | 19.022 ms | 13.49× |
+
+At 3,616 resources, graph construction increased from 4.172 ms to 11.629 ms while grouping decreased from 251.657 ms to 7.431 ms. The tradeoff is additional indexes: retained graph allocations increased from 606.90 KiB to 1,390.56 KiB, and construction peak from 981.23 KiB to 2,424.23 KiB. Allocation measurements use a separate `tracemalloc` run and exclude existing parsed resources; they are not process RSS. These are grouping improvements, not measured end-to-end request speedups.
+
+A separate 15-run check of the flat, zero-edge fixture (244 resources, 32 reports) increased shared build plus grouping from 0.463 ms to 0.822 ms. With no relationship scans to eliminate, classification and explicit-root preparation add about 0.36 ms; some of that work previously happened in the renderer, which these timings exclude. The raw measurements include this case.
+
+Reproduce using an archived copy of the pre-change grouping module:
+
+```bash
+.venv/bin/python -m scripts.benchmark_investigation_grouping \
+  --baseline /tmp/xhuma-investigation-before/investigation_grouping.py \
+  --output /tmp/investigation-indexed-benchmark.json
+```
+
+The baseline path is a local session snapshot, not a repository dependency. For another comparison, archive the desired baseline module before editing and pass that path. The benchmark checks grouping equivalence before timing and supports `--fixture`, `--copies` and `--repeat`.
+
+### Content and ordering validation
+
+Before/after comparisons matched every existing grouping field and dictionary order, plus complete structured organizers and narrative tables, across all 86 reports in the three valid investigation fixtures. An additional 4,000 deterministic randomized report groupings matched the baseline, including overlapping roots, aliases, forward/reverse links, duplicates, comments, missing links and cycles. The malformed fixture remains excluded at FHIR parsing.
+
+Persistent regressions additionally cover child-only entry points resolving parents and siblings, multiple seed ordering, immutable deduplicated associations, a 1,500-link reverse-ordered chain and a guard that rejects full-edge iteration while 1,000 unrelated edges are present. Existing tests retain coverage for shared results, report boundaries, missing results, zero/false values, valued groups and rendering-state isolation. The renderer remains recursive; extremely deep rendered chains still warrant a separate iterative-rendering change.
+
+### Async execution and validation
+
+Investigation grouping and result rendering perform CPU work without network I/O. Their async wrappers do not make that work parallel. Adding `asyncio.gather()` around reports would not remove repeated scans or provide CPU parallelism on the normal event loop. In a separate local experiment, four concurrent full conversions of the 452-resource fixture produced a roughly 1.1-second gap in a heartbeat scheduled every 5 ms. That measurement includes parsing, rendering and serialization and must not be attributed to grouping alone.
+
+Continue reducing repeated traversal work first. If large conversions still delay requests, evaluate a bounded process pool or separate conversion workers, including queue limits, serialization costs, cancellation behavior and the deployment's relay constraints. Avoid creating an unbounded task or process for every report.
+
+Separate timings now cover index construction, shared graph preparation, per-report grouping, post-grouping result rendering and XML/base64 serialization, alongside an event-loop delay probe. See [the updated pipeline profile and monitoring guide](benchmarking.md#reprofile-1-october-2026) for measurements, instrument names and a repeatable offline profiling command. The reprofile still found an approximately 865 ms heartbeat gap during four concurrent conversions of the 452-resource fixture.
+
+Continue validating on supplier fixtures and synthetic bundles with increasing report count, relationship depth, alias count and shared observations. Track event-loop delay, peak memory and output equivalence alongside latency; fixed wall-clock thresholds in ordinary unit tests would be unreliable.

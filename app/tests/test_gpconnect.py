@@ -64,6 +64,9 @@ async def test_gpconnect_with_nhs_data(
     mock_attempt_audit,
     nhsno,
 ):
+    pipeline = mock_redis_pipeline.return_value
+    pipeline.__aenter__.return_value = pipeline
+    pipeline.execute = AsyncMock()
     fake_bundle = load_bundle(nhsno)
     fake_pds = load_pds(nhsno)
 
@@ -104,7 +107,8 @@ async def test_gpconnect_with_nhs_data(
     mock_client.post.assert_called_once()
     mock_convert_bundle.assert_called_once()
     mock_base64_xml.assert_called_once()
-    mock_redis_pipeline.return_value.execute.assert_called_once()
+    mock_redis_pipeline.return_value.execute.assert_awaited_once()
+    mock_redis_pipeline.return_value.__aexit__.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -172,3 +176,59 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
     assert result.status_code == 502
     assert body["success"] is False
     assert "SDS trace failed" in body["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    ["not json", "[]", '{"resourceType":"OperationOutcome"}', '{"resourceType":"Bundle","entry":null}', "bob"],
+)
+@pytest.mark.parametrize("audit_fails", [False, True])
+async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
+    from pathlib import Path
+
+    from app.audit.audit import AuditFailureException
+    from app.audit.models import AuditOutcome
+
+    if payload == "bob":
+        payload = Path("app/tests/fixtures/bundles/investigations/9465699896.json").read_text()
+    with (
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure") as telemetry,
+        patch("app.gpconnect.convert_bundle", new_callable=AsyncMock) as convert,
+        patch("app.gpconnect.redis_client.pipeline") as cache,
+        patch("app.gpconnect.create_nhs_ssl_context"),
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock) as pds,
+    ):
+        pds.return_value = load_pds(9690937278)
+        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        client.return_value.__aenter__.return_value.post = AsyncMock(return_value=Response(200, content=payload))
+        if audit_fails:
+
+            async def fail_validation_audit(**kwargs):
+                if kwargs.get("action") == "validate_fhir_bundle":
+                    raise AuditFailureException("Audit unavailable")
+
+            audit.side_effect = fail_validation_audit
+            with pytest.raises(AuditFailureException):
+                await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+            telemetry.assert_called_once()
+            convert.assert_not_called()
+            cache.assert_not_called()
+            return
+        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+        assert response.status_code == 502
+        body = json.loads(response.body)
+        assert body["success"] is False
+        assert body["error"].startswith("FHIR bundle malformed: ")
+        telemetry.assert_called_once()
+        assert str(telemetry.call_args.args[0]) in body["error"]
+        event = audit.call_args.kwargs
+        assert event["action"] == "validate_fhir_bundle"
+        assert event["outcome"] == AuditOutcome.fail
+        assert event["error_code"] == "502"
+        assert event["nhs_number"] == "9690937278"
+        convert.assert_not_called()
+        cache.assert_not_called()

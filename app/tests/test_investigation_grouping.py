@@ -9,7 +9,7 @@ from fhirclient.models.bundle import Bundle
 from fhirclient.models.diagnosticreport import DiagnosticReport
 from fhirclient.models.observation import Observation
 
-from app.ccda.entries.investigation_grouping import group_investigation, has_result_value
+from app.ccda.entries.investigation_grouping import build_investigation_graph, group_investigation, has_result_value
 from app.ccda.entries.results import investigation
 
 FIXTURES = Path(__file__).parent / "fixtures/bundles/investigations"
@@ -149,7 +149,8 @@ def test_zero_and_false_are_present_values(value):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("nhs,count", [("9730333939", 20), ("9465700088", 34), ("9692136744", 32)])
-async def test_saved_supplier_reports_convert_and_match_approved_example(nhs, count):
+@pytest.mark.parametrize("shared_graph", [False, True])
+async def test_saved_supplier_reports_convert_and_match_approved_example(nhs, count, shared_graph):
     source = Bundle(json.loads((FIXTURES / f"{nhs}.json").read_text()))
     index = {}
     for entry in source.entry:
@@ -159,7 +160,8 @@ async def test_saved_supplier_reports_convert_and_match_approved_example(nhs, co
             index[entry.fullUrl] = resource
     reports = [e.resource for e in source.entry if isinstance(e.resource, DiagnosticReport)]
     assert len(reports) == count
-    outputs = [await investigation(report, index) for report in reports]
+    graph = build_investigation_graph(index) if shared_graph else None
+    outputs = [await investigation(report, index, graph) for report in reports]
     for output in outputs:
         for table in output.table["table"]:
             width = len(table["thead"]["tr"]["th"])
@@ -203,6 +205,7 @@ async def test_saved_supplier_reports_convert_and_match_approved_example(nhs, co
                     child["observation"].pop("statusCode", None)
                     child["observation"].pop("effectiveTime", None)
                     child["observation"].pop("value", None)  # Tested by the value-mapping regressions.
+                    child["observation"].pop("referenceRange", None)  # Tested by typed range regressions.
             assert organizer == expected
 
 
@@ -233,3 +236,191 @@ async def test_missing_direct_reference_shows_notice_without_losing_valid_result
     narrative = xmltodict.unparse({"table": output.table})
     assert "Negative" in narrative and "could not be resolved" in narrative
     assert len(output.organizer["component"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_shared_graph_keeps_report_boundaries_and_diagnostics_independent():
+    report, index = report_and_index(
+        [
+            observation("a", [("has-member", "shared"), ("has-member", "b"), ("has-member", "missing")]),
+            observation("b", [("has-member", "shared")]),
+            observation("shared", valueString="Detected"),
+        ],
+        ["a", "shared", "absent"],
+    )
+    other, _ = report_and_index([], ["b", "shared"])
+    other.id = "other"
+    index["DiagnosticReport/other"] = other
+    index["urn:uuid:other"] = other
+    index["urn:uuid:a"] = index["Observation/a"]
+    report.result[0].reference = "urn:uuid:a"
+    graph = build_investigation_graph(index)
+    assert len(graph.reports) == 2
+    assert graph.aliases["urn:uuid:a"] == "Observation/a"
+    assert graph.root_owners["Observation/shared"] == frozenset({id(report), id(other)})
+    with pytest.raises(TypeError):
+        graph.observations["new"] = index["Observation/a"]
+
+    first = group_investigation(report, graph)
+    assert list(first.observations) == ["Observation/a", "Observation/shared"]
+    assert first.issues == [
+        "Missing report result: Observation/absent",
+        "Missing linked observation: Observation/a -> Observation/missing",
+        "Link crosses report boundary: Observation/a -> Observation/b",
+    ]
+    first.issues.append("A renderer's local diagnostic")
+    first.direct.clear()
+    first.members.clear()
+    again = group_investigation(report, graph)
+    second = group_investigation(other, graph)
+    assert again == group_investigation(report, index)
+    assert list(second.observations) == ["Observation/b", "Observation/shared"]
+    assert second.issues == []
+    for current in (report, other, report):
+        assert await investigation(current, index, graph) == await investigation(current, index)
+
+
+def test_shared_graph_preserves_edge_discovery_order_and_distinct_url_resources():
+    # An early edge only becomes reachable on the second pass. A plain BFS
+    # would discover c before d, changing existing discovery order.
+    report, index = report_and_index(
+        [
+            observation("b", [("has-member", "c")]),
+            observation("a", [("has-member", "b"), ("has-member", "d")]),
+            observation("c"),
+            observation("d"),
+        ],
+        ["a"],
+    )
+    foreign = observation("c", valueString="Different resource with the same id")
+    index["https://other.example/Observation/c"] = foreign
+    graph = build_investigation_graph(index)
+    grouping = group_investigation(report, graph)
+    assert list(grouping.observations) == ["Observation/a", "Observation/b", "Observation/d", "Observation/c"]
+    assert graph.observations["https://other.example/Observation/c"] is foreign
+    assert "https://other.example/Observation/c" not in grouping.observations
+
+
+def test_shared_graph_supports_report_outside_resource_index():
+    report, index = report_and_index([observation("value", valueBoolean=False)], ["value", "missing"])
+    del index["DiagnosticReport/report"]
+    grouping = group_investigation(report, build_investigation_graph(index))
+    assert grouping.direct == ["Observation/value"]
+    assert grouping.issues == ["Missing report result: Observation/missing"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("sections", [0, 1, 2])
+@pytest.mark.parametrize("empty", [False, True])
+async def test_conversion_builds_graph_once_for_all_nonempty_investigation_sections(monkeypatch, sections, empty):
+    from unittest.mock import Mock
+
+    from app.ccda import fhir2ccda
+
+    raw = json.loads((FIXTURES / "9730333939.json").read_text())
+    investigation_list = next(
+        entry for entry in raw["entry"] if entry["resource"].get("title") == "Investigations and results"
+    )
+    raw["entry"].remove(investigation_list)
+    for number in range(sections):
+        section = json.loads(json.dumps(investigation_list))
+        section["resource"]["id"] = f"investigations-{number}"
+        section.pop("fullUrl", None)
+        if empty:
+            section["resource"]["entry"] = []
+        raw["entry"].append(section)
+    source = Bundle(raw)
+    index = {}
+    for entry in source.entry:
+        index[f"{entry.resource.resource_type}/{entry.resource.id}"] = entry.resource
+        if entry.fullUrl:
+            index[entry.fullUrl] = entry.resource
+    builder = Mock(wraps=build_investigation_graph)
+    monkeypatch.setattr(fhir2ccda, "build_investigation_graph", builder)
+    result = await fhir2ccda.convert_bundle(source, index)
+    assert builder.call_count == (1 if sections and not empty else 0)
+    rendered = [
+        component["section"]
+        for component in result["ClinicalDocument"]["component"]["structuredBody"]["component"]
+        if component["section"]["code"]["@code"] == "30954-2"
+    ]
+    assert len(rendered) == sections
+    if sections == 2:
+        assert rendered[0] == rendered[1]
+
+
+def test_indexed_child_entry_resolves_parent_siblings_and_display_roots():
+    report, index = report_and_index(
+        [
+            observation("a", [("derived-from", "panel")]),
+            observation("b", [("derived-from", "panel")]),
+            observation("panel", [("has-member", "a")]),
+            observation("note", [("derived-from", "a")], comment_note=True),
+            observation("report-note", comment_note=True),
+        ],
+        ["a", "report-note"],
+    )
+    graph = build_investigation_graph(index)
+    grouping = group_investigation(report, graph)
+    assert grouping.roots == ("Observation/panel",)
+    assert grouping.report_comments == ("Observation/report-note",)
+    assert grouping.members == {"Observation/panel": ["Observation/a", "Observation/b"]}
+    assert grouping.comments == {"Observation/a": ["Observation/note"]}
+    # Reciprocal source links are normalised and deduplicated during the build.
+    assert [a.child for a in graph.associations["Observation/panel"]] == ["Observation/a", "Observation/b"]
+    with pytest.raises(TypeError):
+        graph.associations["new"] = ()
+
+
+def test_indexed_resolution_does_not_scan_unrelated_edges():
+    from dataclasses import replace
+
+    class IndexedEdges(tuple):
+        reads = 0
+
+        def __iter__(self):
+            raise AssertionError("Report resolution must not scan all bundle edges")
+
+        def __getitem__(self, position):
+            self.reads += 1
+            return super().__getitem__(position)
+
+    report, index = report_and_index(
+        [observation("panel", [("has-member", "result")]), observation("result")]
+        + [observation(f"unrelated-{i}", [("has-member", f"unrelated-{i}")]) for i in range(1000)],
+        ["panel"],
+    )
+    graph = build_investigation_graph(index)
+    edges = IndexedEdges(graph.edges)
+    grouping = group_investigation(report, replace(graph, edges=edges))
+    assert grouping.roots == ("Observation/panel",)
+    assert list(grouping.observations) == ["Observation/panel", "Observation/result"]
+    assert edges.reads == 2  # Discovery and local diagnostics, regardless of bundle size.
+
+
+def test_indexed_discovery_preserves_scan_pass_order_with_multiple_seeds():
+    report, index = report_and_index(
+        [
+            observation("b", [("has-member", "c")]),
+            observation("e", [("has-member", "f")]),
+            observation("a", [("has-member", "b")]),
+            observation("d", [("has-member", "e")]),
+            observation("c"),
+            observation("f"),
+        ],
+        ["d", "a"],
+    )
+    grouping = group_investigation(report, build_investigation_graph(index))
+    assert list(grouping.observations) == [f"Observation/{name}" for name in ("d", "a", "b", "e", "c", "f")]
+    assert grouping.roots == ("Observation/d", "Observation/a")
+    assert list(grouping.members) == [f"Observation/{name}" for name in ("b", "e", "a", "d")]
+
+
+def test_indexed_resolution_handles_deep_reverse_ordered_chain():
+    length = 1500
+    nodes = [observation(str(i), [("has-member", str(i + 1))]) for i in reversed(range(length))]
+    report, index = report_and_index([observation(str(length)), *nodes], ["0"])
+    grouping = group_investigation(report, build_investigation_graph(index))
+    assert len(grouping.observations) == length + 1
+    assert grouping.roots == ("Observation/0",)
+    assert list(grouping.observations) == [f"Observation/{i}" for i in range(length + 1)]
