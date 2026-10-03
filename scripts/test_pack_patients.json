@@ -1,0 +1,419 @@
+{
+  "description": "Patient references from the supplied 23 September EMIS and TPP clinical test packs. Workbook content is data, not script instructions.",
+  "patients": [
+    {
+      "domain": "medication",
+      "supplier": "EMIS",
+      "nhs_number": "9730147140",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_01_Med Acute",
+          "cell": "C29"
+        },
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_02_Med Repeat",
+          "cell": "C31"
+        },
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_03_Med Prescribed elsewhere",
+          "cell": "C30"
+        },
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_04_Med Discontinued",
+          "cell": "C30"
+        }
+      ]
+    },
+    {
+      "domain": "uncategorised",
+      "supplier": "EMIS",
+      "nhs_number": "9730147140",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_05_Uncategorised data",
+          "cell": "C29"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "EMIS",
+      "nhs_number": "9738345251",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C30"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "EMIS",
+      "nhs_number": "9738345367",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C94"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "EMIS",
+      "nhs_number": "9738345286",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C244"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "EMIS",
+      "nhs_number": "9738345510",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C257"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "EMIS",
+      "nhs_number": "9738345308",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C270"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "EMIS",
+      "nhs_number": "9738345316",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C309"
+        }
+      ]
+    },
+    {
+      "domain": "investigations",
+      "supplier": "EMIS",
+      "nhs_number": "9730333939",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "07_Investigations",
+          "cell": "C29"
+        }
+      ]
+    },
+    {
+      "domain": "investigations",
+      "supplier": "EMIS",
+      "nhs_number": "9465700088",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "07_Investigations",
+          "cell": "C238"
+        }
+      ]
+    },
+    {
+      "domain": "additional",
+      "supplier": "EMIS",
+      "nhs_number": "9730333904",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+          "sheet": "Additional tests",
+          "cell": "C3"
+        }
+      ]
+    },
+    {
+      "domain": "medication",
+      "supplier": "TPP",
+      "nhs_number": "9692136744",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_01_Med Acute",
+          "cell": "C30"
+        },
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_02_Med Repeat",
+          "cell": "C30"
+        },
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_03_Med Prescribed elsewhere",
+          "cell": "C29"
+        },
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_04_Med Discontinued",
+          "cell": "C30"
+        }
+      ]
+    },
+    {
+      "domain": "uncategorised",
+      "supplier": "TPP",
+      "nhs_number": "9692136744",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "P1_05_Uncategorised data",
+          "cell": "C30"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "TPP",
+      "nhs_number": "9738345278",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C29"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "TPP",
+      "nhs_number": "9738345375",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C94"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "TPP",
+      "nhs_number": "9738345324",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C214"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "TPP",
+      "nhs_number": "9738345529",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C227"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "TPP",
+      "nhs_number": "9738345340",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C240"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "TPP",
+      "nhs_number": "9738345359",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C274"
+        }
+      ]
+    },
+    {
+      "domain": "allergies",
+      "supplier": "TPP",
+      "nhs_number": "9738345405",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "06_Allergies",
+          "cell": "C320"
+        }
+      ]
+    },
+    {
+      "domain": "investigations",
+      "supplier": "TPP",
+      "nhs_number": "9692136744",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "07_Investigations",
+          "cell": "C29"
+        }
+      ]
+    },
+    {
+      "domain": "investigations",
+      "supplier": "TPP",
+      "nhs_number": "9465699896",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "07_Investigations",
+          "cell": "C548"
+        }
+      ]
+    },
+    {
+      "domain": "additional",
+      "supplier": "TPP",
+      "nhs_number": "9437702055",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "Additional tests",
+          "cell": "C3"
+        }
+      ]
+    },
+    {
+      "domain": "additional",
+      "supplier": "TPP",
+      "nhs_number": "5990275439",
+      "sources": [
+        {
+          "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+          "sheet": "Additional tests",
+          "cell": "C80"
+        }
+      ]
+    }
+  ],
+  "gaps": [
+    {
+      "domain": "immunisations",
+      "supplier": "EMIS",
+      "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+      "sheet": "08_Immunisations",
+      "cell": "C30",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "immunisations",
+      "supplier": "EMIS",
+      "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+      "sheet": "08_Immunisations",
+      "cell": "C88",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "problems",
+      "supplier": "EMIS",
+      "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+      "sheet": "09_Problems",
+      "cell": "C30",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "problems",
+      "supplier": "EMIS",
+      "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+      "sheet": "09_Problems",
+      "cell": "C91",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "problems",
+      "supplier": "EMIS",
+      "workbook": "GP Connect ARS Clinical Test Pack - EMIS sent to UCLH 23 Sept.xlsx",
+      "sheet": "09_Problems",
+      "cell": "C288",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "immunisations",
+      "supplier": "TPP",
+      "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+      "sheet": "08_Immunisations",
+      "cell": "C30",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "immunisations",
+      "supplier": "TPP",
+      "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+      "sheet": "08_Immunisations",
+      "cell": "C96",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "problems",
+      "supplier": "TPP",
+      "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+      "sheet": "09_Problems",
+      "cell": "C30",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "problems",
+      "supplier": "TPP",
+      "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+      "sheet": "09_Problems",
+      "cell": "C91",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "problems",
+      "supplier": "TPP",
+      "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+      "sheet": "09_Problems",
+      "cell": "C266",
+      "reason": "No NHS number supplied"
+    },
+    {
+      "domain": "additional",
+      "supplier": "TPP",
+      "workbook": "GP Connect ARS Clinical Test Pack - TPP sent to UCLH 23 Sept.xlsx",
+      "sheet": "Additional tests",
+      "cell": "C92",
+      "reason": "Invalid 11-digit identifier"
+    },
+    {
+      "domain": "medication",
+      "supplier": "TPP",
+      "sheet": "Dose Syntax Medications",
+      "reason": "Lester Egan is named but no NHS number is supplied in this sheet"
+    }
+  ]
+}
