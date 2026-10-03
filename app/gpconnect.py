@@ -501,7 +501,7 @@ async def _fetch_gpconnect_record(
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(status_code=502, content={"success": False, "error": msg})
+        return JSONResponse(status_code=502, content={"success": False, "error": "FHIR bundle malformed"})
 
     # index resources for resolution
     with measure("fhir.index", resource_count=len(fhir_bundle.entry or [])):
