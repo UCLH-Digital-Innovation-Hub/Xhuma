@@ -221,14 +221,13 @@ async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
         response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
         assert response.status_code == 502
         body = json.loads(response.body)
-        assert body["success"] is False
-        assert body["error"].startswith("FHIR bundle malformed: ")
+        assert body == {"success": False, "error": "FHIR bundle malformed"}
         telemetry.assert_called_once()
-        assert str(telemetry.call_args.args[0]) in body["error"]
         event = audit.call_args.kwargs
         assert event["action"] == "validate_fhir_bundle"
         assert event["outcome"] == AuditOutcome.fail
         assert event["error_code"] == "502"
         assert event["nhs_number"] == "9690937278"
+        assert event["detail"] == {"exception": str(telemetry.call_args.args[0])}
         convert.assert_not_called()
         cache.assert_not_called()
