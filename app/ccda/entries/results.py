@@ -22,6 +22,7 @@ from .investigation_grouping import (
     observation_label,
 )
 from .result_context import cda_specimen, organizer_collection_time, report_issue_time, report_specimens
+from .result_presentation import column_widths, laboratory_details_table, report_heading_time, report_identity
 from .result_ranges import outside_reference_range, reference_range
 from .result_values import map_result_value
 from .types import EntryWithRow
@@ -81,21 +82,15 @@ def is_test_group_header(observation: obs.Observation) -> bool:
     return True
 
 
-def create_xml_table(table: ResultTable) -> dict:
-    # create dict in format for xmltodict to convert to item with caption and table
-    table_dict = {
-        "caption": table.title,
-        # list of tables to allow for appending of specimens etc
-        "table": [],
-    }
+def create_xml_table(table: ResultTable, *, caption: str | None = None) -> dict:
+    """Build a report wrapper containing one independently readable result table."""
     result_table = {
+        **({"caption": {"@styleCode": "Bold", "#text": caption}} if caption else {}),
+        "colgroup": column_widths(30, 20, 20, 30),
         "thead": {"tr": {"th": table.headers}},
-        "tbody": {"tr": []},
+        "tbody": {"tr": [{"td": row.cells} for row in table.rows]},
     }
-    for row in table.rows:
-        result_table["tbody"]["tr"].append({"td": row.cells})
-    table_dict["table"].append(result_table)
-    return table_dict
+    return {"caption": table.title, "table": [result_table]}
 
 
 def degraded_original_name(observation: obs.Observation) -> str | None:
@@ -148,6 +143,7 @@ def specimen_notes_table(report: dr.DiagnosticReport, index: dict) -> dict | Non
         return None
     return {
         "caption": "Specimen notes",
+        "colgroup": column_widths(30, 30, 20, 20),
         "thead": {"tr": {"th": ["Specimen", "Notes", "Collected", "Received"]}},
         "tbody": {"tr": rows},
     }
@@ -257,18 +253,14 @@ async def investigation(
     test_group_headers = [o for o in observations if is_test_group_header(o)]
 
     category_observation = None
-    if len(test_group_headers) == 0 or len(test_group_headers) > 1:
-        test_title = "Diagnostic Report"
-
-    else:
-        test_title = test_group_headers[0].code.coding[0].display if test_group_headers else "Diagnostic Report"
-
+    # Keep legacy category metadata separate from graph-based report identity.
+    if len(test_group_headers) == 1:
         # look for category in test group header
         for category in test_group_headers[0].category or []:
             for code in category.coding or []:
                 if code.system == "http://hl7.org/fhir/observation-category":
                     if code.code == "laboratory":
-                        print("Category is laboratory")
+                        # print("Category is laboratory")
                         # TODO: Supply the required id, observation code and
                         # statusCode, and the 2015-08-01 Result Observation
                         # template extension (CONF:1198-7137/7133/7134/32575).
@@ -291,40 +283,57 @@ async def investigation(
                             effectiveTime=report_issued_time,
                         )
 
-    organizer = ResultsOrganizer(
-        statusCode=result_status(diagnostic_report.status, organizer=True),
-        id=id_helper(diagnostic_report.identifier),
-        code=(code_with_translations(test_group_headers[0].code.coding) if test_group_headers else None),
-        effectiveTime=organizer_collection_time(diagnostic_report, index),
-        specimen=[cda_specimen(s) for s in report_specimens(diagnostic_report, index)] or None,
-    )
-
     with measure("investigations.group") as span:
         grouping = group_investigation(diagnostic_report, graph if graph is not None else index)
         span.set_attribute("report.observations", len(grouping.observations))
         span.set_attribute("report.grouping_issues", len(grouping.issues))
+    test_title, report_code, panel = report_identity(
+        diagnostic_report, grouping, test_group_headers[0] if len(test_group_headers) == 1 else None
+    )
+
+    organizer = ResultsOrganizer(
+        statusCode=result_status(diagnostic_report.status, organizer=True),
+        id=id_helper(diagnostic_report.identifier),
+        code=report_code,
+        effectiveTime=organizer_collection_time(diagnostic_report, index),
+        specimen=[cda_specimen(s) for s in report_specimens(diagnostic_report, index)] or None,
+    )
+
     with measure("investigations.render"):
         table_rows = []
+        group_tables = []
+        other_rows, unplaced_rows = [], []
+        filing_comments = []
         components = []
         emitted = set()
+        has_unplaced_result = False
+        has_cycle = False
 
         def narrative_row(text):
             """Place a heading or annotation across the existing four columns."""
             table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "#text": text}]))
 
-        async def render(reference, path=()):
+        def group_heading(text, depth):
+            content = {"@styleCode": "Bold", "#text": text}
+            for _ in range(depth):
+                content = {"@styleCode": "allIndent", "content": content}
+            table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "content": content}]))
+
+        async def render(reference, path=(), *, table_root=False):
             """Render each assertion once while retaining shared group associations."""
+            nonlocal has_cycle
             observation = grouping.observations[reference]
             if reference in path:
+                has_cycle = True
                 grouping.issues.append(f"Cyclic test grouping at {reference}")
                 narrative_row(f"Grouping could not be resolved for: {observation_label(observation)}")
                 return
             if reference in emitted:
-                narrative_row(f"Also associated: {observation_label(observation)} (shown above)")
+                narrative_row(f"Also associated: {observation_label(observation)} (shown elsewhere in this report)")
                 return
             emitted.add(reference)
             if is_filing_comment(observation):
-                narrative_row(f"Filing comments: {observation_label(observation)}")
+                narrative_row(f"Comment: {observation_label(observation)}")
                 if observation.valueString is not None:
                     narrative_row(observation.valueString)
                 if observation.comment is not None:
@@ -334,7 +343,8 @@ async def investigation(
             members = grouping.members.get(reference, [])
             has_value = has_result_value(observation)
             if members:
-                narrative_row(f"Test group: {observation_label(observation)}")
+                if not table_root:
+                    group_heading(f"Test group: {observation_label(observation)}", len(path))
                 if not has_value and observation.comment:
                     narrative_row(observation.comment)
                 if not has_value and observation.interpretation:
@@ -356,45 +366,107 @@ async def investigation(
             for member in members:
                 await render(member, path + (reference,))
 
+        # Render in the original root order to preserve structured component
+        # order and shared-result ownership, collecting separate narrative tables.
         for reference in grouping.roots:
-            await render(reference)
+            if grouping.members.get(reference):
+                table_rows = []
+                group_tables.append((reference, table_rows))
+                await render(reference, table_root=True)
+            else:
+                table_rows = other_rows
+                await render(reference)
         for reference in grouping.report_comments:
-            narrative_row("Report-level filing")
-            await render(reference)
+            if reference not in emitted:
+                emitted.add(reference)
+                comment = grouping.observations[reference]
+                filing_comments.append(
+                    {
+                        "paragraph": [
+                            {"content": {"@styleCode": "Bold", "#text": observation_label(comment)}},
+                            *[text for text in (comment.valueString, comment.comment) if text is not None],
+                        ]
+                    }
+                )
+        table_rows = unplaced_rows
         # Cyclic and otherwise unplaced items must not disappear from the report.
         for reference in grouping.observations:
             if reference not in emitted:
+                if not is_filing_comment(grouping.observations[reference]):
+                    has_unplaced_result = True
                 narrative_row("Unplaced source item")
                 await render(reference)
         if grouping.issues:
-            narrative_row("Some investigation relationships could not be resolved; available results are shown.")
             for issue in grouping.issues:
                 logger.warning("Investigation %s: %s", diagnostic_report.id, issue)
+        # A sole explicit panel can be a BATTERY; mixed, cyclic or unplaced
+        # results remain a CLUSTER. Source values do not establish membership.
+        organizer.classCode = (
+            "BATTERY" if panel and not has_cycle and not has_unplaced_result and not grouping.issues else "CLUSTER"
+        )
+        if panel and organizer.classCode == "CLUSTER":
+            test_title, organizer.code, _ = report_identity(
+                diagnostic_report,
+                grouping,
+                test_group_headers[0] if len(test_group_headers) == 1 else None,
+                allow_panel=False,
+            )
         organizer.component = components
         if category_observation:
             organizer.component.append({"observation": category_observation})
 
-        result_table = ResultTable(
-            title=f"{test_title} {diagnostic_report.issued.date if diagnostic_report.issued else 'Issue time not supplied'}",
-            headers=["Component", "Value", "Reference Range", "Comments"],
-            rows=table_rows,
-        )
+        title = f"{test_title} ({report_heading_time(diagnostic_report, index)})"
+        narrative_tables = []
 
-        table = create_xml_table(result_table)
+        def add_table(rows, caption):
+            if rows:
+                result_table = ResultTable(
+                    title=title,
+                    headers=["Component", "Value", "Reference Range", "Comments"],
+                    rows=rows,
+                )
+                narrative_tables.extend(create_xml_table(result_table, caption=caption)["table"])
+
+        for reference, rows in group_tables:
+            label = observation_label(grouping.observations[reference])
+            # A single complete panel already names the report; don't repeat it.
+            caption = None if organizer.classCode == "BATTERY" and label == test_title else label
+            add_table(rows, caption)
+        add_table(other_rows, "Other results")
+        add_table(unplaced_rows, "Unplaced source items")
+        paragraphs = []
         if diagnostic_report.conclusion:
-            # Report conclusions belong to the whole report, not to an invented
-            # analyte or one particular test group. Place them before the tables.
-            table = {
-                "caption": table["caption"],
-                "paragraph": [
-                    {"content": {"@styleCode": "Bold", "#text": "Report conclusion"}},
+            paragraphs.extend(
+                [
+                    {"content": {"@styleCode": "Bold", "#text": "Report Interpretation"}},
                     diagnostic_report.conclusion,
-                ],
-                "table": table["table"],
-            }
+                ]
+            )
+        if grouping.issues:
+            paragraphs.append("Some investigation relationships could not be resolved; available results are shown.")
+        table = {
+            "caption": title,
+            **({"paragraph": paragraphs} if paragraphs else {}),
+            **(
+                {
+                    "list": {
+                        "@listType": "unordered",
+                        "caption": {"@styleCode": "Bold", "#text": "Report-level filing"},
+                        "item": filing_comments,
+                    }
+                }
+                if filing_comments
+                else {}
+            ),
+            "table": narrative_tables,
+        }
         specimen_table = specimen_notes_table(diagnostic_report, index)
         if specimen_table:
             table["table"].append(specimen_table)
+
+        laboratory_table = laboratory_details_table(diagnostic_report, grouping, index)
+        if laboratory_table:
+            table["table"].append(laboratory_table)
 
         return InvestigationWithTable(
             organizer=organizer.model_dump(by_alias=True, exclude_none=True),

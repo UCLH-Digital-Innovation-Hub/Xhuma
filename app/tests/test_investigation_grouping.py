@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 import xmltodict
@@ -67,7 +68,8 @@ async def test_membership_directions_and_reverse_filing_comment(direction):
     report, index = report_and_index([note, hb, panel], ["panel"])
     output = await investigation(report, index)
     xml = xmltodict.unparse({"table": output.table})
-    assert "Test group: panel" in xml
+    assert output.table["caption"].startswith("panel (")
+    assert "caption" not in output.table["table"][0]  # Single panel isn't named twice.
     assert "Test group: hb" not in xml
     assert "Repeat in three months" in xml
     assert len(output.organizer["component"]) == 1
@@ -185,11 +187,16 @@ async def test_saved_supplier_reports_convert_and_match_approved_example(nhs, co
             organizer = xmltodict.parse(xmltodict.unparse({"organizer": output.organizer}))["organizer"]
             # The reviewed grouping stays the same; labels, conclusions and
             # specimen notes are intentional subsequent improvements.
-            actual_table = actual["table"][0] if isinstance(actual["table"], list) else actual["table"]
-            actual_groups = [r for r in actual_table["tbody"]["tr"] if "Test group:" in str(r)]
+            # Group names now live in table captions (or the single-panel
+            # report caption); nested names remain bold rows within their table.
             expected_groups = [r for r in narrative["table"]["tbody"]["tr"] if "Test group:" in str(r)]
-            assert actual_groups == expected_groups
-            assert actual["caption"] == narrative["caption"]
+            actual_text = " ".join(ElementTree.fromstring(xmltodict.unparse({"item": actual})).itertext())
+            for row in expected_groups:
+                label = row["td"]["#text"].removeprefix("Test group: ")
+                assert label in actual_text
+            # Captions now use resolved roots and collection/issued display times;
+            # dedicated presentation tests assert their exact content.
+            assert actual["caption"]
             components = organizer.get("component", [])
             for component in components if isinstance(components, list) else [components]:
                 component["observation"].get("code", {}).pop("originalText", None)
@@ -200,6 +207,9 @@ async def test_saved_supplier_reports_convert_and_match_approved_example(nhs, co
             for tree in (organizer, expected):
                 tree.pop("effectiveTime", None)
                 tree.pop("specimen", None)
+                # Root identity/classification now follows the resolved panel.
+                tree.pop("code", None)
+                tree.pop("@classCode", None)
                 children = tree.get("component", [])
                 for child in children if isinstance(children, list) else [children]:
                     child["observation"].pop("statusCode", None)
@@ -222,7 +232,8 @@ async def test_nested_group_preserves_own_value_and_comment_only_members_are_not
     )
     output = await investigation(report, index)
     narrative = xmltodict.unparse({"table": output.table})
-    assert "Test group: outer" in narrative and "Test group: inner" in narrative
+    assert output.table["caption"].startswith("outer (")
+    assert "Test group: inner" in narrative
     assert "Test group: test" not in narrative
     assert "Sample haemolysed" in narrative and "Panel summary" in narrative
     assert "Telephone patient" in narrative

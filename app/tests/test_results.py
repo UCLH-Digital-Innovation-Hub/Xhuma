@@ -48,17 +48,23 @@ async def test_processes_all_investigation_reports_from_9692136744(
     for processed_report in processed_reports:
         assert processed_report.organizer["statusCode"] is not None
         assert processed_report.table["caption"]
-        assert processed_report.table["table"][0]["thead"]["tr"]["th"] == [
-            "Component",
-            "Value",
-            "Reference Range",
-            "Comments",
-        ]
-        assert processed_report.table["table"][0]["tbody"]["tr"]
+        tables = processed_report.table["table"]
+        if tables:
+            assert tables[0]["thead"]["tr"]["th"] == [
+                "Component",
+                "Value",
+                "Reference Range",
+                "Comments",
+            ]
+            assert tables[0]["tbody"]["tr"]
+        else:
+            # A report containing only filing comments needs no results table.
+            assert processed_report.table["list"]["item"]
+            assert not processed_report.organizer["component"]
 
         xml = xmltodict.unparse({"xml": processed_report.table})
         assert "<caption>" in xml
-        assert "<table>" in xml
+        assert "<table>" in xml if tables else '<list listType="unordered">' in xml
 
 
 @pytest.mark.asyncio
@@ -69,15 +75,13 @@ async def test_glucose_tolerance_report_keeps_category_and_comment_rows(
     glucose_report = next(report for report in reports if report.id == "c200000000000000_6237000000000000")
 
     processed_report = await investigation(glucose_report, bundle_index)
-    rows = processed_report.table["table"][0]["tbody"]["tr"]
-
-    assert processed_report.table["caption"] == "Glucose tolerance test 2023-03-30 00:00:00+01:00"
+    assert processed_report.table["caption"] == "Glucose tolerance test (Issued 30/03/2023 00:00 BST)"
     components = processed_report.organizer["component"]
     # The flat report's narrative observations now survive alongside category.
     assert len(components) == 3
     assert components[-1]["observation"]["value"]["@code"] == "16"
     assert components[-1]["observation"]["value"]["@codeSystem"] == "1.2.840.114350.1.72.1.5007"
-    narrative = xmltodict.unparse({"table": {"tr": rows}})
+    narrative = xmltodict.unparse({"report": processed_report.table})
     assert "Original text: Glucose tolerance test" in narrative
     assert "this report has a results indicator changed to abnormal" in narrative
     assert "Specimen description: BLOOD &amp; URINE" in narrative
@@ -93,7 +97,7 @@ async def test_fbc_report_preserves_interpretation_without_inventing_range_units
     rows = processed_report.table["table"][0]["tbody"]["tr"]
     platelet_row = next(row for row in rows if row["td"][0] == "Platelet count")
 
-    assert processed_report.table["caption"] == ("FBC - full blood count 2024-01-20 10:46:00+00:00")
+    assert processed_report.table["caption"] == ("Full blood count (Issued 20/01/2024 10:46 GMT)")
     assert len(processed_report.organizer["component"]) == 14  # Retain the unlinked heading as well.
     assert platelet_row["td"][1] == "497 10^9/L"  # Source range boundaries have no units.
     assert platelet_row["td"][2] == {"#text": "150 – 450"}

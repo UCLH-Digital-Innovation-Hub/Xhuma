@@ -67,7 +67,7 @@ async def test_conclusion_and_distinct_specimen_notes_survive_in_order():
     assert notes["tbody"]["tr"][2]["td"][0].startswith("urine")
     xml = xmltodict.unparse({"item": output.table})
     assert "Note for unrelated" not in xml
-    assert xml.index("Report conclusion") < xml.index("<table>") < xml.index("Specimen notes")
+    assert xml.index("Report Interpretation") < xml.index("<table>") < xml.index("Specimen notes")
     assert "A &lt; B &amp; follow up" in xml
     assert len(output.organizer["component"]) == 1  # No invented result for prose.
 
@@ -104,5 +104,7 @@ async def test_saved_bundles_preserve_original_labels_conclusions_and_specimen_n
             specimen = index[reference.reference]
             for note in specimen.note or []:
                 if note.text:
-                    notes = output.table["table"][1]["tbody"]["tr"]
+                    notes = next(t for t in output.table["table"] if t.get("caption") == "Specimen notes")["tbody"][
+                        "tr"
+                    ]
                     assert any(row["td"][1] == note.text for row in notes)
