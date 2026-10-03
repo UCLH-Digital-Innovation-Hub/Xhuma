@@ -28,6 +28,7 @@ from starlette.background import BackgroundTask
 
 from app.audit.audit import attempt_audit
 from app.audit.models import AuditOutcome
+from app.telemetry import measure, record_cache
 
 from ..audit.audit import process_saml_attributes
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
@@ -432,8 +433,11 @@ async def iti39(request: Request):
             if document_id:
                 span.set_attribute("soap.document_id", document_id)
 
-        document = client.get(document_id)
-        doc_nhsno_bytes = client.get(f"doc_patient:{document_id}")
+        with measure("document.cache.retrieve") as span:
+            document = await client.get(document_id)
+            doc_nhsno_bytes = await client.get(f"doc_patient:{document_id}")
+            span.set_attribute("cache.hit", document is not None and doc_nhsno_bytes is not None)
+        record_cache("retrieval", document is not None and doc_nhsno_bytes is not None)
         doc_nhsno = doc_nhsno_bytes.decode("utf-8") if doc_nhsno_bytes else None
 
         if not doc_nhsno:

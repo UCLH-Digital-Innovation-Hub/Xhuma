@@ -1,33 +1,15 @@
 """Native CDA dates and provenance for GP Connect allergies."""
 
+from ..helpers import cda_timestamp
 from ..models.admin import Person
 from ..models.allergy import (
+    AllergyAssignedAuthor,
     AllergyAssignedEntity,
     AllergyAuthor,
     AllergyIdentifier,
     AllergyInformant,
     AllergyRelatedEntity,
 )
-from ..models.datatypes import IVXB_TS
-
-
-def date_value(date):
-    """Return a FHIR date's original string and precision, or None when absent."""
-    return date.as_json() if date is not None else None
-
-
-def cda_time(date) -> IVXB_TS:
-    """Convert a FHIR date to a CDA timestamp, using UNK when it is missing.
-
-    Preserve partial dates, time components and offsets; express UTC as +0000.
-    No missing month, day or time component is inferred.
-    """
-    value = date_value(date)
-    if not value:
-        return IVXB_TS(nullFlavor="UNK")
-    # Keep source precision and time zone; never manufacture a day for a partial date.
-    day, _, time = value.partition("T")
-    return IVXB_TS(value=day.replace("-", "") + time.replace(":", "").replace("Z", "+0000"))
 
 
 def reference_details(reference, index, owner):
@@ -98,8 +80,8 @@ def source_author(reference, date, index, owner, name=None):
     if not identifiers and not label:
         return None
     return AllergyAuthor(
-        time=cda_time(date),
-        assignedAuthor=AllergyAssignedEntity(
+        time=cda_timestamp(date),
+        assignedAuthor=AllergyAssignedAuthor(
             id=identifiers or [AllergyIdentifier(nullFlavor="UNK")],
             assignedPerson=_person(label, reference),
         ),

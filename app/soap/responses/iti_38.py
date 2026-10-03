@@ -5,6 +5,8 @@ import uuid
 import xmltodict
 from fastapi import Request
 
+from app.telemetry import measure, record_cache
+
 from ...audit.audit import AuditFailureException, attempt_audit
 from ...audit.models import AuditOutcome, SAMLAttributes
 from ...gpconnect import gpconnect
@@ -47,7 +49,10 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
         )
 
     # check the redis cache if there's an existing ccda
-    docid = redis_client.get(nhsno)
+    with measure("document.cache.read") as span:
+        docid = await redis_client.get(nhsno)
+        span.set_attribute("cache.hit", docid is not None)
+    record_cache("document", docid is not None)
 
     cache_hit = docid is not None
     if docid is None:

@@ -381,8 +381,10 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
   - Security: Password authentication, protected mode
 
 - **Client Implementation** (`app/redis_connect.py`)
-  - Connection pooling with configurable limits
-  - Automatic retry mechanism for resilience
+  - Async `redis.asyncio.Redis` clients with separate document and terminology connection pools
+  - Awaited commands and pipeline execution; atomic document publication
+  - Automatic retries with nonblocking async delays
+  - Pool cleanup during application shutdown and partial startup failure
   - Comprehensive error handling
   - Memory usage monitoring
   - Structured logging

@@ -1,3 +1,4 @@
+import pytest
 from fhirclient.models import coding
 
 from app.ccda.helpers import code_with_translations
@@ -19,7 +20,8 @@ def test_single_snomed_code_only():
     assert result.translation is None
 
 
-def test_snomed_priority_and_translation():
+@pytest.mark.parametrize("snomed_first", [True, False])
+def test_snomed_priority_and_translation(snomed_first):
 
     codings = [
         coding.Coding(
@@ -38,7 +40,15 @@ def test_snomed_priority_and_translation():
             },
         ),
     ]
+    if not snomed_first:
+        codings.reverse()
+    source_order = list(codings)
+    source_values = [item.as_json() for item in codings]
+
     result = code_with_translations(codings)
+
+    assert codings == source_order
+    assert [item.as_json() for item in codings] == source_values
     assert result.code == "325242002"
     assert result.codeSystemName == "http://snomed.info/sct"
     assert result.codeSystem == "2.16.840.1.113883.6.96"

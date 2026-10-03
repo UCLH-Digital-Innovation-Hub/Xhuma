@@ -1,41 +1,32 @@
-# GP Connect allergy test-pack bundles
+# GP Connect bundle fixtures
 
-These 13 fixtures are the original successful GP Connect response bodies for the EMIS and TPP clinical test-pack patients, retrieved from the NHS integration environment on 24 September 2026. They are stored unchanged as `<NHS number>.json`, alongside the existing bundle fixtures.
+- [Allergy test-pack bundles](allergies/README.md): 13 allergy-only EMIS and TPP responses.
+- [Investigation test-pack bundles](investigations/README.md): four investigation-only EMIS and TPP responses.
 
-The calls requested allergies with `includeResolvedAllergies=false`; other clinical domains were excluded. They cover six EMIS and seven TPP test patients, with 54 AllergyIntolerance records and three empty allergy lists. Failed connection attempts and local request/audit logs are not fixtures.
+The JSON files in this directory are the existing general-purpose bundle fixtures used by shared converter tests. Domain-specific test packs are kept separately because the same patient can have different responses depending on the requested clinical sections.
 
-| Supplier | Fixture | Allergy records |
-| -------- | ------- | --------------- |
-| EMIS | [9738345251.json](9738345251.json) | 4 |
-| EMIS | [9738345367.json](9738345367.json) | 13 |
-| EMIS | [9738345286.json](9738345286.json) | 1 |
-| EMIS | [9738345510.json](9738345510.json) | 0 |
-| EMIS | [9738345308.json](9738345308.json) | 4 |
-| EMIS | [9738345316.json](9738345316.json) | 4 |
-| TPP | [9738345278.json](9738345278.json) | 5 |
-| TPP | [9738345375.json](9738345375.json) | 11 |
-| TPP | [9738345324.json](9738345324.json) | 0 |
-| TPP | [9738345529.json](9738345529.json) | 0 |
-| TPP | [9738345340.json](9738345340.json) | 3 |
-| TPP | [9738345359.json](9738345359.json) | 6 |
-| TPP | [9738345405.json](9738345405.json) | 3 |
 
-All 13 patients supply official names only. The EMIS fixtures include two explicit no-known-allergy assertions; one coexists with positive allergy records. Empty lists remain distinct from these assertions. Supplied codes, dates, statuses and notes may differ from the workbook expectations, and the EMIS lists include incomplete-transfer warnings. These source differences are intentionally preserved.
+## Refreshing test-pack fixtures
 
-See [Allergy Mapping overview](../../../../docs/allergy_mapping.md) for conversion behaviour and clinical validation limitations. These fixtures support offline conversion checks; successful XML generation does not establish Epic ingestion or clinical acceptance.
-
-## Refreshing the fixtures
-
-From the repository root:
+The existing script now covers both supplied **GP Connect ARS Clinical Test Pack — sent to UCLH 23 Sept** workbooks. The reviewed patient manifest is `scripts/test_pack_patients.json`; it records workbook, sheet and cell references without copying patient names or addresses. Updating a workbook does not automatically update the manifest.
 
 ```bash
-.venv/bin/python scripts/update_allergy_fixtures.py --org-asid 200000002574
+# Preview all identified patients and coverage gaps; no credentials needed.
+.venv/bin/python scripts/update_allergy_fixtures.py --dry-run
+
+# Refresh selected domains, optionally restricted to one supplier.
+.venv/bin/python scripts/update_allergy_fixtures.py --domain allergies investigations --supplier TPP --org-asid 200000002574
+
+# Refresh all supported, identified test-pack patients.
+.venv/bin/python scripts/update_allergy_fixtures.py --domain all --org-asid 200000002574
 ```
 
-The script reads `.env` without overriding existing environment variables. Configure `API_KEY`, `ORG_CODE`, `ORG_ASID` (or the CLI argument) and `KID`, plus the usual JWT signing key and NHS TLS certificates under `keys/`. It always uses the integration environment and direct TLS, with active allergies requested and other domains excluded. The ASID above worked for the original retrieval.
+Options for `--domain` are `allergies`, `medication`, `investigations`, `immunisations`, `problems`, `uncategorised`, `additional`, and `all` (the default). Multiple selections are accepted. `additional` requests all five supported clinical domains for patients in the Additional tests sheets. `--output-dir` overrides the parent fixture directory; each response is stored under `<domain>/<NHS number>.json`. The same patient in different domains receives separate requests and files. Repeated medication scenarios for one patient require only one medication request.
 
-Redis and the migrated audit database must be reachable using the application's normal settings. `DATABASE_URL` can override the `POSTGRES_*` settings, for example when a local database does not use SSL. The script uses the shared implementation behind `gpconnect`, retains audit persistence and CCDA conversion, and caches the resulting documents normally. It does not start services or apply database migrations. The audit caller defaults to the local username; use `--subject` to supply the appropriate caller identity.
+The packs identify 13 allergy patients, 2 medication patients, 4 investigation patients, 2 uncategorised-data patients and 3 additional-test patients. Problems and immunisation patient headers have no NHS numbers. The TPP dose-syntax sheet names Lester Egan without an NHS number, and an additional-test patient has an invalid 11-digit identifier. These gaps are reported; no identities are guessed. Uncategorised-data requests are not supported by the application's current request/converter configuration, so they are explicitly skipped and count as failures during an actual refresh.
 
-All 13 patients are refreshed sequentially. Each original response body is checked for valid FHIR, the requested patient's NHS number and an allergy list before its fixture is atomically replaced. Empty allergy lists are valid. Failed requests, conversion failures and mismatched responses leave that patient's existing fixture unchanged; other patients continue. The final summary reports the outcome and any failure produces a nonzero exit code. Temporary request/response logs are deleted after each patient.
+The script always uses the integration environment and the application's audited GP Connect fetch/conversion path. Credentials, signing/TLS keys, Redis and the migrated audit database must be configured as described in the [allergy refresh instructions](allergies/README.md#refreshing-the-fixtures). Existing active-only allergy and prescription-issue request settings are retained.
 
-Review the resulting JSON diff: the counts and source-data observations above describe the original snapshot and may change when supplier records are updated. Refreshing fixtures does not stage or commit them.
+A response replaces its fixture atomically only after successful audit/conversion, FHIR parsing, patient matching and requested-list validation. An empty domain list is valid. Access-denied responses and malformed source records do not replace fixtures. This includes the known Bob Theresa investigation parser failure and the non-consenting additional-test patient: they remain reported failures, rather than successful bundle refreshes. Other requests continue, and failures produce a nonzero exit code. Temporary logs are removed. No live calls are made by `--dry-run`.
+
+Review the JSON diffs after a refresh. Existing assessment documents and investigation `manifest.json` describe historical retrievals; the script does not rewrite that evidence or stage/commit fixtures.

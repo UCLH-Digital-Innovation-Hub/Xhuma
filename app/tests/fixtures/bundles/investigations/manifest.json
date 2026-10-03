@@ -1,0 +1,120 @@
+{
+  "retrieved_date": "2026-09-29",
+  "environment": "int",
+  "request_parameters": [
+    {
+      "name": "includeInvestigations"
+    }
+  ],
+  "requesting_org_code": "RRV00",
+  "requesting_org_asid": "200000002574",
+  "fixtures": [
+    {
+      "file": "9730333939.json",
+      "supplier": "EMIS",
+      "nhs_number": "9730333939",
+      "sha256": "2a083ff45d43bc726cc69699fc7ddbc9f7cc3d54d75ac1287e8dc791d08231ae",
+      "upstream_http_status": 200,
+      "application_http_status": 200,
+      "request_id": "d94d7859-a46b-4a25-b077-1fb08132ce05",
+      "resource_counts": {
+        "List": 1,
+        "Patient": 1,
+        "DiagnosticReport": 20,
+        "Organization": 4,
+        "Practitioner": 6,
+        "Location": 1,
+        "Specimen": 22,
+        "Observation": 153,
+        "HealthcareService": 1,
+        "PractitionerRole": 4
+      },
+      "parser_errors": []
+    },
+    {
+      "file": "9465700088.json",
+      "supplier": "EMIS",
+      "nhs_number": "9465700088",
+      "sha256": "731c46c96d66653367845c51b4af8d189a6745c4f651b4885fbf386e718a096f",
+      "upstream_http_status": 200,
+      "application_http_status": 200,
+      "request_id": "1343e783-da2d-420d-8323-a96420cff61f",
+      "resource_counts": {
+        "List": 1,
+        "Patient": 1,
+        "DiagnosticReport": 34,
+        "Organization": 13,
+        "Practitioner": 27,
+        "Location": 1,
+        "Specimen": 37,
+        "Observation": 301,
+        "HealthcareService": 34,
+        "PractitionerRole": 3
+      },
+      "parser_errors": []
+    },
+    {
+      "file": "9692136744.json",
+      "supplier": "TPP",
+      "nhs_number": "9692136744",
+      "sha256": "ebd13ded43de0cfdd20d52839c45d32a74cd09be2e642689b54e8485da3cdd5c",
+      "upstream_http_status": 200,
+      "application_http_status": 200,
+      "request_id": "654fa73b-7532-4a60-a034-123c7e29cbcf",
+      "resource_counts": {
+        "Patient": 1,
+        "DiagnosticReport": 32,
+        "Observation": 206,
+        "List": 1,
+        "Organization": 1,
+        "Practitioner": 1,
+        "PractitionerRole": 1,
+        "Location": 1
+      },
+      "parser_errors": []
+    },
+    {
+      "file": "9465699896.json",
+      "supplier": "TPP",
+      "nhs_number": "9465699896",
+      "sha256": "08cb0f4da3a5cd658c3b23320a157ed3f9bf6d21592c27b5ee4f063c0ebbb1cd",
+      "upstream_http_status": 200,
+      "application_http_status": 500,
+      "request_id": "5c51d1a0-c3c6-4965-b7d2-65a036b84a5d",
+      "resource_counts": {
+        "Patient": 1,
+        "DiagnosticReport": 5,
+        "Specimen": 5,
+        "Observation": 14,
+        "ProcedureRequest": 1,
+        "List": 1,
+        "Organization": 1,
+        "Practitioner": 4,
+        "PractitionerRole": 4,
+        "Location": 1
+      },
+      "parser_errors": [
+        {
+          "type": "Specimen",
+          "id": "b200000000000000_7200000000000000_1",
+          "error": "{root}:\n  entry.0:\n    resource:\n      note:\n        Wrong type <class 'fhirclient.models.annotation.Annotation'> for list property \"note\" on <class 'fhirclient.models.specimen.Specimen'>, expecting a list of <class 'fhirclient.models.annotation.Annotation'>"
+        },
+        {
+          "type": "DiagnosticReport",
+          "id": "c200000000000000_2e8c000000000000",
+          "error": "{root}:\n  entry.0:\n    resource:\n      performer.0:\n        'Non-optional property \"actor\" on <fhirclient.models.diagnosticreport.DiagnosticReportPerformer object at <address>> is missing'"
+        },
+        {
+          "type": "DiagnosticReport",
+          "id": "c200000000000000_1e8c000000000000",
+          "error": "{root}:\n  entry.0:\n    resource:\n      performer.0:\n        'Non-optional property \"actor\" on <fhirclient.models.diagnosticreport.DiagnosticReportPerformer object at <address>> is missing'"
+        },
+        {
+          "type": "DiagnosticReport",
+          "id": "c200000000000000_0e8c000000000000",
+          "error": "{root}:\n  entry.0:\n    resource:\n      performer.0:\n        'Non-optional property \"actor\" on <fhirclient.models.diagnosticreport.DiagnosticReportPerformer object at <address>> is missing'"
+        }
+      ]
+    }
+  ]
+}

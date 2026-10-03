@@ -5,9 +5,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_serializer, model_validator
 
-from .admin import Person
+from .admin import AssignedAuthor, AssignedEntity, AuthorParticipation, Person
+from .admin import PlayingEntity as AdministrativePlayingEntity
 from .base import Act, Entry, EntryRelationship, Observation
-from .datatypes import CD, CE, CS, II, IVL_TS, IVXB_TS
+from .datatypes import CD, CE, CS, II, IVL_TS, IVXB_TS, TS
 
 
 class AllergyIdentifier(II):
@@ -16,12 +17,19 @@ class AllergyIdentifier(II):
     root: Optional[str] = Field(alias="@root", default=None)
 
 
-class AllergyAssignedEntity(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class AllergyAssignedEntity(AssignedEntity):
+    """Allergy informant with identifiers that may be explicitly unknown."""
 
-    classCode: Literal["ASSIGNED"] = Field(alias="@classCode", default="ASSIGNED")
+    classcode: Literal["ASSIGNED"] = Field(alias="@classCode", default="ASSIGNED")
     id: List[AllergyIdentifier]
-    assignedPerson: Optional[Person] = None
+
+
+class AllergyAssignedAuthor(AssignedAuthor):
+    """Allergy author preserving unknown identifiers and existing XML defaults."""
+
+    classcode: Literal["ASSIGNED"] = Field(alias="@classCode", default="ASSIGNED")
+    context_control_code: Optional[str] = Field(default=None, alias="@contextControlCode")
+    id: List[AllergyIdentifier]
 
 
 class AllergyRelatedEntity(BaseModel):
@@ -48,12 +56,14 @@ class AllergyInformant(BaseModel):
         return self
 
 
-class AllergyAuthor(BaseModel):
+class AllergyAuthor(AuthorParticipation):
+    """Shared author participation with a required allergy authorship timestamp."""
+
     model_config = ConfigDict(populate_by_name=True)
 
     typeCode: Literal["AUT"] = Field(alias="@typeCode", default="AUT")
-    time: IVXB_TS
-    assignedAuthor: AllergyAssignedEntity
+    time: TS
+    assignedAuthor: AllergyAssignedAuthor
 
 
 class AllergyCommentAct(Act):
@@ -73,10 +83,9 @@ class AllergySubstanceCode(CE):
         return self
 
 
-class PlayingEntity(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class PlayingEntity(AdministrativePlayingEntity):
+    """Allergen material requiring either a substance code or a null reason."""
 
-    classCode: Literal["MMAT"] = Field(alias="@classCode", default="MMAT")
     code: AllergySubstanceCode
 
 

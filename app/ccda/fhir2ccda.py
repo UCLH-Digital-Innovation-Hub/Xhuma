@@ -3,18 +3,20 @@ import datetime
 import json
 import logging
 import os
-from copy import deepcopy
+from copy import copy
 
 import xmltodict
 from fhirclient.models import bundle, patient
 from fhirclient.models import list as fhirlist
 
 from app.gp_connect_config import get_gp_connect_inclusions
+from app.telemetry import measure
 
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
 from .entries.allergy import allergy_onset_sort_key
+from .entries.investigation_grouping import build_investigation_graph
 from .entries.results import investigation
-from .helpers import date_helper, select_patient_name, templateId
+from .helpers import fhir_date_is_after, fhir_to_cda_timestamp, select_patient_name, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
@@ -62,7 +64,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "given": {"#text": " ".join(selected_name.given)},
                     "family": {"#text": selected_name.family},
                 },
-                "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
+                "birthTime": {"@value": fhir_to_cda_timestamp(subject[0].birthDate)},
             },
         }
     }
@@ -109,7 +111,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "@classCode": "PCPR",
             "effectiveTime": {
                 "low": {
-                    "@value": date_helper(subject[0].birthDate.isostring),
+                    "@value": fhir_to_cda_timestamp(subject[0].birthDate),
                 },
                 "high": {"@value": datetime.date.today().strftime("%Y%m%d")},
             },
@@ -121,7 +123,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # vital_signs.title = "Vital Signs"
     # lists.append(vital_signs)s
 
+    investigation_graph = None
+
     async def create_section(list: fhirlist.List) -> dict:
+        nonlocal investigation_graph
         templates = {
             "Allergies and adverse reactions": {
                 "displayName": "Allergies, adverse reactions, alerts",
@@ -430,18 +435,26 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             #     *[investigation(entry, index) for entry in list.entry]
             # )
             # print(organizer_with_table)
+            # Provider completeness warnings apply even when no reports are returned.
+            warnings = [note.text for note in list.note or [] if note.text]
             if not list.entry:
-                comp["section"]["text"] = {"paragraph": "No Information Available"}
+                comp["section"]["text"] = {"paragraph": [*warnings, "No Information Available"]}
                 return comp
             references = [index[entry.item.reference] for entry in list.entry]
 
-            organizer_with_table = [await investigation(ref, index) for ref in references]
+            if investigation_graph is None:
+                with measure("investigations.graph") as span:
+                    investigation_graph = build_investigation_graph(index)
+                    span.set_attribute("graph.observations", len(investigation_graph.observations))
+                    span.set_attribute("graph.reports", len(investigation_graph.reports))
+                    span.set_attribute("graph.edges", len(investigation_graph.edges))
+            organizer_with_table = [await investigation(ref, index, investigation_graph) for ref in references]
 
             table_list = {
                 "@styleCode": "TOC",
                 "item": [org.table for org in organizer_with_table],
             }
-            comp["section"]["text"] = {"list": table_list}
+            comp["section"]["text"] = {**({"paragraph": warnings} if warnings else {}), "list": table_list}
             entries = [{"@typeCode": "DRIV", "organizer": org.organizer} for org in organizer_with_table]
             comp["section"]["entry"] = entries
             return comp
@@ -458,33 +471,17 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         active = []
         past = []
         future_meds = 0
+        today = datetime.date.today()
 
         for med in medications.entry:
             # print(med)
             referenced_med = index[med.item.reference]
             effective_period = getattr(referenced_med, "effectivePeriod", None)
             effective_end = getattr(effective_period, "end", None)
-            effective_end_date = None
-
-            # ensure is the correct type for comparison
-            if effective_end is not None:
-                if isinstance(effective_end, datetime.datetime):
-                    effective_end_date = effective_end.date()
-                elif isinstance(effective_end, datetime.date):
-                    effective_end_date = effective_end
-                else:
-                    # consider just enforcing this route
-                    effective_end_iso = getattr(effective_end, "isostring", effective_end)
-                    effective_end_date = datetime.date.fromisoformat(str(effective_end_iso)[:10])
-            # print(referenced_med)
             # status active or end date in the future
             if referenced_med.status == "active":
                 active.append(med)
-            elif (
-                referenced_med.status == "completed"
-                and effective_end_date is not None
-                and effective_end_date > datetime.date.today()
-            ):
+            elif referenced_med.status == "completed" and fhir_date_is_after(effective_end, today):
                 active.append(med)
                 future_meds += 1
             else:
@@ -494,7 +491,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         return active, past, future_meds
 
     def clone_list(original, new_title, new_entries):
-        new_list = deepcopy(original)
+        # Ownership links lead back to the bundle; only title and entries change.
+        # Section rendering reads the shared metadata without modifying it.
+        new_list = copy(original)
         new_list.title = new_title
         new_list.entry = new_entries
         return new_list

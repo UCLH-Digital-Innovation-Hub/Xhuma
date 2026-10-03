@@ -1,6 +1,6 @@
 from fhirclient.models import immunization
 
-from ..helpers import code_with_translations, date_helper, readable_date, templateId
+from ..helpers import code_with_translations, fhir_to_cda_timestamp, readable_date, templateId
 from ..models.base import EntryRelationship, SubstanceAdministration
 from ..models.datatypes import SXCM_TS
 from .types import EntryWithRow
@@ -13,7 +13,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         templateId=templateId("2.16.840.1.113883.10.20.22.4.52", "2014-06-09"),
         id=[{"@root": entry.id}],
         statusCode={"@code": entry.status},
-        effectiveTime=[SXCM_TS(value=date_helper(entry.date.isostring))] if entry.date else [],
+        effectiveTime=[SXCM_TS(value=fhir_to_cda_timestamp(entry.date))] if entry.date else [],
         consumable={
             "manufacturedProduct": {
                 "templateId": templateId("2.16.840.1.113883.10.20.22.4.54", "2014-06-09"),
@@ -69,7 +69,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         }
         immunization_entry.entryRelationship.append(comment_activity)
 
-    date_val = readable_date(date_helper(entry.date.isostring)) if entry.date else ""
+    date_val = readable_date(fhir_to_cda_timestamp(entry.date)) if entry.date else ""
     vaccine_val = entry.vaccineCode.coding[0].display if (entry.vaccineCode and entry.vaccineCode.coding) else ""
     if misc_notes:
         vaccine_val = f"{vaccine_val}<br />Notes: " + "<br />".join(misc_notes)

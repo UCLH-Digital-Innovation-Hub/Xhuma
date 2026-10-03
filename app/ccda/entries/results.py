@@ -1,17 +1,33 @@
-import asyncio
+import logging
 from dataclasses import dataclass
 
 from fhirclient.models import diagnosticreport as dr
 from fhirclient.models import observation as obs
+from fhirclient.models.specimen import Specimen
+
+from app.telemetry import measure
 
 from ..helpers import (
+    cda_time_interval,
     code_with_translations,
-    datetime_helper,
     id_helper,
 )
 from ..models.base import ResultObservation, ResultsOrganizer
-from ..models.datatypes import CD, CS, II, IVL_TS, IVXB_TS, PQ
+from ..models.datatypes import CD, CS, II, IVL_TS
+from .investigation_grouping import (
+    InvestigationGraph,
+    group_investigation,
+    has_result_value,
+    is_filing_comment,
+    observation_label,
+)
+from .result_context import cda_specimen, organizer_collection_time, report_issue_time, report_specimens
+from .result_presentation import column_widths, laboratory_details_table, report_heading_time, report_identity
+from .result_ranges import outside_reference_range, reference_range
+from .result_values import map_result_value
 from .types import EntryWithRow
+
+logger = logging.getLogger(__name__)
 
 COMMENT_NOTE_SNOMED = ["37331000000100", "364712009"]  # SNOMED codes for comment note
 INVESTIGATION_RESULT = "24641000000107"
@@ -51,7 +67,7 @@ def is_comment_note(observation: obs.Observation) -> bool:
 
 
 def is_test_group_header(observation: obs.Observation) -> bool:
-    # test group headers have no value and are not comment notes
+    """Legacy caption/category heuristic; never use this to select or drop results."""
 
     if is_comment_note(observation):
         return False
@@ -66,127 +82,130 @@ def is_test_group_header(observation: obs.Observation) -> bool:
     return True
 
 
-def create_xml_table(table: ResultTable) -> dict:
-    # create dict in format for xmltodict to convert to item with caption and table
-    table_dict = {
-        "caption": table.title,
-        # list of tables to allow for appending of specimens etc
-        "table": [],
-    }
+def create_xml_table(table: ResultTable, *, caption: str | None = None) -> dict:
+    """Build a report wrapper containing one independently readable result table."""
     result_table = {
+        **({"caption": {"@styleCode": "Bold", "#text": caption}} if caption else {}),
+        "colgroup": column_widths(30, 20, 20, 30),
         "thead": {"tr": {"th": table.headers}},
-        "tbody": {"tr": []},
+        "tbody": {"tr": [{"td": row.cells} for row in table.rows]},
     }
-    for row in table.rows:
-        result_table["tbody"]["tr"].append({"td": row.cells})
-    table_dict["table"].append(result_table)
-    return table_dict
+    return {"caption": table.title, "table": [result_table]}
+
+
+def degraded_original_name(observation: obs.Observation) -> str | None:
+    """Return the original label only for an explicitly transfer-degraded code."""
+    code = observation.code
+    if (
+        code
+        and code.text
+        and any(c.system == "http://snomed.info/sct" and c.code == TRANSFER_DEGRADED for c in code.coding or [])
+    ):
+        return code.text
+    return None
+
+
+def specimen_notes_table(report: dr.DiagnosticReport, index: dict) -> dict | None:
+    """Collect notes from this report's specimens in a separate, labelled table.
+
+    Repeat the specimen label for each note so that several samples cannot be
+    confused. Deduplicate references to the same resource, not identical text
+    from distinct specimens. Never use specimens from an unrelated report.
+    """
+    rows = []
+    seen = set()
+    for reference in report.specimen or []:
+        specimen = index.get(reference.reference)
+        if not isinstance(specimen, Specimen) or id(specimen) in seen:
+            continue
+        seen.add(id(specimen))
+        specimen_type = specimen.type
+        label = (
+            specimen_type.text or next((c.display for c in specimen_type.coding or [] if c.display), None)
+            if specimen_type
+            else None
+        )
+        accession = specimen.accessionIdentifier.value if specimen.accessionIdentifier else None
+        identifier = accession or next((i.value for i in specimen.identifier or [] if i.value), None) or specimen.id
+        label = " — ".join(value for value in (label, identifier) if value) or "Specimen"
+        collection = specimen.collection
+        collected = "Not supplied"
+        if collection and collection.collectedDateTime:
+            collected = collection.collectedDateTime.as_json()
+        elif collection and collection.collectedPeriod:
+            period = collection.collectedPeriod
+            collected = f"{period.start.as_json() if period.start else 'Unknown start'} – {period.end.as_json() if period.end else 'Unknown end'}"
+        received = specimen.receivedTime.as_json() if specimen.receivedTime else "Not supplied"
+        notes = [note.text for note in specimen.note or [] if note.text]
+        for note in notes or [""]:
+            rows.append({"td": [label, note, collected, received]})
+    if not rows:
+        return None
+    return {
+        "caption": "Specimen notes",
+        "colgroup": column_widths(30, 30, 20, 20),
+        "thead": {"tr": {"th": ["Specimen", "Notes", "Collected", "Received"]}},
+        "tbody": {"tr": rows},
+    }
+
+
+def result_status(status: str | None, *, organizer: bool = False) -> CS:
+    """Map FHIR laboratory workflow to CDA, never equating unknown with final.
+
+    Amended/corrected/appended are changes after finalisation in FHIR STU3.
+    Cancellation does not distinguish before/after activation, so use aborted.
+    Result Observation's restricted status vocabulary has no nullified code;
+    represent entered-in-error as OTH there and retain its source status in text.
+    Organizers use ActStatus and can represent nullified directly.
+    """
+    mapped = {
+        "registered": "active",
+        "partial": "active",
+        "preliminary": "active",
+        "final": "completed",
+        "amended": "completed",
+        "corrected": "completed",
+        "appended": "completed",
+        "cancelled": "aborted",
+    }
+    if status in mapped:
+        return CS(code=mapped[status])
+    if status == "entered-in-error" and organizer:
+        return CS(code="nullified")
+    if status in (None, "", "unknown"):
+        return CS(nullFlavor="UNK")
+    return CS(nullFlavor="OTH")
 
 
 async def create_result_component(observation: obs.Observation, group_time: IVL_TS = None) -> ResultWithRow:
     result_component = ResultObservation(
         code=code_with_translations(observation.code.coding),
         id=id_helper(observation.identifier) if observation.identifier else None,
-        statusCode=CS(code=observation.status) if observation.status else None,
+        statusCode=result_status(observation.status),
     )
-
-    # TODO: Map FHIR statuses to CDA Result Status codes, using lowercase
-    # "completed" (HL7 ActStatus is case-sensitive).
-    # change final to completed for better mapping to CDA status codes
-    if result_component.statusCode and result_component.statusCode.code == "final":
-        result_component.statusCode.code = "Completed"
 
     if group_time:
         result_component.effectiveTime = group_time
     else:
         result_component.effectiveTime = (
-            IVL_TS(low=IVXB_TS(value=datetime_helper(observation.effectiveDateTime)))
+            cda_time_interval(observation.effectiveDateTime, observation.effectiveDateTime)
             if observation.effectiveDateTime
             else None
         )
     table_row = ResultTableRow(cells=[None, None, None, None])
-    table_row.cells.insert(0, result_component.code.displayName)
+    original_name = degraded_original_name(observation)
+    if original_name:
+        # Keep the supplied generic coding and its display intact. CDA's
+        # originalText carries the original test name without recoding it.
+        result_component.code.originalText = original_name
+    table_row.cells[0] = original_name or result_component.code.displayName
 
-    # block for value/comment
+    mapped_value = map_result_value(observation)
+    result_component.value = mapped_value.value
+    table_row.cells[1] = mapped_value.text
 
-    if observation.valueString:
-        result_component.value = {"@value": observation.valueString}
-        table_row.cells.insert(1, observation.valueString)
-
-    elif observation.valueQuantity:
-        vq = observation.valueQuantity
-        # Handle comparator logic
-        if getattr(vq, "comparator", None):
-            # comparator means IVL_PQ
-            value = {"@xsi:type": "IVL_PQ"}
-            if "<" in vq.comparator:
-                value["high"] = {
-                    "@value": vq.value,
-                    "@unit": vq.unit,
-                }
-                if "=" in vq.comparator:
-                    value["high"]["@inclusive"] = "true"
-                # lower bound for physical measurement is 0
-                value["low"] = {
-                    "@value": 0,
-                    "@unit": vq.unit,
-                    "@inclusive": "true",
-                }
-            elif ">" in vq.comparator:
-                value["low"] = {
-                    "@value": vq.value,
-                    "@unit": vq.unit,
-                }
-                if "=" in vq.comparator:
-                    value["low"]["@inclusive"] = "true"
-                # high bound for greater than physical measurement is infinity
-                value["high"] = {"@nullFlavor": "PINF"}
-            result_component.value = value
-            table_row.cells.insert(1, f"{vq.comparator} {vq.value} {vq.unit if vq.unit else ''}")
-        else:
-            result_component.value = PQ(
-                value=vq.value,
-                unit=(vq.unit if vq.unit else None),
-            )
-            value_text = f"{vq.value} {vq.unit if vq.unit else ''}"
-
-            outside_reference_range = False
-            if observation.referenceRange:
-                has_numeric_range = False
-                for reference_range in observation.referenceRange:
-                    low = getattr(reference_range, "low", None)
-                    high = getattr(reference_range, "high", None)
-                    low_value = getattr(low, "value", None)
-                    high_value = getattr(high, "value", None)
-
-                    # Handle single-bound ranges
-                    if low_value is not None and high_value is None:
-                        has_numeric_range = True
-                        if vq.value < low_value:
-                            outside_reference_range = True
-                            break
-                    elif high_value is not None and low_value is None:
-                        has_numeric_range = True
-                        if vq.value > high_value:
-                            outside_reference_range = True
-                            break
-                    elif low_value is not None and high_value is not None:
-                        has_numeric_range = True
-                        if not (low_value <= vq.value <= high_value):
-                            outside_reference_range = True
-                            break
-
-                if not has_numeric_range:
-                    outside_reference_range = False
-
-            table_row.cells.insert(
-                1,
-                (
-                    {"content": {"@styleCode": "flagData", "#text": value_text}}
-                    if outside_reference_range
-                    else value_text
-                ),
-            )
+    if outside_reference_range(observation):
+        table_row.cells[1] = {"content": {"@styleCode": "flagData", "#text": mapped_value.text}}
 
     if observation.comment:
         result_component.text = observation.comment
@@ -199,109 +218,49 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
             ],
         }
         # content.append(comment_dict)
-        table_row.cells.insert(3, {"content": comment_dict})
+        table_row.cells[3] = {"content": comment_dict}
 
-    # table_row.cells.insert(1, {"content": content})
+    if result_component.statusCode.nullFlavor == "OTH":
+        # Keep an explicit withdrawal/unrecognised status visible even where
+        # the restricted CDA result vocabulary cannot express that state.
+        status_note = f"Source result status: {observation.status}"
+        result_component.text = "\n".join(filter(None, (status_note, observation.comment)))
+        table_row.cells[3] = {"#text": result_component.text}
 
     if hasattr(observation, "interpretation") and observation.interpretation:
         result_component.interpretationCode = code_with_translations(observation.interpretation.coding)
 
-    # reference range
     if observation.referenceRange:
-        observation_ranges = []
-        unit = observation.valueQuantity.unit if observation.valueQuantity else None
-
-        for reference_range in observation.referenceRange:
-            if getattr(reference_range, "text", None):
-                observation_ranges.append({"text": reference_range.text})
-
-            low = getattr(reference_range, "low", None)
-            high = getattr(reference_range, "high", None)
-            if low or high:
-                range_value = {"@xsi:type": "IVL_PQ"}
-                if low:
-                    range_value["low"] = {
-                        "@value": low.value,
-                        "@unit": unit,
-                    }
-                if high:
-                    range_value["high"] = {
-                        "@value": high.value,
-                        "@unit": unit,
-                    }
-                observation_ranges.append({"value": range_value})
-
-        if observation_ranges:
-            # TODO: Emit separate referenceRange wrappers with exactly one
-            # observationRange each (CONF:1198-7151), and supply a value for
-            # text-only ranges (CONF:1198-32175).
-            # TODO: Construct list[ReferenceRange] with ObservationRange models;
-            # test_results emits Pydantic serializer warnings for this dict assignment.
-            result_component.referenceRange = {"observationRange": observation_ranges}
-
-            # create string with each reference range on a new line
-            reference_range_str = "\n".join(
-                [
-                    (
-                        f"{r['text']}"
-                        if "text" in r
-                        else (
-                            f"{r['value']['low']['@value']} - {r['value']['high']['@value']} {unit}"
-                            if "low" in r["value"] and "high" in r["value"]
-                            else (
-                                f">= {r['value']['low']['@value']} {unit}"
-                                if "low" in r["value"]
-                                else f"<= {r['value']['high']['@value']} {unit}"
-                            )
-                        )
-                    )
-                    for r in observation_ranges
-                ]
-            )
-            table_row.cells.insert(2, {"#text": reference_range_str})
+        mapped_ranges = [reference_range(r) for r in observation.referenceRange]
+        result_component.referenceRange = [model for model, _ in mapped_ranges]
+        table_row.cells[2] = {"#text": "\n".join(text for _, text in mapped_ranges if text)}
 
     return ResultWithRow(entry=result_component, row=table_row)
 
 
-async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> InvestigationWithTable:
+async def investigation(
+    diagnostic_report: dr.DiagnosticReport, index: dict, graph: InvestigationGraph | None = None
+) -> InvestigationWithTable:
+    """Render one report with explicit groups and locally associated filing comments."""
 
     observations: list[obs.Observation] = (
-        [index[x.reference] for x in diagnostic_report.result] if diagnostic_report.result else []
+        [index[x.reference] for x in diagnostic_report.result if isinstance(index.get(x.reference), obs.Observation)]
+        if diagnostic_report.result
+        else []
     )
 
-    report_issued_time = IVL_TS(low=IVXB_TS(value=datetime_helper(diagnostic_report.issued)))
+    report_issued_time = report_issue_time(diagnostic_report)
     test_group_headers = [o for o in observations if is_test_group_header(o)]
 
-    # add results in test group headers to observations list
-    seen = {id(o) for o in observations}
-    for header in test_group_headers:
-        members = list(getattr(header, "hasMember", None) or [])
-        members.extend(
-            relation.target
-            for relation in getattr(header, "related", None) or []
-            if relation.type == "has-member" and relation.target is not None
-        )
-        for member in members:
-            observation = index[member.reference]
-            if id(observation) not in seen:
-                observations.append(observation)
-                seen.add(id(observation))
-    comment_observations = [o for o in observations if is_comment_note(o)]
-
     category_observation = None
-    if len(test_group_headers) == 0 or len(test_group_headers) > 1:
-        test_title = "Diagnostic Report"
-        # treat all non comments as test results and ignore test group headers
-        test_results = [o for o in observations if not is_comment_note(o)]
-    else:
-        test_title = test_group_headers[0].code.coding[0].display if test_group_headers else "Diagnostic Report"
-
+    # Keep legacy category metadata separate from graph-based report identity.
+    if len(test_group_headers) == 1:
         # look for category in test group header
         for category in test_group_headers[0].category or []:
             for code in category.coding or []:
                 if code.system == "http://hl7.org/fhir/observation-category":
                     if code.code == "laboratory":
-                        print("Category is laboratory")
+                        # print("Category is laboratory")
                         # TODO: Supply the required id, observation code and
                         # statusCode, and the 2015-08-01 Result Observation
                         # template extension (CONF:1198-7137/7133/7134/32575).
@@ -324,41 +283,192 @@ async def investigation(diagnostic_report: dr.DiagnosticReport, index: dict) -> 
                             effectiveTime=report_issued_time,
                         )
 
-        # remaining observations are test results
-        test_results = [o for o in observations if not is_comment_note(o) and not is_test_group_header(o)]
+    with measure("investigations.group") as span:
+        grouping = group_investigation(diagnostic_report, graph if graph is not None else index)
+        span.set_attribute("report.observations", len(grouping.observations))
+        span.set_attribute("report.grouping_issues", len(grouping.issues))
+    test_title, report_code, panel = report_identity(
+        diagnostic_report, grouping, test_group_headers[0] if len(test_group_headers) == 1 else None
+    )
 
     organizer = ResultsOrganizer(
-        statusCode=(CS(code=diagnostic_report.status) if diagnostic_report.status else None),
+        statusCode=result_status(diagnostic_report.status, organizer=True),
         id=id_helper(diagnostic_report.identifier),
-        code=(code_with_translations(test_group_headers[0].code.coding) if test_group_headers else None),
-        # this should be the specimen collection time if available, but for now will use report issued time
-        effectiveTime=report_issued_time,
+        code=report_code,
+        effectiveTime=organizer_collection_time(diagnostic_report, index),
+        specimen=[cda_specimen(s) for s in report_specimens(diagnostic_report, index)] or None,
     )
 
-    # TODO: Map FHIR statuses to CDA Result Status codes, using lowercase
-    # "completed" (HL7 ActStatus is case-sensitive).
-    # change final to completed for better mapping to CDA status codes
-    if organizer.statusCode and organizer.statusCode.code == "final":
-        organizer.statusCode.code = "Completed"
-    result_components = asyncio.gather(*[create_result_component(o, report_issued_time) for o in test_results])
-    organizer.component = [{"observation": c.entry} for c in await result_components]
-    if category_observation:
-        organizer.component.append({"observation": category_observation})
-    table_rows = [c.row for c in await result_components]
+    with measure("investigations.render"):
+        table_rows = []
+        group_tables = []
+        other_rows, unplaced_rows = [], []
+        filing_comments = []
+        components = []
+        emitted = set()
+        has_unplaced_result = False
+        has_cycle = False
 
-    for comment in comment_observations:
-        comment_row = ResultTableRow(cells=[{"@colspan": 4, "#text": comment.comment}])
-        if comment.valueString:
-            table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "#text": comment.valueString}]))
-        table_rows.append(comment_row)
+        def narrative_row(text):
+            """Place a heading or annotation across the existing four columns."""
+            table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "#text": text}]))
 
-    result_table = ResultTable(
-        title=f"{test_title} {diagnostic_report.issued.date}",
-        headers=["Component", "Value", "Reference Range", "Comments"],
-        rows=table_rows,
-    )
+        def group_heading(text, depth):
+            content = {"@styleCode": "Bold", "#text": text}
+            for _ in range(depth):
+                content = {"@styleCode": "allIndent", "content": content}
+            table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "content": content}]))
 
-    return InvestigationWithTable(
-        organizer=organizer.model_dump(by_alias=True, exclude_none=True),
-        table=create_xml_table(result_table),
-    )
+        async def render(reference, path=(), *, table_root=False):
+            """Render each assertion once while retaining shared group associations."""
+            nonlocal has_cycle
+            observation = grouping.observations[reference]
+            if reference in path:
+                has_cycle = True
+                grouping.issues.append(f"Cyclic test grouping at {reference}")
+                narrative_row(f"Grouping could not be resolved for: {observation_label(observation)}")
+                return
+            if reference in emitted:
+                narrative_row(f"Also associated: {observation_label(observation)} (shown elsewhere in this report)")
+                return
+            emitted.add(reference)
+            if is_filing_comment(observation):
+                narrative_row(f"Comment: {observation_label(observation)}")
+                if observation.valueString is not None:
+                    narrative_row(observation.valueString)
+                if observation.comment is not None:
+                    narrative_row(observation.comment)
+                return
+
+            members = grouping.members.get(reference, [])
+            has_value = has_result_value(observation)
+            if members:
+                if not table_root:
+                    group_heading(f"Test group: {observation_label(observation)}", len(path))
+                if not has_value and observation.comment:
+                    narrative_row(observation.comment)
+                if not has_value and observation.interpretation:
+                    interpretation = observation.interpretation
+                    text = interpretation.text or "; ".join(
+                        c.display or c.code or "" for c in interpretation.coding or []
+                    )
+                    narrative_row(f"Group interpretation: {text}")
+
+            # Only explicit membership makes a group. String-valued and narrative-
+            # only standalone observations remain results. Keep unexpected values
+            # on groups too, using the existing serializer without changing mapping.
+            if not members or has_value:
+                converted = await create_result_component(observation, report_issued_time)
+                components.append({"observation": converted.entry})
+                table_rows.append(converted.row)
+            for comment in grouping.comments.get(reference, []):
+                await render(comment, path + (reference,))
+            for member in members:
+                await render(member, path + (reference,))
+
+        # Render in the original root order to preserve structured component
+        # order and shared-result ownership, collecting separate narrative tables.
+        for reference in grouping.roots:
+            if grouping.members.get(reference):
+                table_rows = []
+                group_tables.append((reference, table_rows))
+                await render(reference, table_root=True)
+            else:
+                table_rows = other_rows
+                await render(reference)
+        for reference in grouping.report_comments:
+            if reference not in emitted:
+                emitted.add(reference)
+                comment = grouping.observations[reference]
+                filing_comments.append(
+                    {
+                        "paragraph": [
+                            {"content": {"@styleCode": "Bold", "#text": observation_label(comment)}},
+                            *[text for text in (comment.valueString, comment.comment) if text is not None],
+                        ]
+                    }
+                )
+        table_rows = unplaced_rows
+        # Cyclic and otherwise unplaced items must not disappear from the report.
+        for reference in grouping.observations:
+            if reference not in emitted:
+                if not is_filing_comment(grouping.observations[reference]):
+                    has_unplaced_result = True
+                narrative_row("Unplaced source item")
+                await render(reference)
+        if grouping.issues:
+            for issue in grouping.issues:
+                logger.warning("Investigation %s: %s", diagnostic_report.id, issue)
+        # A sole explicit panel can be a BATTERY; mixed, cyclic or unplaced
+        # results remain a CLUSTER. Source values do not establish membership.
+        organizer.classCode = (
+            "BATTERY" if panel and not has_cycle and not has_unplaced_result and not grouping.issues else "CLUSTER"
+        )
+        if panel and organizer.classCode == "CLUSTER":
+            test_title, organizer.code, _ = report_identity(
+                diagnostic_report,
+                grouping,
+                test_group_headers[0] if len(test_group_headers) == 1 else None,
+                allow_panel=False,
+            )
+        organizer.component = components
+        if category_observation:
+            organizer.component.append({"observation": category_observation})
+
+        title = f"{test_title} ({report_heading_time(diagnostic_report, index)})"
+        narrative_tables = []
+
+        def add_table(rows, caption):
+            if rows:
+                result_table = ResultTable(
+                    title=title,
+                    headers=["Component", "Value", "Reference Range", "Comments"],
+                    rows=rows,
+                )
+                narrative_tables.extend(create_xml_table(result_table, caption=caption)["table"])
+
+        for reference, rows in group_tables:
+            label = observation_label(grouping.observations[reference])
+            # A single complete panel already names the report; don't repeat it.
+            caption = None if organizer.classCode == "BATTERY" and label == test_title else label
+            add_table(rows, caption)
+        add_table(other_rows, "Other results")
+        add_table(unplaced_rows, "Unplaced source items")
+        paragraphs = []
+        if diagnostic_report.conclusion:
+            paragraphs.extend(
+                [
+                    {"content": {"@styleCode": "Bold", "#text": "Report Interpretation"}},
+                    diagnostic_report.conclusion,
+                ]
+            )
+        if grouping.issues:
+            paragraphs.append("Some investigation relationships could not be resolved; available results are shown.")
+        table = {
+            "caption": title,
+            **({"paragraph": paragraphs} if paragraphs else {}),
+            **(
+                {
+                    "list": {
+                        "@listType": "unordered",
+                        "caption": {"@styleCode": "Bold", "#text": "Report-level filing"},
+                        "item": filing_comments,
+                    }
+                }
+                if filing_comments
+                else {}
+            ),
+            "table": narrative_tables,
+        }
+        specimen_table = specimen_notes_table(diagnostic_report, index)
+        if specimen_table:
+            table["table"].append(specimen_table)
+
+        laboratory_table = laboratory_details_table(diagnostic_report, grouping, index)
+        if laboratory_table:
+            table["table"].append(laboratory_table)
+
+        return InvestigationWithTable(
+            organizer=organizer.model_dump(by_alias=True, exclude_none=True),
+            table=table,
+        )

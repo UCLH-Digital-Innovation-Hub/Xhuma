@@ -322,6 +322,7 @@ async def test_substance_administration():
         "MedicationRequest/32": med_request,
     }
     substance_administration = await medication_entry(med_statement, index_dict)
+    assert substance_administration.row[0] == "22/05/2024"
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
     # print(substance_administration)
@@ -330,7 +331,7 @@ async def test_substance_administration():
     assert substance_administration["@moodCode"] == "INT"
     assert len(substance_administration["id"]) == 1
     # assert effective time list contains low
-    assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20240522"
+    assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20240522000000+0100"
     # assert substance_administration.id[0].root is not None
 
 

@@ -1,0 +1,649 @@
+{
+  "fixture": "app/tests/fixtures/bundles/investigations/9730333939.json",
+  "fixture_sha256": "2a083ff45d43bc726cc69699fc7ddbc9f7cc3d54d75ac1287e8dc791d08231ae",
+  "reports": [
+    {
+      "report_id": "8D21F8F1-674F-4AB1-BFC9-B98FA4E0FCE7",
+      "caption": "Diagnostic Report 2003-06-18 08:00:00+01:00",
+      "groups": [
+        {
+          "reference": "Observation/E5F850B4-429E-4123-B427-7F27D9A64E23",
+          "label": "Bone profile",
+          "members": [
+            "Observation/FD24AB71-F465-4222-8A4E-88299A00865A",
+            "Observation/722CE353-8CF3-4F0A-BE15-11D93345834A",
+            "Observation/99FAB27E-F70C-4A19-9065-2146E9E3CED5",
+            "Observation/AB86E3AD-77DD-4519-B1A8-85FC9ABF75F7",
+            "Observation/38E4636D-5D3A-47F4-B602-3CB39FB51364",
+            "Observation/ED2D2F9E-8FBC-45A6-9128-694C50B53402"
+          ]
+        },
+        {
+          "reference": "Observation/7CFA53E4-C719-45CD-9C6D-AFB246B960FD",
+          "label": "Urea and electrolytes level",
+          "members": [
+            "Observation/A74836EE-6B4E-43D3-BD39-1D211DCC623E",
+            "Observation/652D1A11-6756-4CF8-8541-27924DC1E30F",
+            "Observation/6FE9CA97-5D24-405D-8F73-8D93B86BB492",
+            "Observation/E798F63D-F5FC-475C-ACD5-4A5FF4DA92C6"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/FD24AB71-F465-4222-8A4E-88299A00865A",
+        "Observation/722CE353-8CF3-4F0A-BE15-11D93345834A",
+        "Observation/99FAB27E-F70C-4A19-9065-2146E9E3CED5",
+        "Observation/AB86E3AD-77DD-4519-B1A8-85FC9ABF75F7",
+        "Observation/38E4636D-5D3A-47F4-B602-3CB39FB51364",
+        "Observation/ED2D2F9E-8FBC-45A6-9128-694C50B53402",
+        "Observation/A74836EE-6B4E-43D3-BD39-1D211DCC623E",
+        "Observation/652D1A11-6756-4CF8-8541-27924DC1E30F",
+        "Observation/6FE9CA97-5D24-405D-8F73-8D93B86BB492",
+        "Observation/E798F63D-F5FC-475C-ACD5-4A5FF4DA92C6",
+        "Observation/C99090BF-F720-454B-9FEE-C0B0DE6E46FD",
+        "Observation/7C2E067F-F547-4986-B0F5-28F2AFC21A2A",
+        "Observation/135BEBFA-8394-4630-A61F-C07D72E53BA8"
+      ],
+      "source_observations": [
+        "Observation/E5F850B4-429E-4123-B427-7F27D9A64E23",
+        "Observation/7CFA53E4-C719-45CD-9C6D-AFB246B960FD",
+        "Observation/C99090BF-F720-454B-9FEE-C0B0DE6E46FD",
+        "Observation/7C2E067F-F547-4986-B0F5-28F2AFC21A2A",
+        "Observation/135BEBFA-8394-4630-A61F-C07D72E53BA8",
+        "Observation/8D21F8F1-674F-4AB1-BFC9-B98FA4E0FCE7-COMM",
+        "Observation/FD24AB71-F465-4222-8A4E-88299A00865A",
+        "Observation/722CE353-8CF3-4F0A-BE15-11D93345834A",
+        "Observation/99FAB27E-F70C-4A19-9065-2146E9E3CED5",
+        "Observation/AB86E3AD-77DD-4519-B1A8-85FC9ABF75F7",
+        "Observation/38E4636D-5D3A-47F4-B602-3CB39FB51364",
+        "Observation/ED2D2F9E-8FBC-45A6-9128-694C50B53402",
+        "Observation/A74836EE-6B4E-43D3-BD39-1D211DCC623E",
+        "Observation/652D1A11-6756-4CF8-8541-27924DC1E30F",
+        "Observation/6FE9CA97-5D24-405D-8F73-8D93B86BB492",
+        "Observation/E798F63D-F5FC-475C-ACD5-4A5FF4DA92C6"
+      ],
+      "existing_components": 15,
+      "proposed_components": 13
+    },
+    {
+      "report_id": "5274130D-4FE7-4EE6-B463-B59E86F34811",
+      "caption": "Diagnostic Report 2023-06-24 00:00:00+01:00",
+      "groups": [],
+      "results": [],
+      "source_observations": [
+        "Observation/5274130D-4FE7-4EE6-B463-B59E86F34811-COMM"
+      ],
+      "existing_components": 0,
+      "proposed_components": 0
+    },
+    {
+      "report_id": "EEC7C3E9-0780-43BB-926E-B97D45EFDD60",
+      "caption": "Diagnostic Report 2023-06-24 00:00:00+01:00",
+      "groups": [],
+      "results": [],
+      "source_observations": [
+        "Observation/EEC7C3E9-0780-43BB-926E-B97D45EFDD60-COMM"
+      ],
+      "existing_components": 0,
+      "proposed_components": 0
+    },
+    {
+      "report_id": "B3453B4C-ACF6-40AB-B4FB-D8B736A2C7CA",
+      "caption": "International normalised ratio 2023-06-24 00:00:00+01:00",
+      "groups": [],
+      "results": [
+        "Observation/525BE8CB-BB88-4173-9D23-018DD43E2027"
+      ],
+      "source_observations": [
+        "Observation/525BE8CB-BB88-4173-9D23-018DD43E2027",
+        "Observation/B3453B4C-ACF6-40AB-B4FB-D8B736A2C7CA-COMM"
+      ],
+      "existing_components": 1,
+      "proposed_components": 2
+    },
+    {
+      "report_id": "3F23D00A-5DC8-49B8-8FEF-0C4BD4D3B4D0",
+      "caption": "Diagnostic Report 2023-06-24 00:00:00+01:00",
+      "groups": [],
+      "results": [],
+      "source_observations": [
+        "Observation/3F23D00A-5DC8-49B8-8FEF-0C4BD4D3B4D0-COMM"
+      ],
+      "existing_components": 0,
+      "proposed_components": 0
+    },
+    {
+      "report_id": "42A5C03B-13BB-41E9-873E-9CF3DA2DE04E",
+      "caption": "Diagnostic Report 2023-06-24 00:00:00+01:00",
+      "groups": [],
+      "results": [
+        "Observation/53AF92D8-AF4C-4C41-AE5D-249F141DC81B"
+      ],
+      "source_observations": [
+        "Observation/53AF92D8-AF4C-4C41-AE5D-249F141DC81B",
+        "Observation/42A5C03B-13BB-41E9-873E-9CF3DA2DE04E-COMM"
+      ],
+      "existing_components": 1,
+      "proposed_components": 1
+    },
+    {
+      "report_id": "5A8B9936-B771-488E-9103-3331629690C4",
+      "caption": "Diagnostic Report 2023-06-24 00:00:00+01:00",
+      "groups": [],
+      "results": [
+        "Observation/F022B5F4-66E8-4DDD-ABAA-10C98713E7EE",
+        "Observation/92DA878D-2346-488E-8742-01ECDE95E31C"
+      ],
+      "source_observations": [
+        "Observation/F022B5F4-66E8-4DDD-ABAA-10C98713E7EE",
+        "Observation/92DA878D-2346-488E-8742-01ECDE95E31C",
+        "Observation/5A8B9936-B771-488E-9103-3331629690C4-COMM"
+      ],
+      "existing_components": 2,
+      "proposed_components": 2
+    },
+    {
+      "report_id": "56E56C3D-E9C1-42E2-ABFE-B06E04B1ADA2",
+      "caption": "Diagnostic Report 2023-06-24 00:00:00+01:00",
+      "groups": [],
+      "results": [
+        "Observation/EA5F9724-7E16-4186-8F69-E5EB51CA4047"
+      ],
+      "source_observations": [
+        "Observation/EA5F9724-7E16-4186-8F69-E5EB51CA4047",
+        "Observation/56E56C3D-E9C1-42E2-ABFE-B06E04B1ADA2-COMM"
+      ],
+      "existing_components": 1,
+      "proposed_components": 1
+    },
+    {
+      "report_id": "BE7FAA19-6674-4700-BD30-E638C9E31948",
+      "caption": "Diagnostic Report 2024-01-20 00:00:00+00:00",
+      "groups": [],
+      "results": [],
+      "source_observations": [
+        "Observation/BE7FAA19-6674-4700-BD30-E638C9E31948-COMM"
+      ],
+      "existing_components": 0,
+      "proposed_components": 0
+    },
+    {
+      "report_id": "461839A4-9B28-46D4-BC27-297C46F4F80E",
+      "caption": "Diagnostic Report 2024-01-20 00:00:00+00:00",
+      "groups": [],
+      "results": [],
+      "source_observations": [
+        "Observation/461839A4-9B28-46D4-BC27-297C46F4F80E-COMM"
+      ],
+      "existing_components": 0,
+      "proposed_components": 0
+    },
+    {
+      "report_id": "9F5631B5-67BE-4A36-9E4C-8A28742239FE",
+      "caption": "Diagnostic Report 2024-01-20 00:00:00+00:00",
+      "groups": [
+        {
+          "reference": "Observation/C08DC916-614C-4F49-8505-86F6D57E6EB5",
+          "label": "Renal function tests",
+          "members": [
+            "Observation/01098FF9-D3FF-496A-977F-ED392DBAD54D",
+            "Observation/E787706E-1E26-484C-9320-77CA84961B75",
+            "Observation/12ACE36E-16C8-4274-85A8-4F054BCA1FF9"
+          ]
+        },
+        {
+          "reference": "Observation/057C3B4D-69BD-4DCB-915C-3DC0AF875E50",
+          "label": "Serum lipids level",
+          "members": [
+            "Observation/8CC6511A-ABAC-4AB0-8879-06E3C7006469",
+            "Observation/174808E1-1A4D-44F9-8E47-132A8D4CB55B",
+            "Observation/40FD13C3-50FB-423F-8E42-F1E630260521",
+            "Observation/E7DD9AF8-4865-4FE8-B2BE-B1AA65150A7F"
+          ]
+        },
+        {
+          "reference": "Observation/9BDA0AA6-965B-4593-82E4-E370EE6850EF",
+          "label": "FBC - full blood count",
+          "members": [
+            "Observation/18238625-DA03-46E2-9C8C-46EFF7E5617D",
+            "Observation/38F86682-1295-4F7F-9BF4-A9E644BF5EB5",
+            "Observation/72E2F295-F90B-4C0C-8AA1-45019B9E715E",
+            "Observation/4070E0E4-5207-4AB8-881E-0F9FCB15CB3F",
+            "Observation/40E51B3E-B2B9-4DFC-AAF0-446C23A1FA91",
+            "Observation/7DD41119-5BF3-4EEA-9A46-7BD579A2BBD5",
+            "Observation/8839823F-1DA8-4724-B956-7665B25096A5",
+            "Observation/476BB667-97FE-4761-A29A-B4C06A22C1A2",
+            "Observation/578AB598-B8C4-4282-A013-56803DC0AD9F",
+            "Observation/4B0109D0-86BE-42D3-9CC4-A28B0D71BA40",
+            "Observation/476F133F-A18A-451A-9A90-5777AFCDA6C2",
+            "Observation/8E2D33CD-6682-4F77-923A-FB6EF652BC71"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/01098FF9-D3FF-496A-977F-ED392DBAD54D",
+        "Observation/E787706E-1E26-484C-9320-77CA84961B75",
+        "Observation/12ACE36E-16C8-4274-85A8-4F054BCA1FF9",
+        "Observation/8CC6511A-ABAC-4AB0-8879-06E3C7006469",
+        "Observation/174808E1-1A4D-44F9-8E47-132A8D4CB55B",
+        "Observation/40FD13C3-50FB-423F-8E42-F1E630260521",
+        "Observation/E7DD9AF8-4865-4FE8-B2BE-B1AA65150A7F",
+        "Observation/BA2E67A6-43E3-423B-9C7C-971C6B19211C",
+        "Observation/18238625-DA03-46E2-9C8C-46EFF7E5617D",
+        "Observation/38F86682-1295-4F7F-9BF4-A9E644BF5EB5",
+        "Observation/72E2F295-F90B-4C0C-8AA1-45019B9E715E",
+        "Observation/4070E0E4-5207-4AB8-881E-0F9FCB15CB3F",
+        "Observation/40E51B3E-B2B9-4DFC-AAF0-446C23A1FA91",
+        "Observation/7DD41119-5BF3-4EEA-9A46-7BD579A2BBD5",
+        "Observation/8839823F-1DA8-4724-B956-7665B25096A5",
+        "Observation/476BB667-97FE-4761-A29A-B4C06A22C1A2",
+        "Observation/578AB598-B8C4-4282-A013-56803DC0AD9F",
+        "Observation/4B0109D0-86BE-42D3-9CC4-A28B0D71BA40",
+        "Observation/476F133F-A18A-451A-9A90-5777AFCDA6C2",
+        "Observation/8E2D33CD-6682-4F77-923A-FB6EF652BC71"
+      ],
+      "source_observations": [
+        "Observation/C08DC916-614C-4F49-8505-86F6D57E6EB5",
+        "Observation/057C3B4D-69BD-4DCB-915C-3DC0AF875E50",
+        "Observation/BA2E67A6-43E3-423B-9C7C-971C6B19211C",
+        "Observation/9BDA0AA6-965B-4593-82E4-E370EE6850EF",
+        "Observation/9F5631B5-67BE-4A36-9E4C-8A28742239FE-COMM",
+        "Observation/01098FF9-D3FF-496A-977F-ED392DBAD54D",
+        "Observation/E787706E-1E26-484C-9320-77CA84961B75",
+        "Observation/12ACE36E-16C8-4274-85A8-4F054BCA1FF9",
+        "Observation/8CC6511A-ABAC-4AB0-8879-06E3C7006469",
+        "Observation/174808E1-1A4D-44F9-8E47-132A8D4CB55B",
+        "Observation/40FD13C3-50FB-423F-8E42-F1E630260521",
+        "Observation/E7DD9AF8-4865-4FE8-B2BE-B1AA65150A7F",
+        "Observation/18238625-DA03-46E2-9C8C-46EFF7E5617D",
+        "Observation/38F86682-1295-4F7F-9BF4-A9E644BF5EB5",
+        "Observation/72E2F295-F90B-4C0C-8AA1-45019B9E715E",
+        "Observation/4070E0E4-5207-4AB8-881E-0F9FCB15CB3F",
+        "Observation/40E51B3E-B2B9-4DFC-AAF0-446C23A1FA91",
+        "Observation/7DD41119-5BF3-4EEA-9A46-7BD579A2BBD5",
+        "Observation/8839823F-1DA8-4724-B956-7665B25096A5",
+        "Observation/476BB667-97FE-4761-A29A-B4C06A22C1A2",
+        "Observation/578AB598-B8C4-4282-A013-56803DC0AD9F",
+        "Observation/4B0109D0-86BE-42D3-9CC4-A28B0D71BA40",
+        "Observation/476F133F-A18A-451A-9A90-5777AFCDA6C2",
+        "Observation/8E2D33CD-6682-4F77-923A-FB6EF652BC71"
+      ],
+      "existing_components": 23,
+      "proposed_components": 20
+    },
+    {
+      "report_id": "BCF44D34-EDC9-4310-BEB4-E45E1441957B",
+      "caption": "Diagnostic Report 2024-01-20 00:00:00+00:00",
+      "groups": [
+        {
+          "reference": "Observation/B39D6784-5532-45FB-BDCC-7F7F21A70857",
+          "label": "Bone profile",
+          "members": [
+            "Observation/01A03AE1-ADC5-4A7B-B6B4-BB391F498A7C",
+            "Observation/E346D597-8A42-4631-BA4D-0C8A17F62C0D",
+            "Observation/C38CCDE2-9EFB-4249-BB78-D23C312D66A4",
+            "Observation/5FFC469E-00A9-4F2F-AE4A-BCA589416266",
+            "Observation/DF6691CB-9617-4701-A186-17F197A997A0",
+            "Observation/F76B671C-D2CE-409F-B801-4320B20D4CA4"
+          ]
+        },
+        {
+          "reference": "Observation/CDC2077F-F701-47F9-AFF9-87E8C07E8C69",
+          "label": "Urea and electrolytes level",
+          "members": [
+            "Observation/AB137387-5068-42C6-BC0A-FC6CE39FD813",
+            "Observation/A7DC554C-1738-4E1A-BF83-5144DA40CA7F",
+            "Observation/33DFF813-0B97-4D38-906D-B477946390BE",
+            "Observation/DD3CF20D-03A5-4310-954C-47DA2D5BBFB2"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/01A03AE1-ADC5-4A7B-B6B4-BB391F498A7C",
+        "Observation/E346D597-8A42-4631-BA4D-0C8A17F62C0D",
+        "Observation/C38CCDE2-9EFB-4249-BB78-D23C312D66A4",
+        "Observation/5FFC469E-00A9-4F2F-AE4A-BCA589416266",
+        "Observation/DF6691CB-9617-4701-A186-17F197A997A0",
+        "Observation/F76B671C-D2CE-409F-B801-4320B20D4CA4",
+        "Observation/AB137387-5068-42C6-BC0A-FC6CE39FD813",
+        "Observation/A7DC554C-1738-4E1A-BF83-5144DA40CA7F",
+        "Observation/33DFF813-0B97-4D38-906D-B477946390BE",
+        "Observation/DD3CF20D-03A5-4310-954C-47DA2D5BBFB2",
+        "Observation/05E6D1C6-9B66-4D02-8FC3-C5CF3CC0EB1C",
+        "Observation/CFAF8307-C6B6-4EB4-A69D-81DDE4D2CD91",
+        "Observation/45F8816D-FC99-4131-ABE6-01CD8A8DE49C"
+      ],
+      "source_observations": [
+        "Observation/B39D6784-5532-45FB-BDCC-7F7F21A70857",
+        "Observation/CDC2077F-F701-47F9-AFF9-87E8C07E8C69",
+        "Observation/05E6D1C6-9B66-4D02-8FC3-C5CF3CC0EB1C",
+        "Observation/CFAF8307-C6B6-4EB4-A69D-81DDE4D2CD91",
+        "Observation/45F8816D-FC99-4131-ABE6-01CD8A8DE49C",
+        "Observation/BCF44D34-EDC9-4310-BEB4-E45E1441957B-COMM",
+        "Observation/01A03AE1-ADC5-4A7B-B6B4-BB391F498A7C",
+        "Observation/E346D597-8A42-4631-BA4D-0C8A17F62C0D",
+        "Observation/C38CCDE2-9EFB-4249-BB78-D23C312D66A4",
+        "Observation/5FFC469E-00A9-4F2F-AE4A-BCA589416266",
+        "Observation/DF6691CB-9617-4701-A186-17F197A997A0",
+        "Observation/F76B671C-D2CE-409F-B801-4320B20D4CA4",
+        "Observation/B39D6784-5532-45FB-BDCC-7F7F21A70857-COMM",
+        "Observation/AB137387-5068-42C6-BC0A-FC6CE39FD813",
+        "Observation/A7DC554C-1738-4E1A-BF83-5144DA40CA7F",
+        "Observation/33DFF813-0B97-4D38-906D-B477946390BE",
+        "Observation/DD3CF20D-03A5-4310-954C-47DA2D5BBFB2",
+        "Observation/CDC2077F-F701-47F9-AFF9-87E8C07E8C69-COMM",
+        "Observation/05E6D1C6-9B66-4D02-8FC3-C5CF3CC0EB1C-COMM",
+        "Observation/CFAF8307-C6B6-4EB4-A69D-81DDE4D2CD91-COMM",
+        "Observation/45F8816D-FC99-4131-ABE6-01CD8A8DE49C-COMM"
+      ],
+      "existing_components": 15,
+      "proposed_components": 13
+    },
+    {
+      "report_id": "23E01304-867A-4645-BDF8-035FEB2C7A41",
+      "caption": "Liver function test 2024-01-20 00:00:00+00:00",
+      "groups": [
+        {
+          "reference": "Observation/15A8BA89-FF03-4880-B540-613745F6BFE3",
+          "label": "Liver function test",
+          "members": [
+            "Observation/D6050BB4-0BB2-4481-A0B2-88C94807BEEF",
+            "Observation/F4014842-A140-4B4F-9F5F-EE3C49892D16",
+            "Observation/EAE91006-6F22-476E-BFF4-08FE121F42C6",
+            "Observation/820006B7-2AF3-4C07-B33A-E3C4B65338B1",
+            "Observation/CE493BAD-46EF-4C81-B14C-45827C3E4C7B"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/D6050BB4-0BB2-4481-A0B2-88C94807BEEF",
+        "Observation/F4014842-A140-4B4F-9F5F-EE3C49892D16",
+        "Observation/EAE91006-6F22-476E-BFF4-08FE121F42C6",
+        "Observation/820006B7-2AF3-4C07-B33A-E3C4B65338B1",
+        "Observation/CE493BAD-46EF-4C81-B14C-45827C3E4C7B",
+        "Observation/36DA8895-114B-40D6-9FA1-82B543D86893",
+        "Observation/471FD197-79B8-47C0-B5D1-6A4AFBA3D31D",
+        "Observation/59F968AD-21F1-4B97-96DE-D1AE22091132"
+      ],
+      "source_observations": [
+        "Observation/15A8BA89-FF03-4880-B540-613745F6BFE3",
+        "Observation/36DA8895-114B-40D6-9FA1-82B543D86893",
+        "Observation/471FD197-79B8-47C0-B5D1-6A4AFBA3D31D",
+        "Observation/59F968AD-21F1-4B97-96DE-D1AE22091132",
+        "Observation/23E01304-867A-4645-BDF8-035FEB2C7A41-COMM",
+        "Observation/D6050BB4-0BB2-4481-A0B2-88C94807BEEF",
+        "Observation/F4014842-A140-4B4F-9F5F-EE3C49892D16",
+        "Observation/EAE91006-6F22-476E-BFF4-08FE121F42C6",
+        "Observation/820006B7-2AF3-4C07-B33A-E3C4B65338B1",
+        "Observation/CE493BAD-46EF-4C81-B14C-45827C3E4C7B",
+        "Observation/15A8BA89-FF03-4880-B540-613745F6BFE3-COMM",
+        "Observation/36DA8895-114B-40D6-9FA1-82B543D86893-COMM",
+        "Observation/471FD197-79B8-47C0-B5D1-6A4AFBA3D31D-COMM",
+        "Observation/59F968AD-21F1-4B97-96DE-D1AE22091132-COMM"
+      ],
+      "existing_components": 8,
+      "proposed_components": 8
+    },
+    {
+      "report_id": "026A2649-A6C3-41DE-8AFB-2C7E605A33EA",
+      "caption": "Diagnostic Report 2024-01-20 00:00:00+00:00",
+      "groups": [],
+      "results": [
+        "Observation/DE3754A7-43B8-481E-97F3-695D767AAFAD",
+        "Observation/DE81936D-8D09-4073-B5FF-FF84DC132B63"
+      ],
+      "source_observations": [
+        "Observation/DE3754A7-43B8-481E-97F3-695D767AAFAD",
+        "Observation/DE81936D-8D09-4073-B5FF-FF84DC132B63",
+        "Observation/026A2649-A6C3-41DE-8AFB-2C7E605A33EA-COMM"
+      ],
+      "existing_components": 2,
+      "proposed_components": 2
+    },
+    {
+      "report_id": "0FE006F6-40FA-44EE-BB56-9FF8C354CBB0",
+      "caption": "Diagnostic Report 2024-01-20 00:00:00+00:00",
+      "groups": [
+        {
+          "reference": "Observation/8DDBEE57-3545-490B-BE7F-EEB352A5BB6F",
+          "label": "Autoimmune profile",
+          "members": [
+            "Observation/54468844-4EF9-4F84-B5AC-1615687AC84D",
+            "Observation/417F140A-E61F-4AC5-9421-7C3CED9EFC51"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/54468844-4EF9-4F84-B5AC-1615687AC84D",
+        "Observation/417F140A-E61F-4AC5-9421-7C3CED9EFC51",
+        "Observation/E956E311-2809-400A-97E1-73F6CD15F98A",
+        "Observation/701F4CF2-3A60-4117-9DF5-8178D4FCA019",
+        "Observation/CC9E0DE1-608F-4241-B6B8-060971DD659B",
+        "Observation/F0309428-9726-4131-A705-C93A8C1F2385",
+        "Observation/C6FDA895-DE99-40ED-BC28-D5D5C18D9BA8",
+        "Observation/E6E33F9D-FC18-4FC9-B931-5A92587C5589",
+        "Observation/21318644-CC93-4BAB-B0D2-47B53E093F73",
+        "Observation/FCB54305-6825-47FE-B331-0F8963AD222F",
+        "Observation/CF963013-BE3D-4845-865A-05722B1DB292",
+        "Observation/D04342AD-DD02-40A4-AE8B-CBB62588B448"
+      ],
+      "source_observations": [
+        "Observation/8DDBEE57-3545-490B-BE7F-EEB352A5BB6F",
+        "Observation/E956E311-2809-400A-97E1-73F6CD15F98A",
+        "Observation/701F4CF2-3A60-4117-9DF5-8178D4FCA019",
+        "Observation/CC9E0DE1-608F-4241-B6B8-060971DD659B",
+        "Observation/F0309428-9726-4131-A705-C93A8C1F2385",
+        "Observation/C6FDA895-DE99-40ED-BC28-D5D5C18D9BA8",
+        "Observation/E6E33F9D-FC18-4FC9-B931-5A92587C5589",
+        "Observation/21318644-CC93-4BAB-B0D2-47B53E093F73",
+        "Observation/FCB54305-6825-47FE-B331-0F8963AD222F",
+        "Observation/CF963013-BE3D-4845-865A-05722B1DB292",
+        "Observation/D04342AD-DD02-40A4-AE8B-CBB62588B448",
+        "Observation/0FE006F6-40FA-44EE-BB56-9FF8C354CBB0-COMM",
+        "Observation/54468844-4EF9-4F84-B5AC-1615687AC84D",
+        "Observation/417F140A-E61F-4AC5-9421-7C3CED9EFC51"
+      ],
+      "existing_components": 13,
+      "proposed_components": 12
+    },
+    {
+      "report_id": "96B3D07D-39C1-43A7-A3E8-91214B66CC68",
+      "caption": "Urea and electrolytes 2024-01-20 00:00:00+00:00",
+      "groups": [
+        {
+          "reference": "Observation/EBEDD7EA-EE7A-4632-BEE4-FDDA9B4D4B11",
+          "label": "Urea and electrolytes level",
+          "members": [
+            "Observation/9F80209D-3466-4DF2-B6BB-5C1623C09A37",
+            "Observation/FA8AD8E4-5F0E-4FE2-90DF-7E5694F3A054",
+            "Observation/2C193166-3A4A-4569-91EA-FF93475B2DE6",
+            "Observation/E02A4D1C-78B2-46D1-B899-776FC940C11B"
+          ]
+        },
+        {
+          "reference": "Observation/2418B6B6-C4C0-46CB-9030-5B7DD39C80FC",
+          "label": "CHOL/HDL RATIO",
+          "members": [
+            "Observation/C737A049-F93E-4C52-AFDF-21B0D1C7298C",
+            "Observation/E47B3A50-EEBE-4336-AA48-5932A01BC1B5",
+            "Observation/8673E805-9884-4040-993A-D72AECF4D363"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/9F80209D-3466-4DF2-B6BB-5C1623C09A37",
+        "Observation/FA8AD8E4-5F0E-4FE2-90DF-7E5694F3A054",
+        "Observation/2C193166-3A4A-4569-91EA-FF93475B2DE6",
+        "Observation/E02A4D1C-78B2-46D1-B899-776FC940C11B",
+        "Observation/C737A049-F93E-4C52-AFDF-21B0D1C7298C",
+        "Observation/E47B3A50-EEBE-4336-AA48-5932A01BC1B5",
+        "Observation/8673E805-9884-4040-993A-D72AECF4D363",
+        "Observation/5578BCAA-4C60-482E-ADFD-095CC8CAB102"
+      ],
+      "source_observations": [
+        "Observation/EBEDD7EA-EE7A-4632-BEE4-FDDA9B4D4B11",
+        "Observation/2418B6B6-C4C0-46CB-9030-5B7DD39C80FC",
+        "Observation/5578BCAA-4C60-482E-ADFD-095CC8CAB102",
+        "Observation/96B3D07D-39C1-43A7-A3E8-91214B66CC68-COMM",
+        "Observation/9F80209D-3466-4DF2-B6BB-5C1623C09A37",
+        "Observation/FA8AD8E4-5F0E-4FE2-90DF-7E5694F3A054",
+        "Observation/2C193166-3A4A-4569-91EA-FF93475B2DE6",
+        "Observation/E02A4D1C-78B2-46D1-B899-776FC940C11B",
+        "Observation/C737A049-F93E-4C52-AFDF-21B0D1C7298C",
+        "Observation/E47B3A50-EEBE-4336-AA48-5932A01BC1B5",
+        "Observation/8673E805-9884-4040-993A-D72AECF4D363"
+      ],
+      "existing_components": 6,
+      "proposed_components": 8
+    },
+    {
+      "report_id": "34AAAAFC-8550-4152-9CDA-624D5AB6C13C",
+      "caption": "Diagnostic Report 2024-01-20 00:00:00+00:00",
+      "groups": [],
+      "results": [],
+      "source_observations": [
+        "Observation/34AAAAFC-8550-4152-9CDA-624D5AB6C13C-COMM"
+      ],
+      "existing_components": 0,
+      "proposed_components": 0
+    },
+    {
+      "report_id": "2BC45D08-3F3E-4939-A1CD-72E13FA08DD4",
+      "caption": "Glucose tolerance test 2024-01-20 00:00:00+00:00",
+      "groups": [
+        {
+          "reference": "Observation/F15C600B-7482-4D0E-938E-78279096DB18",
+          "label": "Glucose tolerance test",
+          "members": [
+            "Observation/7D29B0F6-EE38-44DC-A762-21F8D167E827",
+            "Observation/A0EFCDBD-B2D1-4D87-9D5A-3AA9F51BFFED",
+            "Observation/5F044AF2-8BBA-4569-8967-06D06E0B3644",
+            "Observation/C254A5AF-5D3A-49B4-BAA6-81E1BA144BBA"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/7D29B0F6-EE38-44DC-A762-21F8D167E827",
+        "Observation/A0EFCDBD-B2D1-4D87-9D5A-3AA9F51BFFED",
+        "Observation/5F044AF2-8BBA-4569-8967-06D06E0B3644",
+        "Observation/C254A5AF-5D3A-49B4-BAA6-81E1BA144BBA"
+      ],
+      "source_observations": [
+        "Observation/F15C600B-7482-4D0E-938E-78279096DB18",
+        "Observation/2BC45D08-3F3E-4939-A1CD-72E13FA08DD4-COMM",
+        "Observation/7D29B0F6-EE38-44DC-A762-21F8D167E827",
+        "Observation/A0EFCDBD-B2D1-4D87-9D5A-3AA9F51BFFED",
+        "Observation/5F044AF2-8BBA-4569-8967-06D06E0B3644",
+        "Observation/C254A5AF-5D3A-49B4-BAA6-81E1BA144BBA"
+      ],
+      "existing_components": 4,
+      "proposed_components": 4
+    },
+    {
+      "report_id": "D5B1FA6D-C0BE-457D-AEC9-1CC38FD13C00",
+      "caption": "Glucose tolerance test 2024-01-20 00:00:00+00:00",
+      "groups": [
+        {
+          "reference": "Observation/1834153D-6DB1-43FB-BE4E-8F53C62882FE",
+          "label": "Glucose tolerance test",
+          "members": [
+            "Observation/7678077F-26D7-46F0-A195-16228EE11369",
+            "Observation/2B9134CC-56D2-40BC-BAEB-855B90D2ECC9",
+            "Observation/DD8D3D76-7E97-4A2A-A372-66799FA9EACF",
+            "Observation/3FCF9063-A612-4542-853A-7E38B8BAD1A9"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/7678077F-26D7-46F0-A195-16228EE11369",
+        "Observation/2B9134CC-56D2-40BC-BAEB-855B90D2ECC9",
+        "Observation/DD8D3D76-7E97-4A2A-A372-66799FA9EACF",
+        "Observation/3FCF9063-A612-4542-853A-7E38B8BAD1A9"
+      ],
+      "source_observations": [
+        "Observation/1834153D-6DB1-43FB-BE4E-8F53C62882FE",
+        "Observation/D5B1FA6D-C0BE-457D-AEC9-1CC38FD13C00-COMM",
+        "Observation/7678077F-26D7-46F0-A195-16228EE11369",
+        "Observation/2B9134CC-56D2-40BC-BAEB-855B90D2ECC9",
+        "Observation/DD8D3D76-7E97-4A2A-A372-66799FA9EACF",
+        "Observation/3FCF9063-A612-4542-853A-7E38B8BAD1A9",
+        "Observation/1834153D-6DB1-43FB-BE4E-8F53C62882FE-COMM"
+      ],
+      "existing_components": 4,
+      "proposed_components": 4
+    },
+    {
+      "report_id": "E7D45D09-D343-4CDA-AC8F-942324C8B402",
+      "caption": "Diagnostic Report 2024-01-20 00:00:00+00:00",
+      "groups": [
+        {
+          "reference": "Observation/0F1AD848-FA61-4278-B273-048B0E247D39",
+          "label": "Full blood count - FBC",
+          "members": [
+            "Observation/BD5058DC-7A94-4467-A422-41F8715FDEEC",
+            "Observation/F7B19B0F-7AE8-4B81-AA47-7931ADBE65FE",
+            "Observation/FDAC8F0E-52C3-41E5-BE5B-7CA0C6FDC181",
+            "Observation/DEDB6849-33B3-4E1D-B095-58B842456136",
+            "Observation/CF6655E2-CA0C-4558-B5D5-243622CAF0FA",
+            "Observation/010C38C8-9940-4CB0-BDE7-F2D1F4BAAE40",
+            "Observation/DA7E7FA0-F286-4C2C-8620-2CA04251D656",
+            "Observation/C133CD71-10AE-49CD-A990-64EC229ACD88",
+            "Observation/B594990F-11E8-435F-A6D5-AAA70A5638B6",
+            "Observation/AE444553-CB79-46EB-BA1B-177CC0D001D8",
+            "Observation/064CD03E-63A0-492B-8897-C4757C73D2D0",
+            "Observation/167BF6A8-D797-470A-B5C2-E5FC497B56AD",
+            "Observation/2FC40009-302A-4429-A15B-37A35F36D4CB",
+            "Observation/054A8A00-1553-4DA2-BC5A-C150D4844DB0",
+            "Observation/E87C2915-678D-4001-9C07-CDAA9A08007C"
+          ]
+        }
+      ],
+      "results": [
+        "Observation/BD5058DC-7A94-4467-A422-41F8715FDEEC",
+        "Observation/F7B19B0F-7AE8-4B81-AA47-7931ADBE65FE",
+        "Observation/FDAC8F0E-52C3-41E5-BE5B-7CA0C6FDC181",
+        "Observation/DEDB6849-33B3-4E1D-B095-58B842456136",
+        "Observation/CF6655E2-CA0C-4558-B5D5-243622CAF0FA",
+        "Observation/010C38C8-9940-4CB0-BDE7-F2D1F4BAAE40",
+        "Observation/DA7E7FA0-F286-4C2C-8620-2CA04251D656",
+        "Observation/C133CD71-10AE-49CD-A990-64EC229ACD88",
+        "Observation/B594990F-11E8-435F-A6D5-AAA70A5638B6",
+        "Observation/AE444553-CB79-46EB-BA1B-177CC0D001D8",
+        "Observation/064CD03E-63A0-492B-8897-C4757C73D2D0",
+        "Observation/167BF6A8-D797-470A-B5C2-E5FC497B56AD",
+        "Observation/2FC40009-302A-4429-A15B-37A35F36D4CB",
+        "Observation/054A8A00-1553-4DA2-BC5A-C150D4844DB0",
+        "Observation/E87C2915-678D-4001-9C07-CDAA9A08007C",
+        "Observation/768BF90A-8E36-49D0-9D29-BD3FF0DE733D",
+        "Observation/69832EFE-727E-4270-BDF5-179851BDF295"
+      ],
+      "source_observations": [
+        "Observation/0F1AD848-FA61-4278-B273-048B0E247D39",
+        "Observation/768BF90A-8E36-49D0-9D29-BD3FF0DE733D",
+        "Observation/69832EFE-727E-4270-BDF5-179851BDF295",
+        "Observation/E7D45D09-D343-4CDA-AC8F-942324C8B402-COMM",
+        "Observation/BD5058DC-7A94-4467-A422-41F8715FDEEC",
+        "Observation/F7B19B0F-7AE8-4B81-AA47-7931ADBE65FE",
+        "Observation/FDAC8F0E-52C3-41E5-BE5B-7CA0C6FDC181",
+        "Observation/DEDB6849-33B3-4E1D-B095-58B842456136",
+        "Observation/CF6655E2-CA0C-4558-B5D5-243622CAF0FA",
+        "Observation/010C38C8-9940-4CB0-BDE7-F2D1F4BAAE40",
+        "Observation/DA7E7FA0-F286-4C2C-8620-2CA04251D656",
+        "Observation/C133CD71-10AE-49CD-A990-64EC229ACD88",
+        "Observation/B594990F-11E8-435F-A6D5-AAA70A5638B6",
+        "Observation/AE444553-CB79-46EB-BA1B-177CC0D001D8",
+        "Observation/064CD03E-63A0-492B-8897-C4757C73D2D0",
+        "Observation/167BF6A8-D797-470A-B5C2-E5FC497B56AD",
+        "Observation/2FC40009-302A-4429-A15B-37A35F36D4CB",
+        "Observation/054A8A00-1553-4DA2-BC5A-C150D4844DB0",
+        "Observation/E87C2915-678D-4001-9C07-CDAA9A08007C",
+        "Observation/0F1AD848-FA61-4278-B273-048B0E247D39-COMM",
+        "Observation/768BF90A-8E36-49D0-9D29-BD3FF0DE733D-COMM",
+        "Observation/69832EFE-727E-4270-BDF5-179851BDF295-COMM"
+      ],
+      "existing_components": 3,
+      "proposed_components": 17
+    }
+  ],
+  "verification": "Both XML documents parse; 20 reports retained; only investigation narrative and organizer components differ."
+}
