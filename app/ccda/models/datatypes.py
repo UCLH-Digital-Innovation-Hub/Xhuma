@@ -144,6 +144,8 @@ CODE_SYSTEM_NAMES = {
     "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
     "https://fhir.hl7.org.uk/Id/resipuk-gemscript-drug-codes": "2.16.840.1.113883.2.1.6.15",
     "https://fhir.hl7.org.uk/Id/emis-drug-codes": "2.16.840.1.113883.2.1.6.9",
+    "http://terminology.hl7.org/CodeSystem/v2-0078": "2.16.840.1.113883.1.11.78",
+    "http://read.info/readv2": "2.16.840.1.113883.6.29",
 }
 
 
