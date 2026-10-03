@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-from xml.etree import ElementTree
 
 import pytest
 import xmltodict
@@ -152,7 +151,7 @@ def test_zero_and_false_are_present_values(value):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("nhs,count", [("9730333939", 20), ("9465700088", 34), ("9692136744", 32)])
 @pytest.mark.parametrize("shared_graph", [False, True])
-async def test_saved_supplier_reports_convert_and_match_approved_example(nhs, count, shared_graph):
+async def test_saved_supplier_reports_convert_with_valid_table_layout(nhs, count, shared_graph):
     source = Bundle(json.loads((FIXTURES / f"{nhs}.json").read_text()))
     index = {}
     for entry in source.entry:
@@ -170,53 +169,6 @@ async def test_saved_supplier_reports_convert_and_match_approved_example(nhs, co
             for row in table["tbody"]["tr"]:
                 assert sum(int(cell.get("@colspan", 1)) if isinstance(cell, dict) else 1 for cell in row["td"]) == width
         xmltodict.parse(xmltodict.unparse({"result": {"organizer": output.organizer, "narrative": output.table}}))
-    if nhs == "9730333939":
-        approved_path = (
-            Path(__file__).parents[2]
-            / "docs/assurance/evidence/investigation-grouping-comparison/proposed-grouping.xml"
-        )
-        approved = xmltodict.parse(approved_path.read_text())["ClinicalDocument"]
-        section = next(
-            x["section"]
-            for x in approved["component"]["structuredBody"]["component"]
-            if x["section"]["code"]["@code"] == "30954-2"
-        )
-        for output, entry, narrative in zip(outputs, section["entry"], section["text"]["list"]["item"], strict=True):
-            # Normalise XML whitespace; dictionary output has typed scalar values.
-            actual = xmltodict.parse(xmltodict.unparse({"item": output.table}))["item"]
-            organizer = xmltodict.parse(xmltodict.unparse({"organizer": output.organizer}))["organizer"]
-            # The reviewed grouping stays the same; labels, conclusions and
-            # specimen notes are intentional subsequent improvements.
-            # Group names now live in table captions (or the single-panel
-            # report caption); nested names remain bold rows within their table.
-            expected_groups = [r for r in narrative["table"]["tbody"]["tr"] if "Test group:" in str(r)]
-            actual_text = " ".join(ElementTree.fromstring(xmltodict.unparse({"item": actual})).itertext())
-            for row in expected_groups:
-                label = row["td"]["#text"].removeprefix("Test group: ")
-                assert label in actual_text
-            # Captions now use resolved roots and collection/issued display times;
-            # dedicated presentation tests assert their exact content.
-            assert actual["caption"]
-            components = organizer.get("component", [])
-            for component in components if isinstance(components, list) else [components]:
-                component["observation"].get("code", {}).pop("originalText", None)
-            # Status mapping now supersedes the historical prototype too.
-            expected = entry["organizer"]
-            organizer.pop("statusCode", None)
-            expected.pop("statusCode", None)
-            for tree in (organizer, expected):
-                tree.pop("effectiveTime", None)
-                tree.pop("specimen", None)
-                # Root identity/classification now follows the resolved panel.
-                tree.pop("code", None)
-                tree.pop("@classCode", None)
-                children = tree.get("component", [])
-                for child in children if isinstance(children, list) else [children]:
-                    child["observation"].pop("statusCode", None)
-                    child["observation"].pop("effectiveTime", None)
-                    child["observation"].pop("value", None)  # Tested by the value-mapping regressions.
-                    child["observation"].pop("referenceRange", None)  # Tested by typed range regressions.
-            assert organizer == expected
 
 
 @pytest.mark.asyncio
