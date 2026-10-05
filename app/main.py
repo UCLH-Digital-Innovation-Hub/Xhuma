@@ -9,41 +9,46 @@ The service implements a stateless architecture with Redis caching and supports 
 profiles for healthcare interoperability.
 """
 
-import base64
-import json
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from uuid import uuid4
 
-from fastapi import FastAPI, Form, Request, Response
+from fastapi import FastAPI, Form, Request
 
 # Configure Azure Monitor OpenTelemetry if connection string is present
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor()
+import logging
+import traceback
+import uuid
 
+from fastapi import Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fhirclient.models.operationoutcome import OperationOutcome, OperationOutcomeIssue
 from jwcrypto import jwk
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-from sqlmodel import select
-from starlette.middleware.trustedhost import TrustedHostMiddleware
+from sqlalchemy import select
 
-
+from .audit.audit import AuditFailureException
 from .audit.db_models import AuditEventRow
-from .audit.models import SAMLAttributes, _subject_ref_from_nhs_number
+from .audit.models import _subject_ref_from_nhs_number
 from .db import make_engine, make_sessionmaker
-from .gpconnect import gpconnect
-from .pds import pds
-from .redis_connect import redis_client
+from .middleware.mtls import MTLSMiddleware
+from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
+from .security import verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
+from .telemetry import monitor_event_loop
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
@@ -55,79 +60,105 @@ async def lifespan(app: FastAPI):
     Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
     # --- Startup logic ---
-    # Initialize Postgres connection pool
-    engine = make_engine()
-    SessionLocal = make_sessionmaker(engine)
+    # Validate required configuration
+    for var in ["API_KEY", "ORG_ASID", "ORG_CODE"]:
+        val = os.getenv(var)
+        if not val or not val.strip():
+            raise RuntimeError(f"Missing required configuration: {var}")
+        if val.strip().startswith("@Microsoft.KeyVault("):
+            raise RuntimeError(f"Unresolved KeyVault reference for required configuration: {var}")
 
-    app.state.engine = engine
-    app.state.SessionLocal = SessionLocal
+    import datetime
+    import math
 
-    # Store registry ID in Redis with 24 hour expiry
+    ccda_expiry_str = os.getenv("CCDA_EXPIRY_HOURS", "4")
     try:
-        redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
-    except Exception as e:
-        print(f"Warning: Failed to connect to Redis during startup: {e}")
+        expiry_hours = float(ccda_expiry_str)
+        if not math.isfinite(expiry_hours) or expiry_hours <= 0:
+            raise ValueError("Must be positive and finite")
+        ttl = datetime.timedelta(hours=expiry_hours)
+        if ttl.total_seconds() < 1:
+            raise ValueError("Duration too small for Redis expiry")
+        # Prevent integer overflow in Redis / Timedelta by capping at a reasonable upper bound (e.g. 1 year)
+        if ttl.total_seconds() > 31536000:
+            raise ValueError("Duration exceeds maximum allowed cache expiry (1 year)")
 
-    # Handle JWK generation/verification securely entirely in-memory
-    jwt_key = os.getenv("JWTKEY")
-    app.state.jwk_json = {}
+        app.state.ccda_expiry_hours = expiry_hours
+    except (ValueError, OverflowError) as e:
+        raise RuntimeError(f"Invalid CCDA_EXPIRY_HOURS configuration: {e}")
 
-    if jwt_key:
+    async with AsyncExitStack() as resources:
+        # Initialize Postgres connection pool
+        engine = make_engine()
+        resources.push_async_callback(engine.dispose)
+        resources.push_async_callback(redis_client.close)
+        resources.push_async_callback(snomed_client.close)
+        SessionLocal = make_sessionmaker(engine)
+
+        app.state.engine = engine
+        app.state.SessionLocal = SessionLocal
+
+        # Store registry ID in Redis with 24 hour expiry
         try:
-            # Reformat env var newlines safely and convert to JWK
-            from app.security import fix_pem_formatting
-
-            private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
-            public_jwk = jwk.JWK.from_pem(private_pem)
-            jwk_dict = public_jwk.export_public(as_dict=True)
-            jwk_dict["alg"] = "RS512"
-            jwk_dict["use"] = "sig"
-            app.state.jwk_json = jwk_dict
+            await redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
         except Exception as e:
-            print(f"Warning: Failed to load JWTKEY from environment: {e}")
-    elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile(
-        "keys/test-1.pem"
-    ):
-        # Local development fallback
-        print(
-            "Warning: Falling back to local keys/test-1.pem key. Not for use in production."
+            print(f"Warning: Failed to connect to Redis during startup: {e}")
+
+        # Handle JWK generation/verification securely entirely in-memory
+        jwt_key = os.getenv("JWTKEY")
+        app.state.jwk_json = {}
+
+        if jwt_key:
+            try:
+                # Reformat env var newlines safely and convert to JWK
+                from app.security import fix_pem_formatting
+
+                private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
+                public_jwk = jwk.JWK.from_pem(private_pem)
+                jwk_dict = public_jwk.export_public(as_dict=True)
+                jwk_dict["alg"] = "RS512"
+                jwk_dict["use"] = "sig"
+                app.state.jwk_json = jwk_dict
+            except Exception as e:
+                print(f"Warning: Failed to load JWTKEY from environment: {e}")
+        elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
+            # Local development fallback
+            print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
+            with open("keys/test-1.pem", "rb") as pemfile:
+                private_pem = pemfile.read()
+                public_jwk = jwk.JWK.from_pem(data=private_pem)
+                jwk_dict = public_jwk.export_public(as_dict=True)
+                jwk_dict["alg"] = "RS512"
+                jwk_dict["use"] = "sig"
+                app.state.jwk_json = jwk_dict
+        else:
+            print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
+
+        # Set up OpenTelemetry metrics
+        otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
+        metric_exporter = OTLPMetricExporter(
+            endpoint=otlp_endpoint.replace("http://", "").replace("https://", ""),
+            insecure=True,
         )
-        with open("keys/test-1.pem", "rb") as pemfile:
-            private_pem = pemfile.read()
-            public_jwk = jwk.JWK.from_pem(data=private_pem)
-            jwk_dict = public_jwk.export_public(as_dict=True)
-            jwk_dict["alg"] = "RS512"
-            jwk_dict["use"] = "sig"
-            app.state.jwk_json = jwk_dict
-    else:
-        print(
-            "Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error."
+
+        reader = PeriodicExportingMetricReader(
+            exporter=metric_exporter,
+            export_interval_millis=int(os.getenv("OTEL_METRIC_EXPORT_INTERVAL_MS", "5000")),
         )
+        meter_provider = MeterProvider(metric_readers=[reader])
+        metrics.set_meter_provider(meter_provider)
 
-    # Set up OpenTelemetry metrics
-    otlp_endpoint = os.getenv(
-        "OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317"
-    )
-    metric_exporter = OTLPMetricExporter(
-        endpoint=otlp_endpoint.replace("http://", "").replace("https://", ""),
-        insecure=True,
-    )
-
-    reader = PeriodicExportingMetricReader(
-        exporter=metric_exporter,
-        export_interval_millis=int(os.getenv("OTEL_METRIC_EXPORT_INTERVAL_MS", "5000")),
-    )
-    meter_provider = MeterProvider(metric_readers=[reader])
-    metrics.set_meter_provider(meter_provider)
-
-    # meter = metrics.get_meter("xhuma.business", "1.0.0")
-    # app.state.metrics = build_business_metrics(meter)
-    try:
-        yield
-    finally:
-        # --- Shutdown logic ---
-        # meter_provider.shutdown()
-        await engine.dispose()
+        # meter = metrics.get_meter("xhuma.business", "1.0.0")
+        # app.state.metrics = build_business_metrics(meter)
+        loop_monitor = asyncio.create_task(monitor_event_loop())
+        try:
+            yield
+        finally:
+            loop_monitor.cancel()
+            with suppress(asyncio.CancelledError):
+                await loop_monitor
+            # --- Shutdown logic ---
+            # meter_provider.shutdown()
 
 
 # Initialize FastAPI application
@@ -140,13 +171,13 @@ app = FastAPI(
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     try:
+        # Ensure the root logger captures INFO logs so they are exported
+        import logging
+
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.logging import LoggingInstrumentor
         from opentelemetry.instrumentation.redis import RedisInstrumentor
-
-        # Ensure the root logger captures INFO logs so they are exported
-        import logging
 
         logging.getLogger().setLevel(logging.INFO)
 
@@ -154,13 +185,9 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         HTTPXClientInstrumentor().instrument()
         LoggingInstrumentor().instrument(set_logging_format=True)
         RedisInstrumentor().instrument()
-        print(
-            "Application Insights OpenTelemetry instrumentation enabled successfully."
-        )
+        print("Application Insights OpenTelemetry instrumentation enabled successfully.")
     except Exception as telemetry_err:
-        print(
-            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
-        )
+        print(f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}")
 
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
@@ -172,18 +199,90 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         FastAPIInstrumentor.instrument_app(app)
         HTTPXClientInstrumentor().instrument()
         LoggingInstrumentor().instrument(set_logging_format=True)
-        print(
-            "Application Insights OpenTelemetry instrumentation enabled successfully."
-        )
+        print("Application Insights OpenTelemetry instrumentation enabled successfully.")
     except Exception as telemetry_err:
-        print(
-            f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}"
-        )
+        print(f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}")
 
 # register soap error handler
 soap.register_handlers(app)
 
-from app.middleware.mtls import MTLSMiddleware  # noqa: E402
+
+@app.exception_handler(AuditFailureException)
+async def audit_failure_handler(request: Request, exc: AuditFailureException):
+    trace_id = str(uuid.uuid4())
+    # Explicitly do NOT log traceback to avoid leaking SQL parameters
+    logging.error(f"AuditFailureException [TraceID: {trace_id}] at {request.url.path}: {exc}")
+
+    path = request.url.path
+    if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
+        fault_xml = f"""<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+    <env:Body>
+        <env:Fault>
+            <env:Code><env:Value>env:Receiver</env:Value></env:Code>
+            <env:Reason><env:Text xml:lang="en">Internal Server Error (TraceID: {trace_id})</env:Text></env:Reason>
+        </env:Fault>
+    </env:Body>
+</env:Envelope>"""
+        return Response(content=fault_xml, status_code=502, media_type="application/soap+xml")
+
+    elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
+        issue = OperationOutcomeIssue()
+        issue.severity = "fatal"
+        issue.code = "exception"
+        issue.diagnostics = f"An internal error occurred. TraceID: {trace_id}"
+        outcome = OperationOutcome()
+        outcome.issue = [issue]
+        return JSONResponse(status_code=502, content=outcome.as_json())
+
+    else:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "type": "about:blank",
+                "title": "Internal Server Error",
+                "status": 502,
+                "detail": f"An unexpected error occurred. TraceID: {trace_id}",
+            },
+        )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    trace_id = str(uuid.uuid4())
+    logging.error(f"Unhandled Exception [TraceID: {trace_id}] at {request.url.path}: {exc}\n{traceback.format_exc()}")
+
+    path = request.url.path
+    if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
+        fault_xml = f"""<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
+    <env:Body>
+        <env:Fault>
+            <env:Code><env:Value>env:Receiver</env:Value></env:Code>
+            <env:Reason><env:Text xml:lang="en">Internal Server Error (TraceID: {trace_id})</env:Text></env:Reason>
+        </env:Fault>
+    </env:Body>
+</env:Envelope>"""
+        return Response(content=fault_xml, status_code=500, media_type="application/soap+xml")
+
+    elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
+        issue = OperationOutcomeIssue()
+        issue.severity = "fatal"
+        issue.code = "exception"
+        issue.diagnostics = f"An internal error occurred. TraceID: {trace_id}"
+        outcome = OperationOutcome()
+        outcome.issue = [issue]
+        return JSONResponse(status_code=500, content=outcome.as_json())
+
+    else:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "type": "about:blank",
+                "title": "Internal Server Error",
+                "status": 500,
+                "detail": f"An unexpected error occurred. TraceID: {trace_id}",
+            },
+        )
+
 
 # 1) Trusted hosts
 allowed_hosts_str = os.getenv("ALLOWED_HOSTS", "*")
@@ -211,7 +310,7 @@ app.add_middleware(MTLSMiddleware)
 
 # Include routers for different service components
 app.include_router(soap.router)
-app.include_router(pds.router)
+
 
 # if using HSCN relay, set up WebSocket hub and routes
 if USE_RELAY:
@@ -247,8 +346,6 @@ async def root():
             <h4>Endpoints</h4>
             <p>/pds/lookuppatient/nhsno will perform a pds lookup and return the fhir response.
                <a href="pds/lookup_patient/9449306680">Example</a></p>
-            <p>For the purposes of the internet facing demo /demo/nhsno will return the
-               mime encoded ccda. <a href="/demo/9690937278">Example</a></p>
         </body>
     </html>
     """
@@ -260,61 +357,6 @@ async def health_check():
     Public health check endpoint.
     """
     return {"status": "ok"}
-
-
-@app.get("/demo/{nhsno}")
-async def demo(nhsno: int, request: Request):
-    """
-    Demo endpoint that retrieves and returns a CCDA document for a given NHS number.
-
-    Args:
-        nhsno (int): NHS number to retrieve the CCDA document for.
-
-    Returns:
-        bytes: MIME encoded CCDA document retrieved from Redis cache.
-    """
-    audit_dict = SAMLAttributes(
-        subject_id="CONE, Stephen",
-        organization="UCLH - University College London Hospitals - TST",
-        organization_id="urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        home_community_id="urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        role={
-            "@codeSystem": "2.16.840.1.113883.6.96",
-            "@code": "224608005",
-            "@codeSystemName": "SNOMED_CT",
-            "@displayName": "Administrative healthcare staff",
-            "@xmlns": "urn:hl7-org:v3",
-            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-            "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-        },
-        purpose_of_use={
-            "@xsi:type": "CE",
-            "@code": "TREATMENT",
-            "@codeSystem": "2.16.840.1.113883.3.18.7.1",
-            "@codeSystemName": "nhin-purpose",
-            "@displayName": "Treatment",
-            "@xmlns": "urn:hl7-org:v3",
-            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-            "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-        },
-        resource_id="9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
-    )
-
-    bundle_id = await gpconnect(nhsno, audit_dict, request=request)
-    response = json.loads(bundle_id.body)  # validate json
-    # if success then retrieve from redis and return
-    if response["success"]:
-        ccda = redis_client.get(response["document_id"])
-        # if ccda decode from base64 and return xml
-        if ccda:
-            ccda_decoded = base64.b64decode(ccda).decode("utf-8")
-            return Response(content=ccda_decoded, media_type="application/xml")
-
-    # decode jsonresponse
-
-    # gpcon_response = json.loads(bundle_id)  # validate json
-    # document_id = gpcon_response.get("document_id")
-    return bundle_id
 
 
 @app.get("/jwk")
@@ -336,7 +378,11 @@ async def get_jwk(request: Request):
 # --- Dev-only audit viewer ---
 if os.getenv("ENV", "prod").lower() in ("dev", "local"):
 
-    @app.get("/_dev/audit", response_class=HTMLResponse)
+    @app.get(
+        "/_dev/audit",
+        response_class=HTMLResponse,
+        dependencies=[Depends(verify_api_key)],
+    )
     async def dev_audit_form():
         return HTMLResponse("""
             <html>
@@ -365,7 +411,11 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
             </html>
             """)
 
-    @app.post("/_dev/audit", response_class=HTMLResponse)
+    @app.post(
+        "/_dev/audit",
+        response_class=HTMLResponse,
+        dependencies=[Depends(verify_api_key)],
+    )
     async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
         # --- safety: dev only ---
         secret = os.getenv("API_KEY")
@@ -420,8 +470,7 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
         # --- render ---
         out: list[str] = []
         out.append(
-            "<html><head><title>Dev Audit Results</title></head>"
-            "<body style='font-family:sans-serif;margin:2rem;'>"
+            "<html><head><title>Dev Audit Results</title></head><body style='font-family:sans-serif;margin:2rem;'>"
         )
         out.append("<a href='/_dev/audit'>← back</a>")
         out.append("<h2>Audit results</h2>")

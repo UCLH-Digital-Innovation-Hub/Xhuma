@@ -1,8 +1,8 @@
-from typing import List, Optional
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from .datatypes import AD, CE, CS, II, TEL, TS
+from .datatypes import AD, CE, CS, II, PQ, TEL, TS
 
 
 class Organization(BaseModel):
@@ -13,13 +13,13 @@ class Organization(BaseModel):
 
     classcode: str = Field(default="ORG", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    realmCode: Optional[CS] = None
-    typeId: Optional[II] = None
-    templateId: Optional[List[II]] = None
-    id: Optional[List[II]] = None
-    name: Optional[List[str]] = None
-    telecom: Optional[List[TEL]] = None
-    address: Optional[List[AD]] = None
+    realmCode: CS | None = None
+    typeId: II | None = None
+    templateId: list[II] | None = None
+    id: list[II] | None = None
+    name: list[str] | None = None
+    telecom: list[TEL] | None = None
+    address: list[AD] | None = None
 
 
 class Person(BaseModel):
@@ -30,7 +30,7 @@ class Person(BaseModel):
 
     classcode: str = Field(default="PSN", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class AuthoringDevice(BaseModel):
@@ -41,34 +41,50 @@ class AuthoringDevice(BaseModel):
 
     classcode: str = Field(default="DEV", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    templateId: Optional[List[II]] = None
-    code: Optional[CE] = None
-    softwareName: Optional[str] = None
-    softwareVersion: Optional[str] = None
+    templateId: list[II] | None = None
+    code: CE | None = None
+    softwareName: str | None = None
+    softwareVersion: str | None = None
+
+
+class AssignedEntity(BaseModel):
+    """A person or organization acting in an assigned administrative role."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    classcode: str = Field(default="ASSIGNED", alias="@classCode")
+    id: list[II]
+    code: CE | None = None
+    address: list[AD] | None = None
+    telecom: list[TEL] | None = None
+    assignedPerson: Person | None = None
+    representedOrganization: Organization | None = None
 
 
 class AssignedAuthor(BaseModel):
-    """
-    Represents the author assigned to the practitioner.
-    https://build.fhir.org/ig/HL7/CDA-core-2.0//StructureDefinition-AssignedAuthor.html
-    """
+    """An authoring role, with its CDA-specific device and organization order."""
 
+    model_config = ConfigDict(populate_by_name=True)
     classcode: str = Field(default="ASSIGNED", alias="@classCode")
-    context_control_code: str = Field(default="OP", alias="@contextControlCode")
-    templateId: Optional[List[II]] = None
-    id: List[II]
-    code: Optional[CE] = None
-    address: Optional[List[AD]] = None
-    telecom: Optional[List[TEL]] = None
-    assignedPerson: Optional[Person] = None
-    assignedAuthoringDevice: Optional[AuthoringDevice] = None
-    representedOrganization: Optional[Organization] = None
+    context_control_code: str | None = Field(default="OP", alias="@contextControlCode")
+    templateId: list[II] | None = None
+    id: list[II]
+    code: CE | None = None
+    address: list[AD] | None = None
+    telecom: list[TEL] | None = None
+    assignedPerson: Person | None = None
+    assignedAuthoringDevice: AuthoringDevice | None = None
+    representedOrganization: Organization | None = None
 
-    # @field_serializer("id")
-    # def serialize_id(self, value: Union[List[II], II]) -> List[II]:
-    #     if isinstance(value, II):
-    #         return [value]
-    #     return value
+
+class PlayingEntity(BaseModel):
+    """Material participating in a clinical entry, such as an allergen or sample."""
+
+    model_config = ConfigDict(populate_by_name=True)
+    classCode: Literal["MMAT"] = Field(default="MMAT", alias="@classCode")
+    determinerCode: Literal["INSTANCE"] | None = Field(default=None, alias="@determinerCode")
+    code: CE
+    quantity: list[PQ] | None = None
+    name: list[str] | None = None
 
 
 class AuthorParticipation(BaseModel):
@@ -77,9 +93,12 @@ class AuthorParticipation(BaseModel):
     https://build.fhir.org/ig/HL7/CDA-ccda-2.1-sd/StructureDefinition-AuthorParticipation.html
     """
 
-    templateId: Optional[II] = None
-    time: Optional[TS] = None
-    mode_code: Optional[str] = None
+    templateId: II | None = None
+    # When this author participated in creating the entry. This is not Epic
+    # section 7(a) result finalisation or 7(b) specimen collection time, and
+    # must not be populated from a GP filing date without actual attribution.
+    time: TS | None = None
+    mode_code: str | None = None
     assignedAuthor: AssignedAuthor
-    assignedPerson: Optional[Person] = None
-    representedOrganization: Optional[Organization] = None
+    assignedPerson: Person | None = None
+    representedOrganization: Organization | None = None

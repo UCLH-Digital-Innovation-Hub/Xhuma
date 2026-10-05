@@ -7,9 +7,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 
 
-def generate_csr(
-    out_dir: str = ".", fqdn: str = "gpc-int-RRV00.xhuma.thirdparty.nhs.uk"
-):
+def generate_csr(out_dir: str = ".", fqdn: str = "gpc-int-RRV00.xhuma.thirdparty.nhs.uk"):
     out_path = Path(out_dir)
     key_path = out_path / f"{fqdn}.key"
     csr_path = out_path / f"{fqdn}.csr"
@@ -43,9 +41,7 @@ def generate_csr(
                 ]
             )
         )
-        .add_extension(
-            x509.SubjectAlternativeName([x509.DNSName(fqdn)]), critical=False
-        )
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(fqdn)]), critical=False)
         .sign(private_key, hashes.SHA256())
     )
 
@@ -171,9 +167,7 @@ def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
 
 # Example usage
 if __name__ == "__main__":
-    generate_pfx_from_cert_chain(
-        "gpc-int-RRV00.xhuma.thirdparty.nhs.uk", "keys/nhs_certs"
-    )
+    generate_pfx_from_cert_chain("gpc-int-RRV00.xhuma.thirdparty.nhs.uk", "keys/nhs_certs")
     # generate_csr(
     #     out_dir="keys/nhs_certs", fqdn="gpc-int-test-RRV00.xhuma.thirdparty.nhs.uk"
     # )

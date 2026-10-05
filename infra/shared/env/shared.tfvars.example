@@ -1,0 +1,28 @@
+# The live shared.tfvars is environment-specific and intentionally excluded
+# from version control. Production values should be supplied through the
+# protected deployment environment / operator configuration.
+
+shared_resource_group_name = "rg-xhuma-shared"
+shared_key_vault_name      = "xhuma-shared-kv-int"
+
+location  = "uksouth"
+tenant_id = "1d5e3f6e-150d-480f-9d33-1d45ee3a71e1"
+sku_name  = "standard"
+
+enabled_for_deployment          = true
+enabled_for_disk_encryption     = true
+enabled_for_template_deployment = true
+
+soft_delete_retention_days    = 90
+purge_protection_enabled      = false
+public_network_access_enabled = true
+
+approved_ip_rules = [
+  "203.0.113.1/32", # PLACEHOLDER_VPN_IP
+  "203.0.113.2/32", # PLACEHOLDER_GITHUB_RUNNER_IP
+]
+
+approved_subnet_ids = [
+  "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-placeholder/providers/Microsoft.Network/virtualNetworks/vnet-placeholder/subnets/subnet-placeholder-1",
+  "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-placeholder/providers/Microsoft.Network/virtualNetworks/vnet-placeholder/subnets/subnet-placeholder-2",
+]

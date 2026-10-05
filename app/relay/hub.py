@@ -55,6 +55,6 @@ class WebSocketHub:
 
         try:
             return await asyncio.wait_for(fut, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self.pending.pop(req_id, None)
             raise HTTPException(504, "Agent timeout")

@@ -231,7 +231,7 @@ flowchart TD
     P6 -.->|API error| P11
     P7 -.->|validation error| P11
     P11 -->|safe failure response| Epic
-    P11 -->|alert/log| P10
+    P11 -->|telemetry/log| P10
     
     P1 -->|audit log| P10
     P9 -->|audit log| P10
@@ -294,10 +294,38 @@ sequenceDiagram
     end
 ```
 
+## Security, Governance & Data Minimisation
+
+Xhuma implements strict data governance controls to align with NHS Information Governance (IG) frameworks and the National Data Sharing Arrangement (NDSA).
+
+### Role-Based Access Control (RBAC) & Break The Glass
+Xhuma relies on Epic Care Everywhere as the authoritative system of record for identity and access management. 
+- **RBAC:** Only authorised clinicians with appropriate Epic security classes can initiate Xhuma queries.
+- **Break The Glass:** Epic's native 'Break The Glass' functionality is enforced prior to Xhuma retrieving GP Connect data, requiring clinicians to explicitly state their reason for accessing outside records. This decision is cryptographically audited and passed back to the NHS via SAML assertions.
+
+### Hardcoded Purpose of Use
+Xhuma strictly enforces the `directcare` purpose. The middleware explicitly blocks any attempts to query the GP Connect API for research, secondary uses, or population health analytics.
+
+### Data Minimisation Scope
+To adhere to data minimisation principles, Xhuma scopes its GP Connect structured record retrieval strictly to `patient/*.read`. It only requests the specific clinical domains required for safe direct care (e.g., Allergies, Medications, Immunisations), explicitly excluding sensitive or unnecessary administrative data where possible.
+
+## Error Handling & Graceful Degradation
+
+Xhuma implements a robust **Global Exception Handling** architecture designed to prevent internal server errors from leaking sensitive stack traces, while remaining strictly compliant with downstream parsing expectations.
+
+### Centralized Exception Catching
+All unhandled exceptions (e.g., parsing failures on malformed FHIR payloads) are caught by a global middleware hook in `app/main.py`. The raw python stack trace is suppressed from the client and instead securely logged to Azure Application Insights with a unique Trace ID.
+
+### Context-Aware Error Payloads
+When a fatal error is caught, Xhuma dynamically determines the originating route and returns a clinically safe, specification-compliant error payload:
+- **REST/FHIR Routes:** Returns a standard FHIR `OperationOutcome` resource.
+- **IHE/SOAP Routes (Epic ITI-38/ITI-55):** Returns a standard `SOAP Fault` envelope (incorporating an IHE `RegistryErrorList`) so that Epic can cleanly abandon the transaction without crashing the clinician's workspace.
+- **Other Routes:** Returns a standard RFC 7807 `application/problem+json` payload.
+
 ### Delta Summary & Assumptions
 
 **Changes from previous version:**
-- **Epic Ownership & Statelessness**: Shifted diagram labels and structures to identify Epic explicitly as the ultimate EHR UI, reconciling owner, and keeper of the patient link. Xhuma is now rigorously documented as a stateless orchestrator with cache used only for transient optimization.
+- **Epic Ownership & Statelessness**: Shifted diagram labels and structures to identify Epic explicitly as the ultimate EHR UI, reconciling owner, and keeper of the patient link. Xhuma is now rigorously documented as a stateless orchestrator with cache used only for transient optimisation.
 - **Workflow Separation**: Separated the single unified interactions into two distinct paths: Patient Discovery (ITI-55) & Identity Confirmation, followed by Document Query & Retrieval.
 - **Clinician Intervention visibility**: Updated the DFD Level 0/1 and Context diagram to show clinicians directly interacting with Epic with explicit human confirmation steps and manual reconciliation steps.
 - **Observability Stack Constraint**: Pared down monitoring boxes to explicitly respect the network architecture document baseline (eliminating extrapolated components).
@@ -353,8 +381,10 @@ sequenceDiagram
   - Security: Password authentication, protected mode
 
 - **Client Implementation** (`app/redis_connect.py`)
-  - Connection pooling with configurable limits
-  - Automatic retry mechanism for resilience
+  - Async `redis.asyncio.Redis` clients with separate document and terminology connection pools
+  - Awaited commands and pipeline execution; atomic document publication
+  - Automatic retries with nonblocking async delays
+  - Pool cleanup during application shutdown and partial startup failure
   - Comprehensive error handling
   - Memory usage monitoring
   - Structured logging
@@ -373,58 +403,14 @@ sequenceDiagram
 
 ## Monitoring & Observability Architecture
 
-### 1. Metrics Collection (Prometheus)
-- **Endpoint Metrics**
-  - Request counts and rates
-  - Response times
-  - Error rates by type
-  - Status code distribution
+Xhuma currently uses Azure Application Insights and Log Analytics to collect telemetry. The sections below outline the current foundation and the intended future tooling for advanced observability.
 
-- **Cache Metrics**
-  - Hit/miss rates
-  - Cache size and memory usage
-  - Eviction rates
-  - Connection pool statistics
-  - Operation latencies
-  - Error counts by type
+### 1. Current Telemetry (Azure Monitor / App Insights)
+- **Implemented:** Distributed tracing, request tracking, error logging, and Application Insights integration.
+- **Outstanding:** Proactive Azure alert rules, action groups, and automated operator notification are not yet fully codified in the current Terraform deployment model, but alert rules also exist in the live Azure environment.
 
-- **Resource Metrics**
-  - CPU usage
-  - Memory utilization
-  - Network I/O
-  - Disk operations
-
-### 2. Visualization (Grafana)
-- **System Dashboards**
-  - Real-time performance monitoring
-  - Historical trends analysis
-  - Resource utilization tracking
-  - Error rate visualization
-
-- **Business Metrics**
-  - Transaction success rates
-  - API usage patterns
-  - Cache efficiency
-  - Service availability
-
-### 3. Logging Architecture (ELK Stack)
-- **Log Collection**
-  - Application logs
-  - System logs
-  - Access logs
-  - Error logs
-
-- **Log Processing**
-  - Structured log formatting
-  - Log enrichment
-  - Pattern detection
-  - Alert generation
-
-- **Log Storage**
-  - Indexed storage
-  - Retention policies
-  - Archival strategy
-  - Search optimization
+### 2. Local Development Tooling (Prometheus & Grafana)
+Prometheus and Grafana are available in the local Docker Compose development stack. Production target environments currently use the Azure Monitor / Application Insights / Log Analytics stack.
 
 ### 4. Distributed Tracing (OpenTelemetry)
 - **Trace Collection**
@@ -437,12 +423,12 @@ sequenceDiagram
   - Latency analysis
   - Error tracking
   - Service mapping
-  - Performance optimization
+  - Performance optimisation
 
 ## Testing Architecture
 
 ### 1. Unit Testing
-- **Test Organization**
+- **Test Organisation**
   - Feature-based test suites
   - Integration test suites
   - Mock implementations
@@ -470,7 +456,7 @@ sequenceDiagram
 ### 3. Performance Testing
 - **Load Testing**
   - Concurrent user simulation
-  - Resource utilization
+  - Resource utilisation
   - Response time analysis
   - Bottleneck identification
 
@@ -492,7 +478,7 @@ sequenceDiagram
 - TLS 1.2+ for all communications
 - Data encryption at rest
 - Secure header handling
-- Input validation and sanitization
+- Input validation and sanitisation
 - Redis protected mode
 
 ### 3. Compliance
@@ -509,14 +495,10 @@ sequenceDiagram
 │   ├── FastAPI Application
 │   ├── Uvicorn Server
 │   └── Application Dependencies
-├── Redis Container
-│   ├── Redis Server (v7.2)
-│   ├── Custom Configuration
-│   └── Persistence Volumes
-└── Monitoring Stack
-    ├── Prometheus
-    ├── Grafana
-    └── OpenTelemetry Collector
+└── Redis Container
+    ├── Redis Server (v7.2)
+    ├── Custom Configuration
+    └── Persistence Volumes
 ```
 
 ### Network Configuration
@@ -524,8 +506,6 @@ sequenceDiagram
 - Exposed ports:
   - 8000: Application API
   - 6379: Redis (internal only)
-  - 9090: Prometheus metrics
-  - 3000: Grafana dashboards
 
 ## Error Handling Architecture
 
@@ -575,7 +555,7 @@ sequenceDiagram
 - Memory usage checks
 
 ### 3. Startup Probes
-- Initialization checks
+- Initialisation checks
 - Configuration validation
 - Resource allocation
 - Service registration

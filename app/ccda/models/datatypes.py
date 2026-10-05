@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_serializer, model_validator
 
 # TODO: add Enums
 
@@ -17,7 +17,38 @@ class ANY(BaseModel):
         description="This field provides a description for each date type",
         alias="@xsi:type",
     )
-    nullFlavor: Optional[str] = None  # enumeration
+    nullFlavor: Optional[str] = Field(
+        default=None, alias="@nullFlavor", validation_alias=AliasChoices("@nullFlavor", "nullFlavor")
+    )
+
+
+class ST(ANY):
+    """CDA string content, serialized as XML text rather than a value attribute."""
+
+    resource_type: str = Field("ST", alias="@xsi:type")
+    text: Optional[str] = Field(default=None, alias="#text")
+    model_config = {"populate_by_name": True}
+
+
+class BL(ANY):
+    """CDA Boolean with an XML Schema boolean lexical representation."""
+
+    resource_type: str = Field("BL", alias="@xsi:type")
+    value: Optional[bool] = Field(default=None, alias="@value")
+    model_config = {"populate_by_name": True}
+
+    @field_serializer("value")
+    def serialize_value(self, value):
+        """Emit lowercase true/false for XML, including a supplied false."""
+        return None if value is None else "true" if value else "false"
+
+
+class INT(ANY):
+    """CDA integer result, retaining zero as a supplied value."""
+
+    resource_type: str = Field("INT", alias="@xsi:type")
+    value: Optional[int] = Field(default=None, alias="@value")
+    model_config = {"populate_by_name": True}
 
 
 class BIN(ANY):
@@ -93,9 +124,7 @@ class II(ANY):
         description="An identifier that uniquely identifies a thing or object.",
         alias="@xsi:type",
     )
-    assigningAuthorityName: Optional[str] = Field(
-        alias="@assigningAuthorityName", default=None
-    )
+    assigningAuthorityName: Optional[str] = Field(alias="@assigningAuthorityName", default=None)
     displayable: Optional[bool] = None
     extension: Optional[str] = Field(alias="@extension", default=None)
     root: Optional[str] = Field(alias="@root")
@@ -115,6 +144,8 @@ CODE_SYSTEM_NAMES = {
     "https://fhir.hl7.org.uk/Id/multilex-drug-codes": "2.16.840.1.113883.2.1.6.4",
     "https://fhir.hl7.org.uk/Id/resipuk-gemscript-drug-codes": "2.16.840.1.113883.2.1.6.15",
     "https://fhir.hl7.org.uk/Id/emis-drug-codes": "2.16.840.1.113883.2.1.6.9",
+    "http://terminology.hl7.org/CodeSystem/v2-0078": "2.16.840.1.113883.1.11.78",
+    "http://read.info/readv2": "2.16.840.1.113883.6.29",
 }
 
 
@@ -127,14 +158,17 @@ class CD(ANY):
         "or more translations into different coding systems.",
         alias="@xsi:type",
     )
-    code: str = Field(alias="@code")
+    code: Optional[str] = Field(alias="@code", default=None)
     codeSystem: Optional[str] = Field(alias="@codeSystem", default=None)
     codeSystemName: Optional[str] = Field(alias="@codeSystemName", default=None)
     displayName: Optional[str] = Field(alias="@displayName", default=None)
+    originalText: Optional[str] = None
     translation: Optional[List["CD"]] = None  # Forward reference
 
     @model_validator(mode="before")
     def set_code_system_from_name(cls, values):
+        if not isinstance(values, dict):
+            return values
         cs = values.get("codeSystemName")
         if cs and not values.get("codeSystem"):
             values["codeSystem"] = CODE_SYSTEM_NAMES.get(cs)
@@ -177,10 +211,13 @@ class PQR(CV):
         "system. Used to show alternative representation for a physical "
         "quantity.",
     )
-    value: Optional[float] = None
+    value: Optional[float] = Field(default=None, alias="@value")
 
 
 class CS(CV):
+    # CDA permits an unknown coded status via nullFlavor without a code.
+    code: Optional[str] = Field(alias="@code", default=None)
+
     resource_type: str = Field(
         "CS",
         description="Coded data, consists of a code, display name, code system, and original "
@@ -198,11 +235,17 @@ class PQ(QTY):
     translation: Optional[List[PQR]] = None
     unit: Optional[str] = Field(alias="@unit", default=None)
     value: Optional[float] = Field(alias="@value", default=None)
+    model_config = {
+        "populate_by_name": True,
+    }
 
 
 class TS(QTY):
+    model_config = {"populate_by_name": True}
+
     resource_type: str = Field(
         "TS",
+        alias="@xsi:type",
         description="A quantity specifying a point on the axis of natural time. A point "
         "in time is most often represented as a calendar expression.",
     )
@@ -228,16 +271,19 @@ class SXCM_PQ(PQ):
 
 class IVXB_TS(SXCM_TS):
     resource_type: str = Field("IVXB_TS", description="", alias="@xsi:type")
-    inclusive: Optional[bool] = Field(
-        None, description="Specifies whether the limit is included in the interval."
-    )
+    inclusive: Optional[bool] = Field(None, description="Specifies whether the limit is included in the interval.")
 
 
 class IVXB_PQ(PQ):
+    """Physical-quantity boundary with explicitly serialized inclusivity."""
+
     resource_type: str = Field("IVXB_PQ", description="", alias="@xsi:type")
-    inclusive: Optional[bool] = Field(
-        None, description="Specifies whether the limit is included in the interval."
-    )
+    inclusive: Optional[bool] = Field(default=None, alias="@inclusive")
+
+    @field_serializer("inclusive")
+    def serialize_inclusive(self, value):
+        """Emit XML boolean values, not Python's capitalized spelling."""
+        return None if value is None else "true" if value else "false"
 
 
 class IVL_PQ(ANY):
@@ -258,9 +304,7 @@ class IVL_PQ(ANY):
 
 
 class IVL_TS(IVXB_TS):
-    resource_type: str = Field(
-        "IVL_TS", description="Time interval.", alias="@xsi:type"
-    )
+    resource_type: str = Field("IVL_TS", description="Time interval.", alias="@xsi:type")
     low: Optional[IVXB_TS] = None
     center: Optional[TS] = None
     width: Optional[PQ] = None
@@ -271,9 +315,7 @@ class IVL_TS(IVXB_TS):
 
 
 class IVL_INT(ANY):
-    resource_type: str = Field(
-        "IVL_INT", description="Interval of integers.", alias="@xsi:type"
-    )
+    resource_type: str = Field("IVL_INT", description="Interval of integers.", alias="@xsi:type")
     nullFlavor: Optional[str] = Field(alias="@nullFlavor", default=None)
     value: Optional[int] = Field(alias="@value", default=None)
     operator: Optional[str] = Field(alias="@operator", default=None)
@@ -291,9 +333,7 @@ class PIVL_TS(SXCM_TS):
     phase: Optional[IVL_TS] = None
     period: Optional[Union[IVL_PQ, PQ]] = None
     alignment: Optional[CalendarCycle] = Field(alias="@alignment", default=None)
-    institutionSpecified: Optional[str] = Field(
-        alias="@institutionSpecified", default=None
-    )
+    institutionSpecified: Optional[str] = Field(alias="@institutionSpecified", default=None)
     model_config = {
         "populate_by_name": True,
     }

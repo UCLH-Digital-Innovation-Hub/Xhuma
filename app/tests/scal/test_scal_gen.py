@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from app.gpconnect import gpconnect
+from app.gpconnect import _fetch_gpconnect_record
 
 from ..log_context import capture_test_logs
 
@@ -51,7 +51,7 @@ async def test_GPC_STR_TST_GEN_05():
     nhsnos = ["9690937286", "9690938533"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-05", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             body = json.loads(result.body)
             assert "document_id" in body
 
@@ -69,7 +69,7 @@ async def test_GPC_STR_TST_GEN_06():
     nhsnos = ["9690937286"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-06", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             body = json.loads(result.body)
             assert "document_id" in body
 
@@ -85,7 +85,7 @@ async def test_GPC_STR_TST_GEN_07():
     nhsnos = []
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-07", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
             assert code == 200
@@ -102,7 +102,7 @@ async def test_GPC_STR_TST_GEN_08():
     nhsnos = ["9690937286"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-08", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
             assert code == 200
@@ -118,7 +118,7 @@ async def test_GPC_STR_TST_GEN_09():
     nhsnos = ["9690938533", "9690938541"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-09", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
             assert code == 403
@@ -136,7 +136,7 @@ async def test_GPC_STR_TST_GEN_10():
     nhsnos = ["9690938681"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-10", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
             assert code == 403
@@ -153,7 +153,7 @@ async def test_GPC_STR_TST_GEN_11():
     nhsnos = ["9999999999"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-11", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             json.loads(result.body)
             assert code == 404
@@ -169,7 +169,7 @@ async def test_GPC_STR_TST_GEN_12():
     nhsnos = ["9690938576"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-12", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
             assert code == 403
@@ -186,7 +186,7 @@ async def test_GPC_STR_TST_GEN_13():
     nhsnos = ["9690937286"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-13", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             body = json.loads(result.body)
             assert body["success"] is False
 
@@ -201,7 +201,7 @@ async def test_GPC_STR_TST_GEN_14():
     nhsnos = ["testno"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-14", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             body = json.loads(result.body)
             assert code == 400
@@ -219,7 +219,7 @@ async def test_GPC_STR_TST_GEN_15():
     nhsnos = ["9690937286"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-15", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             body = json.loads(result.body)
             # TODO clarify test as we used fixed allergy parameters
             assert body["success"] is False
@@ -235,7 +235,7 @@ async def test_GPC_STR_TST_GEN_16():
     nhsnos = ["9690937286"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-16", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             body = json.loads(result.body)
             # TODO clarify test as we used fixed allergy parameters
             assert body["success"] is False
@@ -249,7 +249,7 @@ async def test_GPC_STR_TST_GEN_17():
     nhsnos = ["9690938096"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-17", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             json.loads(result.body)
             assert code == 200
@@ -264,7 +264,7 @@ async def test_GPC_STR_TST_GEN_18():
     nhsnos = ["9690938118"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-18", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             json.loads(result.body)
             assert code == 200
@@ -280,7 +280,7 @@ async def test_GPC_STR_TST_GEN_20():
     nhsnos = ["9690937286"]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-STR-TST-GEN-20", nhsno) as log_dir:
-            result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
+            result = await _fetch_gpconnect_record(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
             code = result.status_code
             json.loads(result.body)
             assert code == 200

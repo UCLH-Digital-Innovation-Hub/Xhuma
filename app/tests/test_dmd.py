@@ -176,7 +176,7 @@ example_route_concept = {
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.dmd.snomed_client")
+@patch("app.ccda.dmd.snomed_client", autospec=True)
 @patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock)
 @patch("app.ccda.dmd.httpx.AsyncClient")
 async def test_dmd_lookup(mock_async_client, mock_get_token, mock_snomed):
@@ -221,23 +221,18 @@ async def test_dmd_lookup(mock_async_client, mock_get_token, mock_snomed):
     assert concept.route.code == "26643006"
     assert concept.route.displayName == "Oral"
 
-    assert mock_snomed.setex.call_count == 5
-    assert (
-        mock_snomed.setex.call_args.args[0]
-        == "dmd:resolved:v1:202603.2.0:42010411000001105"
-    )
-    assert all(
-        "version=202603.2.0" in call.args[0]
-        for call in mock_client_instance.get.call_args_list[1:]
-    )
+    assert mock_snomed.setex.await_count == 5
+    assert mock_snomed.setex.call_args.args[0] == "dmd:resolved:v1:202603.2.0:42010411000001105"
+    assert all("version=202603.2.0" in call.args[0] for call in mock_client_instance.get.call_args_list[1:])
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.dmd.snomed_client")
+@patch("app.ccda.dmd.snomed_client", autospec=True)
 @patch("app.ccda.dmd.httpx.AsyncClient")
 async def test_get_dmd_concept_cache_hit(mock_async_client, mock_snomed):
-    from app.ccda.dmd import get_dmd_concept
     import json
+
+    from app.ccda.dmd import get_dmd_concept
 
     # Mock Redis returning a cached concept
     mock_snomed.get.return_value = json.dumps({"cached": "value"}).encode("utf-8")
@@ -248,11 +243,11 @@ async def test_get_dmd_concept_cache_hit(mock_async_client, mock_snomed):
     # Assert network client was never instantiated/called
     mock_async_client.assert_not_called()
     # Assert it checked the correct cache key
-    mock_snomed.get.assert_called_once_with("snomed:12345:properties:test_prop")
+    mock_snomed.get.assert_awaited_once_with("snomed:12345:properties:test_prop")
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.dmd.snomed_client")
+@patch("app.ccda.dmd.snomed_client", autospec=True)
 @patch("app.ccda.dmd.httpx.AsyncClient")
 async def test_get_token_cache_hit(mock_async_client, mock_snomed):
     from app.ccda.dmd import _get_token
@@ -265,7 +260,7 @@ async def test_get_token_cache_hit(mock_async_client, mock_snomed):
     assert token == "cached-dmd-token"
     # Assert network client was never instantiated/called for the token
     mock_async_client.assert_not_called()
-    mock_snomed.get.assert_called_once_with("dmd_token")
+    mock_snomed.get.assert_awaited_once_with("dmd_token")
 
 
 @pytest.mark.asyncio
@@ -280,13 +275,15 @@ async def test_resolved_answer_hit_skips_resolution():
             return_value=example_return,
         ),
         patch("app.ccda.dmd._resolve_dmd_concept", new_callable=AsyncMock) as resolve,
-        patch("app.ccda.dmd.snomed_client") as cache,
+        patch("app.ccda.dmd.record_cache") as record_cache,
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
     ):
         cache.get.return_value = answer.model_dump_json().encode()
         assert await dmd_lookup(123) == answer
-        cache.get.assert_called_once_with("dmd:resolved:v1:202603.2.0:123")
+        cache.get.assert_awaited_once_with("dmd:resolved:v1:202603.2.0:123")
         resolve.assert_not_awaited()
-        cache.setex.assert_not_called()
+        record_cache.assert_called_once_with("terminology.resolved", True)
+        cache.setex.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -295,10 +292,7 @@ async def test_release_change_resolves_new_answer():
 
     stored = {}
     releases = ["202603.2.0", "202603.2.0", "202604.1.0"]
-    data = [
-        {"parameter": [{"name": "version", "valueString": release}]}
-        for release in releases
-    ]
+    data = [{"parameter": [{"name": "version", "valueString": release}]} for release in releases]
     answers = [
         DMDConcept(concept_id=123, valueString="Old"),
         DMDConcept(concept_id=123, valueString="New"),
@@ -310,12 +304,10 @@ async def test_release_change_resolves_new_answer():
             new_callable=AsyncMock,
             side_effect=answers,
         ) as resolve,
-        patch("app.ccda.dmd.snomed_client") as cache,
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
     ):
         cache.get.side_effect = stored.get
-        cache.setex.side_effect = lambda key, ttl, value: stored.update(
-            {key: value.encode()}
-        )
+        cache.setex.side_effect = lambda key, ttl, value: stored.update({key: value.encode()})
         assert (await dmd_lookup(123)).valueString == "Old"
         assert (await dmd_lookup(123)).valueString == "Old"
         assert (await dmd_lookup(123)).valueString == "New"
@@ -337,11 +329,11 @@ async def test_missing_release_does_not_cache_resolved_answer():
             new_callable=AsyncMock,
             return_value=DMDConcept(concept_id=123, valueString="Example"),
         ),
-        patch("app.ccda.dmd.snomed_client") as cache,
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
     ):
         await dmd_lookup(123)
-        cache.get.assert_not_called()
-        cache.setex.assert_not_called()
+        cache.get.assert_not_awaited()
+        cache.setex.assert_not_awaited()
 
 
 def test_prewarm_preserves_release():
@@ -351,41 +343,22 @@ def test_prewarm_preserves_release():
         _lookup_version,
     )
 
-    expansion = {
-        "parameter": [{"name": "version", "valueUri": "https://dmd.nhs.uk|202603.2.0"}]
-    }
+    expansion = {"parameter": [{"name": "version", "valueUri": "https://dmd.nhs.uk|202603.2.0"}]}
     release = _expansion_version(expansion)
     assert release == "202603.2.0"
+    assert _lookup_version(_expansion_concept_to_params({"display": "Example"}, release)) == release
     assert (
-        _lookup_version(_expansion_concept_to_params({"display": "Example"}, release))
-        == release
-    )
-    assert (
-        _lookup_version(
-            _expansion_concept_to_params(
-                {"display": "Example", "version": "202604.1.0"}, release
-            )
-        )
+        _lookup_version(_expansion_concept_to_params({"display": "Example", "version": "202604.1.0"}, release))
         == "202604.1.0"
     )
-    assert (
-        _expansion_version(
-            {
-                "parameter": [
-                    {"name": "version", "valueUri": "http://snomed.info/sct|other"}
-                ]
-            }
-        )
-        is None
-    )
+    assert _expansion_version({"parameter": [{"name": "version", "valueUri": "http://snomed.info/sct|other"}]}) is None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "status,returned_version", [(500, "202603.2.0"), (200, "202604.1.0")]
-)
+@pytest.mark.parametrize("status,returned_version", [(500, "202603.2.0"), (200, "202604.1.0")])
 async def test_failed_or_wrong_release_lookup_is_not_cached(status, returned_version):
     import httpx
+
     from app.ccda.dmd import get_dmd_concept
 
     response = httpx.Response(
@@ -394,14 +367,63 @@ async def test_failed_or_wrong_release_lookup_is_not_cached(status, returned_ver
         json={"parameter": [{"name": "version", "valueString": returned_version}]},
     )
     with (
-        patch("app.ccda.dmd.snomed_client") as cache,
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
         patch("app.ccda.dmd._get_token", new_callable=AsyncMock, return_value="token"),
         patch("app.ccda.dmd.httpx.AsyncClient") as client,
     ):
         cache.get.return_value = None
-        client.return_value.__aenter__.return_value.get = AsyncMock(
-            return_value=response
-        )
+        client.return_value.__aenter__.return_value.get = AsyncMock(return_value=response)
         with pytest.raises((httpx.HTTPStatusError, ValueError)):
             await get_dmd_concept(123, version="202603.2.0")
-        cache.setex.assert_not_called()
+        cache.setex.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prewarmed_concept_awaits_cache_without_http():
+    import json
+
+    from app.ccda.dmd import dmd_cache_key, get_dmd_concept
+
+    with patch("app.ccda.dmd.snomed_client", autospec=True) as cache, patch("app.ccda.dmd.httpx.AsyncClient") as http:
+        cache.get.return_value = json.dumps(example_return).encode()
+        assert await get_dmd_concept(123, properties=["parent", "VPI"]) == example_return
+        cache.get.assert_awaited_once_with(dmd_cache_key(123, ["parent", "VPI"]))
+        cache.setex.assert_not_awaited()
+        http.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_terminology_token_cache_write_is_awaited():
+    import httpx
+
+    from app.ccda.dmd import get_terminology_token
+
+    with (
+        patch("app.ccda.dmd.client_id", "test-client"),
+        patch("app.ccda.dmd.client_secret", "test-secret"),
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
+        patch("app.ccda.dmd.httpx.AsyncClient") as factory,
+    ):
+        client = AsyncMock()
+        client.post.return_value = httpx.Response(
+            200, json={"access_token": "cached-token"}, request=httpx.Request("POST", "https://example.test/token")
+        )
+        factory.return_value.__aenter__.return_value = client
+        assert await get_terminology_token() == "cached-token"
+        cache.setex.assert_awaited_once_with("dmd_token", 30 * 60, "cached-token")
+
+
+@pytest.mark.asyncio
+async def test_prewarm_writes_both_release_keys_asynchronously():
+    import json
+
+    from app.ccda.dmd import _cache_lookup, dmd_cache_key
+
+    with patch("app.ccda.dmd.snomed_client", autospec=True) as cache:
+        await _cache_lookup(123, example_return, ["VPI", "parent"])
+        assert cache.setex.await_count == 2
+        assert [call.args[0] for call in cache.setex.await_args_list] == [
+            dmd_cache_key(123, ["VPI", "parent"]),
+            dmd_cache_key(123, ["VPI", "parent"], "202603.2.0"),
+        ]
+        assert all(json.loads(call.args[2]) == example_return for call in cache.setex.await_args_list)

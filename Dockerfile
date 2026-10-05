@@ -8,7 +8,8 @@ ENV UV_LINK_MODE=copy
 WORKDIR /code
 
 RUN apt-get update && apt-get upgrade -y && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    python -m pip uninstall -y pip setuptools
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 

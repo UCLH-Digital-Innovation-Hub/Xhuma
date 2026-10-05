@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 
 import httpx
@@ -53,11 +54,12 @@ async def log_request(request: httpx.Request):
     correlation_id = request.headers.get("x-correlation-id", "N/A")
     traceparent = request.headers.get("traceparent", "N/A")
 
+    # Scrub any 10-digit NHS numbers from the URL path
+    safe_url = re.sub(r"(?<!\d)\d{10}(?!\d)", "[REDACTED_NHS_NUMBER]", str(request.url))
+
     logger.info(f"[req_trace:{correlation_id}] Outgoing Request:")
-    logger.info(f"[req_trace:{correlation_id}] {request.method} {request.url}")
-    logger.info(
-        f"[req_trace:{correlation_id}] Headers: {_scrub_headers(request.headers)}"
-    )
+    logger.info(f"[req_trace:{correlation_id}] {request.method} {safe_url}")
+    logger.info(f"[req_trace:{correlation_id}] Headers: {_scrub_headers(request.headers)}")
     logger.info(f"[req_trace:{correlation_id}] traceparent: {traceparent}")
     logger.info(f"[req_trace:{correlation_id}] Body: [REDACTED FOR PHI SECURITY]")
     logger.info("-----")
@@ -68,8 +70,6 @@ async def log_response(response: httpx.Response):
 
     logger.info(f"[res_trace:{correlation_id}] Incoming Response:")
     logger.info(f"[res_trace:{correlation_id}] Status Code: {response.status_code}")
-    logger.info(
-        f"[res_trace:{correlation_id}] Headers: {_scrub_headers(response.headers)}"
-    )
+    logger.info(f"[res_trace:{correlation_id}] Headers: {_scrub_headers(response.headers)}")
     logger.info(f"[res_trace:{correlation_id}] Body: [REDACTED FOR PHI SECURITY]")
     logger.info("=====")

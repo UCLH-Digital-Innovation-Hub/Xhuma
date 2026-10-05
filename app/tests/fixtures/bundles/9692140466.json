@@ -490,7 +490,7 @@
                 ],
                 "name": [
                     {
-                        "use": "official",
+                        "use": "usual",
                         "family": "Egan",
                         "given": [
                             "Lester"
@@ -578,7 +578,7 @@
                 "dispenseRequest": {
                     "validityPeriod": {
                         "start": "2026-02-23",
-                        "end": "2026-03-15"
+                        "end": "2027-03-15"
                     },
                     "quantity": {
                         "value": 180,
@@ -3482,7 +3482,7 @@
                 },
                 "effectivePeriod": {
                     "start": "2026-02-23",
-                    "end": "2026-03-15"
+                    "end": "2027-03-15"
                 },
                 "dateAsserted": "2026-02-23T17:09:54.047+00:00",
                 "subject": {

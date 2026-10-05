@@ -7,6 +7,7 @@ import time
 import httpx
 
 from ..redis_connect import snomed_client
+from ..telemetry import measure, record_cache
 from .models.datatypes import CD
 from .models.dmd import DMDConcept
 from .models.dmd import VPIProperty as VPI
@@ -17,17 +18,22 @@ client_secret = os.getenv("DMD_CLIENT_SECRET")
 _TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
 
 
+def _decode_cached_token(token: bytes | str | None) -> str | None:
+    """Normalize cached token value from Redis into a plain string."""
+    if token is None:
+        return None
+    if isinstance(token, bytes):
+        return token.decode("utf-8")
+    return token
+
+
 async def get_terminology_token():
     """Fetch an access token from the DMD API using client credentials."""
 
     # check if client_id and client_secret are set
     if not client_id or not client_secret:
-        logging.error(
-            "DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables."
-        )
-        raise ValueError(
-            "DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables."
-        )
+        logging.error("DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables.")
+        raise ValueError("DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables.")
 
     url = "https://ontology.nhs.uk/authorisation/auth/realms/nhs-digital-terminology/protocol/openid-connect/token"
 
@@ -44,26 +50,27 @@ async def get_terminology_token():
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         logging.info(f"POST {url}")
         t0 = time.perf_counter()
-        response = await client.post(url, data=data, headers=headers)
-        logging.info(
-            f"POST {url} -> {response.status_code} ({time.perf_counter() - t0:.2f}s)"
-        )
+        with measure("terminology.token") as span:
+            response = await client.post(url, data=data, headers=headers)
+            span.set_attribute("http.response.status_code", response.status_code)
+            response.raise_for_status()
+        logging.info(f"POST {url} -> {response.status_code} ({time.perf_counter() - t0:.2f}s)")
         if not response.is_success:
             logging.error(f"Token request failed: {response.text}")
         response.raise_for_status()
         token_data = response.json()
 
-        # cache the token for 5 minutes
-        snomed_client.setex("dmd_token", 300, token_data["access_token"])
+        # cache the token for 30 minutes
+        await snomed_client.setex("dmd_token", 30 * 60, token_data["access_token"])
 
         return token_data["access_token"]
 
 
 async def _get_token() -> str:
     """Return a valid bearer token, fetching a new one if the cache is empty."""
-    cached = snomed_client.get("dmd_token")
+    cached = _decode_cached_token(await snomed_client.get("dmd_token"))
     if cached:
-        return cached.decode("utf-8")
+        return cached
     return await get_terminology_token()
 
 
@@ -78,11 +85,7 @@ def dmd_cache_key(concept_id: int, properties: list = None, version: str = None)
 
 def _lookup_version(data: dict) -> str | None:
     return next(
-        (
-            p.get("valueString")
-            for p in data.get("parameter", [])
-            if p.get("name") == "version"
-        ),
+        (p.get("valueString") for p in data.get("parameter", []) if p.get("name") == "version"),
         None,
     )
 
@@ -91,33 +94,28 @@ def _expansion_version(expansion: dict) -> str | None:
     """Read the dm+d code-system release, rather than the ValueSet version."""
     for parameter in expansion.get("parameter", []):
         if parameter.get("name") in ("version", "system-version", "used-system"):
-            value = (
-                parameter.get("valueUri")
-                or parameter.get("valueCanonical")
-                or parameter.get("valueString", "")
-            )
+            value = parameter.get("valueUri") or parameter.get("valueCanonical") or parameter.get("valueString", "")
             system, separator, version = value.partition("|")
             if system == "https://dmd.nhs.uk" and separator and version:
                 return version
     return None
 
 
-def _cache_lookup(code, data: dict, properties: list = None) -> None:
+async def _cache_lookup(code, data: dict, properties: list = None) -> None:
     payload = json.dumps(data)
-    snomed_client.setex(dmd_cache_key(code, properties), 7 * 24 * 3600, payload)
+    await snomed_client.setex(dmd_cache_key(code, properties), 7 * 24 * 3600, payload)
     version = _lookup_version(data)
     if version:
-        snomed_client.setex(
-            dmd_cache_key(code, properties, version), 7 * 24 * 3600, payload
-        )
+        await snomed_client.setex(dmd_cache_key(code, properties, version), 7 * 24 * 3600, payload)
 
 
-async def get_dmd_concept(
-    concept_id: int, properties: list = None, version: str = None
-) -> dict:
+async def get_dmd_concept(concept_id: int, properties: list = None, version: str = None) -> dict:
     # Check if the concept is in the cache
     cache_key = dmd_cache_key(concept_id, properties, version)
-    cached_concept = snomed_client.get(cache_key)
+    with measure("terminology.cache.read") as span:
+        cached_concept = await snomed_client.get(cache_key)
+        span.set_attribute("cache.hit", bool(cached_concept))
+    record_cache("terminology", bool(cached_concept))
     if cached_concept:
         logging.info(f"Cache hit for SNOMED concept {concept_id}")
         # cached concept is stored as json string, decode it before returning
@@ -141,38 +139,35 @@ async def get_dmd_concept(
         }
         logging.info(f"GET {url}")
         t0 = time.perf_counter()
-        response = await client.get(url, headers=headers)
-        logging.info(
-            f"GET {url} -> {response.status_code} ({time.perf_counter() - t0:.2f}s)"
-        )
+        with measure("terminology.http") as span:
+            response = await client.get(url, headers=headers)
+            span.set_attribute("http.response.status_code", response.status_code)
+            if response.status_code != 401:
+                response.raise_for_status()
+        logging.info(f"GET {url} -> {response.status_code} ({time.perf_counter() - t0:.2f}s)")
 
         if response.status_code == 401:
-            logging.warning(
-                "Unauthorized access to DMD API. Token may have expired. Fetching new token."
-            )
+            logging.warning("Unauthorized access to DMD API. Token may have expired. Fetching new token.")
             token = await get_terminology_token()
             headers["Authorization"] = f"Bearer {token}"
             logging.info(f"GET {url} (retry)")
             t0 = time.perf_counter()
-            response = await client.get(url, headers=headers)
-            logging.info(
-                f"GET {url} (retry) -> {response.status_code} ({time.perf_counter() - t0:.2f}s)"
-            )
+            with measure("terminology.http", retry=True) as span:
+                response = await client.get(url, headers=headers)
+                span.set_attribute("http.response.status_code", response.status_code)
+                response.raise_for_status()
+            logging.info(f"GET {url} (retry) -> {response.status_code} ({time.perf_counter() - t0:.2f}s)")
             if not response.is_success:
-                logging.error(
-                    f"Concept request failed after token refresh: {response.text}"
-                )
+                logging.error(f"Concept request failed after token refresh: {response.text}")
         response.raise_for_status()
         concept_data = response.json()
         if version and _lookup_version(concept_data) != version:
-            raise ValueError(
-                "DMD lookup returned a different or missing release version"
-            )
+            raise ValueError("DMD lookup returned a different or missing release version")
         # cache the concept data for 1 week
         if version:
-            snomed_client.setex(cache_key, 7 * 24 * 3600, json.dumps(concept_data))
+            await snomed_client.setex(cache_key, 7 * 24 * 3600, json.dumps(concept_data))
         else:
-            _cache_lookup(concept_id, concept_data, properties)
+            await _cache_lookup(concept_id, concept_data, properties)
         # print(f"Cached DMD concept {concept_id} with properties {properties} under key {cache_key}")
 
         return concept_data
@@ -218,14 +213,10 @@ async def _populate_parent_cache(parent: str) -> int:
         logging.info(f"POST {url} (parent={parent})")
         t0 = time.perf_counter()
         response = await client.post(url, json=body, headers=headers)
-        logging.info(
-            f"POST {url} (parent={parent}) -> {response.status_code} ({time.perf_counter() - t0:.2f}s)"
-        )
+        logging.info(f"POST {url} (parent={parent}) -> {response.status_code} ({time.perf_counter() - t0:.2f}s)")
 
         if response.status_code == 401:
-            logging.warning(
-                f"Token expired expanding {parent} ValueSet. Fetching new token."
-            )
+            logging.warning(f"Token expired expanding {parent} ValueSet. Fetching new token.")
             token = await get_terminology_token()
             headers["Authorization"] = f"Bearer {token}"
             logging.info(f"POST {url} (parent={parent}, retry)")
@@ -253,7 +244,7 @@ async def _populate_parent_cache(parent: str) -> int:
         release = concept.get("version") or version
         if release:
             cached["parameter"].append({"name": "version", "valueString": release})
-        _cache_lookup(code, cached)
+        await _cache_lookup(code, cached)
         count += 1
 
     logging.info(f"Cached {count} DMD {parent} concepts")
@@ -323,9 +314,7 @@ def _expansion_concept_to_params(concept: dict, version: str = None) -> dict:
                 for subitem in subinner:
                     suburl = subitem.get("url")
                     if suburl == "code":
-                        subpart.append(
-                            {"name": "code", "valueCode": subitem["valueCode"]}
-                        )
+                        subpart.append({"name": "code", "valueCode": subitem["valueCode"]})
                     elif suburl == "value":
                         for vk in _VALUE_KEYS:
                             if vk in subitem:
@@ -401,20 +390,14 @@ async def _populate_concept_cache(parent: str) -> int:
                 ],
             }
 
-            logging.info(
-                f"POST {url} (parent={parent}, page={page_num}, offset={offset})"
-            )
+            logging.info(f"POST {url} (parent={parent}, page={page_num}, offset={offset})")
             t0 = time.perf_counter()
             response = await client.post(url, json=paged_body, headers=headers)
             elapsed = time.perf_counter() - t0
-            logging.info(
-                f"POST {url} (parent={parent}, page={page_num}) -> {response.status_code} ({elapsed:.2f}s)"
-            )
+            logging.info(f"POST {url} (parent={parent}, page={page_num}) -> {response.status_code} ({elapsed:.2f}s)")
 
             if response.status_code == 401:
-                logging.warning(
-                    f"Token expired expanding {parent} ValueSet. Fetching new token."
-                )
+                logging.warning(f"Token expired expanding {parent} ValueSet. Fetching new token.")
                 token = await get_terminology_token()
                 headers["Authorization"] = f"Bearer {token}"
                 logging.info(f"POST {url} (parent={parent}, page={page_num}, retry)")
@@ -438,10 +421,7 @@ async def _populate_concept_cache(parent: str) -> int:
             all_concepts.extend(page)
 
             total = expansion.get("total", len(all_concepts))
-            logging.info(
-                f"{parent} page {page_num} complete: {len(page)} concepts "
-                f"({len(all_concepts)}/{total} total)"
-            )
+            logging.info(f"{parent} page {page_num} complete: {len(page)} concepts ({len(all_concepts)}/{total} total)")
 
             if len(all_concepts) >= total or not page:
                 break
@@ -456,13 +436,9 @@ async def _populate_concept_cache(parent: str) -> int:
 
         params = _expansion_concept_to_params(concept)
 
-        _cache_lookup(code, params, _CONCEPT_PROPERTIES)
-        display_params = {
-            "parameter": [
-                p for p in params["parameter"] if p["name"] in ("display", "version")
-            ]
-        }
-        _cache_lookup(code, display_params)
+        await _cache_lookup(code, params, _CONCEPT_PROPERTIES)
+        display_params = {"parameter": [p for p in params["parameter"] if p["name"] in ("display", "version")]}
+        await _cache_lookup(code, display_params)
         count += 1
 
     logging.info(f"Cached {count} DMD {parent} concepts")
@@ -484,29 +460,27 @@ async def dmd_lookup(concept_id: int) -> DMDConcept:
     version = _lookup_version(dmd)
     key = f"dmd:resolved:v1:{version}:{concept_id}" if version else None
     if key:
-        cached = snomed_client.get(key)
+        with measure("terminology.resolved.cache.read") as span:
+            cached = await snomed_client.get(key)
+            span.set_attribute("cache.hit", bool(cached))
+        record_cache("terminology.resolved", bool(cached))
         if cached:
             return DMDConcept.model_validate_json(cached)
-    result = await _resolve_dmd_concept(concept_id, dmd, version)
+    with measure("terminology.resolve"):
+        result = await _resolve_dmd_concept(concept_id, dmd, version)
     if key:
-        snomed_client.setex(key, 7 * 24 * 3600, result.model_dump_json())
+        await snomed_client.setex(key, 7 * 24 * 3600, result.model_dump_json())
     return result
 
 
-async def _resolve_dmd_concept(
-    concept_id: int, dmd: dict, version: str = None
-) -> DMDConcept:
+async def _resolve_dmd_concept(concept_id: int, dmd: dict, version: str = None) -> DMDConcept:
     properties = _CONCEPT_PROPERTIES
     # make sure dmd is a dict
     if not isinstance(dmd, dict):
-        logging.error(
-            f"Unexpected DMD concept data format for concept {concept_id}: {dmd}"
-        )
+        logging.error(f"Unexpected DMD concept data format for concept {concept_id}: {dmd}")
         dmd = json.loads(dmd)
 
-    display_name = [
-        prop["valueString"] for prop in dmd["parameter"] if prop["name"] == "display"
-    ]
+    display_name = [prop["valueString"] for prop in dmd["parameter"] if prop["name"] == "display"]
 
     processed_dmd = DMDConcept(
         concept_id=concept_id,
@@ -526,10 +500,7 @@ async def _resolve_dmd_concept(
         for part in property_data["part"]:
             if part["name"] == "subproperty":
                 for subpart in part["part"]:
-                    if (
-                        subpart["name"] == "code"
-                        and subpart["valueCode"] == subproperty_name
-                    ):
+                    if subpart["name"] == "code" and subpart["valueCode"] == subproperty_name:
                         return part
 
     # check if there is a parent property
@@ -544,9 +515,7 @@ async def _resolve_dmd_concept(
 
             # check remaining parent is an int
             if len(value_codes) == 1 and value_codes[0].isdigit():
-                dmd = await get_dmd_concept(
-                    int(value_codes[0]), properties=properties, version=version
-                )
+                dmd = await get_dmd_concept(int(value_codes[0]), properties=properties, version=version)
 
     vpi_properties = await get_property("VPI", dmd)
     # logging.info(f"Found {len(vpi_properties)} VPI properties for concept {concept_id}")
@@ -567,14 +536,8 @@ async def _resolve_dmd_concept(
             unit_concept = await get_dmd_concept(dose_unit_code, version=version)
             # pprint.pprint(unit_concept)
             # print(type(unit_concept))
-            unit_display_parameter = [
-                parm for parm in unit_concept["parameter"] if parm["name"] == "display"
-            ]
-            unit_display = (
-                unit_display_parameter[0]["valueString"]
-                if unit_display_parameter
-                else None
-            )
+            unit_display_parameter = [parm for parm in unit_concept["parameter"] if parm["name"] == "display"]
+            unit_display = unit_display_parameter[0]["valueString"] if unit_display_parameter else None
 
         processed_dmd.vpi = VPI(value=dose_value, unit=unit_display)
 
@@ -594,14 +557,8 @@ async def _resolve_dmd_concept(
             route_concept = await get_dmd_concept(route_code, version=version)
             # print(f"Route concept for code {route_code}:")
             # pprint.pprint(route_concept)
-            route_display_parameter = [
-                parm for parm in route_concept["parameter"] if parm["name"] == "display"
-            ]
-            route_display = (
-                route_display_parameter[0]["valueString"]
-                if route_display_parameter
-                else None
-            )
+            route_display_parameter = [parm for parm in route_concept["parameter"] if parm["name"] == "display"]
+            route_display = route_display_parameter[0]["valueString"] if route_display_parameter else None
             processed_dmd.route = CD(
                 code=route_code,
                 displayName=route_display,

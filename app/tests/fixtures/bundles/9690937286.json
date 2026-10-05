@@ -103,7 +103,7 @@
                 "active": true,
                 "name": [
                     {
-                        "use": "official",
+                        "use": "usual",
                         "text": "Horace SKELLY",
                         "family": "SKELLY",
                         "given": [
@@ -6253,7 +6253,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 5.7000000000000002,
+                    "value": 5.7,
                     "unit": "10*9/L"
                 },
                 "specimen": {
@@ -6319,7 +6319,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 4.5700000000000003,
+                    "value": 4.57,
                     "unit": "10*12/L"
                 },
                 "specimen": {
@@ -6446,7 +6446,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 0.42699999999999999,
+                    "value": 0.427,
                     "unit": "%"
                 },
                 "specimen": {
@@ -6507,7 +6507,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 93.400000000000006,
+                    "value": 93.4,
                     "unit": "fL"
                 },
                 "specimen": {
@@ -6573,7 +6573,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 31.100000000000001,
+                    "value": 31.1,
                     "unit": "pg"
                 },
                 "specimen": {
@@ -6771,7 +6771,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 2.7599999999999998,
+                    "value": 2.76,
                     "unit": "10*9/L"
                 },
                 "specimen": {
@@ -6837,7 +6837,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 77.700000000000003,
+                    "value": 77.7,
                     "unit": "%"
                 },
                 "specimen": {
@@ -6893,7 +6893,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 2.1200000000000001,
+                    "value": 2.12,
                     "unit": "10*9/L"
                 },
                 "specimen": {
@@ -6959,7 +6959,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 14.300000000000001,
+                    "value": 14.3,
                     "unit": "%"
                 },
                 "specimen": {
@@ -7015,7 +7015,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 0.47999999999999998,
+                    "value": 0.48,
                     "unit": "10*9/L"
                 },
                 "specimen": {
@@ -7076,7 +7076,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 7.0999999999999996,
+                    "value": 7.1,
                     "unit": "%"
                 },
                 "specimen": {
@@ -7132,7 +7132,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 0.28999999999999998,
+                    "value": 0.29,
                     "unit": "10*9/L"
                 },
                 "specimen": {
@@ -7193,7 +7193,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 0.90000000000000002,
+                    "value": 0.9,
                     "unit": "%"
                 },
                 "specimen": {
@@ -7249,7 +7249,7 @@
                     }
                 ],
                 "valueQuantity": {
-                    "value": 0.059999999999999998,
+                    "value": 0.06,
                     "unit": "10*9/L"
                 },
                 "specimen": {
@@ -7261,7 +7261,7 @@
                             "value": 0.02
                         },
                         "high": {
-                            "value": 0.10
+                            "value": 0.1
                         }
                     }
                 ]

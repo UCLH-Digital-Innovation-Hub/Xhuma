@@ -14,12 +14,8 @@ def get_gp_connect_inclusions():
         "include_allergies": read_bool_flag("GP_CONNECT_INCLUDE_ALLERGIES", True),
         "include_medication": read_bool_flag("GP_CONNECT_INCLUDE_MEDICATION", True),
         "include_problems": read_bool_flag("GP_CONNECT_INCLUDE_PROBLEMS", True),
-        "include_investigations": read_bool_flag(
-            "GP_CONNECT_INCLUDE_INVESTIGATIONS", False
-        ),
-        "include_immunisations": read_bool_flag(
-            "GP_CONNECT_INCLUDE_IMMUNISATIONS", False
-        ),
+        "include_investigations": read_bool_flag("GP_CONNECT_INCLUDE_INVESTIGATIONS", False),
+        "include_immunisations": read_bool_flag("GP_CONNECT_INCLUDE_IMMUNISATIONS", False),
     }
 
 
@@ -53,6 +49,4 @@ def build_gp_connect_parameters(inclusions: dict) -> list[dict]:
     return parameters
 
 
-GP_CONNECT_PARAMETERS = build_gp_connect_parameters(
-    inclusions=get_gp_connect_inclusions()
-)
+GP_CONNECT_PARAMETERS = build_gp_connect_parameters(inclusions=get_gp_connect_inclusions())

@@ -31,9 +31,7 @@ async def test_build_audit_event_writes_expected_fields(monkeypatch):
     async def _fake_next_audit_sequence(_session):
         return 42
 
-    monkeypatch.setattr(
-        "app.audit.build.next_audit_sequence", _fake_next_audit_sequence
-    )
+    monkeypatch.setattr("app.audit.build.next_audit_sequence", _fake_next_audit_sequence)
 
     fake_session = object()
 

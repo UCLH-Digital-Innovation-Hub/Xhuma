@@ -2,7 +2,6 @@
 SOAP Handler Module
 
 This module implements SOAP message handling for IHE ITI transactions:
-- ITI-47: Patient Demographics Query
 - ITI-38: Cross Gateway Query
 - ITI-39: Cross Gateway Retrieve
 
@@ -11,7 +10,9 @@ integrating with Redis for caching and implementing NHS number validation.
 """
 
 import logging
+import os
 import re
+import urllib.parse
 import uuid
 from datetime import datetime
 from email import charset
@@ -19,26 +20,29 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Callable
 
-
 import httpx
-import xmltodict
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.routing import APIRoute
+from pydantic import ValidationError
 from starlette.background import BackgroundTask
+
+from app.audit.audit import attempt_audit
+from app.audit.models import AuditOutcome
+from app.telemetry import measure, record_cache
 
 from ..audit.audit import process_saml_attributes
 from ..ccda.helpers import clean_soap, extract_soap_request, validateNHSnumber
 from ..pds.pds import lookup_patient
 from ..redis_connect import redis_connect
+from .models import ITI38Request, ITI39Request, ITI55Request
 from .responses import (
-    create_envelope,
-    create_header,
     iti_38_response,
+    iti_39_error,
     iti_39_response,
-    iti_47_response,
     iti_55_error,
     iti_55_response,
 )
+from .saml_helper import InvalidSAMLContext, extract_trusted_saml_assertion
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -109,9 +113,7 @@ NAMESPACES = (
 class SoapError(Exception):
     """Signal an ITI-55 SOAP fault that should be returned as application/soap+xml."""
 
-    def __init__(
-        self, message_id: str, reason: str, query_params: dict, http_status: int = 200
-    ):
+    def __init__(self, message_id: str, reason: str, query_params: dict, http_status: int = 200):
         self.message_id = message_id
         self.reason = reason
         self.query_params = query_params
@@ -123,12 +125,16 @@ def register_handlers(app: FastAPI):
     @app.exception_handler(SoapError)
     async def soap_error_handler(request: Request, exc: SoapError):
         xml = await iti_55_error(exc.message_id, exc.query_params, exc.reason)
-        return Response(
-            content=xml, media_type="application/soap+xml", status_code=exc.http_status
-        )
+        return Response(content=xml, media_type="application/soap+xml", status_code=exc.http_status)
 
 
-@router.post("/iti55")
+@router.post(
+    "/iti55",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+    },
+)
 async def iti55(request: Request):
     """
     Handles ITI-55 (Cross Gateway Patient Discovery) requests.
@@ -151,22 +157,41 @@ async def iti55(request: Request):
     if "application/soap+xml" in content_type:
         body = await request.body()
         envelope = clean_soap(body)
-        query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-            "queryByParameter"
-        ]["parameterList"]
-
-        nhsno = None
         try:
-            for param in query_params["livingSubjectId"]["value"]:
-                if param["@root"] == "2.16.840.1.113883.2.1.4.1":
-                    nhsno = param["@extension"]
-                    # print(f"NHSNO: {nhsno}")
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
-        except Exception:
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
+            )
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
+
+        try:
+            soap_request = ITI55Request.model_validate(envelope)
+            query = soap_request.query
+            query_data = query.to_xml_dict() if query else {}
+            nhsno = soap_request.patient_identifier("2.16.840.1.113883.2.1.4.1")
+            message_id = soap_request.header.message_id
+        except ValidationError:
+            # Preserve the existing ITI-55 error response for malformed queries.
+            message_id = envelope.get("Header", {}).get("MessageID")
+            try:
+                query_data = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"]["queryByParameter"]
+            except (KeyError, TypeError):
+                query_data = {}
             nhsno = None
 
         # OpenTelemetry trace propagation
-        message_id = envelope.get("Header", {}).get("MessageID")
         from opentelemetry import trace
 
         span = trace.get_current_span()
@@ -181,26 +206,20 @@ async def iti55(request: Request):
 
         if not nhsno:
             data = await iti_55_error(
-                envelope["Header"]["MessageID"],
-                "No NHS number found in request",
-                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                    "queryByParameter"
-                ],
+                message_id=message_id or "Unknown",
+                error_text="No NHS number found in request",
+                query=query_data,
             )
             return Response(content=data, media_type="application/soap+xml")
 
-        patient = await lookup_patient(nhsno, request=request)
+        patient = await lookup_patient(nhsno, request=request, saml=saml_attrs)
         # TODO implement checking of demographics
 
-        if (not patient) or (
-            "resourceType" in patient and patient["resourceType"] == "OperationOutcome"
-        ):
+        if (not patient) or ("resourceType" in patient and patient["resourceType"] == "OperationOutcome"):
             data = await iti_55_error(
-                envelope["Header"]["MessageID"],
-                f"Patient with NHS number {nhsno} not found",
-                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                    "queryByParameter"
-                ],
+                message_id=message_id,
+                error_text=f"Patient with NHS number {nhsno} not found",
+                query=query_data,
             )
             return Response(content=data, media_type="application/soap+xml")
 
@@ -216,93 +235,39 @@ async def iti55(request: Request):
             security_code = patient["meta"]["security"][0]["code"]
 
         if security_code != "U":
+            await attempt_audit(
+                request=request,
+                nhs_number=str(nhsno),
+                saml=saml_attrs,
+                action="iti55_patient_discovery",
+                outcome=AuditOutcome.deny,
+                message_id=envelope["Header"]["MessageID"],
+                detail={"error": "Patient record has restricted access"},
+            )
             data = await iti_55_error(
-                envelope["Header"]["MessageID"],
-                "Patient record has restricted access",
-                envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                    "queryByParameter"
-                ],
+                message_id=message_id,
+                error_text="Patient record has restricted access",
+                query=query_data,
             )
             return Response(content=data, media_type="application/soap+xml")
 
         data = await iti_55_response(
-            envelope["Header"]["MessageID"],
+            message_id,
             patient,
-            envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                "queryByParameter"
-            ],
+            query_data,
         )
         return Response(content=data, media_type="application/soap+xml")
     else:
-        raise HTTPException(
-            status_code=400, detail=f"Content type {content_type} not supported"
-        )
+        raise HTTPException(status_code=400, detail=f"Content type {content_type} not supported")
 
 
-@router.post("/iti47")
-async def iti47(request: Request):
-    """
-    Handles ITI-47 (Patient Demographics Query) requests.
-
-    This endpoint processes PDQ requests by:
-    1. Extracting NHS number and CEID from the request
-    2. Mapping NHS number to CEID in Redis
-    3. Performing PDS lookup
-    4. Returning demographics in ITI-47 response format
-
-    Args:
-        request (Request): The incoming SOAP request
-
-    Returns:
-        Response: SOAP response containing patient demographics
-
-    Raises:
-        HTTPException: For invalid content type, missing NHS number, or missing CEID
-    """
-    content_type = request.headers["Content-Type"]
-    if "application/soap+xml" in content_type:
-        body = await request.body()
-        envelope = clean_soap(body)
-
-        query_params = envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-            "queryByParameter"
-        ]["parameterList"]
-        for param in query_params["livingSubjectId"]:
-            if param["value"]["@root"] == "2.16.840.1.113883.2.1.4.1":
-                nhsno = param["value"]["@extension"]
-            if param["value"]["@root"] == "1.2.840.114350.1.13.525.3.7.3.688884.100":
-                ceid = param["value"]["@extension"]
-        if not nhsno:
-            raise HTTPException(
-                status_code=400, detail="Invalid request, no nhs number found"
-            )
-        if not ceid:
-            raise HTTPException(
-                status_code=400, detail="Invalid request, no care everywhere id found"
-            )
-        print(f"Mapping NHSNO to CEID: {nhsno} -> {ceid}")
-        client.set(ceid, nhsno)
-        # TODO add audit stuff here too
-        patient = await lookup_patient(nhsno, request=request)
-        print(f"Patient: {patient}")
-        if not patient:
-            print("Patient not found")
-        data = await iti_47_response(
-            envelope["Header"]["MessageID"],
-            patient,
-            ceid,
-            envelope["Body"]["PRPA_IN201305UV02"]["controlActProcess"][
-                "queryByParameter"
-            ],
-        )
-        return Response(content=data, media_type="application/soap+xml")
-    else:
-        raise HTTPException(
-            status_code=400, detail=f"Content type {content_type} not supported"
-        )
-
-
-@router.post("/iti38")
+@router.post(
+    "/iti38",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+    },
+)
 async def iti38(request: Request):
     """
     Handles ITI-38 (Cross Gateway Query) requests.
@@ -322,37 +287,43 @@ async def iti38(request: Request):
     Raises:
         HTTPException: For invalid content type
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         print("-" * 40)
         # print(f"Received body: {body}")
         envelope = clean_soap(body)
-        # print(f"Envelope: {envelope["Header"]["Security"]["Assertion"]}")
-        # for key, value in envelope["Header"]["Security"]["Assertion"].items():
-        #     print(f"{key}: {value}")
+        try:
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
-        # for item in envelope["Header"]["Security"]["Assertion"].items():
-        #     print(f"{item[0]}: {item[1]}")
-        saml_attrs = process_saml_attributes(
-            envelope["Header"]["Security"]["Assertion"]["AttributeStatement"]
-            # envelope["Header"]["Security"]["AttributeStatement"]
-        )
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
+            )
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
 
-        soap_body = envelope["Body"]
-        slots = soap_body["AdhocQueryRequest"]["AdhocQuery"]["Slot"]
-        query_id = soap_body["AdhocQueryRequest"]["AdhocQuery"]["@id"]
-
-        patient_id = next(
-            x["ValueList"]["Value"]
-            for x in slots
-            if x["@name"] == "$XDSDocumentEntryPatientId"
-        )
-
-        print(f"Patient ID: {patient_id}")
+        try:
+            soap_request = ITI38Request.model_validate(envelope)
+            adhoc_query = soap_request.body.query
+            query_id = adhoc_query.query_id if adhoc_query else "unknown"
+            patient_id = adhoc_query.slot_value("$XDSDocumentEntryPatientId") if adhoc_query else None
+            message_id = soap_request.header.message_id
+        except ValidationError:
+            query_id = "unknown"
+            patient_id = None
+            message_id = envelope.get("Header", {}).get("MessageID")
 
         # OpenTelemetry trace propagation
-        message_id = envelope.get("Header", {}).get("MessageID")
         from opentelemetry import trace
 
         span = trace.get_current_span()
@@ -374,29 +345,31 @@ async def iti38(request: Request):
         if not validateNHSnumber(patient_id):
             try:
                 pattern = r"[0-9]{10}"
-                poss_nhs = re.search(pattern, patient_id).group(0)
-                # print(f"Possible NHS number: {poss_nhs}")
-                # print(validateNHSnumber(poss_nhs))
+                poss_nhs = re.search(pattern, str(patient_id)).group(0)
                 if validateNHSnumber(poss_nhs):
                     patient_id = poss_nhs
-                    data = await iti_38_response(
-                        request, patient_id, "NOCEID", query_id, saml_attrs
-                    )
-            except AttributeError:
-                print(f"No valid NHS number found in patient ID's {patient_id}")
-                logging.info(f"No valid NHS number found in patient ID's {patient_id}")
-        else:
-            data = await iti_38_response(
-                request, patient_id, "NOCEID", query_id, saml_attrs
-            )
+                else:
+                    raise AttributeError("Invalid NHS number checksum")
+            except (AttributeError, TypeError):
+                print("No valid NHS number found in patient ID field")
+                logging.info("No valid NHS number found in patient ID field")
+                raise HTTPException(status_code=400, detail="Invalid NHS number format in request")
+
+        data = await iti_38_response(request, patient_id, "NOCEID", query_id, saml_attrs)
         return Response(content=data, media_type="application/soap+xml")
     else:
-        raise HTTPException(
-            status_code=400, detail=f"Content type {content_type} not supported"
-        )
+        raise HTTPException(status_code=400, detail=f"Content type {content_type} not supported")
 
 
-@router.post("/iti39")
+@router.post(
+    "/iti39",
+    responses={
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+        403: {"description": "Forbidden"},
+        404: {"description": "Not Found"},
+    },
+)
 async def iti39(request: Request):
     """
     Handles ITI-39 (Cross Gateway Retrieve) requests.
@@ -415,17 +388,39 @@ async def iti39(request: Request):
     Raises:
         HTTPException: For invalid content type, missing document ID, or document not found
     """
-    content_type = request.headers["Content-Type"]
+    content_type = request.headers.get("Content-Type", "")
     if "application/soap+xml" in content_type:
         body = await request.body()
         soap = extract_soap_request(body.decode("utf-8"))
         envelope = clean_soap(soap)
-        message_id = envelope["Header"]["MessageID"]
         try:
-            document_id = envelope["Body"]["RetrieveDocumentSetRequest"][
-                "DocumentRequest"
-            ]["DocumentUniqueId"]
-        except Exception:
+            assertion = extract_trusted_saml_assertion(envelope)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
+
+        saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
+        if not all(
+            (
+                saml_attrs.subject_id,
+                saml_attrs.organization,
+                saml_attrs.organization_id,
+                saml_attrs.role,
+            )
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Incomplete SAML security context",
+            )
+
+        try:
+            soap_request = ITI39Request.model_validate(envelope)
+        except ValidationError:
+            raise HTTPException(status_code=404, detail="DocumentUniqueId not found")
+        message_id = soap_request.header.message_id
+        retrieve_request = soap_request.body.retrieve_document_set_request
+        document_request = retrieve_request.first_document if retrieve_request else None
+        document_id = document_request.document_unique_id if document_request else None
+        if not document_id:
             raise HTTPException(status_code=404, detail="DocumentUniqueId not found")
 
         # OpenTelemetry trace propagation
@@ -438,15 +433,30 @@ async def iti39(request: Request):
             if document_id:
                 span.set_attribute("soap.document_id", document_id)
 
-        document = client.get(document_id)
+        with measure("document.cache.retrieve") as span:
+            document = await client.get(document_id)
+            doc_nhsno_bytes = await client.get(f"doc_patient:{document_id}")
+            span.set_attribute("cache.hit", document is not None and doc_nhsno_bytes is not None)
+        record_cache("retrieval", document is not None and doc_nhsno_bytes is not None)
+        doc_nhsno = doc_nhsno_bytes.decode("utf-8") if doc_nhsno_bytes else None
+
+        if not doc_nhsno:
+            await attempt_audit(
+                request=request,
+                nhs_number=None,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.fail,
+                document_id=document_id,
+                detail={"error": "Document-to-patient association missing or expired"},
+            )
+            raise HTTPException(status_code=404, detail="Document association expired or missing")
 
         if document is not None:
             data = await iti_39_response(message_id, document_id, document)
             # mime encode the data
             boundary = f"uuid:{uuid.uuid4()}"
-            mime_message = MIMEMultipart(
-                "related", boundary=boundary, type="application/xop+xml"
-            )
+            mime_message = MIMEMultipart("related", boundary=boundary, type="application/xop+xml")
 
             # specify 8bit encoding so it doesn't 64bit encode everything
             ch = charset.Charset("utf-8")
@@ -468,60 +478,87 @@ async def iti39(request: Request):
             headers = {"Content-Type": f'multipart/related; boundary="{boundary}"'}
 
             # if there's not an anonymous address in the reply to header, send the response to that address
-            if (
-                envelope["Header"]["ReplyTo"]["Address"]
-                and envelope["Header"]["ReplyTo"]["Address"]
-                != "http://www.w3.org/2005/08/addressing/anonymous"
-            ):
-                print(
-                    f"Sending response to: {envelope['Header']['ReplyTo']['Address']}"
+            reply_to = soap_request.header.reply_to.address if soap_request.header.reply_to else None
+            if reply_to and reply_to != "http://www.w3.org/2005/08/addressing/anonymous":
+                # SSRF Protection
+                if not reply_to.startswith("https://"):
+                    await attempt_audit(
+                        request=request,
+                        nhs_number=doc_nhsno,
+                        saml=saml_attrs,
+                        action="iti39_document_retrieve",
+                        outcome=AuditOutcome.deny,
+                        document_id=document_id,
+                        detail={"error": "ReplyTo must use https", "reply_to": reply_to},
+                    )
+                    raise HTTPException(status_code=400, detail="ReplyTo must use https")
+
+                allowed_domains = os.getenv("ALLOWED_REPLY_TO_DOMAINS", ".nhs.uk").split(",")
+                parsed_url = urllib.parse.urlparse(reply_to)
+                if not any(parsed_url.hostname and parsed_url.hostname.endswith(domain) for domain in allowed_domains):
+                    print(
+                        f"ITI-39 SSRF Protection: Rejected ReplyTo domain '{parsed_url.hostname}' (allowed: {allowed_domains})",
+                        flush=True,
+                    )
+                    await attempt_audit(
+                        request=request,
+                        nhs_number=doc_nhsno,
+                        saml=saml_attrs,
+                        action="iti39_document_retrieve",
+                        outcome=AuditOutcome.deny,
+                        document_id=document_id,
+                        detail={"error": "ReplyTo domain not allowed", "reply_to": reply_to},
+                    )
+                    raise HTTPException(status_code=403, detail="ReplyTo domain not allowed")
+
+                print(f"Sending response to: {reply_to}")
+
+                def send_post(url, payload, hdrs):
+                    try:
+                        httpx.post(url, data=payload, headers=hdrs, timeout=10.0)
+                    except Exception as e:
+                        print(f"Failed to send async response: {e}", flush=True)
+
+                await attempt_audit(
+                    request=request,
+                    nhs_number=doc_nhsno,
+                    saml=saml_attrs,
+                    action="iti39_document_retrieve",
+                    outcome=AuditOutcome.ok,
+                    document_id=document_id,
+                    detail={"delivery_mode": "async", "reply_to": reply_to},
                 )
+
                 return Response(
                     content=mime_string.encode("utf-8"),
                     headers=headers,
-                    background=BackgroundTask(
-                        lambda: httpx.post(
-                            envelope["Header"]["ReplyTo"]["Address"],
-                            data=mime_string.encode("utf-8"),
-                            headers=headers,
-                        )
-                    ),
+                    background=BackgroundTask(send_post, reply_to, mime_string.encode("utf-8"), headers),
                 )
 
+            await attempt_audit(
+                request=request,
+                nhs_number=doc_nhsno,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.ok,
+                document_id=document_id,
+                detail={"delivery_mode": "sync"},
+            )
             return Response(content=data, media_type="application/soap+xml")
         else:
-            # return iti39 error
-            body = {
-                "ns4:RetrieveDocumentSetResponse": {
-                    "@xmlns:ns4": "urn:ihe:iti:xds-b:2007",
-                    "@xmlns:rs": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
-                    "rs:RegistryResponse": {
-                        "@status": "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure",
-                        "rs:RegistryErrorList": {
-                            "@highestSeverity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                            "rs:RegistryError": {
-                                "@errorCode": "XDSDocumentUniqueIdError",
-                                "@codeContext": f"Document with Id {document_id} not found",
-                                "@severity": "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error",
-                            },
-                        },
-                    },
-                }
-            }
-            soap_response = create_envelope(
-                create_header(
-                    "urn:ihe:iti:2007:CrossGatewayRetrieveResponse", message_id
-                ),
-                body,
+            await attempt_audit(
+                request=request,
+                nhs_number=doc_nhsno,
+                saml=saml_attrs,
+                action="iti39_document_retrieve",
+                outcome=AuditOutcome.fail,
+                document_id=document_id,
+                detail={"error": "Document not found"},
             )
-            error_response = xmltodict.unparse(
-                soap_response, full_document=False, pretty=True
-            )
+            error_response = await iti_39_error(message_id, document_id)
             return Response(
                 content=error_response,
                 media_type="application/soap+xml",
             )
     else:
-        raise HTTPException(
-            status_code=400, detail=f"Content type {content_type} not supported"
-        )
+        raise HTTPException(status_code=400, detail=f"Content type {content_type} not supported")

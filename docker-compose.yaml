@@ -94,6 +94,11 @@ services:
 
   xhuma:
     build: .
+    dns:
+      - ${DNS_SERVER_PRIMARY:-1.1.1.1}
+      - ${DNS_SERVER_SECONDARY:-8.8.8.8}
+    ports:
+      - "${GPCON_PORT:-80}:80"
     expose:
       - "80"
     env_file:

@@ -12,19 +12,18 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
 
-from .audit.audit import process_saml_attributes
-from .audit.build import build_audit_event
+from .audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
 from .audit.models import AuditOutcome, SAMLAttributes
-from .audit.store import insert_audit_event
 from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
+from .gp_connect_config import GP_CONNECT_PARAMETERS
+from .logging import record_application_failure
 from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
-from .gp_connect_config import GP_CONNECT_PARAMETERS
-from .logging import record_application_failure
+from .telemetry import measure
 
 # from app.metrics.metric_utils import classify_error, now
 
@@ -36,50 +35,13 @@ router = APIRouter()
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
 
-
-# audit event with shared session
-async def _attempt_audit(
-    request: Request,
-    *,
-    nhs_number: str,
-    saml: SAMLAttributes,
-    action: str,
-    outcome: AuditOutcome,
-    error_code: str | None = None,
-    detail: dict | None = None,
-    message_id: str | None = None,
-    document_id: str | None = None,
-    request_id: str | None = None,
-) -> None:
-    """Attempt to write an audit event, but don't fail the main request if it fails."""
-    if not request or not hasattr(request, "app"):
-        logging.warning("No request or app found; skipping audit event")
-        return
-
-    SessionLocal = getattr(request.app.state, "SessionLocal", None)
-    if not SessionLocal:
-        logging.warning("No SessionLocal found in app state; skipping audit event")
-        return
-
-    try:
-        async with SessionLocal() as session:
-            ev = await build_audit_event(
-                request=request,
-                session=session,
-                nhs_number=str(nhs_number),
-                saml=saml,
-                action=action,
-                outcome=outcome,
-                error_code=error_code,
-                detail=detail,
-                message_id=message_id,
-                document_id=document_id,
-                request_id=request_id,
-            )
-            await insert_audit_event(session, ev)
-            await session.commit()
-    except Exception as e:
-        logging.error(f"Failed to write audit event: {e}")
+environment = os.getenv("ENV", "dev")
+if environment.lower() in ["dev", "int"]:
+    RELAY_BASE_PATH = "https://proxy.int.spine2.ncrs.nhs.uk"
+    IS_DEV = environment.lower() == "dev"
+    OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk"
+else:
+    raise ValueError(f"Unknown or unsupported environment: {environment}")
 
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
@@ -119,15 +81,19 @@ httpx_logger.setLevel(logging.WARNING)
 
 
 @router.get("/gpconnect/{nhsno}")
-async def gpconnect(
+async def gpconnect(nhsno: int, saml_attrs: SAMLAttributes, request: Request = None) -> JSONResponse:
+    """accesses gp connect endpoint for nhs number"""
+    return await _fetch_gpconnect_record(nhsno, saml_attrs, log_dir=None, request=request)
+
+
+async def _fetch_gpconnect_record(
     nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
 ) -> JSONResponse:
-    """accesses gp connect endpoint for nhs number"""
 
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
         msg = f"{nhsno} is not a valid NHS number"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -140,25 +106,12 @@ async def gpconnect(
     # 2) PDS lookup (consider caching in future)
     # t = now()
     try:
-        pds_search = await lookup_patient(nhsno, request=request)
-        await _attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="pds_lookup",
-            outcome=AuditOutcome.ok,
-        )
+        with measure("pds.lookup"):
+            pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"PDS lookup failed: {e}"
-        await _attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="pds_lookup",
-            outcome=AuditOutcome.fail,
-            error_code="502",
-            detail={"exception": str(e)},
-        )
         record_application_failure(e)
         logging.exception(msg)
         if log_dir:
@@ -174,26 +127,28 @@ async def gpconnect(
 
     if security_code != "U":
         msg = "Patient is not unrestricted, access to GP Connect is not permitted"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="check_restriction",
-            outcome=AuditOutcome.fail,
+            outcome=AuditOutcome.deny,
             error_code="403",
         )
-        logging.error(f"{nhsno} is restricted")
+        logging.error("Patient is restricted")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(f"{nhsno} is restricted\n")
+                f.write("Patient is restricted\n")
         return JSONResponse(status_code=403, content={"success": False, "error": msg})
 
     # 4) Resolve ODS → ASID + PartyKey
     try:
         gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Unable to read GP ODS from PDS response: {e}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -210,17 +165,20 @@ async def gpconnect(
         return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     try:
-        asid_trace = await sds_trace(gp_ods)
-        await _attempt_audit(
+        with measure("sds.device"):
+            asid_trace = await sds_trace(gp_ods)
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="sds_trace",
             outcome=AuditOutcome.ok,
         )
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"SDS trace failed: {e}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -239,13 +197,13 @@ async def gpconnect(
     asid = None
     nhsmhsparty = None
     try:
-        for item in (
-            asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
-        ):
+        for item in asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", []):
             if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
                 asid = item.get("value")
             elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
                 nhsmhsparty = item.get("value")
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Unable to parse SDS trace response: {e}"
         record_application_failure(e)
@@ -257,7 +215,7 @@ async def gpconnect(
 
     if not asid or not nhsmhsparty:
         msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -274,17 +232,20 @@ async def gpconnect(
 
     # 5) Endpoint lookup
     try:
-        endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
-        await _attempt_audit(
+        with measure("sds.endpoint"):
+            endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="fhir_endpoint_trace",
             outcome=AuditOutcome.ok,
         )
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"SDS endpoint trace failed: {e}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -302,7 +263,7 @@ async def gpconnect(
 
     if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
         msg = f"Unable to find FHIR endpoint for ODS code {gp_ods}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
@@ -323,7 +284,7 @@ async def gpconnect(
     token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
     headers = {
         "Ssp-TraceID": str(uuid4()),
-        "Ssp-From": "200000002574",  # TODO this should be dynamic as each client endpoint will have own SSID
+        "Ssp-From": os.environ["ORG_ASID"],
         "Ssp-To": asid,
         "Ssp-InteractionID": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
         "Authorization": f"Bearer {token}",
@@ -387,9 +348,9 @@ async def gpconnect(
         }
 
         from .settings import (
-            EXTERNAL_RELAY_URL,
             EXTERNAL_RELAY_CLIENT_ID,
             EXTERNAL_RELAY_TOKEN,
+            EXTERNAL_RELAY_URL,
         )
 
         if EXTERNAL_RELAY_URL:
@@ -398,17 +359,11 @@ async def gpconnect(
                 req_headers["Authorization"] = f"Bearer {EXTERNAL_RELAY_TOKEN}"
 
             async with httpx.AsyncClient(timeout=httpx.Timeout(75.0)) as client:
-                relay_target = (
-                    f"{EXTERNAL_RELAY_URL.rstrip('/')}/send/{EXTERNAL_RELAY_CLIENT_ID}"
-                )
+                relay_target = f"{EXTERNAL_RELAY_URL.rstrip('/')}/send/{EXTERNAL_RELAY_CLIENT_ID}"
                 try:
-                    ext_resp = await client.post(
-                        relay_target, headers=req_headers, json=relay_req
-                    )
+                    ext_resp = await client.post(relay_target, headers=req_headers, json=relay_req)
                     if ext_resp.status_code != 200:
-                        raise HTTPException(
-                            502, f"External relay error: {ext_resp.text}"
-                        )
+                        raise HTTPException(502, f"External relay error: {ext_resp.text}")
                     resp = ext_resp.json()
                 except Exception as e:
                     raise HTTPException(502, f"Failed to call external relay: {e}")
@@ -440,26 +395,28 @@ async def gpconnect(
     resp = None
     try:
         if USE_RELAY:
-            url = f"https://proxy.int.spine2.ncrs.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-            resp = await _relay_call(url, headers, body)
+            url = f"{RELAY_BASE_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            with measure("gpconnect.http", transport="relay"):
+                resp = await _relay_call(url, headers, body)
             # print(f"Relay response status: {status_code}")
             # print(f"Relay response text: {resp_text}")
             # resp = httpx.Response(status_code=status_code, content=resp_text)
 
         else:
-            url = f"https://proxy.intspineservices.nhs.uk/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-            resp = await _direct_http_call(url, headers, body)
+            url = f"{OVER_INTERNET_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
+            with measure("gpconnect.http", transport="direct"):
+                resp = await _direct_http_call(url, headers, body)
 
         if log_dir:
-            with open(
-                os.path.join(log_dir, f"{resp.status_code}_response.json"), "w"
-            ) as f:
+            with open(os.path.join(log_dir, f"{resp.status_code}_response.json"), "w") as f:
                 f.write(resp.text)
         logging.info(f"GP Connect request successful with status {resp.status_code}")
 
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Transport error: {e}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             request_id=headers.get("Ssp-TraceID"),
             nhs_number=str(nhsno),
@@ -486,7 +443,7 @@ async def gpconnect(
     # 8) Non-200 handling
     if resp.status_code != 200:
         msg = f"Error from GP Connect endpoint {resp.status_code}"
-        await _attempt_audit(
+        await attempt_audit(
             request=request,
             request_id=headers.get("Ssp-TraceID"),
             nhs_number=str(nhsno),
@@ -500,12 +457,10 @@ async def gpconnect(
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(
-            status_code=resp.status_code, content={"success": False, "error": msg}
-        )
+        return JSONResponse(status_code=resp.status_code, content={"success": False, "error": msg})
 
     # audit successful response
-    await _attempt_audit(
+    await attempt_audit(
         request=request,
         request_id=headers.get("Ssp-TraceID"),
         nhs_number=str(nhsno),
@@ -514,48 +469,63 @@ async def gpconnect(
         outcome=AuditOutcome.ok,
     )
 
-    # 9) Convert to CCDA, store in Redis, return JSONResponse
-    scr_bundle = json.loads(resp.text)
-    # remove any single 'fhir_comments' entry to keep fhirclient happy
-    comment_index = None
-    for j, i in enumerate(scr_bundle.get("entry", [])):
-        if "fhir_comments" in i:
-            comment_index = j
-            break
-    if comment_index is not None:
-        scr_bundle["entry"].pop(comment_index)
-
+    # 9) Validate the entire upstream payload before conversion or caching.
     try:
-        fhir_bundle = bundle.Bundle(scr_bundle)
+        with measure("fhir.decode", input_bytes=len(resp.content)):
+            scr_bundle = json.loads(resp.text)
+        if not isinstance(scr_bundle, dict) or scr_bundle.get("resourceType") != "Bundle":
+            raise ValueError("Expected a FHIR Bundle resource")
+        # Retain the existing compatibility handling for standalone comment entries.
+        for j, entry in enumerate(scr_bundle.get("entry", [])):
+            if "fhir_comments" in entry:
+                scr_bundle["entry"].pop(j)
+                break
+        with measure("fhir.models", resource_count=len(scr_bundle.get("entry", []))):
+            fhir_bundle = bundle.Bundle(scr_bundle)
+    except AuditFailureException:
+        raise
     except Exception as e:
-        msg = f"Failed to parse FHIR Bundle from GP Connect response: {e}"
+        msg = f"FHIR bundle malformed: {e}"
         record_application_failure(e)
         logging.exception(msg)
+        await attempt_audit(
+            request=request,
+            request_id=headers.get("Ssp-TraceID"),
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="validate_fhir_bundle",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+        return JSONResponse(status_code=502, content={"success": False, "error": "FHIR bundle malformed"})
 
     # index resources for resolution
-    bundle_index = {}
-    for entry in fhir_bundle.entry or []:
-        try:
-            addr = f"{entry.resource.resource_type}/{entry.resource.id}"
-            bundle_index[addr] = entry.resource
-        except Exception:
-            pass
+    with measure("fhir.index", resource_count=len(fhir_bundle.entry or [])):
+        bundle_index = {}
+        for entry in fhir_bundle.entry or []:
+            try:
+                addr = f"{entry.resource.resource_type}/{entry.resource.id}"
+                bundle_index[addr] = entry.resource
+                if entry.fullUrl:
+                    bundle_index[entry.fullUrl] = entry.resource
+            except Exception:
+                pass
 
     import time
-    from opentelemetry import trace
 
-    tracer = trace.get_tracer(__name__)
     start_time = time.perf_counter()
     try:
-        with tracer.start_as_current_span("FHIR2CCDA.convert_bundle"):
+        with measure("ccda.convert", span_name="FHIR2CCDA.convert_bundle", resource_count=len(fhir_bundle.entry or [])):
             xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
 
         duration_ms = (time.perf_counter() - start_time) * 1000
         logging.info(f"FHIR2CCDA conversion completed in {duration_ms:.2f}ms")
+    except AuditFailureException:
+        raise
     except Exception as e:
         msg = f"Failed to convert FHIR Bundle to CCDA: {e}"
         record_application_failure(e)
@@ -566,20 +536,16 @@ async def gpconnect(
         return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     if log_dir:
-        with open(os.path.join(log_dir, f"{nhsno}.xml"), "w") as output:
+        # CodeQL static analysis requires explicit integer casting to drop path traversal taint
+        safe_nhsno = str(int(nhsno))
+        with open(os.path.join(log_dir, f"{safe_nhsno}.xml"), "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
-    xop = base64_xml(xml_ccda)
+    with measure("ccda.serialize") as span:
+        xop = base64_xml(xml_ccda)
+        span.set_attribute("document.base64_bytes", len(xop))
     doc_uuid = str(uuid4())
-    redis_client.setex(nhsno, timedelta(minutes=1), doc_uuid)
-    redis_client.setex(doc_uuid, timedelta(minutes=1), xop)
-
-    # only write the xml if dev
-    if os.getenv("ENV", "prod").lower() in ("dev", "local"):
-        with open(f"{nhsno}.xml", "w") as output:
-            output.write(xmltodict.unparse(xml_ccda, pretty=True))
-
-    await _attempt_audit(
+    await attempt_audit(
         request=request,
         nhs_number=str(nhsno),
         saml=saml_attrs,
@@ -588,9 +554,27 @@ async def gpconnect(
         document_id=doc_uuid,
     )
 
-    return JSONResponse(
-        status_code=200, content={"success": True, "document_id": doc_uuid}
-    )
+    if request and hasattr(request, "app") and hasattr(request.app.state, "ccda_expiry_hours"):
+        expiry_hours = request.app.state.ccda_expiry_hours
+    else:
+        expiry_hours = float(os.getenv("CCDA_EXPIRY_HOURS", "4"))
+
+    cache_ttl = timedelta(hours=expiry_hours)
+
+    # Use a pipeline to write all keys atomically with a consistent TTL
+    async with redis_client.pipeline() as pipe:
+        pipe.setex(str(nhsno), cache_ttl, doc_uuid)
+        pipe.setex(doc_uuid, cache_ttl, xop)
+        pipe.setex(f"doc_patient:{doc_uuid}", cache_ttl, str(nhsno))
+        with measure("ccda.cache.write", document_bytes=len(xop)):
+            await pipe.execute()
+
+    # only write the xml if dev
+    if os.getenv("ENV", "prod").lower() in ("dev", "local"):
+        with open(f"{int(nhsno)!s}.xml", "w") as output:
+            output.write(xmltodict.unparse(xml_ccda, pretty=True))
+
+    return JSONResponse(status_code=200, content={"success": True, "document_id": doc_uuid})
 
 
 if __name__ == "__main__":
@@ -599,11 +583,7 @@ if __name__ == "__main__":
     xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
     saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 
-    # result = await gpconnect(9690937278, audit_dict)
-    result = asyncio.run(gpconnect(9692136744, saml))
-    print(result.body.decode())
-    print(result.status_code)
-    # assert "error" in result.body.decode()
-    # body = json.loads(result.body)
-    # assert body["success"] is False
-    # assert result["resourceType"] == "Patient"
+    result = asyncio.run(gpconnect(9692140466, saml))
+    # save bundle as json for inspection
+    with open("gpconnect_response.json", "w") as f:
+        json.dump(json.loads(result.body), f, indent=2)

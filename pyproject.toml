@@ -3,7 +3,7 @@ name = "Xhuma"
 version = "0.9"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.138",
+    "fastapi>=0.140",
     "pyjwt>=2.13.0",
     "httpx",
     "xmltodict",
@@ -29,27 +29,40 @@ dependencies = [
     "alembic",
     "psycopg[binary]",
     "azure-monitor-opentelemetry>=1.8.7",
+    "urllib3>=1.7.0",
+    "defusedxml>=0.7.1",
+    "tzdata>=2026.4",
 ]
 
-[tool.isort]
-profile = "black"
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F"]
+extend-select = ["I"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
 
 [dependency-groups]
 dev = [
-    "black",
     "websockets",
-    "isort",
     "pytest",
     "xmlschema",
     "pytest-asyncio",
     "pytest-benchmark",
-    "flake8",
     "pre-commit",
     "coverage",
     "ruff>=0.15.12",
     "locust",
     "azure-identity",
     "azure-keyvault-secrets",
+    "pytest-cov>=7.1.0",
+    "schemathesis>=4.25.2",
+    "hypothesis>=6.165.10",
+    "pytest-sugar>=1.1.1",
 ]
 
 [tool.uv]

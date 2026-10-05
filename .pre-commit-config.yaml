@@ -8,9 +8,18 @@ repos:
       - id: trailing-whitespace
         exclude: '\.[mM][dD]$'
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.12
+  # Use uv.lock and pyproject.toml, just like CI, and check the whole repository.
+  - repo: local
     hooks:
       - id: ruff-check
-        args: ["--fix"]
+        name: Ruff lint
+        entry: uv run --locked ruff check --fix .
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: ruff-format
+        name: Ruff format
+        entry: uv run --locked ruff format .
+        language: system
+        pass_filenames: false
+        always_run: true
