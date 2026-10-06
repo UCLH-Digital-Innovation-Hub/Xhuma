@@ -3,7 +3,7 @@ name: Matrix Deployment Pilot
 on:
   push:
     branches:
-      - rehearsal/play-deployment
+      - dev
       - int
 
 env:
