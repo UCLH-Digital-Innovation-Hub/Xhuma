@@ -4,9 +4,10 @@
     {
       "id": "play",
       "stage": "play",
-      "source_branch": "rehearsal/play-deployment",
+      "source_branch": "dev",
       "enabled": true,
       "hold": false,
+      "require_existing_state": true,
       "rollout_ring": 0,
       "github_environment": "rg-xhuma-play",
       "github_infra_environment": "rg-xhuma-play-infra",
