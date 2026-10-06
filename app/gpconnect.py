@@ -414,6 +414,14 @@ async def _fetch_gpconnect_record(
 
     except AuditFailureException:
         raise
+    except httpx.ReadError:
+        msg = "ReadError: server closed connection before responding"
+        print("❌", msg)
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
+
     except Exception as e:
         msg = f"Transport error: {e}"
         await attempt_audit(
@@ -427,14 +435,6 @@ async def _fetch_gpconnect_record(
             detail={"exception": str(e)},
         )
         record_application_failure(e)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
-        return JSONResponse(status_code=502, content={"success": False, "error": msg})
-
-    except httpx.ReadError:
-        msg = "ReadError: server closed connection before responding"
-        print("❌", msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")

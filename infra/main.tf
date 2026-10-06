@@ -265,8 +265,7 @@ resource "azurerm_linux_web_app" "app" {
 
   lifecycle {
     ignore_changes = [
-      site_config[0].application_stack[0].docker_image,
-      site_config[0].application_stack[0].docker_image_tag,
+      site_config[0].application_stack[0].docker_image_name,
       app_settings["WEBSITE_VNET_ROUTE_ALL"],
       tags["CostCenter"],
       tags["hidden-link: /app-insights-resource-id"]
@@ -275,8 +274,10 @@ resource "azurerm_linux_web_app" "app" {
 
   site_config {
     application_stack {
-      docker_image     = length(split(":", var.docker_image)) > 1 ? join(":", slice(split(":", var.docker_image), 0, length(split(":", var.docker_image)) - 1)) : var.docker_image
-      docker_image_tag = length(split(":", var.docker_image)) > 1 ? split(":", var.docker_image)[length(split(":", var.docker_image)) - 1] : "latest"
+      docker_image_name        = var.docker_image
+      docker_registry_url      = var.docker_registry_url
+      docker_registry_username = var.docker_registry_username
+      docker_registry_password = var.docker_registry_password
     }
 
     container_registry_use_managed_identity = false

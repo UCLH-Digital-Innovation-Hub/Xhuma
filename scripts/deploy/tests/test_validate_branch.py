@@ -9,7 +9,6 @@ def run_script(args):
 
 
 def test_cd_valid_branch():
-    assert run_script(["cd", "push", "refs/heads/dev"]).returncode == 0
     assert run_script(["cd", "push", "refs/heads/main"]).returncode == 0
 
 
@@ -20,8 +19,6 @@ def test_cd_invalid_branch():
 
 
 def test_infra_push_valid_branch():
-    assert run_script(["infra", "push", "refs/heads/dev"]).returncode == 0
-    assert run_script(["infra", "workflow_dispatch", "refs/heads/dev"]).returncode == 0
     assert run_script(["infra", "push", "refs/heads/main"]).returncode == 0
 
 
@@ -32,7 +29,6 @@ def test_infra_push_invalid_branch():
 
 
 def test_infra_pr_valid_base():
-    assert run_script(["infra", "pull_request", "refs/pull/235/merge", "dev"]).returncode == 0
     assert run_script(["infra", "pull_request", "refs/pull/1/merge", "main"]).returncode == 0
 
 

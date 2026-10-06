@@ -11,9 +11,9 @@ redis_sku_name = "Standard"
 redis_family   = "C"
 redis_capacity = 1
 org_code  = "RRV00"
-org_asid  = ""
+org_asid  = "200000002574"
 device_id = "1"
-env       = "prod"
+env       = "int"
 app_version = "0.9"
 
 allowed_hosts = "*"
