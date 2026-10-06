@@ -81,7 +81,7 @@ The deployment relies on specific GitHub environments to orchestrate the provisi
 ![Play matrix deployment pipeline](./assets/play-plan-approval-gate.png)
 *Figure 1 — Pre-plan approval gate — Run #32 paused before `Infra Plan - play` because the `play-plan` GitHub Environment required reviewer approval.*
 
-> **Control note:** During the September 2026 Play rehearsal, `play-plan` required reviewer approval. The workflow source currently describes the plan environment as having no manual approvers. Confirm the intended control model before INT migration.
+> **Control note:** During the September 2026 Play rehearsal, `play-plan` required reviewer approval. The workflow source currently describes the plan environment as having no manual approvers.
 
 **Environment Configuration:**
 
@@ -90,8 +90,13 @@ The deployment relies on specific GitHub environments to orchestrate the provisi
 | `play-plan`           | Azure credential set; `CR_PAT`; `REGISTRY_ID`; `POSTGRES_PASSWORD`; `SHARED_KEY_VAULT_NAME`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_SUBSCRIPTION_ID` |
 | `rg-xhuma-play-infra` | Azure credential set; `SHARED_SUBSCRIPTION_ID`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_KEY_VAULT_NAME` |
 | `rg-xhuma-play`       | Azure credential set                                                                                                      |
+| `int-plan`            | Azure credential set; `CR_PAT`; `REGISTRY_ID`; `POSTGRES_PASSWORD`; `SHARED_KEY_VAULT_NAME`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_SUBSCRIPTION_ID` |
+| `rg-xhuma-int-infra`  | Azure credential set; `SHARED_SUBSCRIPTION_ID`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_KEY_VAULT_NAME` |
+| `rg-xhuma-int`        | Azure credential set                                                                                                      |
 
 *Note: The Azure credential set consists of `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`. Do not duplicate Terraform input secrets in the apply/deploy environments, as apply consumes the saved plan.*
+
+*Note: The `GHCR_USERNAME` GitHub Environment variable (not a secret) must be set on the plan environments to provide a stable runtime registry identity paired with the `CR_PAT` secret. The runtime registry identity must not use the ephemeral `github.actor`. (The CI build/push stage correctly uses `github.actor` + `GITHUB_TOKEN`, which is a separate and valid pattern for ephemeral Actions).*
 
 **Shared Resources Configuration:**
 The `SHARED_SUBSCRIPTION_ID` is `c24b0c3e-9e09-4c7c-8687-75e8b654bc8e`. This cross-subscription variable must be explicitly provided to the environments running Terraform Plan (e.g., `play-plan` for matrix deployments) and the legacy `infra.yml` workflow, which provisions INT and production infrastructure.
@@ -111,7 +116,7 @@ The `SHARED_SUBSCRIPTION_ID` is `c24b0c3e-9e09-4c7c-8687-75e8b654bc8e`. This cro
 
 Infrastructure and application liveness can be established before the target-local Epic CA is populated. However, `epic-ca-cert` is required before Epic/SOAP/mTLS functional acceptance.
 
-1. `epic-ca-cert`: The target-specific Epic Root CA certificate (Base64 PEM) used for mutual TLS (mTLS).
+1. `epic-ca-cert`: The target-specific Epic verification CA bundle required by current application semantics (Base64 PEM) used for mutual TLS (mTLS). It may contain the direct issuing intermediate(s).
 2. **Populating the Vault**: Use the Azure Portal or CLI to add the secret to the newly provisioned Local Key Vault (e.g., `<app_service_name>-kv`, for example `xhuma-app-play-kv`).
    *Note: Ensure multi-line PEM files are formatted correctly (newlines replaced if pasting into the Azure Portal).*
 
@@ -120,8 +125,8 @@ Infrastructure and application liveness can be established before the target-loc
 ## 6. Deployment Orchestration
 
 Deployment is handled by GitHub Actions (`.github/workflows/matrix-deploy.yml`), which enforces strict boundaries:
-- `matrix-deploy.yml` currently orchestrates only the `play` environment from the `rehearsal/play-deployment` branch.
-- Legacy pipelines (`cd.yml` and `infra.yml`) still own the deployment to `int` and `prd` from the `int` and `main` branches.
+- The matrix workflow (`matrix-deploy.yml`) is the authoritative deployment path for `int` and the `play` environment.
+- The legacy `infra.yml` remains present for the production/legacy path and retains a manual `workflow_dispatch` entry point. It must not be manually dispatched against `int`; this path is pending retirement or hardening.
 
 ### 6.1 Continuous Integration and Build Controls
 
@@ -273,7 +278,7 @@ Deployment is deterministic. We record the previous digest before deploying and 
 - [ ] Scoped Azure SP access configured and credentials placed in GitHub.
 - [ ] GitHub Environment approvals configured for infra apply and container deployment.
 - [ ] Local Key Vault populated with `epic-ca-cert`.
-- [ ] App Service integration subnet ID added to the shared configuration. *(Note: The shared Terraform root has been implemented and an explicit shared tfvars/source-of-truth file is the intended configuration mechanism. However, creation of the live `shared.tfvars` configuration, import of the existing vault `xhuma-shared-kv-int`, reconciliation plan, and first Apply remain outstanding. Target states continue to own their App/Locust access policies, while shared state is intended to own the vault/network ACL lifecycle. Adoption must be proven without vault replacement, ACL loss, or removal of existing target access.)*
+- [ ] App Service integration subnet ID added to the shared configuration. *(Note: The shared Terraform root is fully operational. The matrix workflow automatically computes an ephemeral configuration to add the target App Service subnet to the shared Key Vault network ACL while preserving existing rules. A strict guard validates the plan to fail-closed if unexpected changes are proposed before applying.)*
 
 **Follow-ups / Manual Exercises:**
 - [ ] [TODO: automate] Trust-local authentication.
@@ -344,6 +349,8 @@ Complete this sequence to achieve external environment functional acceptance:
 
 *Make clear that `"Using HSCN Relay"` in startup logs is configuration evidence only and does not prove relay connectivity.*
 
+*Note: Complete clinical end-to-end acceptance requires all downstream services (like GP Connect) to be operational. GP Connect functional acceptance may be temporarily blocked by an external downstream outage, even if infrastructure, PDS, and Epic TLS acceptance remain fully valid. Do not overstate production readiness until all endpoints succeed.*
+
 ### 7.6 Key Vault Reference Verification
 
 A mandatory verification step must be performed post-Terraform and pre-functional-testing to ensure the App Service can resolve its `@Microsoft.KeyVault(...)` configuration references. Note that Terraform automatically provisions the App Service managed-identity access policy on the shared Key Vault.
@@ -358,6 +365,8 @@ When the shared Key Vault is configured with `DefaultAction = Deny`, the target 
 5. **Do not proceed** to functional testing if the reference status is `AccessToKeyVaultDenied`, `SecretNotFound`, or any other unresolved state.
 
 *(Note: Verification can be performed via the Azure Portal or using the `az webapp config appsettings` command to verify values are appropriately retrieved rather than remaining as raw references).*
+
+*Note: Forcing an App Service Key Vault reference refresh can return a transient HTTP 409 Conflict if another operation is active. Bounded retries should be used. Furthermore, a `Resolved` status does not prove that the application has picked up the *latest* content (only that it can successfully resolve *a* version). Positive application-level trust evidence must be verified after certificate rotation.*
 
 ### 7.7 Post-Deployment Health Verification
 
@@ -451,6 +460,7 @@ Use these safe generic commands to inspect environments. Replace placeholders (e
 Specific deployment rehearsals and assurance events are captured as immutable evidence records. These records are retained separately from this living operational runbook to preserve point-in-time factual observations.
 
 - [Play Matrix Deployment Rehearsal (23 September 2026)](./assurance/evidence/2026-09-23-play-matrix-deployment-rehearsal.md)
+- [INT Matrix Cutover (6 October 2026)](./assurance/evidence/2026-10-06-int-matrix-cutover.md)
 
 
 ---
