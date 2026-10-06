@@ -209,6 +209,33 @@ jobs:
           terraform init \
             -backend-config="../${{ matrix.target.backend_file }}"
 
+      - name: Verify Existing State Anchors
+        if: matrix.target.require_existing_state == true
+        working-directory: ./infra
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          echo "Verifying existing state contains expected workload anchors..."
+          STATE_LIST=$(terraform state list)
+
+          ANCHORS=("azurerm_resource_group.rg" "azurerm_linux_web_app.app" "azurerm_postgresql_flexible_server.psql")
+
+          MISSING=0
+          for ANCHOR in "${ANCHORS[@]}"; do
+            if ! echo "$STATE_LIST" | grep -q "^${ANCHOR}$"; then
+              echo "::error::Migration Guard: Required state anchor '${ANCHOR}' is missing from the remote state. Aborting to prevent recreation of brownfield environment."
+              MISSING=1
+            fi
+          done
+
+          if [ $MISSING -eq 1 ]; then
+            exit 1
+          fi
+          echo "State anchors verified successfully."
+
       - name: Terraform Plan
         id: plan
         working-directory: ./infra
@@ -295,9 +322,14 @@ jobs:
           # Highlight deletes/replacements using a GitHub warning
           DESTRUCTIVE=$(terraform show -json "$PLAN_FILE" | jq -r '.resource_changes[]? | select(.change.actions | index("delete") or index("replace")) | .address')
           if [ -n "$DESTRUCTIVE" ]; then
-            # Convert newlines to commas for the warning message
+            # Convert newlines to commas for the message
             WARN_MSG=$(echo "$DESTRUCTIVE" | tr '\n' ',' | sed 's/,$//')
-            echo "::warning::The plan contains destructive actions (delete/replace) for the following resources: $WARN_MSG"
+            if [ "${{ matrix.target.require_existing_state }}" == "true" ]; then
+              echo "::error::Migration Guard: The plan contains destructive actions (delete/replace) for an environment requiring existing state adoption. Affected resources: $WARN_MSG"
+              exit 1
+            else
+              echo "::warning::The plan contains destructive actions (delete/replace) for the following resources: $WARN_MSG"
+            fi
           fi
 
           echo '```text' >> $GITHUB_STEP_SUMMARY

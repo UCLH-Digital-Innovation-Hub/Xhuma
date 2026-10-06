@@ -4,17 +4,17 @@ app_service_name     = "xhuma-app-int"
 redis_name           = "xhuma-redis-int"
 postgres_server_name = "xhuma-psql-int"
 
-# Same inert bootstrap image used by the proven Play target
-docker_image = "mcr.microsoft.com/appsvc/staticsite@sha256:23edadf1c0aca901e8532eb145432f49d4e27a20bef92c48710bb4a81142d4ee"
+# Immutable bootstrap image reference for initial creation
+docker_image = "uclh-digital-innovation-hub/xhuma:latest"
 
 redis_sku_name = "Standard"
 redis_family   = "C"
 redis_capacity = 1
-org_code  = "RRV00"
-org_asid  = "200000002574"
-device_id = "1"
-env       = "int"
-app_version = "0.9"
+org_code       = "RRV00"
+org_asid       = "200000002574"
+device_id      = "1"
+env            = "int"
+app_version    = "0.9"
 
 allowed_hosts = "*"
 cors_origins  = "*"

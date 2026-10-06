@@ -309,9 +309,6 @@ resource "azurerm_linux_web_app" "app" {
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
-    "DOCKER_REGISTRY_SERVER_URL"          = var.docker_registry_url
-    "DOCKER_REGISTRY_SERVER_USERNAME"     = var.docker_registry_username
-    "DOCKER_REGISTRY_SERVER_PASSWORD"     = var.docker_registry_password
 
     # App Config (Key Vault References)
     "API_KEY"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=api-key)"

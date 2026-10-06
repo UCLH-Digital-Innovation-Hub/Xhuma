@@ -414,9 +414,20 @@ async def _fetch_gpconnect_record(
 
     except AuditFailureException:
         raise
-    except httpx.ReadError:
+    except httpx.ReadError as e:
         msg = "ReadError: server closed connection before responding"
         print("❌", msg)
+        await attempt_audit(
+            request=request,
+            request_id=headers.get("Ssp-TraceID"),
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="gpconnect_request",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
+        record_application_failure(e)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")

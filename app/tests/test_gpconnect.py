@@ -179,6 +179,45 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 
 
 @pytest.mark.asyncio
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect.record_application_failure")
+@patch("app.gpconnect.httpx.AsyncClient")
+@patch("app.gpconnect.create_nhs_ssl_context")
+@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
+async def test_gpconnect_readerror_audits_failure(
+    mock_lookup_patient,
+    mock_sds_trace,
+    mock_create_nhs_ssl_context,
+    mock_async_client,
+    mock_record_application_failure,
+    mock_attempt_audit,
+):
+    import httpx
+
+    fake_pds = load_pds(9690937278)
+    mock_lookup_patient.return_value = fake_pds
+    mock_sds_trace.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+
+    mock_client = AsyncMock()
+    mock_client.post.side_effect = httpx.ReadError("server closed connection before responding")
+    mock_async_client.return_value.__aenter__.return_value = mock_client
+
+    result = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+    body = json.loads(result.body)
+
+    assert result.status_code == 502
+    assert body["success"] is False
+    assert "ReadError: server closed connection before responding" in body["error"]
+
+    assert mock_attempt_audit.call_count == 3
+    audit_args = mock_attempt_audit.call_args.kwargs
+    assert audit_args["action"] == "gpconnect_request"
+    assert audit_args["error_code"] == "502"
+    mock_record_application_failure.assert_called_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "payload",
     ["not json", "[]", '{"resourceType":"OperationOutcome"}', '{"resourceType":"Bundle","entry":null}', "bob"],

@@ -190,7 +190,6 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         print(f"Warning: Failed to initialize OpenTelemetry instrumentation: {telemetry_err}")
 
 
-
 # register soap error handler
 soap.register_handlers(app)
 
