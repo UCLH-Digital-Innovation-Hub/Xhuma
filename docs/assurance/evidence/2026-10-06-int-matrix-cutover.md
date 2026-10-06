@@ -64,3 +64,89 @@
 - Positive application-level trust evidence must be required after certificate rotation.
 - Persistent runtime identities must not be derived from human workflow actors.
 - Automated `/health` endpoints may be non-authoritative when runner connectivity is blocked; manual external verification remains required.
+
+## I. Live PostgreSQL Audit Validation
+
+Record the following verified facts from 6 October 2026.
+
+### Access method
+
+- Direct access from the operator workstation was unavailable because the PostgreSQL Flexible Server is private-networked through Private Link.
+- No database networking, firewall rules, public access or SSH configuration was changed.
+- `az webapp exec` was used to open an ephemeral shell inside the running INT App Service container.
+- Database inspection was explicitly performed inside: `SET TRANSACTION READ ONLY`
+- The transaction was rolled back after inspection.
+- No row contents were modified.
+
+### Database/schema state
+
+Verified:
+- database: `xhuma`
+- transaction_read_only: `on`
+- Alembic head: `1f53d4c82b1a`
+- audit_event total rows: 1548
+- minimum sequence: 1
+- maximum sequence: 1548
+- unique sequences: 1548
+- non-monotonic rows: 0
+- sequence gaps observed: 0
+
+### Live transaction evidence
+
+Within the preceding 90-minute INT test window:
+
+- `pds_lookup` / `ok`: 6
+- `sds_trace` / `ok`: 5
+- `fhir_endpoint_trace` / `ok`: 5
+- `gpconnect_request` / `fail` / `500`: 5
+- `iti38_document_query` / `fail` / `UNKNOWN_ERROR`: 5
+
+This is consistent with one PDS/ITI-55 interaction plus five ITI-38 transactions progressing through PDS/SDS/GP Connect before the known downstream GP Connect HTTP 500.
+
+### Audit field validation
+
+26 recent audit rows were inspected using metadata-only queries.
+
+All 26 showed:
+- `subject_ref` present
+- `subject_ref` using expected `v1:` pseudonymous format
+- SAML role present
+- organisation present
+- Purpose of Use present
+- OpenTelemetry trace ID present
+
+No raw `subject_ref` values, user identifiers, patient identifiers or detail payloads were printed during validation.
+
+This provides live evidence that the deployed INT audit implementation is persisting the core audit identity/action/outcome metadata required for the current assurance scope.
+
+### Correlation
+
+- 21 of 26 recent rows did not contain `request_id`.
+- This did not prevent transaction correlation because all 26 contained OpenTelemetry trace IDs.
+- Record this as a correlation-quality hardening opportunity rather than an audit persistence failure.
+
+### Production-hardening findings
+
+1. **GP Connect response body persistence**
+
+All five failed `gpconnect_request` audit rows contained the `detail.response_text` field.
+
+A constrained numeric-token check found zero ten-digit numeric identifiers in the five stored details, but this MUST NOT be represented as proving absence of PHI.
+
+Current source permits arbitrary downstream response text to be persisted in the audit DB. Record as a PRE-PRODUCTION data-minimisation hardening item:
+
+- remove raw downstream `response_text` from audit persistence;
+- retain only controlled metadata such as status code, transport and safe error classification;
+- do not inspect or reproduce the existing stored response bodies.
+
+2. **ITI-38 error classification**
+
+The five failed `iti38_document_query` rows were stored with `error_code=UNKNOWN_ERROR` while the corresponding child GP Connect audit records correctly contained `error_code=500`.
+
+Record as an audit-quality improvement: propagate a controlled upstream failure classification to the ITI-38 audit record.
+
+3. **SOAP correlation**
+
+The current SOAP handler parses the inbound WS-Addressing MessageID but the ITI-38 audit rows inspected did not contain `message_id`.
+
+Record as an observability/audit-correlation improvement: preserve the appropriate SOAP MessageID/query correlation identifier in the ITI-38 audit event.

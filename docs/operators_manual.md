@@ -453,6 +453,118 @@ Use these safe generic commands to inspect environments. Replace placeholders (e
   gh run view <run-id>
   ```
 
+### Azure Runtime Diagnostics and Audit Verification
+
+- commands are read-only unless explicitly stated otherwise;
+- never print secret-valued application settings;
+- never print raw audit `detail`, `subject_ref`, patient identifiers, tokens, SOAP payloads or downstream response bodies;
+- prefer metadata/count/presence checks;
+- `az webapp exec` is currently a preview CLI capability and the container shell is ephemeral;
+- do not enable SSH, public PostgreSQL access or firewall exceptions merely for routine inspection.
+
+#### Live application logs
+
+```bash
+az webapp log tail \
+  --name <app-service> \
+  --resource-group <resource-group>
+```
+
+Warn that operators must avoid capturing/publishing PHI or credentials from logs.
+
+#### Ephemeral runtime shell
+
+```bash
+az webapp exec \
+  --name <app-service> \
+  --resource-group <resource-group> \
+  --mode shell \
+  --shell /bin/sh
+```
+
+- this was used in INT because SSH was not enabled;
+- routine diagnostic use must remain read-only;
+- data outside persistent App Service storage must not be relied upon.
+
+#### Resolve Log Analytics workspace ID
+
+```bash
+LAW_ID=$(az monitor log-analytics workspace show \
+  --resource-group <resource-group> \
+  --name <workspace-name> \
+  --query customerId \
+  -o tsv)
+```
+
+#### Recent SOAP requests
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+AppRequests
+| where TimeGenerated > ago(60m)
+| where Url contains "/SOAP/"
+| project TimeGenerated, Name, ResultCode, Success, DurationMs, OperationId
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+#### Audit persistence telemetry
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+AppDependencies
+| where TimeGenerated > ago(60m)
+| where Name == "xhuma.audit.persist"
+| project TimeGenerated, Success, ResultCode, DurationMs, OperationId, Properties
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+`Success=True`, `ResultCode=0`, and `stage.outcome=ok` demonstrate successful completion of the instrumented audit-persistence operation. They do not by themselves validate every stored row field.
+
+#### Pipeline trace
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+AppDependencies
+| where TimeGenerated > ago(60m)
+| where Name startswith "xhuma."
+| project TimeGenerated, Name, Success, DurationMs, OperationId, Properties
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+`OperationId` can be used to correlate PDS, SDS, GP Connect and audit persistence without exposing clinical payloads.
+
+#### Private PostgreSQL inspection
+
+Private-network PostgreSQL may not resolve from an operator workstation.
+If runtime inspection is necessary:
+1. use `az webapp exec`;
+2. use the application's existing connection context;
+3. begin with `SET TRANSACTION READ ONLY`;
+4. inspect counts/presence/metadata only;
+5. rollback;
+6. never select raw audit detail or identifiers merely for operational assurance.
+
+Minimal safe pattern:
+```python
+from sqlalchemy import text
+tx = await conn.begin()
+await conn.execute(text("SET TRANSACTION READ ONLY"))
+# metadata/count queries only
+await tx.rollback()
+```
+
 ---
 
 ## 10. Assurance and Evidence Records
