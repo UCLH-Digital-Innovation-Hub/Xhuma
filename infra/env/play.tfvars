@@ -4,8 +4,6 @@ app_service_name     = "xhuma-app-play"
 redis_name           = "xhuma-redis-play"
 postgres_server_name = "xhuma-psql-play"
 
-# Immutable bootstrap image reference for initial creation
-docker_image = "uclh-digital-innovation-hub/xhuma:latest"
 
 # Application Settings (Operator must review and populate corresponding secrets)
 org_code                 = "RRV00"

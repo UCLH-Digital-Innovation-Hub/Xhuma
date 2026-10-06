@@ -221,7 +221,7 @@ jobs:
           echo "Verifying existing state contains expected workload anchors..."
           STATE_LIST=$(terraform state list)
 
-          ANCHORS=("azurerm_resource_group.rg" "azurerm_linux_web_app.app" "azurerm_postgresql_flexible_server.psql")
+          ANCHORS=("azurerm_linux_web_app.app" "azurerm_postgresql_flexible_server.postgres" "azurerm_redis_cache.redis")
 
           MISSING=0
           for ANCHOR in "${ANCHORS[@]}"; do
@@ -248,6 +248,7 @@ jobs:
           TF_VAR_registry_id: "${{ secrets.REGISTRY_ID }}"
           TF_VAR_docker_registry_password: "${{ secrets.CR_PAT }}"
           TF_VAR_docker_registry_username: "${{ github.actor }}"
+          TF_VAR_docker_image: "${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
           TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
           TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
           TF_VAR_shared_subscription_id: "${{ secrets.SHARED_SUBSCRIPTION_ID }}"

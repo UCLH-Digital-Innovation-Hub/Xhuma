@@ -4,8 +4,6 @@ app_service_name     = "xhuma-app-int"
 redis_name           = "xhuma-redis-int"
 postgres_server_name = "xhuma-psql-int"
 
-# Immutable bootstrap image reference for initial creation
-docker_image = "uclh-digital-innovation-hub/xhuma:latest"
 
 redis_sku_name = "Standard"
 redis_family   = "C"
