@@ -1,8 +1,8 @@
 from typing import Union
 
-from ..helpers import code_with_translations, date_helper, readable_date, templateId
+from ..helpers import cda_time_bound, code_with_translations, fhir_to_cda_timestamp, readable_date, templateId
 from ..models.base import EntryRelationship
-from ..models.datatypes import IVL_TS, IVXB_TS
+from ..models.datatypes import IVL_TS
 from .types import EntryWithRow
 
 
@@ -61,14 +61,14 @@ def observation_entry(entry, index: dict, section_name: Union[str, int]) -> Entr
 
     date_val = "N/A"
     if hasattr(entry, "effectiveDateTime") and entry.effectiveDateTime:
-        obs.effectiveTime = IVL_TS(**{"@value": date_helper(entry.effectiveDateTime.isostring)})
-        date_val = readable_date(date_helper(entry.effectiveDateTime.isostring))
+        obs.effectiveTime = IVL_TS(**{"@value": fhir_to_cda_timestamp(entry.effectiveDateTime)})
+        date_val = readable_date(fhir_to_cda_timestamp(entry.effectiveDateTime))
     elif hasattr(entry, "effectivePeriod") and entry.effectivePeriod and entry.effectivePeriod.start:
-        obs.effectiveTime = IVL_TS(low=IVXB_TS(**{"@value": date_helper(entry.effectivePeriod.start.isostring)}))
-        date_val = readable_date(date_helper(entry.effectivePeriod.start.isostring))
+        obs.effectiveTime = IVL_TS(low=cda_time_bound(entry.effectivePeriod.start))
+        date_val = readable_date(fhir_to_cda_timestamp(entry.effectivePeriod.start))
     elif hasattr(entry, "effectiveInstant") and entry.effectiveInstant:
-        obs.effectiveTime = IVL_TS(**{"@value": date_helper(entry.effectiveInstant.isostring)})
-        date_val = readable_date(date_helper(entry.effectiveInstant.isostring))
+        obs.effectiveTime = IVL_TS(**{"@value": fhir_to_cda_timestamp(entry.effectiveInstant)})
+        date_val = readable_date(fhir_to_cda_timestamp(entry.effectiveInstant))
 
     name_val = "N/A"
     if hasattr(entry, "code") and entry.code and entry.code.coding:
@@ -77,7 +77,7 @@ def observation_entry(entry, index: dict, section_name: Union[str, int]) -> Entr
                 name_val = coding.display
                 break
 
-    if obs_notes:
+    if obs_notes and section_name != "Allergies and adverse reactions":
         name_val = f"{name_val}<br />Notes: " + "<br />".join(obs_notes)
 
     # Build row based on the specific section layout
@@ -86,7 +86,11 @@ def observation_entry(entry, index: dict, section_name: Union[str, int]) -> Entr
     elif section_name == "Problems":
         row = [date_val, "N/A", name_val]
     elif section_name == "Allergies and adverse reactions":
-        row = [date_val, "N/A", name_val, "N/A"]
+        # An Observation (e.g. "No known allergy") has an effective date and an
+        # observation status, not an AllergyIntolerance assertion/clinical status.
+        dates = f"Effective: {date_val}" if date_val != "N/A" else ""
+        status = f"Observation status: {entry.status}" if getattr(entry, "status", None) else ""
+        row = [dates, name_val, status, "N/A", "N/A", "<br />".join(obs_notes)]
     else:
         # Fallback to old behavior if a simple integer length is passed
         row = [date_val, name_val]

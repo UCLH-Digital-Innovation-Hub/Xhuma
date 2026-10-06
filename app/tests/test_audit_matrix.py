@@ -163,8 +163,9 @@ async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redi
 
 
 @pytest.mark.asyncio
+@patch("app.audit.build.build_audit_event", new_callable=AsyncMock)
 @patch("app.audit.store.insert_audit_event", new_callable=AsyncMock)
-async def test_audit_failure_exception_hides_sql(mock_insert, caplog):
+async def test_audit_failure_exception_hides_sql(mock_insert, mock_build, caplog):
     import logging
 
     from app.audit.audit import attempt_audit
@@ -182,6 +183,7 @@ async def test_audit_failure_exception_hides_sql(mock_insert, caplog):
                 request=mock_request, nhs_number="123", saml=MagicMock(), action="test", outcome=AuditOutcome.ok
             )
 
+        mock_insert.assert_awaited_once_with(mock_session, mock_build.return_value)
         assert "Failed to persist audit event" in str(exc_info.value)
         # Verify the underlying exception (with sensitive data) is not attached via __cause__
         assert exc_info.value.__cause__ is None

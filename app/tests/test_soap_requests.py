@@ -7,7 +7,7 @@ test fixtures and are never read by this suite.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, call
 
 import pytest
 from fastapi import HTTPException
@@ -250,7 +250,7 @@ async def test_iti38_rejects_patient_identifier_without_a_valid_nhs_number(
 
 @pytest.mark.asyncio
 async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(monkeypatch, complete_saml_context):
-    redis_client = MagicMock()
+    redis_client = AsyncMock()
     redis_client.get.side_effect = lambda key: (
         NHS_NUMBER.encode()
         if key == f"doc_patient:{DOCUMENT_ID}"
@@ -265,7 +265,7 @@ async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(monke
 
     assert response.status_code == 200
     assert response.body == b"<synthetic-iti39-response/>"
-    assert redis_client.get.call_args_list == [call(DOCUMENT_ID), call(f"doc_patient:{DOCUMENT_ID}")]
+    assert redis_client.get.await_args_list == [call(DOCUMENT_ID), call(f"doc_patient:{DOCUMENT_ID}")]
     response_builder.assert_awaited_once_with(
         "urn:uuid:11111111-1111-4111-8111-111111111111",
         DOCUMENT_ID,
@@ -275,7 +275,7 @@ async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(monke
 
 @pytest.mark.asyncio
 async def test_iti39_returns_registry_error_when_document_is_not_cached(monkeypatch, complete_saml_context):
-    redis_client = MagicMock()
+    redis_client = AsyncMock()
     redis_client.get.side_effect = lambda key: NHS_NUMBER.encode() if key == f"doc_patient:{DOCUMENT_ID}" else None
     error_builder = AsyncMock(return_value="<synthetic-iti39-error/>")
     monkeypatch.setattr(soap, "client", redis_client)
@@ -290,7 +290,7 @@ async def test_iti39_returns_registry_error_when_document_is_not_cached(monkeypa
 
 @pytest.mark.asyncio
 async def test_iti39_rejects_non_https_reply_to(monkeypatch, complete_saml_context):
-    redis_client = MagicMock()
+    redis_client = AsyncMock()
     redis_client.get.side_effect = lambda key: (
         NHS_NUMBER.encode()
         if key == f"doc_patient:{DOCUMENT_ID}"

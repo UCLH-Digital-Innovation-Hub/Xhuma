@@ -33,16 +33,16 @@ env:
   TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
 
   # Construct names dynamically (Using static names for persistence in Main environment)
-  TF_VAR_app_service_name: ${{ github.base_ref == 'main' && 'xhuma-app-prd' || github.ref == 'refs/heads/main' && 'xhuma-app-prd' || 'xhuma-app-int' }}
-  TF_VAR_redis_name: ${{ github.base_ref == 'main' && 'xhuma-redis-prd' || github.ref == 'refs/heads/main' && 'xhuma-redis-prd' || 'xhuma-redis-int' }}
-  TF_VAR_postgres_server_name: ${{ github.base_ref == 'main' && 'xhuma-psql-prd' || github.ref == 'refs/heads/main' && 'xhuma-psql-prd' || 'xhuma-psql-int' }}
+  TF_VAR_app_service_name: ${{ github.base_ref == 'main' && 'xhuma-app-prd' || github.ref == 'refs/heads/main' && 'xhuma-app-prd' || (github.base_ref == 'dev' || github.ref == 'refs/heads/dev') && 'xhuma-app-play' || 'xhuma-app-int' }}
+  TF_VAR_redis_name: ${{ github.base_ref == 'main' && 'xhuma-redis-prd' || github.ref == 'refs/heads/main' && 'xhuma-redis-prd' || (github.base_ref == 'dev' || github.ref == 'refs/heads/dev') && 'xhuma-redis-play' || 'xhuma-redis-int' }}
+  TF_VAR_postgres_server_name: ${{ github.base_ref == 'main' && 'xhuma-psql-prd' || github.ref == 'refs/heads/main' && 'xhuma-psql-prd' || (github.base_ref == 'dev' || github.ref == 'refs/heads/dev') && 'xhuma-psql-play' || 'xhuma-psql-int' }}
 
 jobs:
   terraform:
     name: "Terraform"
     runs-on: ubuntu-latest
     environment:
-      name: ${{ github.base_ref == 'main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || 'rg-xhuma-int' }}
+      name: ${{ github.base_ref == 'main' && 'rg-xhuma-uclh-prd' || github.ref == 'refs/heads/main' && 'rg-xhuma-uclh-prd' || (github.base_ref == 'dev' || github.ref == 'refs/heads/dev') && 'rg-xhuma-uclh-play' || 'rg-xhuma-int' }}
 
     defaults:
       run:
@@ -105,7 +105,7 @@ jobs:
         run: terraform plan -input=false
 
       - name: Terraform Apply
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/int')
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/int' || github.ref == 'refs/heads/dev')
         run: |
           set +e
           # Run terraform and save output

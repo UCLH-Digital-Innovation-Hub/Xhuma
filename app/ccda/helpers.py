@@ -1,3 +1,5 @@
+import re
+from datetime import date as CalendarDate
 from datetime import datetime
 from typing import List
 
@@ -5,159 +7,17 @@ import xmltodict
 from defusedxml import ElementTree
 from fastapi import HTTPException
 from fhirclient.models import coding, fhirdate, identifier, organization, period
+from fhirclient.models.humanname import HumanName
 
 from .models.admin import AssignedAuthor, AuthorParticipation
-from .models.datatypes import CD, II, SXCM_TS
+from .models.datatypes import CD, II, IVL_TS, IVXB_TS, TS
 
 
-def validateNHSnumber(number: int) -> bool:
-    """validates NHS number
-
-    Args:
-        NHs number as integer
-
-    Returns:
-        Boolean if NHS number is valid or not
-    """
-    if len(str(number)) != 10 or not str(number).isdigit():
-        return False
-
-    numbers = [int(c) for c in str(number)]
-
-    total = 0
-    for idx in range(0, 9):
-        multiplier = 10 - idx
-        total += numbers[idx] * multiplier
-
-    _, modtot = divmod(total, 11)
-    checkdig = 11 - modtot
-
-    if checkdig == 11:
-        checkdig = 0
-
-    return checkdig == numbers[9]
-
-
-def generate_code(coding: coding.Coding) -> dict:
-    code = {
-        "@code": coding.code,
-        "@displayName": coding.display,
-        "@codeSystemName": coding.system,
-    }
-
-    if coding.system == "http://snomed.info/sct":
-        code["@codeSystem"] = "2.16.840.1.113883.6.96"
-    elif coding.system == "https://fhir.hl7.org.uk/Id/multilex-drug-codes":
-        code["@codeSystem"] = "2.16.840.1.113883.2.1.6.4"
-
-    return code
-
-
-def code_with_translations(codings: List[coding.Coding]) -> CD:
-    """
-    Takes a list of coding objects and returns a CD object with translations
-    Args:
-        codings: List of fhir coding objects
-    Returns:
-        CD object with translations if more than one coding is provided
-    """
-    # Check if the list is empty
-    if not codings:
-        return None
-
-    # sort for SNOMED first
-    # codings.sort(key=lambda x: x.get("system") == "http://snomed.info/sct")
-
-    codings.sort(key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
-
-    # Create the CD object
-    cd = CD(
-        code=codings[0].code,
-        codeSystemName=codings[0].system,
-        displayName=codings[0].display,
-    )
-    # Add translations for each coding
-    if len(codings) > 1:
-        cd.translation = [
-            CD(
-                code=coding.code,
-                codeSystemName=coding.system,
-                displayName=coding.display,
-            )
-            for coding in codings[1:]
-        ]
-
-    return cd
-
-
-def templateId(root: str, extension: str) -> list:
-    """
-    takes root and extensions and returns list for proper
-    ccda formatting
-    """
-    template = [{"@root": root}, {"@root": root, "@extension": extension}]
-
-    return template
-
-
-def id_helper(identities: identifier.Identifier) -> list[II]:
-    """
-    takes list of dicts with root and extension and returns list of II objects
-    """
-    return [II(**{"@root": item.system, "@extension": item.value}) for item in identities]
-
-
-def date_helper(isodate):
-    """
-    takes iso string and returns to format valid for ccda
-
-    """
-    new_date = datetime.strptime(isodate[:10], "%Y-%m-%d").strftime("%Y%m%d")
-
-    return new_date
-
-
-def datetime_helper(fhirdate: fhirdate.FHIRDate) -> str:
-    """
-    takes a FHIRDate object and returns a string in the format YYYYMMDDHHMMSS
-    """
-    if fhirdate is None:
-        return None
-    return datetime.strptime(fhirdate.isostring[:10], "%Y-%m-%d").strftime("%Y%m%d%H%M%S")
-
-
-def effective_time_helper(effective_period: period.Period) -> List[SXCM_TS]:
-    """
-    Takes a FHIR effective period and returns a list of SXCM_TS objects
-    """
-    # effective_period = effective_period.as_json()
-    start = effective_period.start
-    # end = effective_period.get("end")
-    # print(effective_period.as_json())
-    # print(date_helper(start.isostring))
-
-    # Create the SXCM_TS objects
-    sxcm_ts_list = []
-    if start:
-        low_value = SXCM_TS(operator="low")
-        low_value.value = date_helper(start.isostring)
-        sxcm_ts_list.append(low_value)
-    if effective_period.end:
-        high_value = SXCM_TS(operator="high")
-        high_value.value = date_helper(effective_period.end.isostring)
-        sxcm_ts_list.append(high_value)
-        # sxcm_ts_list.append(SXCM_TS(operator="high", value=date_helper(effective_period.end.isostring)))
-    # Example usage of as_dict
-    return sxcm_ts_list
-
-
-def readable_date(date):
-    """
-    takes date string in YYYYMMDD format and returns to more readable format
-    """
-    new_date = datetime.strptime(date, "%Y%m%d").strftime("%d/%m/%Y")
-
-    return new_date
+def clean_number(x):
+    # if x is a float and is an integer, convert to int
+    if isinstance(x, float) and x.is_integer():
+        return int(x)
+    return x
 
 
 def clean_soap(
@@ -198,6 +58,105 @@ def clean_soap(
         raise HTTPException(status_code=400, detail="Malformed XML in request body")
 
 
+def code_with_translations(codings: List[coding.Coding]) -> CD:
+    """
+    Takes a list of coding objects and returns a CD object with translations
+    Args:
+        codings: List of fhir coding objects
+    Returns:
+        CD object with translations if more than one coding is provided
+    """
+    # Check if the list is empty
+    if not codings:
+        return None
+
+    # Prefer SNOMED as the canonical CDA code without reordering the source list.
+    codings = sorted(codings, key=lambda x: x.system == "http://snomed.info/sct", reverse=True)
+
+    # Create the CD object
+    cd = CD(
+        code=codings[0].code,
+        codeSystemName=codings[0].system,
+        displayName=codings[0].display,
+    )
+    # Add translations for each coding
+    if len(codings) > 1:
+        cd.translation = [
+            CD(
+                code=coding.code,
+                codeSystemName=coding.system,
+                displayName=coding.display,
+            )
+            for coding in codings[1:]
+        ]
+
+    return cd
+
+
+def fhir_to_cda_timestamp(date: fhirdate.FHIRDate | None) -> str | None:
+    """Preserve FHIR date precision, fractional seconds and offset in CDA syntax.
+
+    Use the original JSON value: isostring may add a month/day or lose fractions.
+    This only formats the supplied date; callers choose its clinical meaning.
+    """
+    source = date.as_json() if date is not None else None
+    if not source:
+        return None
+    day, _, time = source.partition("T")
+    return day.replace("-", "") + time.replace(":", "").replace("Z", "+0000")
+
+
+def cda_timestamp(date: fhirdate.FHIRDate | None) -> TS:
+    """Build a standalone timestamp, explicitly marking an absent date unknown."""
+    value = fhir_to_cda_timestamp(date)
+    return TS(value=value) if value is not None else TS(nullFlavor="UNK")
+
+
+def cda_time_bound(date: fhirdate.FHIRDate | None) -> IVXB_TS:
+    """Build an interval endpoint, explicitly marking an absent date unknown."""
+    value = fhir_to_cda_timestamp(date)
+    return IVXB_TS(value=value) if value is not None else IVXB_TS(nullFlavor="UNK")
+
+
+def cda_time_interval(start: fhirdate.FHIRDate | None, end: fhirdate.FHIRDate | None) -> IVL_TS:
+    """Build an interval with explicit bounds; missing endpoints are unknown.
+
+    Pass the same date twice for an instant. Callers that deliberately omit an
+    endpoint should construct IVL_TS themselves instead of using this helper.
+    """
+    return IVL_TS(low=cda_time_bound(start), high=cda_time_bound(end))
+
+
+def effective_time_helper(effective_period: period.Period | None) -> list[IVL_TS]:
+    """Build medication duration, omitting endpoints absent from the source."""
+    if effective_period is None:
+        return []
+    start, end = effective_period.start, effective_period.end
+    if start is None and end is None:
+        return []
+    return [
+        IVL_TS(
+            low=cda_time_bound(start) if start is not None else None,
+            high=cda_time_bound(end) if end is not None else None,
+        )
+    ]
+
+
+def fhir_date_is_after(value: fhirdate.FHIRDate | None, reference_date: CalendarDate) -> bool:
+    """Compare calendar dates only at the precision supplied by FHIR.
+
+    A future year/month qualifies; the current year/month alone cannot establish
+    a future end date. Preserve the source calendar day without timezone shifting.
+    Missing values return False; malformed source dates are not silently ignored.
+    """
+    source = value.as_json() if value is not None else None
+    if not source:
+        return False
+    parts = tuple(int(part) for part in source.partition("T")[0].split("-"))
+    reference = (reference_date.year, reference_date.month, reference_date.day)
+    return parts > reference[: len(parts)]
+
+
 def extract_soap_request(message):
     """
     Extracts the SOAP request from a MIME message.
@@ -213,6 +172,28 @@ def extract_soap_request(message):
             return line
     # if can't find a soap envelope raise an error
     raise ValueError("SOAP envelope not found in the message.")
+
+
+def generate_code(coding: coding.Coding) -> dict:
+    code = {
+        "@code": coding.code,
+        "@displayName": coding.display,
+        "@codeSystemName": coding.system,
+    }
+
+    if coding.system == "http://snomed.info/sct":
+        code["@codeSystem"] = "2.16.840.1.113883.6.96"
+    elif coding.system == "https://fhir.hl7.org.uk/Id/multilex-drug-codes":
+        code["@codeSystem"] = "2.16.840.1.113883.2.1.6.4"
+
+    return code
+
+
+def id_helper(identities: identifier.Identifier) -> list[II]:
+    """
+    takes list of dicts with root and extension and returns list of II objects
+    """
+    return [II(**{"@root": item.system, "@extension": item.value}) for item in identities]
 
 
 def organization_to_author(
@@ -247,8 +228,90 @@ def organization_to_author(
     return org
 
 
-def clean_number(x):
-    # if x is a float and is an integer, convert to int
-    if isinstance(x, float) and x.is_integer():
-        return int(x)
-    return x
+def readable_date(value: str) -> str:
+    """Display a valid CDA timestamp as a date without adding missing precision.
+
+    Full dates display DD/MM/YYYY; partial dates retain YYYY or YYYY-MM. Time
+    and offset are validated but omitted from display, without timezone shifting.
+    Empty or malformed inputs raise ValueError; callers handle absent dates.
+    """
+    match = re.fullmatch(
+        r"(?P<year>[0-9]{4})(?:(?P<month>[0-9]{2})(?:(?P<day>[0-9]{2})"
+        r"(?:(?P<hour>[0-9]{2})(?:(?P<minute>[0-9]{2})(?:(?P<second>[0-9]{2})"
+        r"(?P<fraction>\.[0-9]+)?)?)?(?P<zone>[+-][0-9]{4})?)?)?)?",
+        value,
+    )
+    if match is None:
+        raise ValueError(f"Invalid CDA timestamp: {value!r}")
+    fields = match.groupdict()
+    # Validate calendar and clock components; defaults are for validation only.
+    datetime(
+        int(fields["year"]),
+        int(fields["month"] or 1),
+        int(fields["day"] or 1),
+        int(fields["hour"] or 0),
+        int(fields["minute"] or 0),
+        int(fields["second"] or 0),
+    )
+    zone = fields["zone"]
+    if zone and (int(zone[1:3]) > 14 or int(zone[3:]) > 59 or (zone[1:3] == "14" and zone[3:] != "00")):
+        raise ValueError(f"Invalid CDA timezone: {zone!r}")
+    if fields["day"]:
+        return f"{fields['day']}/{fields['month']}/{fields['year']}"
+    if fields["month"]:
+        return f"{fields['year']}-{fields['month']}"
+    return fields["year"]
+
+
+def select_patient_name(names: list[HumanName] | None) -> HumanName:
+    """Select usual, then official, then the first supplied FHIR patient name.
+
+    Return the original HumanName, preserving source order within each use.
+    Raise ValueError when no names were supplied rather than inventing a name.
+    """
+    if not names:
+        raise ValueError("Patient record contains no names")
+
+    for preferred_use in ("usual", "official"):
+        for name in names:
+            if name.use == preferred_use:
+                return name
+    return names[0]
+
+
+def templateId(root: str, extension: str) -> list:
+    """
+    takes root and extensions and returns list for proper
+    ccda formatting
+    """
+    template = [{"@root": root}, {"@root": root, "@extension": extension}]
+
+    return template
+
+
+def validateNHSnumber(number: int) -> bool:
+    """validates NHS number
+
+    Args:
+        NHs number as integer
+
+    Returns:
+        Boolean if NHS number is valid or not
+    """
+    if len(str(number)) != 10 or not str(number).isdigit():
+        return False
+
+    numbers = [int(c) for c in str(number)]
+
+    total = 0
+    for idx in range(0, 9):
+        multiplier = 10 - idx
+        total += numbers[idx] * multiplier
+
+    _, modtot = divmod(total, 11)
+    checkdig = 11 - modtot
+
+    if checkdig == 11:
+        checkdig = 0
+
+    return checkdig == numbers[9]

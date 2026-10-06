@@ -23,6 +23,7 @@ from .pds.pds import lookup_patient, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
+from .telemetry import measure
 
 # from app.metrics.metric_utils import classify_error, now
 
@@ -105,7 +106,8 @@ async def _fetch_gpconnect_record(
     # 2) PDS lookup (consider caching in future)
     # t = now()
     try:
-        pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
+        with measure("pds.lookup"):
+            pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
     except AuditFailureException:
         raise
     except Exception as e:
@@ -163,7 +165,8 @@ async def _fetch_gpconnect_record(
         return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     try:
-        asid_trace = await sds_trace(gp_ods)
+        with measure("sds.device"):
+            asid_trace = await sds_trace(gp_ods)
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -229,7 +232,8 @@ async def _fetch_gpconnect_record(
 
     # 5) Endpoint lookup
     try:
-        endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+        with measure("sds.endpoint"):
+            endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -392,14 +396,16 @@ async def _fetch_gpconnect_record(
     try:
         if USE_RELAY:
             url = f"{RELAY_BASE_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-            resp = await _relay_call(url, headers, body)
+            with measure("gpconnect.http", transport="relay"):
+                resp = await _relay_call(url, headers, body)
             # print(f"Relay response status: {status_code}")
             # print(f"Relay response text: {resp_text}")
             # resp = httpx.Response(status_code=status_code, content=resp_text)
 
         else:
             url = f"{OVER_INTERNET_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
-            resp = await _direct_http_call(url, headers, body)
+            with measure("gpconnect.http", transport="direct"):
+                resp = await _direct_http_call(url, headers, body)
 
         if log_dir:
             with open(os.path.join(log_dir, f"{resp.status_code}_response.json"), "w") as f:
@@ -463,47 +469,57 @@ async def _fetch_gpconnect_record(
         outcome=AuditOutcome.ok,
     )
 
-    # 9) Convert to CCDA, store in Redis, return JSONResponse
-    scr_bundle = json.loads(resp.text)
-    # remove any single 'fhir_comments' entry to keep fhirclient happy
-    comment_index = None
-    for j, i in enumerate(scr_bundle.get("entry", [])):
-        if "fhir_comments" in i:
-            comment_index = j
-            break
-    if comment_index is not None:
-        scr_bundle["entry"].pop(comment_index)
-
+    # 9) Validate the entire upstream payload before conversion or caching.
     try:
-        fhir_bundle = bundle.Bundle(scr_bundle)
+        with measure("fhir.decode", input_bytes=len(resp.content)):
+            scr_bundle = json.loads(resp.text)
+        if not isinstance(scr_bundle, dict) or scr_bundle.get("resourceType") != "Bundle":
+            raise ValueError("Expected a FHIR Bundle resource")
+        # Retain the existing compatibility handling for standalone comment entries.
+        for j, entry in enumerate(scr_bundle.get("entry", [])):
+            if "fhir_comments" in entry:
+                scr_bundle["entry"].pop(j)
+                break
+        with measure("fhir.models", resource_count=len(scr_bundle.get("entry", []))):
+            fhir_bundle = bundle.Bundle(scr_bundle)
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"Failed to parse FHIR Bundle from GP Connect response: {e}"
+        msg = f"FHIR bundle malformed: {e}"
         record_application_failure(e)
         logging.exception(msg)
+        await attempt_audit(
+            request=request,
+            request_id=headers.get("Ssp-TraceID"),
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="validate_fhir_bundle",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception": str(e)},
+        )
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+        return JSONResponse(status_code=502, content={"success": False, "error": "FHIR bundle malformed"})
 
     # index resources for resolution
-    bundle_index = {}
-    for entry in fhir_bundle.entry or []:
-        try:
-            addr = f"{entry.resource.resource_type}/{entry.resource.id}"
-            bundle_index[addr] = entry.resource
-        except Exception:
-            pass
+    with measure("fhir.index", resource_count=len(fhir_bundle.entry or [])):
+        bundle_index = {}
+        for entry in fhir_bundle.entry or []:
+            try:
+                addr = f"{entry.resource.resource_type}/{entry.resource.id}"
+                bundle_index[addr] = entry.resource
+                if entry.fullUrl:
+                    bundle_index[entry.fullUrl] = entry.resource
+            except Exception:
+                pass
 
     import time
 
-    from opentelemetry import trace
-
-    tracer = trace.get_tracer(__name__)
     start_time = time.perf_counter()
     try:
-        with tracer.start_as_current_span("FHIR2CCDA.convert_bundle"):
+        with measure("ccda.convert", span_name="FHIR2CCDA.convert_bundle", resource_count=len(fhir_bundle.entry or [])):
             xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
 
         duration_ms = (time.perf_counter() - start_time) * 1000
@@ -525,7 +541,9 @@ async def _fetch_gpconnect_record(
         with open(os.path.join(log_dir, f"{safe_nhsno}.xml"), "w") as output:
             output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
-    xop = base64_xml(xml_ccda)
+    with measure("ccda.serialize") as span:
+        xop = base64_xml(xml_ccda)
+        span.set_attribute("document.base64_bytes", len(xop))
     doc_uuid = str(uuid4())
     await attempt_audit(
         request=request,
@@ -544,11 +562,12 @@ async def _fetch_gpconnect_record(
     cache_ttl = timedelta(hours=expiry_hours)
 
     # Use a pipeline to write all keys atomically with a consistent TTL
-    pipe = redis_client.pipeline()
-    pipe.setex(str(nhsno), cache_ttl, doc_uuid)
-    pipe.setex(doc_uuid, cache_ttl, xop)
-    pipe.setex(f"doc_patient:{doc_uuid}", cache_ttl, str(nhsno))
-    pipe.execute()
+    async with redis_client.pipeline() as pipe:
+        pipe.setex(str(nhsno), cache_ttl, doc_uuid)
+        pipe.setex(doc_uuid, cache_ttl, xop)
+        pipe.setex(f"doc_patient:{doc_uuid}", cache_ttl, str(nhsno))
+        with measure("ccda.cache.write", document_bytes=len(xop)):
+            await pipe.execute()
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):

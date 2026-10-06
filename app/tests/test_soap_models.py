@@ -4,11 +4,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 import xmltodict
+from fhirclient.models.humanname import HumanName
 
+from app.ccda.helpers import select_patient_name
 from app.soap import responses
 from app.soap.models import ITI38Request, ITI39Request, ITI55Request
 from app.soap.responses import iti_38
-from app.soap.responses.iti_55 import _select_usual_name
 
 PDS_RESULTS = Path(__file__).parent / "fixtures" / "pdsresults"
 
@@ -145,7 +146,7 @@ def test_iti39_request_selects_first_document_from_repeating_requests():
 def test_iti55_name_selection_falls_back_when_use_is_missing():
     name = {"given": ["Ada"], "family": "Lovelace"}
 
-    assert _select_usual_name({"name": [name]}) == name
+    assert select_patient_name([HumanName(name)]).as_json() == name
 
 
 @pytest.mark.asyncio
@@ -211,7 +212,7 @@ async def test_iti55_response_with_pds_fixture(fixture_name, given, family, gp_c
 
 @pytest.mark.asyncio
 async def test_iti38_response_preserves_registry_metadata_shape(monkeypatch):
-    monkeypatch.setattr(iti_38.redis_client, "get", lambda _: b"document-id")
+    monkeypatch.setattr(iti_38.redis_client, "get", AsyncMock(return_value=b"document-id"))
     monkeypatch.setattr(iti_38, "attempt_audit", AsyncMock())
 
     xml = await responses.iti_38_response(

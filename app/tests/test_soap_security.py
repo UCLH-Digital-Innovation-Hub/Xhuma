@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -11,7 +13,8 @@ ENDPOINTS = ["/SOAP/iti38", "/SOAP/iti39", "/SOAP/iti55"]
 @pytest.fixture(autouse=True)
 def mock_dependencies(monkeypatch):
     monkeypatch.setenv("REQUIRE_MTLS", "false")
-    monkeypatch.setattr("app.soap.soap.client.get", lambda x: b"dummy")
+    monkeypatch.setattr("app.soap.soap.client.get", AsyncMock(return_value=b"dummy"))
+    monkeypatch.setattr("app.soap.soap.httpx.post", MagicMock())
     monkeypatch.setattr(
         "app.soap.soap.process_saml_attributes",
         lambda x: type(
@@ -25,8 +28,7 @@ def mock_dependencies(monkeypatch):
             },
         )(),
     )
-    monkeypatch.setattr("app.soap.soap.lookup_patient", lambda *args, **kwargs: {"id": "test"})
-    from unittest.mock import AsyncMock
+    monkeypatch.setattr("app.soap.soap.lookup_patient", AsyncMock(return_value={"id": "test"}))
 
     monkeypatch.setattr("app.soap.soap.attempt_audit", AsyncMock())
 

@@ -8,6 +8,20 @@ from app.gpconnect import _fetch_gpconnect_record
 from app.main import lifespan
 
 
+@pytest.fixture(autouse=True)
+def isolate_startup_io():
+    # These tests exercise configuration/lifecycle, not live Redis or OTLP exporters.
+    with (
+        patch("app.main.redis_client", autospec=True),
+        patch("app.main.snomed_client", autospec=True),
+        patch("app.main.OTLPMetricExporter"),
+        patch("app.main.PeriodicExportingMetricReader"),
+        patch("app.main.MeterProvider"),
+        patch("app.main.metrics.set_meter_provider"),
+    ):
+        yield
+
+
 @pytest.mark.asyncio
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 @patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
@@ -18,6 +32,10 @@ from app.main import lifespan
 async def test_ccda_expiry_configuration_parsing(
     mock_audit, mock_client, mock_ssl, mock_pipeline, mock_sds, mock_lookup
 ):
+    pipeline = mock_pipeline.return_value
+    pipeline.__aenter__.return_value = pipeline
+    pipeline.execute = AsyncMock()
+
     # Setup happy path to get down to cache logic
     async def mock_lookup_patient(*args, **kwargs):
         return {
