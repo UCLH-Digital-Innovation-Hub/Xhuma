@@ -425,7 +425,7 @@ async def _fetch_gpconnect_record(
             action="gpconnect_request",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"transport": "relay" if USE_RELAY else "direct", "exception_type": type(e).__name__},
         )
         record_application_failure(e)
         if log_dir:
@@ -443,7 +443,7 @@ async def _fetch_gpconnect_record(
             action="gpconnect_request",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"transport": "relay" if USE_RELAY else "direct", "exception_type": type(e).__name__},
         )
         record_application_failure(e)
         if log_dir:
@@ -462,7 +462,7 @@ async def _fetch_gpconnect_record(
             action="gpconnect_request",
             outcome=AuditOutcome.fail,
             error_code=str(resp.status_code),
-            detail={"response_text": resp.text},
+            detail={"transport": "relay" if USE_RELAY else "direct"},
         )
         logging.error(msg)
         if log_dir:

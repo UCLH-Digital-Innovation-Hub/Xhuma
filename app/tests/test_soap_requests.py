@@ -232,6 +232,7 @@ async def test_iti38_normalizes_xds_patient_identifier_and_uses_query_id(monkeyp
         "NOCEID",
         "urn:uuid:44444444-4444-4444-8444-444444444444",
         complete_saml_context,
+        message_id="urn:uuid:11111111-1111-4111-8111-111111111111",
     )
 
 
