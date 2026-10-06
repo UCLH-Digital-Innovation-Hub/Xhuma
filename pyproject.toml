@@ -29,23 +29,30 @@ dependencies = [
     "alembic",
     "psycopg[binary]",
     "azure-monitor-opentelemetry>=1.8.7",
-    "urllib3>=1.7.0",
+    "urllib3>=2.8.0",
     "defusedxml>=0.7.1",
+    "tzdata>=2026.4",
 ]
 
-[tool.isort]
-profile = "black"
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F"]
+extend-select = ["I"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
 
 [dependency-groups]
 dev = [
-    "black",
     "websockets",
-    "isort",
     "pytest",
     "xmlschema",
     "pytest-asyncio",
     "pytest-benchmark",
-    "flake8",
     "pre-commit",
     "coverage",
     "ruff>=0.15.12",
@@ -72,11 +79,3 @@ paths=[
     "alembic"]
 deps-file="pyproject.toml"
 sections=["project.dependencies"]
-
-[tool.ruff]
-line-length = 120
-
-[tool.ruff.lint]
-select = ["E", "F"]
-ignore = ["E501"]
-

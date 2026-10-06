@@ -175,7 +175,7 @@ example_route_concept = {
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.dmd.snomed_client")
+@patch("app.ccda.dmd.snomed_client", autospec=True)
 @patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock)
 @patch("app.ccda.dmd.httpx.AsyncClient")
 async def test_dmd_lookup(mock_async_client, mock_get_token, mock_snomed):
@@ -220,4 +220,39 @@ async def test_dmd_lookup(mock_async_client, mock_get_token, mock_snomed):
     assert concept.route.code == "26643006"
     assert concept.route.displayName == "Oral"
 
-    assert mock_snomed.setex.call_count == 3
+    assert mock_snomed.setex.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_prewarmed_concept_awaits_cache_without_http():
+    import json
+
+    from app.ccda.dmd import dmd_cache_key, get_dmd_concept
+
+    with patch("app.ccda.dmd.snomed_client", autospec=True) as cache, patch("app.ccda.dmd.httpx.AsyncClient") as http:
+        cache.get.return_value = json.dumps(example_return).encode()
+        assert await get_dmd_concept(123, properties=["parent", "VPI"]) == example_return
+        cache.get.assert_awaited_once_with(dmd_cache_key(123, ["parent", "VPI"]))
+        cache.setex.assert_not_awaited()
+        http.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_terminology_token_cache_write_is_awaited():
+    import httpx
+
+    from app.ccda.dmd import get_terminology_token
+
+    with (
+        patch("app.ccda.dmd.client_id", "test-client"),
+        patch("app.ccda.dmd.client_secret", "test-secret"),
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
+        patch("app.ccda.dmd.httpx.AsyncClient") as factory,
+    ):
+        client = AsyncMock()
+        client.post.return_value = httpx.Response(
+            200, json={"access_token": "cached-token"}, request=httpx.Request("POST", "https://example.test/token")
+        )
+        factory.return_value.__aenter__.return_value = client
+        assert await get_terminology_token() == "cached-token"
+        cache.setex.assert_awaited_once_with("dmd_token", 30 * 60, "cached-token")

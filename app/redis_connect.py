@@ -2,14 +2,15 @@
 Redis Connection Module
 """
 
+import asyncio
 import logging
 import os
 import ssl
-import time
+from datetime import timedelta
 from functools import wraps
 from typing import Any
 
-import redis
+import redis.asyncio as redis
 from redis.exceptions import ConnectionError, RedisError, TimeoutError
 
 logger = logging.getLogger(__name__)
@@ -38,12 +39,12 @@ def retry_on_connection_error(max_retries: int = MAX_RETRIES, delay: int = RETRY
 
     def decorator(func):
         @wraps(func)
-        def wrapper(*args, **kwargs):
+        async def wrapper(*args, **kwargs):
             last_error = None
 
             for attempt in range(max_retries):
                 try:
-                    return func(*args, **kwargs)
+                    return await func(*args, **kwargs)
                 except (ConnectionError, TimeoutError) as exc:
                     last_error = exc
                     if attempt < max_retries - 1:
@@ -52,7 +53,7 @@ def retry_on_connection_error(max_retries: int = MAX_RETRIES, delay: int = RETRY
                             attempt + 2,
                             max_retries,
                         )
-                        time.sleep(delay)
+                        await asyncio.sleep(delay)
 
             logger.error(
                 "Redis operation failed after %s attempts: %s",
@@ -67,7 +68,7 @@ def retry_on_connection_error(max_retries: int = MAX_RETRIES, delay: int = RETRY
 
 
 class RedisClient:
-    """Redis client with connection pooling and error handling."""
+    """Async Redis client; one pooled instance per database and application worker."""
 
     def __init__(self, db: int = REDIS_DB):
         """Initialize Redis client with connection pool."""
@@ -101,45 +102,49 @@ class RedisClient:
         self._client = redis.Redis(**kwargs)
 
     @retry_on_connection_error()
-    def ping(self) -> bool:
+    async def ping(self) -> bool:
         """Test Redis connection."""
-        return bool(self._client.ping())
+        return bool(await self._client.ping())
 
     @retry_on_connection_error()
-    def get(self, key: str) -> bytes | None:
+    async def get(self, key: str) -> bytes | None:
         """Get value for key with automatic retry."""
-        return self._client.get(key)
+        return await self._client.get(key)
 
     @retry_on_connection_error()
-    def setex(self, key: str, time: int, value: str | bytes) -> bool:
+    async def setex(self, key: str, time: int | timedelta, value: str | bytes) -> bool:
         """Set key-value pair with expiry time."""
-        return bool(self._client.setex(key, time, value))
+        return bool(await self._client.setex(key, time, value))
 
     @retry_on_connection_error()
-    def delete(self, *keys: str) -> int:
+    async def delete(self, *keys: str) -> int:
         """Delete one or more keys."""
-        return int(self._client.delete(*keys))
+        return int(await self._client.delete(*keys))
 
     @retry_on_connection_error()
-    def keys(self, pattern: str = "*") -> list:
+    async def keys(self, pattern: str = "*") -> list:
         """Get keys matching pattern."""
-        return self._client.keys(pattern)
+        return await self._client.keys(pattern)
 
     @retry_on_connection_error()
-    def info(self) -> dict[str, Any]:
+    async def info(self) -> dict[str, Any]:
         """Get Redis server information."""
-        return self._client.info()
+        return await self._client.info()
 
     @retry_on_connection_error()
-    def exists(self, key: str) -> bool:
+    async def exists(self, key: str) -> bool:
         """Check if a key exists."""
-        return bool(self._client.exists(key))
+        return bool(await self._client.exists(key))
 
-    def get_cache_info(self) -> dict:
+    def pipeline(self):
+        """Queue commands synchronously; use async with and await pipeline.execute()."""
+        return self._client.pipeline()
+
+    async def get_cache_info(self) -> dict:
         """Get cache statistics and memory usage."""
         try:
-            info = self.info()
-            total_keys = self._client.dbsize()
+            info = await self.info()
+            total_keys = await self._client.dbsize()
             memory_used = info.get("used_memory", 0)
             total_memory = info.get("maxmemory", 0)
 
@@ -168,9 +173,9 @@ class RedisClient:
             logger.error("Failed to retrieve cache information: %s", exc)
             return {"error": str(exc)}
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close all connections in the pool."""
-        self._client.connection_pool.disconnect()
+        await self._client.aclose(close_connection_pool=True)
 
 
 redis_client = RedisClient()
@@ -180,30 +185,30 @@ redis_connect = redis_client
 snomed_client = RedisClient(db=2)
 
 
-def get_cached_data(key: str) -> bytes | None:
+async def get_cached_data(key: str) -> bytes | None:
     """Retrieve cached data for a given key."""
     try:
-        return redis_client.get(key)
+        return await redis_client.get(key)
     except RedisError as exc:
         logger.error("Error retrieving cached data: %s", exc)
         return None
 
 
-def cache_data(key: str, value: str | bytes, expiry: int = 3600) -> bool:
+async def cache_data(key: str, value: str | bytes, expiry: int = 3600) -> bool:
     """Cache data with expiry time."""
     try:
-        return redis_client.setex(key, expiry, value)
+        return await redis_client.setex(key, expiry, value)
     except RedisError as exc:
         logger.error("Error caching data: %s", exc)
         return False
 
 
-def clear_cache(pattern: str = "*") -> bool:
+async def clear_cache(pattern: str = "*") -> bool:
     """Clear cache entries matching pattern."""
     try:
-        keys = redis_client.keys(pattern)
+        keys = await redis_client.keys(pattern)
         if keys:
-            return bool(redis_client.delete(*keys))
+            return bool(await redis_client.delete(*keys))
         return True
     except RedisError as exc:
         logger.error("Error clearing cache: %s", exc)

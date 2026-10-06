@@ -6,12 +6,22 @@ import pprint
 import httpx
 
 from ..redis_connect import snomed_client
+from ..telemetry import measure, record_cache
 from .models.datatypes import CD
 from .models.dmd import DMDConcept
 from .models.dmd import VPIProperty as VPI
 
 client_id = os.getenv("DMD_CLIENT_ID")
 client_secret = os.getenv("DMD_CLIENT_SECRET")
+
+
+def _decode_cached_token(token: bytes | str | None) -> str | None:
+    """Normalize cached token value from Redis into a plain string."""
+    if token is None:
+        return None
+    if isinstance(token, bytes):
+        return token.decode("utf-8")
+    return token
 
 
 async def get_terminology_token():
@@ -35,12 +45,14 @@ async def get_terminology_token():
     }
 
     async with httpx.AsyncClient() as client:
-        response = await client.post(url, data=data, headers=headers)
-        response.raise_for_status()
+        with measure("terminology.token") as span:
+            response = await client.post(url, data=data, headers=headers)
+            span.set_attribute("http.response.status_code", response.status_code)
+            response.raise_for_status()
         token_data = response.json()
 
-        # cache the token for 5 minutes
-        snomed_client.setex("dmd_token", 300, token_data["access_token"])
+        # cache the token for 30 minutes
+        await snomed_client.setex("dmd_token", 30 * 60, token_data["access_token"])
 
         return token_data["access_token"]
 
@@ -56,7 +68,10 @@ def dmd_cache_key(concept_id: int, properties: list = None) -> str:
 async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
     # Check if the concept is in the cache
     cache_key = dmd_cache_key(concept_id, properties)
-    cached_concept = snomed_client.get(cache_key)
+    with measure("terminology.cache.read") as span:
+        cached_concept = await snomed_client.get(cache_key)
+        span.set_attribute("cache.hit", bool(cached_concept))
+    record_cache("terminology", bool(cached_concept))
     if cached_concept:
         logging.info(f"Cache hit for SNOMED concept {concept_id}")
         # cached concept is stored as json string, decode it before returning
@@ -66,7 +81,7 @@ async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
     # If not in cache, fetch from DMD API
 
     # check for cached token
-    token = snomed_client.get("dmd_token")
+    token = _decode_cached_token(await snomed_client.get("dmd_token"))
     # if token is not cached, fetch a new one
     if not token:
         logging.info("No cached DMD token found. Fetching new token.")
@@ -81,18 +96,22 @@ async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
         headers = {
             "Authorization": f"Bearer {token}",
         }
-        response = await client.get(url, headers=headers)
+        with measure("terminology.http") as span:
+            response = await client.get(url, headers=headers)
+            span.set_attribute("http.response.status_code", response.status_code)
 
         if response.status_code == 401:
             logging.warning("Unauthorized access to DMD API. Token may have expired. Fetching new token.")
             token = await get_terminology_token()
             headers["Authorization"] = f"Bearer {token}"
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
+            with measure("terminology.http", retry=True) as span:
+                response = await client.get(url, headers=headers)
+                span.set_attribute("http.response.status_code", response.status_code)
+                response.raise_for_status()
 
         concept_data = response.json()
         # cache the concept data for 1 week
-        snomed_client.setex(cache_key, 7 * 24 * 3600, json.dumps(concept_data))
+        await snomed_client.setex(cache_key, 7 * 24 * 3600, json.dumps(concept_data))
         # print(f"Cached DMD concept {concept_id} with properties {properties} under key {cache_key}")
 
         return concept_data

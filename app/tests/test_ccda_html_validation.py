@@ -1,12 +1,11 @@
 import pytest
-
-from app.ccda.entries import medication as medication_entry
-from app.ccda.entries import immunization_entry as immunization_entry_func
-from app.ccda.entries import observation_entry
-
-from fhirclient.models.medicationstatement import MedicationStatement
 from fhirclient.models.immunization import Immunization
+from fhirclient.models.medicationstatement import MedicationStatement
 from fhirclient.models.observation import Observation
+
+from app.ccda.entries import immunization_entry as immunization_entry_func
+from app.ccda.entries import medication as medication_entry
+from app.ccda.entries import observation_entry
 
 
 def assert_no_br_in_xmltext(obj):

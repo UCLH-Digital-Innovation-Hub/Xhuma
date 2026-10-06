@@ -322,6 +322,7 @@ async def test_substance_administration():
         "MedicationRequest/32": med_request,
     }
     substance_administration = await medication_entry(med_statement, index_dict)
+    assert substance_administration.row[0] == "22/05/2024"
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
     # print(substance_administration)
@@ -330,12 +331,12 @@ async def test_substance_administration():
     assert substance_administration["@moodCode"] == "INT"
     assert len(substance_administration["id"]) == 1
     # assert effective time list contains low
-    assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20240522"
+    assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20240522000000+0100"
     # assert substance_administration.id[0].root is not None
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+@patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_structured_dosage(mock_dmd_lookup):
     """
     Test the structured dosage
@@ -382,7 +383,7 @@ async def test_structured_dosage(mock_dmd_lookup):
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+@patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_structured_detail(mock_dmd_lookup):
     mock_dmd_lookup.return_value = DMDConcept(
         concept_id=1,
@@ -510,7 +511,7 @@ new_med = medication.Medication(
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+@patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_new_structured_detail(mock_dmd_lookup):
     mock_dmd_lookup.return_value = DMDConcept(
         concept_id=212169831,
@@ -655,7 +656,7 @@ async def test_medication_repeats_robustness():
 
 
 @pytest.mark.asyncio
-@patch("app.ccda.entries.dmd_lookup", new_callable=AsyncMock)
+@patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
     # Setup mock data to test chronological order of notes and that issued quantity / repeats are included in XML
     med_request_data = {

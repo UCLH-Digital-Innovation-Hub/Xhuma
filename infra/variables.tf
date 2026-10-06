@@ -59,6 +59,11 @@ variable "shared_resource_group_name" {
   type        = string
 }
 
+variable "shared_subscription_id" {
+  description = "The subscription ID hosting the shared Key Vault"
+  type        = string
+}
+
 variable "shared_key_vault_name" {
   description = "The name of the global shared Key Vault"
   type        = string
@@ -142,6 +147,12 @@ variable "env" {
   description = "Environment Name"
   type        = string
   default     = "prod"
+}
+
+variable "ccda_expiry_hours" {
+  description = "Number of hours to cache CCDA documents"
+  type        = string
+  default     = "4"
 }
 
 variable "otel_metric_export_interval_ms" {

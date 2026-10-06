@@ -9,7 +9,7 @@ WORKDIR /code
 
 RUN apt-get update && apt-get upgrade -y && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
-    pip install --no-cache-dir --upgrade setuptools
+    python -m pip uninstall -y pip setuptools
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
