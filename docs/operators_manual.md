@@ -4,7 +4,7 @@
 
 **Security Rule for Operators:**
 > [!WARNING]
-> **Screenshots and Logs:** Screenshots and command outputs must **never** expose credentials, secret values, access/storage keys, tokens, full Terraform plans, connection strings, or sensitive application configuration.
+> **Screenshots and Logs:** Operational evidence must not contain credentials, tokens, patient data, certificate material, secret-valued configuration or protected infrastructure identifiers.
 
 > **Note:** Screenshots included in this manual are illustrative evidence captured during the September 2026 Play rehearsal. Commands and configuration in this runbook are authoritative; UI screenshots may change as GitHub and Azure evolve.
 
@@ -60,15 +60,9 @@ We reuse the established bootstrap logic across environments. For `play`, we now
 
 To allow GitHub Actions to deploy infrastructure and code, Xhuma currently relies on a Service Principal with client secrets.
 
-1. **Target Resource Group Permissions**: The SP requires `Contributor` rights over the target Azure Resource Group, and must be able to list storage account keys for the state backend.
-2. **Shared Key Vault Access Prerequisite**: The Terraform configuration explicitly writes access policies to the shared key vault (`xhuma-shared-kv-int`) for the newly provisioned App Service identity and Locust Managed Identity. **The Service Principal must have `Key Vault Contributor` (or equivalent `Microsoft.KeyVault/vaults/accessPolicies/write` permissions) on the shared Key Vault.** This is an approved onboarding prerequisite.
-3. **Expiry & Rotation**: Ensure the SP secret is rotated before expiry. Update the `AZURE_CLIENT_SECRET` in GitHub Secrets upon rotation.
-4. **GitHub Secrets Configuration**:
-   - `AZURE_CLIENT_ID`
-   - `AZURE_CLIENT_SECRET`
-   - `AZURE_TENANT_ID`
-   - `AZURE_SUBSCRIPTION_ID`
-   - `SHARED_SUBSCRIPTION_ID`
+1. **Target Resource Group Permissions**: The SP requires least privilege rights over the target Azure Resource Group and state backend.
+2. **Shared Key Vault Access Prerequisite**: The Terraform configuration securely manages access policies on the shared Key Vault. The Service Principal requires sufficient rights to manage these policies.
+3. **Expiry & Rotation**: Ensure the deployment credential is rotated before expiry. Update the relevant GitHub Secret upon rotation.
 
 ---
 
@@ -81,29 +75,16 @@ The deployment relies on specific GitHub environments to orchestrate the provisi
 ![Play matrix deployment pipeline](./assets/play-plan-approval-gate.png)
 *Figure 1 — Pre-plan approval gate — Run #32 paused before `Infra Plan - play` because the `play-plan` GitHub Environment required reviewer approval.*
 
-> **Control note:** During the September 2026 Play rehearsal, `play-plan` required reviewer approval. The workflow source currently describes the plan environment as having no manual approvers.
-
 **Environment Configuration:**
 
-| GitHub environment    | Required secrets                                                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `play-plan`           | Azure credential set; `CR_PAT`; `REGISTRY_ID`; `POSTGRES_PASSWORD`; `SHARED_KEY_VAULT_NAME`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_SUBSCRIPTION_ID` |
-| `rg-xhuma-play-infra` | Azure credential set; `SHARED_SUBSCRIPTION_ID`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_KEY_VAULT_NAME` |
-| `rg-xhuma-play`       | Azure credential set                                                                                                      |
-| `int-plan`            | Azure credential set; `CR_PAT`; `REGISTRY_ID`; `POSTGRES_PASSWORD`; `SHARED_KEY_VAULT_NAME`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_SUBSCRIPTION_ID` |
-| `rg-xhuma-int-infra`  | Azure credential set; `SHARED_SUBSCRIPTION_ID`; `SHARED_RESOURCE_GROUP_NAME`; `SHARED_KEY_VAULT_NAME` |
-| `rg-xhuma-int`        | Azure credential set                                                                                                      |
-
-*Note: The Azure credential set consists of `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, and `AZURE_SUBSCRIPTION_ID`. Do not duplicate Terraform input secrets in the apply/deploy environments, as apply consumes the saved plan.*
-
-*Note: The `GHCR_USERNAME` GitHub Environment variable (not a secret) must be set on the plan environments to provide a stable runtime registry identity paired with the `CR_PAT` secret. The runtime registry identity must not use the ephemeral `github.actor`. (The CI build/push stage correctly uses `github.actor` + `GITHUB_TOKEN`, which is a separate and valid pattern for ephemeral Actions).*
+Deployments use protected GitHub Environments and dedicated Azure deployment identities. Target-specific credentials, role assignments, environment configuration and approval topology are maintained in the restricted operational record and are intentionally not reproduced in this public runbook.
 
 **Shared Resources Configuration:**
-The `SHARED_SUBSCRIPTION_ID` is `c24b0c3e-9e09-4c7c-8687-75e8b654bc8e`. This cross-subscription variable must be explicitly provided to the environments running Terraform Plan (e.g., `play-plan` for matrix deployments) and the legacy `infra.yml` workflow, which provisions INT and production infrastructure.
+The shared subscription ID must be explicitly provided to the environments running Terraform Plan (e.g., `<target>-plan` for matrix deployments) and the legacy `<legacy-workflow>.yml` workflow, which provisions legacy infrastructure.
 
 **Actual Deployment Sequence:**
 
-1. **Configure GitHub Environments & Secrets:** Ensure the environments (`play-plan`, `rg-xhuma-play-infra`, `rg-xhuma-play`) exist and their secrets are securely stored. Environment names alone do not configure protection; you must set manual approvers on `rg-xhuma-play-infra` and `rg-xhuma-play`.
+1. **Configure GitHub Environments & Secrets:** Ensure the environments exist and their credentials are securely stored with appropriate manual approver configurations.
 2. **Automatic Bootstrap and Plan:** The workflow automatically runs the bootstrap script to create state storage (if missing), then executes `terraform plan`. The generated plan is uploaded securely and its hash is presented for review.
 3. **Review and Approved Apply:** Operators review the plan output. Once approved, the apply job verifies the plan hash and provisions the infrastructure.
 4. **Local-Vault Onboarding:** With the infrastructure provisioned, the operator manually injects required operational secrets (e.g., `epic-ca-cert`) into the newly created target Key Vault.
@@ -117,7 +98,7 @@ The `SHARED_SUBSCRIPTION_ID` is `c24b0c3e-9e09-4c7c-8687-75e8b654bc8e`. This cro
 Infrastructure and application liveness can be established before the target-local Epic CA is populated. However, `epic-ca-cert` is required before Epic/SOAP/mTLS functional acceptance.
 
 1. `epic-ca-cert`: The target-specific Epic verification CA bundle required by current application semantics (Base64 PEM) used for mutual TLS (mTLS). It may contain the direct issuing intermediate(s).
-2. **Populating the Vault**: Use the Azure Portal or CLI to add the secret to the newly provisioned Local Key Vault (e.g., `<app_service_name>-kv`, for example `xhuma-app-play-kv`).
+2. **Populating the Vault**: Use the Azure Portal or CLI to add the secret to the newly provisioned Local Key Vault (e.g., `<app_service_name>-kv`).
    *Note: Ensure multi-line PEM files are formatted correctly (newlines replaced if pasting into the Azure Portal).*
 
 ---
@@ -141,7 +122,7 @@ Before any deployment plan is generated, the pipeline enforces strict quality an
 ### 6.2 First Deployment & Protected Plans
 1. **Trigger**: Push code to the mapped branch (e.g., `rehearsal/play-deployment`).
 2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are available in GitHub. Plan generation will fail if a plan already exists for that run.
-3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary) using the strict review hierarchy below. Then, explicitly approve the infrastructure environment (`rg-xhuma-play-infra`).
+3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary) using the strict review hierarchy below. Then, explicitly approve the infrastructure environment (e.g., `<rg-target-infra>`).
 
 ### 6.3 Terraform Plan Review Before Approval
 
@@ -167,12 +148,12 @@ Do NOT proceed if you observe any of the following:
    ```bash
    RG_NAME="<backend-resource-group>"
    SA_NAME="<backend-storage-account>"
-   ACCOUNT_KEY=$(az storage account keys list --resource-group "$RG_NAME" --account-name "$SA_NAME" --query '[0].value' -o tsv)
+   # Obtain credentials securely via Azure AD or approved operational method
    ```
 3. **Download the exact immutable `.tfplan`:**
    ```bash
    PLAN_FILE="<plan-filename>"
-   az storage blob download --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" --container-name tfplans --name "$PLAN_FILE" --file "/tmp/$PLAN_FILE"
+   az storage blob download --auth-mode login --account-name "$SA_NAME" --container-name tfplans --name "$PLAN_FILE" --file "/tmp/$PLAN_FILE"
    ```
 4. **SHA256 verification against the workflow manifest/job summary:**
    ```bash
@@ -236,7 +217,7 @@ Do NOT proceed if you observe any of the following:
 *Figure 7 — Successful infrastructure Apply job, completing only after the strict plan review and GitHub Environment manual approval.*
 
 1. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a completely new workflow run is required to generate and approve a new plan.
-2. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval (`rg-xhuma-play`).
+2. **Image Deployment**: After infrastructure applies the inert bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires a separate environment approval.
 
 ![Play Deploy Digest](./assets/play-deploy-digest.png)
 *Figure 8 — The application image is deployed deterministically using the exact immutable SHA256 digest validated during the build stage.*
@@ -291,7 +272,7 @@ Deployment is deterministic. We record the previous digest before deploying and 
 
 ### 7.3 Custom Domain / DNS / TLS Onboarding
 
-Assigning the externally agreed environment FQDN (e.g., `int.uclh.xhuma.co.uk`) to the Azure App Service is a critical post-provisioning step. 
+Assigning the externally agreed environment FQDN (e.g., `<environment-hostname>`) to the Azure App Service is a critical post-provisioning step. 
 
 > **Current IaC Limitation:** Custom-domain DNS, App Service hostname binding, and managed-certificate onboarding are currently operator-managed post-provisioning steps. The current Terraform root does not manage the custom hostname binding or certificate. Therefore, a destructive App Service recreation can require the custom hostname/TLS binding to be manually re-established. Future IaC adoption is planned as an operational hardening item.
 
@@ -397,7 +378,7 @@ The shared Key Vault is now adopted into a separate shared Terraform state. The 
 
 Run #36 demonstrated automatic restoration of this network link after the Play subnet was deliberately destroyed.
 
-When managing shared infrastructure components (such as the shared Key Vault `xhuma-shared-kv-int` network ACLs) in Terraform:
+When managing shared infrastructure components (such as the shared Key Vault network ACLs) in Terraform:
 - Ensure the resource includes a `lifecycle { prevent_destroy = true }` block.
 - **Note:** `prevent_destroy` does not guarantee Terraform will never *propose* replacement. Instead, any proposed destruction or replacement of the imported shared Key Vault will be blocked by `prevent_destroy` during the apply phase.
 
@@ -459,7 +440,6 @@ Use these safe generic commands to inspect environments. Replace placeholders (e
 - never print secret-valued application settings;
 - never print raw audit `detail`, `subject_ref`, patient identifiers, tokens, SOAP payloads or downstream response bodies;
 - prefer metadata/count/presence checks;
-- `az webapp exec` is currently a preview CLI capability and the container shell is ephemeral;
 - do not enable SSH, public PostgreSQL access or firewall exceptions merely for routine inspection.
 
 #### Live application logs
@@ -471,20 +451,6 @@ az webapp log tail \
 ```
 
 Warn that operators must avoid capturing/publishing PHI or credentials from logs.
-
-#### Ephemeral runtime shell
-
-```bash
-az webapp exec \
-  --name <app-service> \
-  --resource-group <resource-group> \
-  --mode shell \
-  --shell /bin/sh
-```
-
-- this was used in INT because SSH was not enabled;
-- routine diagnostic use must remain read-only;
-- data outside persistent App Service storage must not be relied upon.
 
 #### Resolve Log Analytics workspace ID
 
@@ -547,23 +513,7 @@ AppDependencies
 
 #### Private PostgreSQL inspection
 
-Private-network PostgreSQL may not resolve from an operator workstation.
-If runtime inspection is necessary:
-1. use `az webapp exec`;
-2. use the application's existing connection context;
-3. begin with `SET TRANSACTION READ ONLY`;
-4. inspect counts/presence/metadata only;
-5. rollback;
-6. never select raw audit detail or identifiers merely for operational assurance.
-
-Minimal safe pattern:
-```python
-from sqlalchemy import text
-tx = await conn.begin()
-await conn.execute(text("SET TRANSACTION READ ONLY"))
-# metadata/count queries only
-await tx.rollback()
-```
+Database-level assurance checks must be performed through an approved restricted administration path using read-only queries. Connection details and access procedures are intentionally not documented publicly.
 
 ---
 
