@@ -33,7 +33,9 @@ from ..models import (
 from .constants import REGISTRY_ID
 
 
-async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes, message_id: str | None = None):
+async def iti_38_response(
+    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes, message_id: str | None = None
+):
     response = AdhocQueryResponse()
 
     def set_failure(code_context: str) -> None:

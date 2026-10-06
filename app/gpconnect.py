@@ -498,7 +498,7 @@ async def _fetch_gpconnect_record(
     except Exception as e:
         msg = f"FHIR bundle malformed: {e}"
         record_application_failure(e)
-        logging.exception(msg)
+        logging.exception("FHIR bundle validation failed (%s)", type(e).__name__)
         await attempt_audit(
             request=request,
             request_id=headers.get("Ssp-TraceID"),
@@ -507,7 +507,7 @@ async def _fetch_gpconnect_record(
             action="validate_fhir_bundle",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"exception_type": type(e).__name__},
         )
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
