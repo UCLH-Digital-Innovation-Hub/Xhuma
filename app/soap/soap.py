@@ -354,8 +354,7 @@ async def iti38(request: Request):
                 print("No valid NHS number found in patient ID field")
                 logging.info("No valid NHS number found in patient ID field")
                 raise HTTPException(status_code=400, detail="Invalid NHS number format in request")
-
-        data = await iti_38_response(request, patient_id, "NOCEID", query_id, saml_attrs)
+        data = await iti_38_response(request, patient_id, "NOCEID", query_id, saml_attrs, message_id=message_id)
         return Response(content=data, media_type="application/soap+xml")
     else:
         raise HTTPException(status_code=400, detail=f"Content type {content_type} not supported")
