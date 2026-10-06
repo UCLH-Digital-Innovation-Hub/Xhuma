@@ -127,6 +127,7 @@ jobs:
           TF_VAR_shared_key_vault_name: ${{ secrets.SHARED_KEY_VAULT_NAME }}
           TF_VAR_registry_id: ${{ secrets.REGISTRY_ID }}
           TF_VAR_docker_registry_password: ${{ secrets.CR_PAT }}
+          TF_VAR_docker_registry_username: ${{ vars.GHCR_USERNAME }}
         run: |
           MISSING=""
           [ -z "$ARM_CLIENT_ID" ] && MISSING="$MISSING AZURE_CLIENT_ID"
@@ -139,8 +140,9 @@ jobs:
           [ -z "$TF_VAR_shared_key_vault_name" ] && MISSING="$MISSING SHARED_KEY_VAULT_NAME"
           [ -z "$TF_VAR_registry_id" ] && MISSING="$MISSING REGISTRY_ID"
           [ -z "$TF_VAR_docker_registry_password" ] && MISSING="$MISSING CR_PAT"
+          [ -z "$TF_VAR_docker_registry_username" ] && MISSING="$MISSING GHCR_USERNAME"
           if [ -n "$MISSING" ]; then
-            echo "::error::Missing required secrets:$MISSING"
+            echo "::error::Missing required secrets/vars:$MISSING"
             exit 1
           fi
 
@@ -247,7 +249,10 @@ jobs:
           TF_VAR_resource_group_name: "${{ matrix.target.resource_group }}"
           TF_VAR_registry_id: "${{ secrets.REGISTRY_ID }}"
           TF_VAR_docker_registry_password: "${{ secrets.CR_PAT }}"
-          TF_VAR_docker_registry_username: "${{ github.actor }}"
+          # GITHUB_TOKEN/github.actor are appropriate for ephemeral Actions build/push
+          # App Service requires a stable runtime registry username paired with CR_PAT
+          # runtime pull identity must not vary according to the deployment actor
+          TF_VAR_docker_registry_username: "${{ vars.GHCR_USERNAME }}"
           TF_VAR_docker_image: "${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
           TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
           TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
