@@ -218,3 +218,34 @@ async def test_cached_token_uses_one_read_without_exists_race(token):
         cache.exists.assert_not_called()
         client.post.assert_not_awaited()
         assert client.get.await_args.kwargs["headers"]["Authorization"] == "Bearer cached-token"
+
+
+def test_nhs_api_environment_selection():
+    import importlib
+    import os
+
+    import app.pds.pds
+
+    # Test dev
+    os.environ["ENV"] = "dev"
+    importlib.reload(app.pds.pds)
+    assert app.pds.pds.BASE_PATH == "https://dev.api.service.nhs.uk/"
+
+    # Test int
+    os.environ["ENV"] = "int"
+    importlib.reload(app.pds.pds)
+    assert app.pds.pds.BASE_PATH == "https://int.api.service.nhs.uk/"
+
+    # Test prod
+    os.environ["ENV"] = "prod"
+    importlib.reload(app.pds.pds)
+    assert app.pds.pds.BASE_PATH == "https://api.service.nhs.uk/"
+
+    # Test unknown raises
+    os.environ["ENV"] = "unknown"
+    with pytest.raises(ValueError, match="Unknown or unsupported environment: unknown"):
+        importlib.reload(app.pds.pds)
+
+    # Restore to avoid side effects
+    os.environ["ENV"] = "dev"
+    importlib.reload(app.pds.pds)
