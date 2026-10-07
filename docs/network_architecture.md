@@ -18,8 +18,7 @@ Xhuma's cloud infrastructure is provisioned via Terraform (`infra/main.tf`). The
 
 Xhuma uses GitHub Actions for automated deployment. The architecture is currently migrating to a target-isolated matrix deployment model.
 
-- **Legacy Pipelines (`cd.yml` / `infra.yml`)**: Currently manage the integration (`int`) and production (`prd`) environments.
-- **Matrix Pipeline (`matrix-deploy.yml`)**: Currently manages the `play` rehearsal environment, introducing strict environment approvals, immutable Docker image digests, and centralised shared services.
+- **Matrix Pipeline (`matrix-deploy.yml`)**: The authoritative deployment path managing `play`, `int`, and `prd` targets. It enforces strict environment approvals, immutable Docker image digests, target-isolated boundaries, and centralised shared services. The legacy deployment pipelines have been retired.
 
 ### General Deployment Flow (Matrix Example)
 

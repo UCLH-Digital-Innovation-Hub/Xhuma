@@ -1,10 +1,11 @@
 import subprocess
+import sys
 
 SCRIPT_PATH = "scripts/deploy/validate_branch.py"
 
 
 def run_script(args):
-    result = subprocess.run(["python", SCRIPT_PATH] + args, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, SCRIPT_PATH] + args, capture_output=True, text=True)
     return result
 
 

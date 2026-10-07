@@ -31,7 +31,9 @@
 Xhuma utilises a **Target-isolated matrix deployment with centrally managed shared services**. Every target environment (e.g., `play`, `int`, production trusts) receives its own isolated cloud footprint for compute and data to prevent cross-contamination of health data and limit blast radius. 
 
 - **Shared Resources:** A centrally managed Azure Resource Group hosts shared services with separate lifecycle/ownership, such as the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault for global secrets (e.g., API keys, DM+D secrets).
-- **Target-Local Resources:** Each environment receives a dedicated Azure App Service, VNet, Managed Redis, PostgreSQL, and Local Key Vault.
+- **Target-Local Resources:** Each environment receives a dedicated Azure App Service, VNet, Managed Redis, PostgreSQL, and Local Key Vault. Target workloads are isolated per environment/site.
+
+**Operational Exception Notice:** PRD shared resources (such as `xhuma-shared-kv-prd` and its state) are temporarily hosted in the legacy `rg-xhuma-shared` resource group pending migration to a dedicated `rg-xhuma-shared-prd` resource group. This is a temporary operational exception and not the intended target architecture. PRD shared state and Key Vault are, however, logically separated from INT.
 
 ---
 
@@ -60,7 +62,7 @@ We reuse the established bootstrap logic across environments. For `play`, we now
 
 To allow GitHub Actions to deploy infrastructure and code, Xhuma currently relies on a Service Principal with client secrets.
 
-1. **Target Resource Group Permissions**: The SP requires least privilege rights over the target Azure Resource Group and state backend.
+1. **Target Resource Group Permissions**: Target resource group creation and initial RBAC assignments are privileged administrative bootstrap operations performed outside the normal deployment identity. The Service Principal requires least privilege rights (e.g. Contributor) strictly scoped to the pre-existing target Azure Resource Group. CI will fail closed if the expected target Resource Group does not exist, rather than requiring subscription-wide Contributor permissions.
 2. **Shared Key Vault Access Prerequisite**: The Terraform configuration securely manages access policies on the shared Key Vault. The Service Principal requires sufficient rights to manage these policies.
 3. **Expiry & Rotation**: Ensure the deployment credential is rotated before expiry. Update the relevant GitHub Secret upon rotation.
 
@@ -79,17 +81,24 @@ The deployment relies on specific GitHub environments to orchestrate the provisi
 
 Deployments use protected GitHub Environments and dedicated Azure deployment identities. Target-specific credentials, role assignments, environment configuration and approval topology are maintained in the restricted operational record and are intentionally not reproduced in this public runbook.
 
+**Target Inventory Model:**
+Future Trust/site deployments will be data-driven from the validated `infra/targets.json` inventory rather than requiring duplicated CI/CD workflows. Staged fleet deployment is controlled via the `hold` and `rollout_ring` attributes in this inventory. Greenfield targets (e.g., new deployments) generally have `require_existing_state=false`, whereas migrated or brownfield environments must use `require_existing_state=true` to enforce existing-state preflight and state-anchor validation.
+
 **Shared Resources Configuration:**
-The shared subscription ID must be explicitly provided to the environments running Terraform Plan (e.g., `<target>-plan` for matrix deployments) and the legacy `<legacy-workflow>.yml` workflow, which provisions legacy infrastructure.
+The shared subscription ID and related shared variables (e.g. `SHARED_RESOURCE_GROUP_NAME`) must be explicitly provided to the environments running Terraform Plan and Apply.
 
-**Actual Deployment Sequence:**
+**Actual Production Deployment Sequence:**
 
-1. **Configure GitHub Environments & Secrets:** Ensure the environments exist and their credentials are securely stored with appropriate manual approver configurations.
-2. **Automatic Bootstrap and Plan:** The workflow automatically runs the bootstrap script to create state storage (if missing), then executes `terraform plan`. The generated plan is uploaded securely and its hash is presented for review.
-3. **Review and Approved Apply:** Operators review the plan output. Once approved, the apply job verifies the plan hash and provisions the infrastructure.
-4. **Local-Vault Onboarding:** With the infrastructure provisioned, the operator manually injects required operational secrets (e.g., `epic-ca-cert`) into the newly created target Key Vault.
-5. **Approved Application Deployment:** Once the vault is ready, the deployment job replaces the inert bootstrap image with the actual application container digest.
-6. **Verification and Manual Rollback:** The new image digest is verified. If issues occur, operators manually roll back by deploying a previous known-good digest, ensuring no concurrent deployment or database incompatibility.
+1. **Continuous Integration & Build**: CI/tests execute, followed by immutable image build and vulnerability scan.
+2. **Target Selection**: Targets are parsed from `infra/targets.json`.
+3. **Terraform Plan**: Generates an infrastructure plan.
+4. **Immutable Plan Storage**: The exact plan and a SHA256 manifest are securely stored.
+5. **Human Infrastructure Approval**: Operators review and approve the exact plan in GitHub.
+6. **Apply Infrastructure**: Applies the reviewed exact plan.
+7. **Shared Infrastructure Reconciliation**: The target integrates with shared services (e.g., shared Key Vault network ACLs).
+8. **Application Deployment Approval**: A separate approval gate is used before application deployment.
+9. **Digest Verification & Health Check**: The exact image digest is verified and an unauthenticated `/health` check confirms coarse liveness.
+10. **Subsequent Functional/Clinical Acceptance**: (See section 7.5). Note that infrastructure deployment being successful does not imply clinical commissioning; PRD infrastructure is currently in progress and not fully live.
 
 ---
 
@@ -105,9 +114,18 @@ Infrastructure and application liveness can be established before the target-loc
 
 ## 6. Deployment Orchestration
 
-Deployment is handled by GitHub Actions (`.github/workflows/matrix-deploy.yml`), which enforces strict boundaries:
-- The matrix workflow (`matrix-deploy.yml`) is the authoritative deployment path for `int` and the `play` environment.
-- The legacy `infra.yml` remains present for the production/legacy path and retains a manual `workflow_dispatch` entry point. It must not be manually dispatched against `int`; this path is pending retirement or hardening.
+The matrix workflow (`.github/workflows/matrix-deploy.yml`) is the authoritative deployment path for all environments (`play`, `int`, and `prd`). The legacy deployment pipelines have been retired.
+
+### 6.0 Release Promotion Model
+
+The deployment lifecycle explicitly separates code integration from release promotion:
+- **Development**: All standard development occurs on the `dev` branch.
+- **Release Candidate**: To prepare a release, a `release/x.y` candidate branch is created from `dev`.
+- **INT Promotion & Validation**: The candidate is promoted/pushed to the `int` branch, deploying the candidate to the `INT` environment where it is validated and assured.
+- **PRD Promotion**: Upon successful validation, the exact same `release/x.y` candidate is merged into `main` (for PRD deployment).
+- **Reconciliation**: After the release is successfully deployed, `main` is back-merged into `dev` to reconcile any hotfixes or deployment-specific configuration changes.
+
+Do not describe `int` -> `main` as the normal release mechanism; `int` is a deployment target environment, whereas `main` tracks the production release.
 
 ### 6.1 Continuous Integration and Build Controls
 
@@ -517,7 +535,19 @@ Database-level assurance checks must be performed through an approved restricted
 
 ---
 
-## 10. Assurance and Evidence Records
+## 10. Post-0.9 Hardening
+
+The following operational and security hardening activities are scheduled post-0.9 release:
+
+- **Fuzzing requirement:** Make fuzzing a required check for any PR targeting `main`, not only `int -> main`.
+- **Identity/Federation:** Adopt OIDC/workload federation instead of long-lived SP secrets.
+- **State Authentication:** Adopt Entra/identity-based Terraform state access instead of storage keys.
+- **Inventory V2:** Expand the `targets.json` model into a complete site commissioning model (Inventory v2).
+- **PRD Shared Migration:** Complete the dedicated PRD shared RG migration (`rg-xhuma-shared-prd`) and explicitly remove PRD SP access from the legacy shared RG (`rg-xhuma-shared`).
+
+---
+
+## 11. Assurance and Evidence Records
 
 Specific deployment rehearsals and assurance events are captured as immutable evidence records. These records are retained separately from this living operational runbook to preserve point-in-time factual observations.
 

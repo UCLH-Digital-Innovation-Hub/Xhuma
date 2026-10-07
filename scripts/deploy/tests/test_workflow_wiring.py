@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 
 import yaml
 
@@ -67,7 +68,7 @@ def test_consumed_job_outputs_have_needs():
 
 def get_selected_targets(branch):
     result = subprocess.run(
-        ["python", "scripts/deploy/select_targets.py", "infra/targets.json", branch],
+        [sys.executable, "scripts/deploy/select_targets.py", "infra/targets.json", branch],
         capture_output=True,
         text=True,
         check=True,

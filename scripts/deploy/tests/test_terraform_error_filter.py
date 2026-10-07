@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 
 
@@ -50,7 +51,7 @@ def test_terraform_error_filter():
         error_file = f.name
 
     try:
-        cmd = f'python scripts/deploy/filter_tf_error.py 1 "{error_file}"'
+        cmd = f'"{sys.executable}" scripts/deploy/filter_tf_error.py 1 "{error_file}"'
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
         output = result.stdout
@@ -92,7 +93,7 @@ def test_terraform_error_filter():
             )
             error_file2 = f2.name
 
-        cmd2 = f'python scripts/deploy/filter_tf_error.py 2 "{error_file2}"'
+        cmd2 = f'"{sys.executable}" scripts/deploy/filter_tf_error.py 2 "{error_file2}"'
         result2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True)
 
         assert (

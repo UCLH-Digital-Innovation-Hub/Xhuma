@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from copy import deepcopy
 
@@ -54,7 +55,7 @@ def run_script(manifest_dict, env_vars, mock_backend=None):
     try:
         env = os.environ.copy()
         env.update(env_vars)
-        result = subprocess.run(["python", SCRIPT_PATH, manifest_path], env=env, capture_output=True, text=True)
+        result = subprocess.run([sys.executable, SCRIPT_PATH, manifest_path], env=env, capture_output=True, text=True)
         return result
     finally:
         os.remove(manifest_path)
@@ -93,7 +94,7 @@ def test_invoked_from_subdirectory():
         manifest_basename = os.path.basename(manifest_path)
 
         result = subprocess.run(
-            ["python", script_rel_path, manifest_basename], env=env, cwd="infra", capture_output=True, text=True
+            [sys.executable, script_rel_path, manifest_basename], env=env, cwd="infra", capture_output=True, text=True
         )
         assert result.returncode == 0
         assert "Manifest verified successfully" in result.stdout
