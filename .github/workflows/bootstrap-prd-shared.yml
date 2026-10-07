@@ -1,7 +1,9 @@
 name: Bootstrap PRD Shared State
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - chore/bootstrap-prd-shared
 
 jobs:
   bootstrap:
