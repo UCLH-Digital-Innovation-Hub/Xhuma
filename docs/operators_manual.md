@@ -30,10 +30,8 @@
 
 Xhuma utilises a **Target-isolated matrix deployment with centrally managed shared services**. Every target environment (e.g., `play`, `int`, production trusts) receives its own isolated cloud footprint for compute and data to prevent cross-contamination of health data and limit blast radius. 
 
-- **Shared Resources:** A centrally managed Azure Resource Group hosts shared services with separate lifecycle/ownership, such as the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault for global secrets (e.g., API keys, DM+D secrets).
-- **Target-Local Resources:** Each environment receives a dedicated Azure App Service, VNet, Managed Redis, PostgreSQL, and Local Key Vault. Target workloads are isolated per environment/site.
-
-**Operational Exception Notice:** PRD shared resources (such as `xhuma-shared-kv-prd` and its state) are temporarily hosted in the legacy `rg-xhuma-shared` resource group pending migration to a dedicated `rg-xhuma-shared-prd` resource group. This is a temporary operational exception and not the intended target architecture. PRD shared state and Key Vault are, however, logically separated from INT.
+- **Shared Resources:** A centrally managed Azure Resource Group (e.g., `rg-xhuma-shared`) hosts shared services with separate lifecycle/ownership, such as the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault (e.g., `xhuma-shared-kv-<environment>`) for global secrets (e.g., API keys, DM+D secrets). Environment-specific shared resources must remain logically separate, with distinct Key Vaults, Terraform state, and backend keys. A separate resource group per environment may be used as a hardening option, but it is not currently a mandatory Xhuma design principle.
+- **Target-Local Resources:** Each environment receives a dedicated Azure App Service, VNet, Managed Redis, PostgreSQL, and Local Key Vault (e.g., `xhuma-<site>-kv`). Target workloads are isolated per environment/site.
 
 ---
 
@@ -85,7 +83,7 @@ Deployments use protected GitHub Environments and dedicated Azure deployment ide
 Future Trust/site deployments will be data-driven from the validated `infra/targets.json` inventory rather than requiring duplicated CI/CD workflows. Staged fleet deployment is controlled via the `hold` and `rollout_ring` attributes in this inventory. Greenfield targets (e.g., new deployments) generally have `require_existing_state=false`, whereas migrated or brownfield environments must use `require_existing_state=true` to enforce existing-state preflight and state-anchor validation.
 
 **Shared Resources Configuration:**
-The shared subscription ID and related shared variables (e.g. `SHARED_RESOURCE_GROUP_NAME`) must be explicitly provided to the environments running Terraform Plan and Apply.
+The shared subscription ID (e.g. `<shared-subscription-id>`) and related shared variables (e.g. `SHARED_RESOURCE_GROUP_NAME`) must be explicitly provided to the environments running Terraform Plan and Apply.
 
 **Actual Production Deployment Sequence:**
 
@@ -542,8 +540,8 @@ The following operational and security hardening activities are scheduled post-0
 - **Fuzzing requirement:** Make fuzzing a required check for any PR targeting `main`, not only `int -> main`.
 - **Identity/Federation:** Adopt OIDC/workload federation instead of long-lived SP secrets.
 - **State Authentication:** Adopt Entra/identity-based Terraform state access instead of storage keys.
-- **Inventory V2:** Expand the `targets.json` model into a complete site commissioning model (Inventory v2).
-- **PRD Shared Migration:** Complete the dedicated PRD shared RG migration (`rg-xhuma-shared-prd`) and explicitly remove PRD SP access from the legacy shared RG (`rg-xhuma-shared`).
+- **Inventory V2:** Expand the `targets.json` model into a complete site commissioning model (Inventory v2), with automated deployment evidence and improved site onboarding/bootstrap automation.
+- **Least-Privilege Review:** Conduct a least-privilege review of shared-resource RBAC and cross-environment management rights.
 
 ---
 

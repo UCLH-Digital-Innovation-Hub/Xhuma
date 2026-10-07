@@ -14,17 +14,21 @@ flowchart TD
     G -->|Error Response| F
 ```
 
-### 2. Structured Record Retrieval Flow
+### 2. Structured Record Retrieval Flow (ITI-38/ITI-39)
 ```mermaid
 flowchart TD
-    A[Client Request] -->|ITI-38| B[Request Validation]
-    B -->|Valid Request| C[Cache Check]
-    C -->|Cache Miss| D[SDS Lookup]
-    D -->|FHIR Endpoints| E[GP Connect Request]
-    E -->|FHIR Bundle| F[CCDA Conversion]
-    F -->|CCDA Document| G[Cache Storage]
-    G -->|Formatted Response| H[ITI-38 Response]
-    C -->|Cache Hit| H
+    A[Client Request ITI-38] -->|Query| B[Validate Request]
+    B -->|Valid Request| C[SDS Routing Lookup]
+    C -->|Return Endpoint| D[Generate/Return Document IDs]
+    
+    E[Client Request ITI-39] -->|Retrieve| F[Validate Document ID]
+    F -->|Valid Request| G[GP Connect Request]
+    G -->|FHIR Bundle| H[Response Validation / Warnings]
+    H -->|Valid Data| I[CCDA / HTML Transformation]
+    I -->|Formatted Response| J[ITI-39 Response]
+    
+    C -.->|Cache Miss| Cache[Transient Cache]
+    G -.->|Fail-closed Audit| Audit[(PostgreSQL Audit Store)]
 ```
 
 ## Observability Data Flows
@@ -66,13 +70,9 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[Request Start] -->|Generate Trace ID| B[OpenTelemetry]
-    B -->|Collect Spans| C[Trace Processing]
-    C -->|Store| D[Trace Storage]
-    D -->|Query| E[Trace Analysis]
-
-    F[Service Calls] -->|Add Spans| B
-    G[Database Ops] -->|Add Spans| B
-    H[Cache Ops] -->|Add Spans| B
+    B -->|Collect Spans| C[Azure Application Insights]
+    C -->|Store| D[Azure Log Analytics Workspace]
+    D -->|Query| E[Azure Monitor Dashboards]
 ```
 
 ## Data Transformations
@@ -152,9 +152,8 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[Cache Operations] -->|Stats| B[Metrics Collection]
-    B -->|Store| C[Time Series DB]
+    B -->|Store| C[Azure Log Analytics Workspace]
     C -->|Query| D[Performance Analysis]
-    D -->|Alert| E[Cache Optimisation]
 ```
 
 ## Security Data Flow
@@ -162,24 +161,26 @@ flowchart TD
 ### 1. Authentication Flow
 ```mermaid
 flowchart TD
-    A[Request] -->|mTLS Client Cert| B[Thumbprint Validation]
+    %% Inbound Trust
+    A[Client Request] -->|mTLS Client Cert| B[Thumbprint Validation]
     B -->|Valid Cert| C[SAML Assertion Check]
-    C -->|Valid Clinician Identity| D[JWT Token Generation]
-    D -->|Valid| E[Permission Check]
-    E -->|Authorized| F[Process Request]
+    C -->|Valid Identity| D[Process Request]
+    
+    %% Outbound Trust
+    D -->|Generate JWT| E[Outbound NHS API Auth]
+    E -->|Authorized| F[Perform PDS/GPC Query]
+    
     B -->|Invalid| G[Auth Error]
     C -->|Invalid| G
     E -->|Unauthorized| G
-    G -->|Log| H[Error Tracking]
 ```
 
 ### 2. Audit Trail Flow
 ```mermaid
 flowchart TD
     A[System Event] -->|Generate| B[Audit Record]
-    B -->|Store| C[Audit Log]
-    C -->|Index| D[Search Engine]
-    D -->|Query| E[Audit Reports]
+    B -->|Fail-closed Write| C[(PostgreSQL Audit Store)]
+    C -->|Query| D[Operational Audit Reviews]
 ```
 
 ## Health Check Data Flow
@@ -189,16 +190,13 @@ flowchart TD
 flowchart TD
     A[Health Check] -->|Probe| B{Service Status}
     B -->|Healthy| C[Update Status]
-    B -->|Unhealthy| D[Alert]
-    D -->|Log| E[Incident Management]
-    C -->|Metrics| F[Health Dashboard]
+    B -->|Unhealthy| D[Return 503]
 ```
 
 ### 2. Dependency Health
 ```mermaid
 flowchart TD
-    A[Service Check] -->|Test| B{Dependencies}
+    A[Service Check] -->|Test| B{Dependencies (DB/Redis)}
     B -->|Available| C[Update Status]
-    B -->|Unavailable| D[Circuit Breaker]
-    D -->|Activate| E[Fallback Mode]
-    E -->|Log| F[Recovery Monitor]
+    B -->|Unavailable| D[Log Error & Return 503]
+```

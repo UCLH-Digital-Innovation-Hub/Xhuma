@@ -16,13 +16,13 @@ flowchart TD
     classDef boundary fill:none,color:#fff,stroke:#444,stroke-width:2px,stroke-dasharray: 5 5;
 
     %% Elements
-    Clinician(("UCLH Clinicians\n[Person]")):::person
+    Clinician(("Clinicians\n[Person]")):::person
     
     Epic["Epic Care Everywhere\n[External System]"]:::ext_system
 
-    subgraph UCLHBoundary[System Boundary UCLH]
+    subgraph TrustBoundary[System Boundary Trust/Site]
         Xhuma["Xhuma\n[System]\nStateless middleware"]:::system
-        Monitor["UCLH Logging & Monitoring\n[System]\nAudit trail layer"]:::system
+        Monitor["Site Logging & Monitoring\n[System]\nAudit trail layer"]:::system
     end
 
     NHSE["NHSE APIs\n[External System]\nPDS, SDS, GP Connect"]:::ext_system
@@ -50,19 +50,19 @@ flowchart TD
     Epic["Epic Care Everywhere\n[External System]"]:::ext_system
     NHSE["NHSE APIs (PDS, SDS, GPC)\n[External System]"]:::ext_system
 
-    %% UCLH Boundary
-    subgraph UCLHBoundary[System Boundary - Xhuma / UCLH]
-        CICD["CI/CD Pipeline\n[Container]\nGitHub Actions"]:::container
+    %% Trust Boundary
+    subgraph TrustBoundary[System Boundary - Xhuma / Target Site]
+        CICD["CI/CD Pipeline\n[Container]\nGitHub Actions (Control Plane)"]:::container
         API["Inbound IHE/SOAP Layer\n[Container]\nFastAPI"]:::container
         PDS["Patient Discovery\n[Container]"]:::container
         Ret["Document Retrieval\n[Container]"]:::container
         Trans["Transformation Engine\n[Container]"]:::container
-        Audit[("Audit & Logging DB\n[Database]")]:::db
-        Cache[("Transient Cache\n[Database]")]:::db
-        Mon["Logging Component\n[Container]\nApp Insights"]:::container
+        Audit[("Audit & Logging DB\n[Database]\nPostgreSQL Persistent Store")]:::db
+        Cache[("Transient Cache\n[Database]\nRedis Transient Store")]:::db
+        Mon["Logging Component\n[Container]\nApp Insights / Log Analytics"]:::container
         Relay["HSCN Relay Agent\n[Container]"]:::container
     end
-    class UCLHBoundary boundary;
+    class TrustBoundary boundary;
 
     %% Relationships
     CICD -->|Deploy Image| API
@@ -149,9 +149,9 @@ flowchart TD
     %% DFD Level 0
     Epic["Epic Care Everywhere\n(External dependency, remembers linkage)"]
     NHSE["NHSE APIs\n(External dependency, risk owner)"]
-    Mon["UCLH Monitoring/Audit Store\n(Audit trail required)"]
-    Admin["UCLH Admins"]
-    Clinician["UCLH Clinicians"]
+    Mon["Trust Monitoring/Audit Store\n(Audit trail required)"]
+    Admin["Trust Admins"]
+    Clinician["Clinicians"]
     
     Xhuma(("Xhuma\n(Stateless System boundary)"))
     
@@ -181,11 +181,11 @@ flowchart TD
     Clinician["Clinician"]
     Epic["Epic EHR\n(Stores patient link permanently)"]
     NHSE["NHSE APIs\n(PDS, SDS, GP Connect)"]
-    Mon["UCLH Monitoring"]
+    Mon["Site Monitoring\n(App Insights/Log Analytics)"]
 
     %% Data Stores
-    StoreAudit[("Audit log store")]:::datastore
-    StoreCache[("Transient Cache\n(Redis - transient only)")]:::datastore
+    StoreAudit[("Audit log store\n(PostgreSQL Persistent)")]:::datastore
+    StoreCache[("Transient Cache\n(Redis Transient)")]:::datastore
     
     %% Discovery Scope
     P1(("1. Receive patient\ndiscovery request"))
