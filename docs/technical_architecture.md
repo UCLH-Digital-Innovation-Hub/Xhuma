@@ -34,7 +34,7 @@ flowchart TD
     Xhuma -->|"1. PDS/SDS Lookups<br>2. GP Connect Retrieval"| NHSE
     Xhuma -->|"Sends audit logs"| Monitor
     
-    class UCLHBoundary boundary;
+    class TrustBoundary boundary;
 ```
 
 ### Container Diagram
@@ -283,7 +283,7 @@ sequenceDiagram
     %% Display & Reconciliation
     note over C, E: Phase 3: Display & Reconciliation
     E->>C: Displays outside chart (Read-only, provenance visible)
-    C->>E: Initiates reconciliation into UCLH chart
+    C->>E: Initiates reconciliation into Trust EHR / clinical record
     
     alt Medication Map Cleanly
         C->>E: Accepts standard mapping (Medication, Dose, Route, Frequency)
@@ -333,7 +333,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 
 **Assumptions / TBDs:**
 - **TBD-01**: Identity/Auth beyond core mTLS for incoming Epic requests and clinician tracing.
-- **TBD-02**: Exact granularity of UCLH telemetry observability access controls (e.g., who accesses dashboards) and role-based access logic for the Postgres audit tables.
+- **TBD-02**: Exact granularity of Trust monitoring / operational access controls (e.g., who accesses dashboards) and role-based access logic for the Postgres audit tables.
 
 ## Core Components
 

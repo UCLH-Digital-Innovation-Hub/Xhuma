@@ -42,8 +42,8 @@ The Trust's Epic EHR connects to Xhuma over the public internet utilising mutual
 ### 3.2 Outbound Integrations (Xhuma -> NHS)
 Xhuma processes the inbound IHE ITI requests and converts them into NHS FHIR calls.
 
-* **PDS (Patient Demographics Service):** Routed over the public internet via `https://int.api.service.nhs.uk/`. Secured via NHS OAuth2 Client Credentials (JWT assertion).
-* **SDS (Spine Directory Service):** Routed over the public internet to query FHIR endpoints and routing identifiers using API keys.
+* **PDS (Patient Demographics Service):** Routed over the public internet to environment-dependent NHS API endpoints (e.g., development, integration, or production APIs). Secured via NHS OAuth2 Client Credentials (JWT assertion).
+* **SDS (Spine Directory Service):** Routed over the public internet to query environment-dependent FHIR endpoints and routing identifiers using API keys.
 * **GP Connect (Structured Records):** GP Connect requests have separate network requirements, detailed below.
 
 ---
@@ -58,7 +58,7 @@ Due to NHS England restrictions on GP Connect via the public internet, Xhuma lev
 
 An HSCN-connected agent (e.g., via Azure Private Link or an internal NHS VPN Gateway) establishes a WebSocket connection inbound to the Xhuma Azure App Service. GP Connect requests are securely tunnelled back down this WebSocket to the agent, which executes the query natively against HSCN. This allows Xhuma's main infrastructure to remain purely cloud-native while satisfying strict NHS network requirements.
 
-> **Note on Custom Domains:** External integration endpoints (including Epic and the Relay) do not target the default Azure App Service hostname directly. They target an externally agreed environment custom FQDN (e.g., `int.uclh.xhuma.co.uk`), which is then bound to the Xhuma App Service via an operator-managed Azure hostname binding. DNS and the associated custom TLS certificates are currently managed manually outside of the Terraform infrastructure lifecycle.
+> **Note on Custom Domains:** External integration endpoints (including Epic and the Relay) do not target the default Azure App Service hostname directly. They target an externally agreed environment custom FQDN (e.g., `<environment>.<trust-domain>`), which is then bound to the Xhuma App Service via an operator-managed Azure hostname binding. DNS and the associated custom TLS certificates are currently managed manually outside of the Terraform infrastructure lifecycle.
 
 ```mermaid
 flowchart TD

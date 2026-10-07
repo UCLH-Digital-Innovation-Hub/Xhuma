@@ -30,7 +30,7 @@
 
 Xhuma utilises a **Target-isolated matrix deployment with centrally managed shared services**. Every target environment (e.g., `play`, `int`, production trusts) receives its own isolated cloud footprint for compute and data to prevent cross-contamination of health data and limit blast radius. 
 
-- **Shared Resources:** A centrally managed Azure Resource Group (e.g., `rg-xhuma-shared`) hosts shared services with separate lifecycle/ownership, such as the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault (e.g., `xhuma-shared-kv-<environment>`) for global secrets (e.g., API keys, DM+D secrets). Environment-specific shared resources must remain logically separate, with distinct Key Vaults, Terraform state, and backend keys. A separate resource group per environment may be used as a hardening option, but it is not currently a mandatory Xhuma design principle.
+- **Shared Resources:** A centrally managed Azure Resource Group (e.g., `rg-xhuma-<shared-scope>`) hosts shared services with separate lifecycle/ownership, such as the Public JSON Web Key Set (JWKS) via Blob Storage and a Shared Key Vault (e.g., `xhuma-shared-kv-<environment>`) for global secrets (e.g., API keys, DM+D secrets). Environment-specific shared resources must remain logically separate, with distinct Key Vaults, Terraform state, and backend keys. A separate resource group per environment may be used as a hardening option, but it is not currently a mandatory Xhuma design principle.
 - **Target-Local Resources:** Each environment receives a dedicated Azure App Service, VNet, Managed Redis, PostgreSQL, and Local Key Vault (e.g., `xhuma-<site>-kv`). Target workloads are isolated per environment/site.
 
 ---
@@ -227,7 +227,7 @@ Do NOT proceed if you observe any of the following:
 ### 6.4 Plan Retries & Image Deployment
 
 ![Infrastructure Apply Approval Gate](./assets/play-infra-apply-approval-gate.png)
-*Figure 6 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `rg-xhuma-play-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
+*Figure 6 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `<target>-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
 
 ![Play Infrastructure Apply Success](./assets/play-infra-apply-success.png)
 *Figure 7 — Successful infrastructure Apply job, completing only after the strict plan review and GitHub Environment manual approval.*
