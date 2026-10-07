@@ -148,3 +148,9 @@ end
 ```
 
 The workflow is robust to edge cases whilst allowing for more informative mapping for the majority of oral medications that otherwise are difficult to easily consolidate into secondary care systems.
+
+### Caching Strategy
+
+To ensure rapid resolution of dm+d concepts while strictly adhering to NHSE's publication and update cycles, Xhuma utilizes a dynamic caching strategy:
+- **On-Demand Fetching:** Concepts are fetched directly from the NHSE Terminology Server in real-time only when encountered in a patient's GP record. This entirely avoids the complexity and unreliability of downloading and parsing bulk TRUD releases.
+- **7-Day TTL (Time-To-Live):** Once a concept is retrieved, it is cached in Redis for exactly 7 days. This mandatory 7-day expiry ensures that Xhuma seamlessly ages out stale terminology data and automatically aligns with NHSE's frequent formulary updates, guaranteeing that downstream clinical systems always receive accurately mapped and up-to-date medication dosages and routes.
