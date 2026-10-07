@@ -1,4 +1,4 @@
-resource_group_name  = "rg-xhuma-shared"
-storage_account_name = "xtfrgxhumashared"
+resource_group_name  = "rg-xhuma-uclh-prd"
+storage_account_name = "xtfrgxhumauclhprd"
 container_name       = "tfstate"
-key                  = "shared-prd.tfstate"
+key                  = "shared.tfstate"
