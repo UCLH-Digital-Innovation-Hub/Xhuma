@@ -8,6 +8,7 @@ on:
 jobs:
   bootstrap:
     runs-on: ubuntu-latest
+    environment: rg-xhuma-uclh-prd-infra
     steps:
       - uses: actions/checkout@v4
 
