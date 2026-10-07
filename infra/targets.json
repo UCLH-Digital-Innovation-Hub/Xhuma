@@ -4,9 +4,10 @@
     {
       "id": "play",
       "stage": "play",
-      "source_branch": "rehearsal/play-deployment",
+      "source_branch": "dev",
       "enabled": true,
       "hold": false,
+      "require_existing_state": true,
       "rollout_ring": 0,
       "github_environment": "rg-xhuma-play",
       "github_infra_environment": "rg-xhuma-play-infra",
@@ -37,6 +38,25 @@
       "backend_file": "infra/backends/int.hcl",
       "runner_label": "ubuntu-latest",
       "require_existing_state": true,
+      "owner": "TBC",
+      "support_route": "TBC"
+    },
+    {
+      "id": "prd",
+      "stage": "prd",
+      "source_branch": "main",
+      "enabled": true,
+      "hold": false,
+      "rollout_ring": 0,
+      "github_environment": "rg-xhuma-uclh-prd",
+      "github_infra_environment": "rg-xhuma-uclh-prd-infra",
+      "resource_group": "rg-xhuma-uclh-prd",
+      "location": "uksouth",
+      "app_service_name": "xhuma-app-prd",
+      "tfvars_file": "infra/env/prd.tfvars",
+      "backend_file": "infra/backends/prd.hcl",
+      "runner_label": "ubuntu-latest",
+      "require_existing_state": false,
       "owner": "TBC",
       "support_route": "TBC"
     }

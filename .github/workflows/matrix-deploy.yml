@@ -3,8 +3,9 @@ name: Matrix Deployment Pilot
 on:
   push:
     branches:
-      - rehearsal/play-deployment
+      - dev
       - int
+      - main
 
 env:
   REGISTRY: ghcr.io

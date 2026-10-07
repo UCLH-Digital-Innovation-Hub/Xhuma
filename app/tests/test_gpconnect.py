@@ -214,6 +214,9 @@ async def test_gpconnect_readerror_audits_failure(
     audit_args = mock_attempt_audit.call_args.kwargs
     assert audit_args["action"] == "gpconnect_request"
     assert audit_args["error_code"] == "502"
+    assert "exception" not in audit_args["detail"]
+    assert audit_args["detail"]["exception_type"] == "ReadError"
+    assert "transport" in audit_args["detail"]
     mock_record_application_failure.assert_called_once()
 
 
@@ -267,6 +270,132 @@ async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
         assert event["outcome"] == AuditOutcome.fail
         assert event["error_code"] == "502"
         assert event["nhs_number"] == "9690937278"
-        assert event["detail"] == {"exception": str(telemetry.call_args.args[0])}
+        assert event["detail"] == {"exception_type": type(telemetry.call_args.args[0]).__name__}
         convert.assert_not_called()
         cache.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect.httpx.AsyncClient")
+@patch("app.gpconnect.create_nhs_ssl_context")
+@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
+async def test_gpconnect_non200_data_minimisation(
+    mock_lookup_patient, mock_sds_trace, mock_create_nhs_ssl_context, mock_async_client, mock_attempt_audit
+):
+    from app.audit.models import AuditOutcome
+
+    fake_pds = load_pds(9690937278)
+    mock_lookup_patient.return_value = fake_pds
+    mock_sds_trace.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+
+    synthetic_body = "SYNTHETIC_DOWNSTREAM_BODY_MUST_NOT_BE_AUDITED"
+    mock_client = AsyncMock()
+    mock_client.post.return_value = Response(status_code=500, content=synthetic_body)
+    mock_async_client.return_value.__aenter__.return_value = mock_client
+
+    result = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+    assert result.status_code == 500
+
+    audit_calls = mock_attempt_audit.call_args_list
+    gpconnect_request_call = [call for call in audit_calls if call.kwargs.get("action") == "gpconnect_request"]
+    assert gpconnect_request_call
+
+    audit_args = gpconnect_request_call[-1].kwargs
+    assert audit_args["outcome"] == AuditOutcome.fail
+    assert audit_args["error_code"] == "500"
+
+    assert "response_text" not in audit_args["detail"]
+    assert "transport" in audit_args["detail"]
+
+    for arg in audit_args.values():
+        assert synthetic_body not in str(arg)
+
+
+@pytest.mark.asyncio
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect.httpx.AsyncClient")
+@patch("app.gpconnect.create_nhs_ssl_context")
+@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
+async def test_gpconnect_transport_exception_data_minimisation(
+    mock_lookup_patient, mock_sds_trace, mock_create_nhs_ssl_context, mock_async_client, mock_attempt_audit
+):
+    from app.audit.models import AuditOutcome
+
+    fake_pds = load_pds(9690937278)
+    mock_lookup_patient.return_value = fake_pds
+    mock_sds_trace.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+
+    synthetic_body = "SYNTHETIC_SENSITIVE_EXCEPTION_TEXT"
+    mock_client = AsyncMock()
+    mock_client.post.side_effect = Exception(synthetic_body)
+    mock_async_client.return_value.__aenter__.return_value = mock_client
+
+    result = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+    assert result.status_code == 502
+
+    audit_calls = mock_attempt_audit.call_args_list
+    gpconnect_request_call = [call for call in audit_calls if call.kwargs.get("action") == "gpconnect_request"]
+    assert gpconnect_request_call
+
+    audit_args = gpconnect_request_call[-1].kwargs
+    assert audit_args["outcome"] == AuditOutcome.fail
+    assert audit_args["error_code"] == "502"
+
+    assert "exception" not in audit_args["detail"]
+    assert audit_args["detail"]["exception_type"] == "Exception"
+    assert "transport" in audit_args["detail"]
+
+    for arg in audit_args.values():
+        assert synthetic_body not in str(arg)
+
+
+@pytest.mark.asyncio
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect.record_application_failure")
+@patch("app.gpconnect.httpx.AsyncClient")
+@patch("app.gpconnect.create_nhs_ssl_context")
+@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
+async def test_validate_fhir_bundle_data_minimisation(
+    mock_lookup_patient,
+    mock_sds_trace,
+    mock_create_nhs_ssl_context,
+    mock_async_client,
+    mock_record_application_failure,
+    mock_attempt_audit,
+):
+    from app.audit.models import AuditOutcome
+
+    fake_pds = load_pds(9690937278)
+    mock_lookup_patient.return_value = fake_pds
+    mock_sds_trace.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+
+    synthetic_body = "SYNTHETIC_FHIR_CONTENT_MUST_NOT_BE_AUDITED"
+    mock_client = AsyncMock()
+    mock_client.post.return_value = Response(status_code=200, content=synthetic_body)
+    mock_async_client.return_value.__aenter__.return_value = mock_client
+
+    result = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+    assert result.status_code == 502
+    body = json.loads(result.body)
+    assert body == {"success": False, "error": "FHIR bundle malformed"}
+
+    audit_calls = mock_attempt_audit.call_args_list
+    validate_fhir_call = [call for call in audit_calls if call.kwargs.get("action") == "validate_fhir_bundle"]
+    assert validate_fhir_call
+
+    audit_args = validate_fhir_call[-1].kwargs
+    assert audit_args["outcome"] == AuditOutcome.fail
+    assert audit_args["error_code"] == "502"
+
+    assert "exception" not in audit_args["detail"]
+    assert audit_args["detail"]["exception_type"] == "JSONDecodeError"
+
+    for arg in audit_args.values():
+        assert synthetic_body not in str(arg)

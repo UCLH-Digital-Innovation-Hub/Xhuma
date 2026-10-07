@@ -33,7 +33,9 @@ from ..models import (
 from .constants import REGISTRY_ID
 
 
-async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes):
+async def iti_38_response(
+    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes, message_id: str | None = None
+):
     response = AdhocQueryResponse()
 
     def set_failure(code_context: str) -> None:
@@ -55,6 +57,7 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
     record_cache("document", docid is not None)
 
     cache_hit = docid is not None
+    audit_error_code = None
     if docid is None:
         # no cached ccda
         try:
@@ -63,6 +66,8 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
             # print("-" * 40)
             logging.info("no cached ccda, used internal call for patient")
             r = json.loads(r.body)
+            if not r.get("success"):
+                audit_error_code = "GP_CONNECT_FAILURE"
         except AuditFailureException:
             raise
         except Exception as e:
@@ -71,11 +76,14 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
                 "success": False,
                 "error": f"Internal error retrieving structured record for patient. error: {e}",
             }
+            audit_error_code = "DOCUMENT_QUERY_FAILURE"
             set_failure("Unable to locate SCR for patient")
 
         if not r.get("success"):
             logging.warning(f"gpconnect failed for patient: {r.get('error')}")
             set_failure(r.get("error", "Unknown error"))
+            if not audit_error_code:
+                audit_error_code = "DOCUMENT_QUERY_FAILURE"
         else:
             docid = r["document_id"]
 
@@ -85,6 +93,8 @@ async def iti_38_response(request: Request, nhsno: int, ceid, queryid: str, saml
         saml=saml_attrs,
         action="iti38_document_query",
         outcome=AuditOutcome.ok if docid else AuditOutcome.fail,
+        error_code=audit_error_code,
+        message_id=message_id,
         detail={"cache_hit": cache_hit},
         document_id=docid,
     )
