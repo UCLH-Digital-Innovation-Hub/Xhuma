@@ -1,0 +1,16 @@
+{
+  "repository": "UCLH-Digital-Innovation-Hub/Xhuma",
+  "source_commit_sha": "c4144da034f91565ea7eedcdd82bc37b1455d0e4",
+  "workflow_run_id": "37547901999",
+  "target_id": "play",
+  "azure_tenant_id": "1d5e3f6e-150d-480f-9d33-1d45ee3a71e1",
+  "azure_subscription_id": "7b6a1345-50b0-492e-9d53-78833f756987",
+  "backend_file": "infra/backends/play.hcl",
+  "backend_resource_group": "rg-xhuma-play",
+  "backend_storage_account": "xtfrgxhumaplay",
+  "backend_container": "tfstate",
+  "backend_key": "terraform.tfstate",
+  "candidate_image_digest": "sha256:c9a566f8a3784bf0a0f754f8c8726665a035bd635a1c3362ff4516490463515b",
+  "plan_blob_path": "play-c4144da034f91565ea7eedcdd82bc37b1455d0e4-37547901999.tfplan",
+  "plan_sha256": "52f72e0d64384f1f615503c34edce361b8250a360d20076a8d059bc9a3103d04"
+}
