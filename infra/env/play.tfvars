@@ -7,7 +7,7 @@ postgres_server_name = "xhuma-psql-play"
 
 # Application Settings (Operator must review and populate corresponding secrets)
 org_code                 = "RRV00"
-org_asid                 = "200000000000"
+org_asid                 = "200000002574"
 device_id                = "1"
 env                      = "int" # Non-production
 ccda_expiry_hours        = "4"
