@@ -22,6 +22,16 @@ jobs:
         with:
           terraform_version: 1.5.7
 
+      - name: Setup Target Backend
+        working-directory: infra/shared
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          XHUMA_BACKEND_FILE: backends/prd.hcl
+        run: |
+          az group create --name rg-xhuma-shared-prd --location uksouth
+          ../bootstrap/setup-target.sh
+
       - name: Terraform Init
         working-directory: infra/shared
         env:

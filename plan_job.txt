@@ -1,0 +1,511 @@
+﻿2026-10-07T17:36:38.7397594Z Current runner version: '2.337.0'
+2026-10-07T17:36:38.7423214Z ##[group]Runner Image Provisioner
+2026-10-07T17:36:38.7424230Z Hosted Compute Agent
+2026-10-07T17:36:38.7425034Z Version: 20261002.596
+2026-10-07T17:36:38.7425786Z Commit: c3d12f3313a95f25162a1503be624f3b0617f8c0
+2026-10-07T17:36:38.7426608Z Build Date: 2026-10-02T22:28:27Z
+2026-10-07T17:36:38.7427321Z Worker ID: {63f873ff-608f-4018-93b6-3927ad787dcb}
+2026-10-07T17:36:38.7428103Z Region: westus3
+2026-10-07T17:36:38.7428702Z Cloud: Azure
+2026-10-07T17:36:38.7429270Z ##[endgroup]
+2026-10-07T17:36:38.7431156Z ##[group]Operating System
+2026-10-07T17:36:38.7431901Z Ubuntu
+2026-10-07T17:36:38.7432446Z 24.04.5
+2026-10-07T17:36:38.7433033Z LTS
+2026-10-07T17:36:38.7433608Z ##[endgroup]
+2026-10-07T17:36:38.7434197Z ##[group]Runner Image
+2026-10-07T17:36:38.7435109Z Image: ubuntu-24.04
+2026-10-07T17:36:38.7435760Z Version: 20261004.327.1
+2026-10-07T17:36:38.7437066Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261004.327/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-07T17:36:38.7438620Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261004.327
+2026-10-07T17:36:38.7439547Z ##[endgroup]
+2026-10-07T17:36:38.7440798Z ##[group]GITHUB_TOKEN Permissions
+2026-10-07T17:36:38.7443216Z Contents: read
+2026-10-07T17:36:38.7443884Z Metadata: read
+2026-10-07T17:36:38.7444484Z Packages: read
+2026-10-07T17:36:38.7445248Z ##[endgroup]
+2026-10-07T17:36:38.7447476Z Secret source: Actions
+2026-10-07T17:36:38.7448540Z Cache mode: write
+2026-10-07T17:36:38.7449464Z Prepare workflow directory
+2026-10-07T17:36:38.7878641Z Prepare all required actions
+2026-10-07T17:36:38.7930507Z Getting action download info
+2026-10-07T17:36:39.1352685Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-10-07T17:36:39.2203770Z Download action repository 'hashicorp/setup-terraform@v2' (SHA:633666f66e0061ca3b725c73b2ec20cd13a8fdd1)
+2026-10-07T17:36:39.8185815Z Download action repository 'azure/login@v2' (SHA:7184910d9eb2b1c5e48f7073824a90609bb9b6d6)
+2026-10-07T17:36:40.1882862Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-10-07T17:36:40.4398045Z Complete job name: Infra Plan - int
+2026-10-07T17:36:40.5371523Z ##[group]Run actions/checkout@v4
+2026-10-07T17:36:40.5372993Z with:
+2026-10-07T17:36:40.5374092Z   repository: UCLH-Digital-Innovation-Hub/Xhuma
+2026-10-07T17:36:40.5382333Z   token: ***
+2026-10-07T17:36:40.5383306Z   ssh-strict: true
+2026-10-07T17:36:40.5384310Z   ssh-user: git
+2026-10-07T17:36:40.5385516Z   persist-credentials: true
+2026-10-07T17:36:40.5386624Z   clean: true
+2026-10-07T17:36:40.5387632Z   sparse-checkout-cone-mode: true
+2026-10-07T17:36:40.5388784Z   fetch-depth: 1
+2026-10-07T17:36:40.5389873Z   fetch-tags: false
+2026-10-07T17:36:40.5390924Z   show-progress: true
+2026-10-07T17:36:40.5391947Z   lfs: false
+2026-10-07T17:36:40.5392877Z   submodules: false
+2026-10-07T17:36:40.5393881Z   set-safe-directory: true
+2026-10-07T17:36:40.5395091Z   allow-unsafe-pr-checkout: false
+2026-10-07T17:36:40.5396573Z env:
+2026-10-07T17:36:40.5397457Z   REGISTRY: ghcr.io
+2026-10-07T17:36:40.5398554Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:36:40.5399855Z ##[endgroup]
+2026-10-07T17:36:40.6461553Z Syncing repository: UCLH-Digital-Innovation-Hub/Xhuma
+2026-10-07T17:36:40.6465449Z ##[group]Getting Git version info
+2026-10-07T17:36:40.6467110Z Working directory is '/home/runner/work/Xhuma/Xhuma'
+2026-10-07T17:36:40.6469496Z [command]/usr/bin/git version
+2026-10-07T17:36:40.6577328Z git version 2.55.0
+2026-10-07T17:36:40.6603566Z ##[endgroup]
+2026-10-07T17:36:40.6622198Z Temporarily overriding HOME='/home/runner/work/_temp/7ea60dfc-ff03-4bd2-a38a-ca35cb106b3d' before making global git config changes
+2026-10-07T17:36:40.6628222Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-07T17:36:40.6631146Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Xhuma/Xhuma
+2026-10-07T17:36:40.6686764Z Deleting the contents of '/home/runner/work/Xhuma/Xhuma'
+2026-10-07T17:36:40.6691001Z ##[group]Initializing the repository
+2026-10-07T17:36:40.6696490Z [command]/usr/bin/git init /home/runner/work/Xhuma/Xhuma
+2026-10-07T17:36:40.6834616Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-07T17:36:40.6837252Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-07T17:36:40.6839157Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-07T17:36:40.6840663Z hint: call:
+2026-10-07T17:36:40.6841557Z hint:
+2026-10-07T17:36:40.6842666Z hint: 	git config --global init.defaultBranch <name>
+2026-10-07T17:36:40.6843915Z hint:
+2026-10-07T17:36:40.6845481Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-07T17:36:40.6847372Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-07T17:36:40.6848888Z hint:
+2026-10-07T17:36:40.6849838Z hint: 	git branch -m <name>
+2026-10-07T17:36:40.6850885Z hint:
+2026-10-07T17:36:40.6852186Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-07T17:36:40.6858766Z Initialized empty Git repository in /home/runner/work/Xhuma/Xhuma/.git/
+2026-10-07T17:36:40.6870943Z [command]/usr/bin/git remote add origin https://github.com/UCLH-Digital-Innovation-Hub/Xhuma
+2026-10-07T17:36:40.6926020Z ##[endgroup]
+2026-10-07T17:36:40.6927735Z ##[group]Disabling automatic garbage collection
+2026-10-07T17:36:40.6930457Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-07T17:36:40.6963523Z ##[endgroup]
+2026-10-07T17:36:40.6966086Z ##[group]Setting up auth
+2026-10-07T17:36:40.6973397Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-07T17:36:40.7019700Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-07T17:36:40.7387036Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-07T17:36:40.7428074Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-07T17:36:40.7614345Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-07T17:36:40.7645230Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-07T17:36:40.7839743Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-07T17:36:40.7880424Z ##[endgroup]
+2026-10-07T17:36:40.7882248Z ##[group]Fetching the repository
+2026-10-07T17:36:40.7895959Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +d81f86dc186ec922da0de4937dbdb3b1bf60ad4c:refs/remotes/origin/int
+2026-10-07T17:36:41.8796420Z From https://github.com/UCLH-Digital-Innovation-Hub/Xhuma
+2026-10-07T17:36:41.8799087Z  * [new ref]         d81f86dc186ec922da0de4937dbdb3b1bf60ad4c -> origin/int
+2026-10-07T17:36:41.8802492Z ##[endgroup]
+2026-10-07T17:36:41.8803843Z ##[group]Determining the checkout info
+2026-10-07T17:36:41.8805511Z ##[endgroup]
+2026-10-07T17:36:41.8811296Z [command]/usr/bin/git sparse-checkout disable
+2026-10-07T17:36:41.8857342Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-07T17:36:41.8887399Z ##[group]Checking out the ref
+2026-10-07T17:36:41.8890136Z [command]/usr/bin/git checkout --progress --force -B int refs/remotes/origin/int
+2026-10-07T17:36:41.9171688Z Switched to a new branch 'int'
+2026-10-07T17:36:41.9175952Z branch 'int' set up to track 'origin/int'.
+2026-10-07T17:36:41.9181889Z ##[endgroup]
+2026-10-07T17:36:41.9220722Z [command]/usr/bin/git log -1 --format=%H
+2026-10-07T17:36:41.9242173Z d81f86dc186ec922da0de4937dbdb3b1bf60ad4c
+2026-10-07T17:36:41.9452054Z ##[group]Run hashicorp/setup-terraform@v2
+2026-10-07T17:36:41.9452481Z with:
+2026-10-07T17:36:41.9452789Z   terraform_wrapper: false
+2026-10-07T17:36:41.9453109Z   terraform_version: 1.5.7
+2026-10-07T17:36:41.9453471Z   cli_config_credentials_hostname: app.terraform.io
+2026-10-07T17:36:41.9453832Z env:
+2026-10-07T17:36:41.9454088Z   REGISTRY: ghcr.io
+2026-10-07T17:36:41.9454425Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:36:41.9454787Z ##[endgroup]
+2026-10-07T17:36:42.0346606Z (node:2226) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-07T17:36:42.0347786Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-07T17:36:42.2284392Z [command]/usr/bin/unzip -o -q /home/runner/work/_temp/1a5fbcca-f97f-411f-aeda-7527ec76c4b4
+2026-10-07T17:36:42.6820414Z ##[group]Run MISSING=""
+2026-10-07T17:36:42.6820842Z [36;1mMISSING=""[0m
+2026-10-07T17:36:42.6821260Z [36;1m[ -z "$ARM_CLIENT_ID" ] && MISSING="$MISSING AZURE_CLIENT_ID"[0m
+2026-10-07T17:36:42.6821881Z [36;1m[ -z "$ARM_CLIENT_SECRET" ] && MISSING="$MISSING AZURE_CLIENT_SECRET"[0m
+2026-10-07T17:36:42.6822442Z [36;1m[ -z "$ARM_TENANT_ID" ] && MISSING="$MISSING AZURE_TENANT_ID"[0m
+2026-10-07T17:36:42.6822960Z [36;1m[ -z "$ARM_SUBSCRIPTION_ID" ] && MISSING="$MISSING AZURE_SUBSCRIPTION_ID"[0m
+2026-10-07T17:36:42.6823493Z [36;1m[ -z "$TF_VAR_postgres_admin_password" ] && MISSING="$MISSING POSTGRES_PASSWORD"[0m
+2026-10-07T17:36:42.6824073Z [36;1m[ -z "$TF_VAR_shared_resource_group_name" ] && MISSING="$MISSING SHARED_RESOURCE_GROUP_NAME"[0m
+2026-10-07T17:36:42.6824656Z [36;1m[ -z "$TF_VAR_shared_subscription_id" ] && MISSING="$MISSING SHARED_SUBSCRIPTION_ID"[0m
+2026-10-07T17:36:42.6825533Z [36;1m[ -z "$TF_VAR_shared_key_vault_name" ] && MISSING="$MISSING SHARED_KEY_VAULT_NAME"[0m
+2026-10-07T17:36:42.6826031Z [36;1m[ -z "$TF_VAR_registry_id" ] && MISSING="$MISSING REGISTRY_ID"[0m
+2026-10-07T17:36:42.6826488Z [36;1m[ -z "$TF_VAR_docker_registry_password" ] && MISSING="$MISSING CR_PAT"[0m
+2026-10-07T17:36:42.6826990Z [36;1m[ -z "$TF_VAR_docker_registry_username" ] && MISSING="$MISSING GHCR_USERNAME"[0m
+2026-10-07T17:36:42.6827415Z [36;1mif [ -n "$MISSING" ]; then[0m
+2026-10-07T17:36:42.6827769Z [36;1m  echo "::error::Missing required secrets/vars:$MISSING"[0m
+2026-10-07T17:36:42.6828115Z [36;1m  exit 1[0m
+2026-10-07T17:36:42.6828339Z [36;1mfi[0m
+2026-10-07T17:36:42.7056262Z shell: /usr/bin/bash -e {0}
+2026-10-07T17:36:42.7056599Z env:
+2026-10-07T17:36:42.7056830Z   REGISTRY: ghcr.io
+2026-10-07T17:36:42.7057126Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:36:42.7057778Z   ARM_CLIENT_ID: ***
+2026-10-07T17:36:42.7058177Z   ARM_CLIENT_SECRET: ***
+2026-10-07T17:36:42.7058495Z   ARM_TENANT_ID: ***
+2026-10-07T17:36:42.7058844Z   ARM_SUBSCRIPTION_ID: ***
+2026-10-07T17:36:42.7059162Z   TF_VAR_postgres_admin_password: ***
+2026-10-07T17:36:42.7059490Z   TF_VAR_shared_resource_group_name: ***
+2026-10-07T17:36:42.7059878Z   TF_VAR_shared_subscription_id: ***
+2026-10-07T17:36:42.7060209Z   TF_VAR_shared_key_vault_name: ***
+2026-10-07T17:36:42.7060514Z   TF_VAR_registry_id: ***
+2026-10-07T17:36:42.7060910Z   TF_VAR_docker_registry_password: ***
+2026-10-07T17:36:42.7061212Z   TF_VAR_docker_registry_username: OSAS-NHS
+2026-10-07T17:36:42.7061507Z ##[endgroup]
+2026-10-07T17:36:42.7241290Z ##[group]Run azure/login@v2
+2026-10-07T17:36:42.7241565Z with:
+2026-10-07T17:36:42.7242549Z   creds: {"clientId":"***","clientSecret":"***","subscriptionId":"***","tenantId":"***"}
+2026-10-07T17:36:42.7242977Z   enable-AzPSSession: false
+2026-10-07T17:36:42.7243246Z   environment: azurecloud
+2026-10-07T17:36:42.7243508Z   allow-no-subscriptions: false
+2026-10-07T17:36:42.7243836Z   audience: api://AzureADTokenExchange
+2026-10-07T17:36:42.7244144Z   auth-type: SERVICE_PRINCIPAL
+2026-10-07T17:36:42.7244517Z env:
+2026-10-07T17:36:42.7244723Z   REGISTRY: ghcr.io
+2026-10-07T17:36:42.7245234Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:36:42.7245536Z ##[endgroup]
+2026-10-07T17:36:42.7691749Z Running Azure CLI Login.
+2026-10-07T17:36:45.3279636Z [command]/usr/bin/az cloud set -n azurecloud
+2026-10-07T17:36:45.8205708Z Done setting cloud: "azurecloud"
+2026-10-07T17:36:45.8207988Z Note: Azure/login action also supports OIDC login mechanism. Refer https://github.com/azure/login#configure-a-service-principal-with-a-federated-credential-to-use-oidc-based-authentication for more details.
+2026-10-07T17:36:45.8210092Z Attempting Azure CLI login by using service principal with secret...
+2026-10-07T17:36:48.1731826Z Subscription is set successfully.
+2026-10-07T17:36:48.1733091Z Azure CLI login succeeds by using service principal with secret.
+2026-10-07T17:36:48.1929495Z ##[group]Run echo "Preflighting existing state for target int"
+2026-10-07T17:36:48.1929999Z [36;1mecho "Preflighting existing state for target int"[0m
+2026-10-07T17:36:48.1930557Z [36;1mRG_NAME=$(grep 'resource_group_name' "infra/backends/int.hcl" | awk -F'"' '{print $2}' | xargs)[0m
+2026-10-07T17:36:48.1931198Z [36;1mSA_NAME=$(grep 'storage_account_name' "infra/backends/int.hcl" | awk -F'"' '{print $2}' | xargs)[0m
+2026-10-07T17:36:48.1931832Z [36;1mCONTAINER_NAME=$(grep 'container_name' "infra/backends/int.hcl" | awk -F'"' '{print $2}' | xargs)[0m
+2026-10-07T17:36:48.1932417Z [36;1mSTATE_KEY=$(grep 'key' "infra/backends/int.hcl" | awk -F'"' '{print $2}' | xargs)[0m
+2026-10-07T17:36:48.1932838Z [36;1m[0m
+2026-10-07T17:36:48.1933072Z [36;1mMISSING=0[0m
+2026-10-07T17:36:48.1933363Z [36;1mif ! az group show -n "$RG_NAME" &>/dev/null; then[0m
+2026-10-07T17:36:48.1933757Z [36;1m  echo "::error::Resource group $RG_NAME not found."[0m
+2026-10-07T17:36:48.1934125Z [36;1m  MISSING=1[0m
+2026-10-07T17:36:48.1934356Z [36;1mfi[0m
+2026-10-07T17:36:48.1934560Z [36;1m[0m
+2026-10-07T17:36:48.1935191Z [36;1mif ! az storage account show -n "$SA_NAME" -g "$RG_NAME" &>/dev/null; then[0m
+2026-10-07T17:36:48.1935700Z [36;1m  echo "::error::Storage account $SA_NAME not found in $RG_NAME."[0m
+2026-10-07T17:36:48.1936068Z [36;1m  MISSING=1[0m
+2026-10-07T17:36:48.1936286Z [36;1mfi[0m
+2026-10-07T17:36:48.1936503Z [36;1m[0m
+2026-10-07T17:36:48.1936729Z [36;1mif [ $MISSING -eq 0 ]; then[0m
+2026-10-07T17:36:48.1937176Z [36;1m  ACCOUNT_KEY=$(az storage account keys list -g "$RG_NAME" -n "$SA_NAME" --query "[0].value" -o tsv)[0m
+2026-10-07T17:36:48.1937663Z [36;1m  echo "::add-mask::$ACCOUNT_KEY"[0m
+2026-10-07T17:36:48.1938215Z [36;1m  if ! az storage container show -n "$CONTAINER_NAME" --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" &>/dev/null; then[0m
+2026-10-07T17:36:48.1938893Z [36;1m    echo "::error::Container $CONTAINER_NAME not found in storage account $SA_NAME."[0m
+2026-10-07T17:36:48.1939306Z [36;1m    MISSING=1[0m
+2026-10-07T17:36:48.1939555Z [36;1m  else[0m
+2026-10-07T17:36:48.1940064Z [36;1m    if ! az storage blob show -c "$CONTAINER_NAME" -n "$STATE_KEY" --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" &>/dev/null; then[0m
+2026-10-07T17:36:48.1940732Z [36;1m      echo "::error::State blob $STATE_KEY not found in container $CONTAINER_NAME."[0m
+2026-10-07T17:36:48.1941135Z [36;1m      MISSING=1[0m
+2026-10-07T17:36:48.1941373Z [36;1m    fi[0m
+2026-10-07T17:36:48.1941582Z [36;1m  fi[0m
+2026-10-07T17:36:48.1941794Z [36;1mfi[0m
+2026-10-07T17:36:48.1941996Z [36;1m[0m
+2026-10-07T17:36:48.1942206Z [36;1mif [ $MISSING -eq 1 ]; then[0m
+2026-10-07T17:36:48.1942744Z [36;1m  echo "::error::Target requires existing state, but preflight failed. Aborting to prevent empty state initialization."[0m
+2026-10-07T17:36:48.1943276Z [36;1m  exit 1[0m
+2026-10-07T17:36:48.1943487Z [36;1mfi[0m
+2026-10-07T17:36:48.1943751Z [36;1mecho "Existing state verified successfully."[0m
+2026-10-07T17:36:48.1980759Z shell: /usr/bin/bash -e {0}
+2026-10-07T17:36:48.1981053Z env:
+2026-10-07T17:36:48.1981279Z   REGISTRY: ghcr.io
+2026-10-07T17:36:48.1981714Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:36:48.1982452Z   AZURE_SUBSCRIPTION_ID: ***
+2026-10-07T17:36:48.1982726Z ##[endgroup]
+2026-10-07T17:36:48.2042171Z Preflighting existing state for target int
+2026-10-07T17:36:55.3770308Z Existing state verified successfully.
+2026-10-07T17:36:55.3801402Z ##[group]Run bash infra/bootstrap/setup-target.sh
+2026-10-07T17:36:55.3801808Z [36;1mbash infra/bootstrap/setup-target.sh[0m
+2026-10-07T17:36:55.3843516Z shell: /usr/bin/bash -e {0}
+2026-10-07T17:36:55.3843963Z env:
+2026-10-07T17:36:55.3844328Z   REGISTRY: ghcr.io
+2026-10-07T17:36:55.3844742Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:36:55.3845776Z   AZURE_SUBSCRIPTION_ID: ***
+2026-10-07T17:36:55.3846140Z   AZURE_TENANT_ID: ***
+2026-10-07T17:36:55.3846486Z   XHUMA_BACKEND_FILE: infra/backends/int.hcl
+2026-10-07T17:36:55.3846908Z ##[endgroup]
+2026-10-07T17:36:55.9448179Z Checking if Resource Group rg-xhuma-int exists...
+2026-10-07T17:36:56.6720426Z Ensuring Storage Account xtfrgxhumaint exists in rg-xhuma-int...
+2026-10-07T17:36:58.6556095Z Creating tfstate container...
+2026-10-07T17:36:59.7891280Z Creating tfplans container...
+2026-10-07T17:37:00.9290722Z Enabling versioning and retention on storage account...
+2026-10-07T17:37:02.7835899Z {
+2026-10-07T17:37:02.7837072Z   "automaticSnapshotPolicyEnabled": null,
+2026-10-07T17:37:02.7838153Z   "changeFeed": null,
+2026-10-07T17:37:02.7839160Z   "containerDeleteRetentionPolicy": {
+2026-10-07T17:37:02.7840236Z     "allowPermanentDelete": null,
+2026-10-07T17:37:02.7841174Z     "days": 30,
+2026-10-07T17:37:02.7841958Z     "enabled": true
+2026-10-07T17:37:02.7842796Z   },
+2026-10-07T17:37:02.7843516Z   "cors": {
+2026-10-07T17:37:02.7844270Z     "corsRules": []
+2026-10-07T17:37:02.7845177Z   },
+2026-10-07T17:37:02.7845970Z   "defaultServiceVersion": null,
+2026-10-07T17:37:02.7846969Z   "deleteRetentionPolicy": {
+2026-10-07T17:37:02.7847941Z     "allowPermanentDelete": null,
+2026-10-07T17:37:02.7848903Z     "days": 30,
+2026-10-07T17:37:02.7849727Z     "enabled": true
+2026-10-07T17:37:02.7850512Z   },
+2026-10-07T17:37:02.7853003Z   "id": "/subscriptions/***/resourceGroups/rg-xhuma-int/providers/Microsoft.Storage/storageAccounts/xtfrgxhumaint/blobServices/default",
+2026-10-07T17:37:02.7855326Z   "isVersioningEnabled": true,
+2026-10-07T17:37:02.7856392Z   "lastAccessTimeTrackingPolicy": null,
+2026-10-07T17:37:02.7857400Z   "name": "default",
+2026-10-07T17:37:02.7858267Z   "resourceGroup": "rg-xhuma-int",
+2026-10-07T17:37:02.7859176Z   "restorePolicy": null,
+2026-10-07T17:37:02.7859987Z   "sku": null,
+2026-10-07T17:37:02.7860750Z   "staticWebsite": {
+2026-10-07T17:37:02.7861613Z     "defaultIndexDocumentPath": null,
+2026-10-07T17:37:02.7862570Z     "enabled": false,
+2026-10-07T17:37:02.7863390Z     "errorDocument404Path": null,
+2026-10-07T17:37:02.7864363Z     "indexDocument": null
+2026-10-07T17:37:02.7865633Z   },
+2026-10-07T17:37:02.7866035Z   "systemData": null,
+2026-10-07T17:37:02.7866626Z   "type": "Microsoft.Storage/storageAccounts/blobServices"
+2026-10-07T17:37:02.7867203Z }
+2026-10-07T17:37:02.9166404Z Retrieving existing lifecycle policy...
+2026-10-07T17:37:03.8597102Z Updating lifecycle policy...
+2026-10-07T17:37:04.9822387Z Setup complete.
+2026-10-07T17:37:04.9856874Z ##[group]Run terraform init \
+2026-10-07T17:37:04.9857212Z [36;1mterraform init \[0m
+2026-10-07T17:37:04.9857549Z [36;1m  -backend-config="../infra/backends/int.hcl"[0m
+2026-10-07T17:37:04.9894682Z shell: /usr/bin/bash -e {0}
+2026-10-07T17:37:04.9895122Z env:
+2026-10-07T17:37:04.9895339Z   REGISTRY: ghcr.io
+2026-10-07T17:37:04.9895639Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:37:04.9896100Z   ARM_CLIENT_ID: ***
+2026-10-07T17:37:04.9896487Z   ARM_CLIENT_SECRET: ***
+2026-10-07T17:37:04.9896810Z   ARM_TENANT_ID: ***
+2026-10-07T17:37:04.9897118Z   ARM_SUBSCRIPTION_ID: ***
+2026-10-07T17:37:04.9897374Z ##[endgroup]
+2026-10-07T17:37:05.0173009Z 
+2026-10-07T17:37:05.0174063Z [0m[1mInitializing the backend...[0m
+2026-10-07T17:37:06.2543251Z [0m[32m
+2026-10-07T17:37:06.2544007Z Successfully configured the backend "azurerm"! Terraform will automatically
+2026-10-07T17:37:06.2544687Z use this backend unless the backend configuration changes.[0m
+2026-10-07T17:37:07.5438217Z 
+2026-10-07T17:37:07.5439541Z [0m[1mInitializing provider plugins...[0m
+2026-10-07T17:37:07.5440432Z - Reusing previous version of hashicorp/azurerm from the dependency lock file
+2026-10-07T17:37:07.7151092Z - Installing hashicorp/azurerm v3.117.1...
+2026-10-07T17:37:11.4284100Z - Installed hashicorp/azurerm v3.117.1 (signed by HashiCorp)
+2026-10-07T17:37:11.4285784Z 
+2026-10-07T17:37:11.4286258Z Terraform has made some changes to the provider dependency selections recorded
+2026-10-07T17:37:11.4287318Z in the .terraform.lock.hcl file. Review those changes and commit them to your
+2026-10-07T17:37:11.4288275Z version control system if they represent changes you intended to make.
+2026-10-07T17:37:11.4288655Z 
+2026-10-07T17:37:11.4289143Z [0m[1m[32mTerraform has been successfully initialized![0m[32m[0m
+2026-10-07T17:37:11.4289643Z [0m[32m
+2026-10-07T17:37:11.4290039Z You may now begin working with Terraform. Try running "terraform plan" to see
+2026-10-07T17:37:11.4290661Z any changes that are required for your infrastructure. All Terraform commands
+2026-10-07T17:37:11.4291125Z should now work.
+2026-10-07T17:37:11.4291292Z 
+2026-10-07T17:37:11.4291524Z If you ever set or change modules or backend configuration for Terraform,
+2026-10-07T17:37:11.4292115Z rerun this command to reinitialize your working directory. If you forget, other
+2026-10-07T17:37:11.4292761Z commands will detect it and remind you to do so if necessary.[0m
+2026-10-07T17:37:11.4341960Z ##[group]Run echo "Verifying existing state contains expected workload anchors..."
+2026-10-07T17:37:11.4342668Z [36;1mecho "Verifying existing state contains expected workload anchors..."[0m
+2026-10-07T17:37:11.4343191Z [36;1mSTATE_LIST=$(terraform state list)[0m
+2026-10-07T17:37:11.4343544Z [36;1m[0m
+2026-10-07T17:37:11.4344118Z [36;1mANCHORS=("azurerm_linux_web_app.app" "azurerm_postgresql_flexible_server.postgres" "azurerm_redis_cache.redis")[0m
+2026-10-07T17:37:11.4344718Z [36;1m[0m
+2026-10-07T17:37:11.4345542Z [36;1mMISSING=0[0m
+2026-10-07T17:37:11.4345855Z [36;1mfor ANCHOR in "${ANCHORS[@]}"; do[0m
+2026-10-07T17:37:11.4346288Z [36;1m  if ! echo "$STATE_LIST" | grep -q "^${ANCHOR}$"; then[0m
+2026-10-07T17:37:11.4347135Z [36;1m    echo "::error::Migration Guard: Required state anchor '${ANCHOR}' is missing from the remote state. Aborting to prevent recreation of brownfield environment."[0m
+2026-10-07T17:37:11.4347925Z [36;1m    MISSING=1[0m
+2026-10-07T17:37:11.4348284Z [36;1m  fi[0m
+2026-10-07T17:37:11.4348533Z [36;1mdone[0m
+2026-10-07T17:37:11.4348781Z [36;1m[0m
+2026-10-07T17:37:11.4349047Z [36;1mif [ $MISSING -eq 1 ]; then[0m
+2026-10-07T17:37:11.4349374Z [36;1m  exit 1[0m
+2026-10-07T17:37:11.4349587Z [36;1mfi[0m
+2026-10-07T17:37:11.4349853Z [36;1mecho "State anchors verified successfully."[0m
+2026-10-07T17:37:11.4385706Z shell: /usr/bin/bash -e {0}
+2026-10-07T17:37:11.4385996Z env:
+2026-10-07T17:37:11.4386219Z   REGISTRY: ghcr.io
+2026-10-07T17:37:11.4386505Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:37:11.4386970Z   ARM_CLIENT_ID: ***
+2026-10-07T17:37:11.4387371Z   ARM_CLIENT_SECRET: ***
+2026-10-07T17:37:11.4387670Z   ARM_TENANT_ID: ***
+2026-10-07T17:37:11.4387978Z   ARM_SUBSCRIPTION_ID: ***
+2026-10-07T17:37:11.4388241Z ##[endgroup]
+2026-10-07T17:37:11.4445126Z Verifying existing state contains expected workload anchors...
+2026-10-07T17:37:13.7726386Z State anchors verified successfully.
+2026-10-07T17:37:13.7767266Z ##[group]Run PLAN_FILE="int-${GITHUB_SHA}-${GITHUB_RUN_ID}.tfplan"
+2026-10-07T17:37:13.7767806Z [36;1mPLAN_FILE="int-${GITHUB_SHA}-${GITHUB_RUN_ID}.tfplan"[0m
+2026-10-07T17:37:13.7768148Z [36;1m[0m
+2026-10-07T17:37:13.7768439Z [36;1m# Check if plan already exists (fail if re-planning)[0m
+2026-10-07T17:37:13.7768818Z [36;1m# Extract authoritative storage coordinates[0m
+2026-10-07T17:37:13.7769447Z [36;1mRG_NAME=$(grep 'resource_group_name' "../infra/backends/int.hcl" | awk -F'"' '{print $2}' | xargs)[0m
+2026-10-07T17:37:13.7770090Z [36;1mSA_NAME=$(grep 'storage_account_name' "../infra/backends/int.hcl" | awk -F'"' '{print $2}' | xargs)[0m
+2026-10-07T17:37:13.7770732Z [36;1mCONTAINER_NAME=$(grep 'container_name' "../infra/backends/int.hcl" | awk -F'"' '{print $2}' | xargs)[0m
+2026-10-07T17:37:13.7771335Z [36;1mSTATE_KEY=$(grep 'key' "../infra/backends/int.hcl" | awk -F'"' '{print $2}' | xargs)[0m
+2026-10-07T17:37:13.7771733Z [36;1m[0m
+2026-10-07T17:37:13.7772265Z [36;1mACCOUNT_KEY=$(az storage account keys list --resource-group "$RG_NAME" --account-name "$SA_NAME" --query '[0].value' -o tsv)[0m
+2026-10-07T17:37:13.7772827Z [36;1mecho "::add-mask::$ACCOUNT_KEY"[0m
+2026-10-07T17:37:13.7773098Z [36;1m[0m
+2026-10-07T17:37:13.7773673Z [36;1mEXISTS=$(az storage blob exists --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" --container-name tfplans --name "$PLAN_FILE" --query exists -o tsv)[0m
+2026-10-07T17:37:13.7774319Z [36;1mif [ "$EXISTS" == "true" ]; then[0m
+2026-10-07T17:37:13.7775045Z [36;1m  echo "::error::Plan $PLAN_FILE already exists. Overwriting is forbidden. A replacement plan requires a new workflow run."[0m
+2026-10-07T17:37:13.7775658Z [36;1m  exit 1[0m
+2026-10-07T17:37:13.7775890Z [36;1mfi[0m
+2026-10-07T17:37:13.7776102Z [36;1m[0m
+2026-10-07T17:37:13.7776313Z [36;1mset +e[0m
+2026-10-07T17:37:13.7776773Z [36;1mterraform plan -input=false -var-file="../infra/env/int.tfvars" -out="$PLAN_FILE" -json > plan_output.json 2>&1[0m
+2026-10-07T17:37:13.7777299Z [36;1mTF_EXIT=$?[0m
+2026-10-07T17:37:13.7777541Z [36;1mset -e[0m
+2026-10-07T17:37:13.7777758Z [36;1m[0m
+2026-10-07T17:37:13.7777972Z [36;1mif [ $TF_EXIT -ne 0 ]; then[0m
+2026-10-07T17:37:13.7778330Z [36;1m  echo "::error::Terraform plan failed with exit code $TF_EXIT"[0m
+2026-10-07T17:37:13.7778762Z [36;1m  echo "### Terraform Plan Error" >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7779135Z [36;1m  echo '```text' >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7779501Z [36;1m  # Publish actionable error, absent sensitive values[0m
+2026-10-07T17:37:13.7780018Z [36;1m  python ../scripts/deploy/filter_tf_error.py $TF_EXIT plan_output.json >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7780502Z [36;1m  echo '```' >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7780799Z [36;1m  exit $TF_EXIT[0m
+2026-10-07T17:37:13.7781034Z [36;1mfi[0m
+2026-10-07T17:37:13.7781231Z [36;1m[0m
+2026-10-07T17:37:13.7781446Z [36;1maz storage blob upload \[0m
+2026-10-07T17:37:13.7781733Z [36;1m  --account-name "$SA_NAME" \[0m
+2026-10-07T17:37:13.7782024Z [36;1m  --account-key "$ACCOUNT_KEY" \[0m
+2026-10-07T17:37:13.7782320Z [36;1m  --container-name tfplans \[0m
+2026-10-07T17:37:13.7782607Z [36;1m  --name "$PLAN_FILE" \[0m
+2026-10-07T17:37:13.7782875Z [36;1m  --file "$PLAN_FILE"[0m
+2026-10-07T17:37:13.7783114Z [36;1m[0m
+2026-10-07T17:37:13.7783405Z [36;1mPLAN_HASH=$(sha256sum "$PLAN_FILE" | awk '{ print $1 }')[0m
+2026-10-07T17:37:13.7783741Z [36;1m[0m
+2026-10-07T17:37:13.7783968Z [36;1mcat <<EOF_MANIFEST > manifest.json[0m
+2026-10-07T17:37:13.7784246Z [36;1m{[0m
+2026-10-07T17:37:13.7784533Z [36;1m  "repository": "UCLH-Digital-Innovation-Hub/Xhuma",[0m
+2026-10-07T17:37:13.7785135Z [36;1m  "source_commit_sha": "${GITHUB_SHA}",[0m
+2026-10-07T17:37:13.7785472Z [36;1m  "workflow_run_id": "${GITHUB_RUN_ID}",[0m
+2026-10-07T17:37:13.7785775Z [36;1m  "target_id": "int",[0m
+2026-10-07T17:37:13.7786211Z [36;1m  "azure_tenant_id": "***",[0m
+2026-10-07T17:37:13.7786752Z [36;1m  "azure_subscription_id": "***",[0m
+2026-10-07T17:37:13.7787097Z [36;1m  "backend_file": "infra/backends/int.hcl",[0m
+2026-10-07T17:37:13.7787443Z [36;1m  "backend_resource_group": "$RG_NAME",[0m
+2026-10-07T17:37:13.7787768Z [36;1m  "backend_storage_account": "$SA_NAME",[0m
+2026-10-07T17:37:13.7788110Z [36;1m  "backend_container": "$CONTAINER_NAME",[0m
+2026-10-07T17:37:13.7788503Z [36;1m  "backend_key": "$STATE_KEY",[0m
+2026-10-07T17:37:13.7788995Z [36;1m  "candidate_image_digest": "sha256:10ee29f73f5f68eb5a84f05487975d66487b6b96c737bf9bdc42c7fd0c4c63ba",[0m
+2026-10-07T17:37:13.7789515Z [36;1m  "plan_blob_path": "$PLAN_FILE",[0m
+2026-10-07T17:37:13.7789811Z [36;1m  "plan_sha256": "$PLAN_HASH"[0m
+2026-10-07T17:37:13.7790083Z [36;1m}[0m
+2026-10-07T17:37:13.7790309Z [36;1mEOF_MANIFEST[0m
+2026-10-07T17:37:13.7790542Z [36;1m[0m
+2026-10-07T17:37:13.7790840Z [36;1mecho "### Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7791253Z [36;1mecho "**Plan Hash:** \`$PLAN_HASH\`" >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7791736Z [36;1mecho "**Target:** int" >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7792383Z [36;1mecho "**Expected Image Digest:** \`sha256:10ee29f73f5f68eb5a84f05487975d66487b6b96c737bf9bdc42c7fd0c4c63ba\`" >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7792958Z [36;1m[0m
+2026-10-07T17:37:13.7793235Z [36;1m# Highlight deletes/replacements using a GitHub warning[0m
+2026-10-07T17:37:13.7793935Z [36;1mDESTRUCTIVE=$(terraform show -json "$PLAN_FILE" | jq -r '.resource_changes[]? | select(.change.actions | index("delete") or index("replace")) | .address')[0m
+2026-10-07T17:37:13.7794571Z [36;1mif [ -n "$DESTRUCTIVE" ]; then[0m
+2026-10-07T17:37:13.7795095Z [36;1m  # Convert newlines to commas for the message[0m
+2026-10-07T17:37:13.7795486Z [36;1m  WARN_MSG=$(echo "$DESTRUCTIVE" | tr '\n' ',' | sed 's/,$//')[0m
+2026-10-07T17:37:13.7795840Z [36;1m  if [ "true" == "true" ]; then[0m
+2026-10-07T17:37:13.7796543Z [36;1m    echo "::error::Migration Guard: The plan contains destructive actions (delete/replace) for an environment requiring existing state adoption. Affected resources: $WARN_MSG"[0m
+2026-10-07T17:37:13.7797238Z [36;1m    exit 1[0m
+2026-10-07T17:37:13.7797466Z [36;1m  else[0m
+2026-10-07T17:37:13.7797924Z [36;1m    echo "::warning::The plan contains destructive actions (delete/replace) for the following resources: $WARN_MSG"[0m
+2026-10-07T17:37:13.7798433Z [36;1m  fi[0m
+2026-10-07T17:37:13.7798645Z [36;1mfi[0m
+2026-10-07T17:37:13.7798870Z [36;1m[0m
+2026-10-07T17:37:13.7799099Z [36;1mecho '```text' >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7799442Z [36;1m# Filter output to non-secret change summary[0m
+2026-10-07T17:37:13.7799838Z [36;1mterraform show -no-color "$PLAN_FILE" > plan_output.txt[0m
+2026-10-07T17:37:13.7800330Z [36;1mgrep -E "Plan: |No changes.|error" plan_output.txt >> $GITHUB_STEP_SUMMARY || true[0m
+2026-10-07T17:37:13.7800768Z [36;1mecho "" >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7801037Z [36;1m[0m
+2026-10-07T17:37:13.7801365Z [36;1m# Safely append only the action and resource address of changed resources[0m
+2026-10-07T17:37:13.7801810Z [36;1mterraform show -json "$PLAN_FILE" | jq -r '[0m
+2026-10-07T17:37:13.7802134Z [36;1m  .resource_changes[]?[0m
+2026-10-07T17:37:13.7802499Z [36;1m  | select(.change.actions != ["no-op"] and .change.actions != ["read"])[0m
+2026-10-07T17:37:13.7802937Z [36;1m  | "\(.change.actions | join(", ")) \(.address)"[0m
+2026-10-07T17:37:13.7803281Z [36;1m' >> $GITHUB_STEP_SUMMARY || true[0m
+2026-10-07T17:37:13.7803591Z [36;1mecho '```' >> $GITHUB_STEP_SUMMARY[0m
+2026-10-07T17:37:13.7838967Z shell: /usr/bin/bash -e {0}
+2026-10-07T17:37:13.7839259Z env:
+2026-10-07T17:37:13.7839468Z   REGISTRY: ghcr.io
+2026-10-07T17:37:13.7839763Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:37:13.7840187Z   ARM_CLIENT_ID: ***
+2026-10-07T17:37:13.7840575Z   ARM_CLIENT_SECRET: ***
+2026-10-07T17:37:13.7840883Z   ARM_TENANT_ID: ***
+2026-10-07T17:37:13.7841306Z   ARM_SUBSCRIPTION_ID: ***
+2026-10-07T17:37:13.7841588Z   TF_VAR_resource_group_name: rg-xhuma-int
+2026-10-07T17:37:13.7841908Z   TF_VAR_registry_id: ***
+2026-10-07T17:37:13.7842357Z   TF_VAR_docker_registry_password: ***
+2026-10-07T17:37:13.7842671Z   TF_VAR_docker_registry_username: OSAS-NHS
+2026-10-07T17:37:13.7843255Z   TF_VAR_docker_image: uclh-digital-innovation-hub/xhuma@sha256:10ee29f73f5f68eb5a84f05487975d66487b6b96c737bf9bdc42c7fd0c4c63ba
+2026-10-07T17:37:13.7843924Z   TF_VAR_postgres_admin_password: ***
+2026-10-07T17:37:13.7844247Z   TF_VAR_shared_resource_group_name: ***
+2026-10-07T17:37:13.7844619Z   TF_VAR_shared_subscription_id: ***
+2026-10-07T17:37:13.7845121Z   TF_VAR_shared_key_vault_name: ***
+2026-10-07T17:37:13.7845390Z ##[endgroup]
+2026-10-07T17:37:56.4901934Z 
+2026-10-07T17:37:56.4902583Z Alive[################################################################]  100.0000%
+2026-10-07T17:37:56.4903102Z Finished[#############################################################]  100.0000%
+2026-10-07T17:37:56.5155346Z {
+2026-10-07T17:37:56.5156265Z   "client_request_id": "d458a91d-c275-11f1-ae67-70a8a51ab155",
+2026-10-07T17:37:56.5157369Z   "content_md5": "TmIppiCXEcky9WJhC901EQ==",
+2026-10-07T17:37:56.5158282Z   "date": "2026-10-07T17:37:55+00:00",
+2026-10-07T17:37:56.5159102Z   "encryption_key_sha256": null,
+2026-10-07T17:37:56.5159890Z   "encryption_scope": null,
+2026-10-07T17:37:56.5160651Z   "etag": "\"0x8DF2499B91D1AEC\"",
+2026-10-07T17:37:56.5161466Z   "lastModified": "2026-10-07T17:37:56+00:00",
+2026-10-07T17:37:56.5162449Z   "request_id": "028199dc-801e-005e-4982-5630fd000000",
+2026-10-07T17:37:56.5163442Z   "request_server_encrypted": true,
+2026-10-07T17:37:56.5164269Z   "structured_body": null,
+2026-10-07T17:37:56.5165197Z   "version": "2026-04-06",
+2026-10-07T17:37:56.5165963Z   "version_id": "2026-10-07T17:37:56.4188396Z"
+2026-10-07T17:37:56.5166809Z }
+2026-10-07T17:37:59.5101591Z ##[group]Run actions/upload-artifact@v4
+2026-10-07T17:37:59.5101934Z with:
+2026-10-07T17:37:59.5102173Z   name: plan-manifest-int
+2026-10-07T17:37:59.5102441Z   path: infra/manifest.json
+2026-10-07T17:37:59.5102715Z   if-no-files-found: warn
+2026-10-07T17:37:59.5102977Z   compression-level: 6
+2026-10-07T17:37:59.5103218Z   overwrite: false
+2026-10-07T17:37:59.5103458Z   include-hidden-files: false
+2026-10-07T17:37:59.5103708Z env:
+2026-10-07T17:37:59.5103916Z   REGISTRY: ghcr.io
+2026-10-07T17:37:59.5104197Z   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+2026-10-07T17:37:59.5104504Z ##[endgroup]
+2026-10-07T17:37:59.6795659Z (node:2982) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-10-07T17:37:59.6796341Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-10-07T17:37:59.6841585Z With the provided path, there will be 1 file uploaded
+2026-10-07T17:37:59.6856805Z Artifact name is valid!
+2026-10-07T17:37:59.6865170Z Root directory input is valid!
+2026-10-07T17:38:00.0486413Z Beginning upload of artifact content to blob storage
+2026-10-07T17:38:00.0662338Z (node:2982) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-10-07T17:38:00.2728214Z Uploaded bytes 588
+2026-10-07T17:38:00.3316354Z Finished uploading artifact content to blob storage!
+2026-10-07T17:38:00.3317637Z SHA256 digest of uploaded artifact zip is 113ed3f414c5ec8ef11bf3735d64212ffb798e07500382825c3c4c85a44834d5
+2026-10-07T17:38:00.3320001Z Finalizing artifact upload
+2026-10-07T17:38:00.6122761Z Artifact plan-manifest-int.zip successfully finalized. Artifact ID 11500690672
+2026-10-07T17:38:00.6123892Z Artifact plan-manifest-int has been successfully uploaded! Final size is 588 bytes. Artifact ID is 11500690672
+2026-10-07T17:38:00.6130624Z Artifact download URL: https://github.com/UCLH-Digital-Innovation-Hub/Xhuma/actions/runs/37660156212/artifacts/11500690672
+2026-10-07T17:38:00.6299790Z Post job cleanup.
+2026-10-07T17:38:00.6747934Z Clearing azure cli accounts from the local cache.
+2026-10-07T17:38:00.6756344Z [command]/usr/bin/az account clear
+2026-10-07T17:38:01.3918905Z Post job cleanup.
+2026-10-07T17:38:01.4752659Z [command]/usr/bin/git version
+2026-10-07T17:38:01.4792381Z git version 2.55.0
+2026-10-07T17:38:01.4830163Z Temporarily overriding HOME='/home/runner/work/_temp/27ea92c6-d5b3-4a0e-ae34-41e53f462784' before making global git config changes
+2026-10-07T17:38:01.4832078Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-07T17:38:01.4835931Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Xhuma/Xhuma
+2026-10-07T17:38:01.4875193Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-07T17:38:01.4909758Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-07T17:38:01.5137565Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-07T17:38:01.5164270Z http.https://github.com/.extraheader
+2026-10-07T17:38:01.5175877Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-10-07T17:38:01.5209584Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-07T17:38:01.5452976Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-07T17:38:01.5477909Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-07T17:38:01.5877208Z Cleaning up orphan processes
+2026-10-07T17:38:01.6176652Z Terminate orphan process: pid (3028) (python3)
+2026-10-07T17:38:01.6222141Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4, azure/login@v2, hashicorp/setup-terraform@v2. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
