@@ -166,3 +166,10 @@ walkthrough.md
 *.tfstate.backup
 *.code-workspace
 RIGG_Presentation.html
+
+# Pre-production operator artefacts
+/create_envs.sh
+/test-sp-access.sh
+/manifest.json
+/plan-manifest-*/
+/plan_logs.txt
