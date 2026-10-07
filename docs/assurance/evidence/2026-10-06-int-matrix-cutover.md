@@ -86,3 +86,13 @@ They showed:
 No PHI or raw audit content was reproduced.
 
 This provides live evidence that the deployed INT audit implementation is persisting the core audit identity/action/outcome metadata required for the current assurance scope.
+
+## I. Functional Acceptance Follow-up — 7 October 2026
+
+A subsequent INT interoperability test completed the ITI-38 document query and subsequent ITI-39 document retrieval workflow successfully.
+
+This demonstrates that the downstream GP Connect failure observed on 6 October did not recur during this test and that the previously blocked end-to-end XDS document workflow was successfully exercised.
+
+The successful test was performed against the existing deployed INT release. The later audit data-minimisation/correlation hardening present on `dev` had not yet been promoted to INT at the time of this functional test and is therefore not claimed as part of this evidence.
+
+No patient-identifiable payload or raw clinical content is reproduced in this public assurance record.
