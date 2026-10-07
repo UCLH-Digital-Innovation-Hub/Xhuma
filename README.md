@@ -44,10 +44,10 @@ sequenceDiagram
     end
 
 
-    EHR->>Fast API: ITI 47 Request
+    EHR->>Fast API: ITI 55 Request
     Fast API->>PDS: FHIR PDS lookup
     PDS->>Fast API: PDS response
-    Fast API->>EHR: ITI 47 Response
+    Fast API->>EHR: ITI 55 Response
     Fast API->>Redis: Check for cached SDS lookup
     opt if no cached SDS lookup
     Fast API--)SDS: ASID Lookup
@@ -76,16 +76,26 @@ sequenceDiagram
 - NHS Digital API access credentials
 
 ## Development
-1. install pipenv
+1. Install uv.
 
-2. install development dependencies
+2. Install development dependencies from the lockfile.
 ```bash
-pipenv install --dev
+uv sync --locked --dev
 ```
 
 3. install pre-commit hooks to ensure consistency
 ```bash
-pre-commit install
+uv run --locked pre-commit install
+```
+
+The Ruff hooks check the whole repository using the version in `uv.lock` and
+the rules in `pyproject.toml`, matching CI. They automatically fix lint and
+formatting issues where possible; review and stage those edits before retrying
+the commit. To run the same read-only checks as CI:
+
+```bash
+uv run --locked ruff check .
+uv run --locked ruff format --check .
 ```
 
 4. configure environmental variables and use docker as below
@@ -116,12 +126,32 @@ REGISTRY_ID=your_registry_id
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
+
+# Relay configuration
+USE_RELAY=false
+RELAY_REQUIRE_MTLS=true
+RELAY_CLIENT_CERT_HEADER=X-Relay-ClientCert
+# Optional certificate pinning for dedicated relay cert(s):
+# RELAY_MTLS_ALLOWED_CERT_SHA256=<sha256_hex>[,<sha256_hex>...]
+
+# Compose-managed nginx
+NGINX_PUBLIC_SERVER_NAME=xhumademo.com
+NGINX_RELAY_SERVER_NAME=relay.xhumademo.com
+NGINX_CERTS_DIR=/etc/letsencrypt
+NGINX_CLIENT_CA_DIR=/etc/ssl/clients
+# Optional if the relay host uses a separate server cert/key pair:
+# NGINX_RELAY_TLS_CERT=/etc/letsencrypt/live/relay.xhumademo.com/fullchain.pem
+# NGINX_RELAY_TLS_KEY=/etc/letsencrypt/live/relay.xhumademo.com/privkey.pem
+# Dedicated relay client CA bundle mounted into nginx:
+# NGINX_RELAY_CLIENT_CA=/etc/nginx/client-ca/relay-client-ca.pem
 ```
 
 4. Deploy with Docker Compose:
 ```bash
 docker-compose up -d
 ```
+
+When using the bundled Nginx proxy, point the public site at `NGINX_PUBLIC_SERVER_NAME` and the relay agent at `NGINX_RELAY_SERVER_NAME`. The relay hostname is terminated separately in Nginx so it can require a dedicated relay client CA at the TLS layer; that is not possible on the same hostname and port with path-based routing alone.
 
 The service will be available at `http://localhost:8000`
 
@@ -135,10 +165,12 @@ The `infra/` directory contains Terraform configuration for:
 - Azure Cache for Redis (Standard)
 - Azure Monitor (Application Insights & Log Analytics)
 
-### CI/CD Pipelines
-- **CI (`.github/workflows/ci.yml`)**: Runs linting and tests on PRs to `dev`.
-- **Infrastructure (`.github/workflows/infra.yml`)**: Plans Terraform changes on PRs, and Applies on merge to `main`.
-- **Deployment (`.github/workflows/cd.yml`)**: Builds Docker image, pushes to GitHub Container Registry (GHCR), and deploys to Azure Web App on merge to `main`.
+### CI/CD Pipelines & Matrix Deployment
+The deployment architecture is currently migrating to a **"Target-isolated matrix deployment with centrally managed shared services"** model.
+
+- **Matrix Pipeline (`.github/workflows/matrix-deploy.yml`)**: Currently orchestrates deployments to the `play` environment from the `rehearsal/play-deployment` branch. This pipeline enforces strict pre-plan and pre-apply approval gates and relies on immutable Docker image digests.
+- **Legacy Pipelines (`.github/workflows/infra.yml` and `cd.yml`)**: INT and PRD environments currently remain on legacy ownership pipelines and will be migrated to the matrix model in the future.
+- **Shared Infrastructure**: Adoption of a shared Terraform state (for cross-environment resources like the shared Key Vault) is currently incomplete and remains an outstanding migration step.
 
 ### Observability
 End-to-end traceability is implemented using **Azure Monitor OpenTelemetry**.
@@ -165,7 +197,7 @@ The service uses a production-ready Redis setup with:
 - Comprehensive monitoring
 - Security hardening
 
-Redis metrics are available through Prometheus and can be visualized in Grafana.
+*(Note: In local development, Redis metrics are available through Prometheus and can be visualized in Grafana. Production Azure target environments use Azure Monitor for managed Redis metrics).*
 
 ## API Documentation
 
@@ -175,10 +207,10 @@ Access the interactive API documentation at:
 
 ## Branch Strategy
 
-- `main`: Production releases
-- `dev`: Development branch
+- `main`: Production releases (Triggers deployments to `rg-xhuma-uclh-prd` and future trust environments)
+- `int`: Integration/Stabilisation branch (Triggers deployments to `rg-xhuma-int` for dry runs)
+- `dev`: Active development and feature integration
 - `feature/*`: Feature branches
-- `integration`: Integration testing
 
 ## Contributing
 
@@ -195,6 +227,6 @@ Tests are automatically run in the CI pipeline. To run tests locally using Docke
 docker-compose -f docker-compose.test.yml up --build
 ```
 
-## License
+## Licence
 
-This project is licensed under the terms of the license included in the [LICENSE](LICENSE) file.
+This project is licensed under the terms of the licence included in the [LICENSE](LICENSE) file.

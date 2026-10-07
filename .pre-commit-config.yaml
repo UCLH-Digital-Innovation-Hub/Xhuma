@@ -1,24 +1,25 @@
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-    -   id: check-yaml
-    -   id: end-of-file-fixer
+      - id: check-yaml
+      - id: end-of-file-fixer
         exclude: '\.[mM][dD]$'
-    -   id: trailing-whitespace
+      - id: trailing-whitespace
         exclude: '\.[mM][dD]$'
--   repo: https://github.com/pycqa/isort
-    rev: 8.0.1
+
+  # Use uv.lock and pyproject.toml, just like CI, and check the whole repository.
+  - repo: local
     hooks:
-      - id: isort
-        name: isort (python)
-        args: ["--profile", "black", "--filter-files"]
--   repo: https://github.com/psf/black
-    rev: 26.3.1
-    hooks:
-      - id: black
-        # It is recommended to specify the latest version of Python
-        # supported by your project here, or alternatively use
-        # pre-commit's default_language_version, see
-        # https://pre-commit.com/#top_level-default_language_version
-        language_version: python3.13
+      - id: ruff-check
+        name: Ruff lint
+        entry: uv run --locked ruff check --fix .
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: ruff-format
+        name: Ruff format
+        entry: uv run --locked ruff format .
+        language: system
+        pass_filenames: false
+        always_run: true

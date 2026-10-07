@@ -110,6 +110,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# Do not ignore non-secret tfvars
+!infra/env/
+!infra/env/play.tfvars
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -161,3 +165,11 @@ walkthrough.md
 *.tfstate
 *.tfstate.backup
 *.code-workspace
+RIGG_Presentation.html
+
+# Pre-production operator artefacts
+/create_envs.sh
+/test-sp-access.sh
+/manifest.json
+/plan-manifest-*/
+/plan_logs.txt

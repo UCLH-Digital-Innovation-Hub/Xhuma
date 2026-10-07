@@ -1,5 +1,3 @@
-import os
-
 import xmltodict
 
 from app.audit.audit import process_saml_attributes

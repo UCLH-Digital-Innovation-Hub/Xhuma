@@ -17,11 +17,53 @@ import uuid
 from time import time
 
 import jwt
-from fhirclient.models import humanname, practitioner
+from fastapi import HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 
 from .audit.models import SAMLAttributes
 
 JWTKEY = os.getenv("JWTKEY")
+API_KEY = os.getenv("API_KEY")
+api_key_header_scheme = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+
+async def verify_api_key(api_key_header: str = Security(api_key_header_scheme)):
+    expected_key = os.getenv("API_KEY")
+    if not expected_key or not expected_key.strip():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server authentication misconfigured",
+        )
+    if api_key_header != expected_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API Key",
+        )
+    return api_key_header
+
+
+def fix_pem_formatting(pem_string: str) -> str:
+    if not pem_string:
+        return pem_string
+    pem_string = pem_string.replace("\\n", "\n")
+    if "\n" not in pem_string:
+        import re
+
+        formatted_certs = []
+        matches = re.finditer(r"(-----BEGIN [^-]+-----)(.*?)(-----END [^-]+-----)", pem_string)
+        for match in matches:
+            header = match.group(1)
+            # Remove all whitespace from the base64 body
+            raw_body = re.sub(r"\s+", "", match.group(2))
+            # Chunk the body into 64-character lines
+            body_lines = [raw_body[i : i + 64] for i in range(0, len(raw_body), 64)]
+            body = "\n".join(body_lines)
+            footer = match.group(3)
+            formatted_certs.append(f"{header}\n{body}\n{footer}")
+
+        if formatted_certs:
+            return "\n".join(formatted_certs)
+    return pem_string
 
 
 def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
@@ -42,7 +84,6 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         - A unique JWT ID (jti claim)
         - 5-minute expiration time (exp claim)
     """
-    headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
     payload = {
         "sub": subject,
         "iss": issuer,
@@ -51,8 +92,13 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         "exp": int(time()) + 300,
     }
 
+    headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
+
     # Get private key from environment or file
     private_key = os.getenv("JWTKEY")
+    if private_key is not None:
+        private_key = fix_pem_formatting(private_key)
+
     if private_key is None:
         # Fallback to local file if it exists, otherwise raise clear error
         key_path = "keys/test-1.pem"
@@ -67,7 +113,7 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
     if private_key is None:
         raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
 
-    return jwt.encode(payload, key=private_key, algorithm="RS512", headers=headers)
+    return jwt.encode(payload, private_key, algorithm="RS512", headers=headers)
 
 
 def create_jwt(
@@ -94,10 +140,16 @@ def create_jwt(
 
     """
     created_time = int(time())
-    family, given = audit.subject_id.split(", ")
+
+    subject_id_str = audit.subject_id
+    try:
+        family, given = subject_id_str.split(", ", 1)
+    except ValueError:
+        family, given = subject_id_str, "User"
+
     payload = {
         "iss": "http://int.apis.ptl.api.platform.nhs.uk/Device/EA2027FD-B486-4033-B48C-E87222F6FA1C",
-        "sub": audit.subject_id,
+        "sub": subject_id_str,
         "aud": audience,
         "iat": created_time,
         "exp": created_time + 300,
@@ -130,7 +182,7 @@ def create_jwt(
         },
         "requesting_practitioner": {
             "resourceType": "Practitioner",
-            "id": audit.subject_id,
+            "id": subject_id_str,
             "identifier": [
                 {
                     "system": "https://fhir.nhs.uk/Id/sds-user-id",
@@ -142,7 +194,7 @@ def create_jwt(
                 },
                 {
                     "system": audit.organization,
-                    "value": audit.subject_id,
+                    "value": subject_id_str,
                 },
             ],
             "name": [
@@ -159,8 +211,8 @@ def create_jwt(
     # audit_role.pop("nullFlavor", None)  # Remove null flavor if present
 
     audit_role = {
-        "system": audit.role.codeSystemName,
-        "value": audit.role.code,
+        "system": audit.role.codeSystemName if audit.role else "",
+        "value": audit.role.code if audit.role else "",
     }
 
     # print("Adding role to JWT payload:", audit_role)
@@ -174,31 +226,7 @@ def create_jwt(
     #     import json
 
     #     json.dump(payload, f, indent=4)
-    # Get private key from environment or file
-
-    headers = {"alg": "RS512", "typ": "JWT", "kid": "test-1"}
-    # log headers to file for debugging
-    # with open("app/logs/int_troubleshooting/jwt_headers.json", "w") as f:
-    #     import json
-
-    #     json.dump(headers, f, indent=4)
-    # headers = {"alg": "none", "typ": "JWT"}
-
-    private_key = os.getenv("JWTKEY")
-    if private_key is None:
-        key_path = "keys/test-1.pem"
-        if os.path.exists(key_path):
-            with open(key_path, "r") as f:
-                private_key = f.read()
-        else:
-            private_key = None
-
-    if private_key is None:
-        raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
-
-    return jwt.encode(payload, headers={"alg": "none", "typ": "JWT"}, key=None)
-
-    # return jwt.encode(payload, private_key, algorithm="RS512", headers={"alg": "RS512", "typ": "JWT", "kid": "test-1"})
+    return jwt.encode(payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"})
 
 
 if __name__ == "__main__":

@@ -24,23 +24,18 @@ async def test_GPC_SPN_TST_01():
     nhsnos = [9658218873]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-01", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-01.log"), "a") as f:
                 pds_search = await lookup_patient(nhsno)
-                f.write(f"PDS trace output" + json.dumps(pds_search) + "\n")
+                f.write("PDS trace output" + json.dumps(pds_search) + "\n")
                 gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
                 f.write(f"GP ODS: {gp_ods}\n")
                 # sds_response = await sds_trace(gp_ods, endpoint=False)
                 asid_trace = await sds_trace(gp_ods)
-                f.write(f"SDS ASID trace output" + json.dumps(asid_trace) + "\n")
+                f.write("SDS ASID trace output" + json.dumps(asid_trace) + "\n")
 
                 asid = None
                 nhsmhsparty = None
-                for item in (
-                    asid_trace.get("entry", [{}])[0]
-                    .get("resource", {})
-                    .get("identifier", [])
-                ):
+                for item in asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", []):
                     if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
                         asid = item.get("value")
                     elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
@@ -62,35 +57,26 @@ async def test_GPC_SPN_TST_02():
     nhsnos = [9658218873]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-02", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-02.log"), "a") as f:
                 pds_search = await lookup_patient(nhsno)
-                f.write(f"PDS trace output" + json.dumps(pds_search) + "\n")
+                f.write("PDS trace output" + json.dumps(pds_search) + "\n")
                 gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
                 f.write(f"GP ODS: {gp_ods}\n")
                 # sds_response = await sds_trace(gp_ods, endpoint=False)
                 asid_trace = await sds_trace(gp_ods)
-                f.write(f"SDS ASID trace output" + json.dumps(asid_trace) + "\n")
+                f.write("SDS ASID trace output" + json.dumps(asid_trace) + "\n")
 
                 asid = None
                 nhsmhsparty = None
-                for item in (
-                    asid_trace.get("entry", [{}])[0]
-                    .get("resource", {})
-                    .get("identifier", [])
-                ):
+                for item in asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", []):
                     if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
                         asid = item.get("value")
                     elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
                         nhsmhsparty = item.get("value")
                 f.write(f"ASID: {asid}\n")
                 f.write(f"NHS MHS Party Key: {nhsmhsparty}\n")
-                endpoint_trace = await sds_trace(
-                    gp_ods, endpoint=True, mhsparty=nhsmhsparty
-                )
-                f.write(
-                    f"SDS Endpoint trace output" + json.dumps(endpoint_trace) + "\n"
-                )
+                endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+                f.write("SDS Endpoint trace output" + json.dumps(endpoint_trace) + "\n")
                 fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
                 f.write(f"FHIR Endpoint URL: {fhir_endpoint_url}\n")
                 assert fhir_endpoint_url is not None
@@ -106,7 +92,6 @@ async def test_GPC_SPN_TST_03():
     nhsnos = [9658218873]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-03", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-03.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")
@@ -125,7 +110,6 @@ async def test_GPC_SPN_TST_04():
     nhsnos = [9658218873]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-04", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-04.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")
@@ -150,7 +134,6 @@ async def test_GPC_SPN_TST_06():
     nhsnos = [9658218873]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-06", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-06.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")
@@ -171,7 +154,6 @@ async def test_GPC_SPN_TST_07():
     nhsnos = [9450056234]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-07", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-07.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")
@@ -193,7 +175,6 @@ async def test_GPC_SPN_TST_08():
     nhsnos = [9658218873]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-08", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-08.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")
@@ -216,7 +197,6 @@ async def test_GPC_SPN_TST_09():
     nhsnos = [9658219748]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-09", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-09.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")
@@ -237,7 +217,6 @@ async def test_GPC_SPN_TST_11():
     nhsnos = [9658218873]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-11", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-11.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")
@@ -258,7 +237,6 @@ async def test_GPC_SPN_TST_13():
     nhsnos = [9658218873]
     for nhsno in nhsnos:
         async with capture_test_logs("GPC-SPN-TST-13", nhsno) as log_dir:
-
             with open(os.path.join(log_dir, "GPC-SPN-TST-13.log"), "a") as f:
                 result = await gpconnect(nhsno, saml_attrs=audit_dict, log_dir=log_dir)
                 f.write(f"GP Connect response status code: {result.status_code}\n")

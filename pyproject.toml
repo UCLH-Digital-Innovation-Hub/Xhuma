@@ -1,2 +1,81 @@
-[tool.isort]
-profile = "black"
+[project]
+name = "Xhuma"
+version = "0.9"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.140",
+    "pyjwt>=2.13.0",
+    "httpx",
+    "xmltodict",
+    "uvicorn[standard]",
+    "fhirclient~=3.0.0",
+    "redis",
+    "cryptography>=48.0.1",
+    "jwcrypto",
+    "pydantic",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-asgi",
+    "opentelemetry-instrumentation-httpx",
+    "opentelemetry-instrumentation-logging",
+    "opentelemetry-instrumentation-redis",
+    "asyncpg",
+    "sqlalchemy",
+    "grpcio",
+    "python-multipart>=0.0.31",
+    "sqlmodel",
+    "alembic",
+    "psycopg[binary]",
+    "azure-monitor-opentelemetry>=1.8.7",
+    "urllib3>=2.8.0",
+    "defusedxml>=0.7.1",
+    "tzdata>=2026.4",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F"]
+extend-select = ["I"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "double"
+
+[dependency-groups]
+dev = [
+    "websockets",
+    "pytest",
+    "xmlschema",
+    "pytest-asyncio",
+    "pytest-benchmark",
+    "pre-commit",
+    "coverage",
+    "ruff>=0.15.12",
+    "locust",
+    "azure-identity",
+    "azure-keyvault-secrets",
+    "pytest-cov>=7.1.0",
+    "schemathesis>=4.25.2",
+    "hypothesis>=6.165.10",
+    "pytest-sugar>=1.1.1",
+]
+
+[tool.uv]
+package = false
+default-groups = "all"
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.python.org/simple"
+
+[tool.creosote]
+paths=[
+    "app",
+    "alembic"]
+deps-file="pyproject.toml"
+sections=["project.dependencies"]

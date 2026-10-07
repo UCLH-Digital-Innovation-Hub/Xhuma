@@ -11,3 +11,16 @@ output "postgres_hostname" {
   value     = azurerm_postgresql_flexible_server.postgres.fqdn
   sensitive = true
 }
+
+output "locust_mi_id" {
+  value = azurerm_user_assigned_identity.locust_mi.id
+}
+
+output "locust_subnet_id" {
+  value = azurerm_subnet.locust_subnet.id
+}
+
+output "app_subnet_id" {
+  value       = azurerm_subnet.app_subnet.id
+  description = "The ID of the App Service integration subnet, required for shared Key Vault network ACLs"
+}

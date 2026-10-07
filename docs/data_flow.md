@@ -5,11 +5,11 @@
 ### 1. Patient Demographics Service (PDS) Flow
 ```mermaid
 flowchart TD
-    A[Client Request] -->|ITI-47| B[PDS Lookup]
+    A[Client Request] -->|ITI-55| B[PDS Lookup]
     B -->|NHS Number| C[PDS FHIR API]
     C -->|Patient Demographics| D[Response Validation]
     D -->|Valid Response| E[Cache Demographics]
-    E -->|Formatted Response| F[ITI-47 Response]
+    E -->|Formatted Response| F[ITI-55 Response]
     D -->|Invalid Response| G[Error Handler]
     G -->|Error Response| F
 ```
@@ -29,30 +29,37 @@ flowchart TD
 
 ## Observability Data Flows
 
-### 1. Metrics Collection Flow
+### 1. Production Metrics Flow (Azure Monitor)
 ```mermaid
 flowchart TD
-    A[Application Events] -->|Metrics| B[Prometheus Client]
-    B -->|Scrape| C[Prometheus Server]
-    C -->|Query| D[Grafana]
-    D -->|Alert| E[Alert Manager]
-    E -->|Notification| F[Alert Channels]
+    A[Application Events] -->|OpenTelemetry| B[Azure Application Insights]
+    B -->|Store| C[Azure Log Analytics Workspace]
+    C -->|Query & Analyse| D[Azure Monitor]
 
     G[System Metrics] -->|Resource Usage| B
     H[Redis Metrics] -->|Cache Stats| B
     I[Request Metrics] -->|Latency/Errors| B
 ```
 
-### 2. Logging Flow
+### 1a. Local Development Metrics Flow (Docker Compose Only)
 ```mermaid
 flowchart TD
-    A[Application Logs] -->|JSON Format| B[Logstash]
-    B -->|Process| C[Elasticsearch]
-    C -->|Query| D[Kibana]
+    A[Application Events] -->|Metrics| B[Prometheus Client]
+    B -->|Scrape| C[Prometheus Server]
+    C -->|Query| D[Grafana]
+```
 
-    E[System Logs] -->|Structured| B
-    F[Access Logs] -->|Parse| B
-    G[Error Logs] -->|Enrich| B
+### 2. Production Logging Flow (Azure Log Analytics)
+```mermaid
+flowchart TD
+    A[Application Logs] -->|JSON Format| B[PHI Regex Scrubber]
+    B -->|Redacted Logs| C[Application Insights]
+    C -->|Store| D[Log Analytics Workspace]
+    D -->|Query| E[Azure Monitor / KQL]
+
+    F[System Logs] -->|Structured| C
+    G[Access Logs] -->|Parse| C
+    H[Error Logs] -->|Enrich| C
 ```
 
 ### 3. Tracing Flow
@@ -108,9 +115,9 @@ Timing Collection
 ↓
 Metric Aggregation
 ↓
-Prometheus Storage
+Azure Application Insights
 ↓
-Grafana Visualization
+Azure Monitor Dashboards
 ```
 
 ### 2. Error Tracking Flow
@@ -147,7 +154,7 @@ flowchart TD
     A[Cache Operations] -->|Stats| B[Metrics Collection]
     B -->|Store| C[Time Series DB]
     C -->|Query| D[Performance Analysis]
-    D -->|Alert| E[Cache Optimization]
+    D -->|Alert| E[Cache Optimisation]
 ```
 
 ## Security Data Flow
@@ -155,12 +162,15 @@ flowchart TD
 ### 1. Authentication Flow
 ```mermaid
 flowchart TD
-    A[Request] -->|JWT Token| B[Token Validation]
-    B -->|Valid| C[Permission Check]
-    C -->|Authorized| D[Process Request]
-    B -->|Invalid| E[Auth Error]
-    C -->|Unauthorized| E
-    E -->|Log| F[Error Tracking]
+    A[Request] -->|mTLS Client Cert| B[Thumbprint Validation]
+    B -->|Valid Cert| C[SAML Assertion Check]
+    C -->|Valid Clinician Identity| D[JWT Token Generation]
+    D -->|Valid| E[Permission Check]
+    E -->|Authorized| F[Process Request]
+    B -->|Invalid| G[Auth Error]
+    C -->|Invalid| G
+    E -->|Unauthorized| G
+    G -->|Log| H[Error Tracking]
 ```
 
 ### 2. Audit Trail Flow

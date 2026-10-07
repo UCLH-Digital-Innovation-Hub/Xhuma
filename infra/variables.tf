@@ -54,16 +54,59 @@ variable "postgres_admin_password" {
   sensitive   = true
 }
 
-variable "api_key" {
-  description = "API Key for Xhuma"
+variable "shared_resource_group_name" {
+  description = "The name of the shared resource group"
   type        = string
-  sensitive   = true
 }
 
-variable "jwt_key" {
-  description = "JWT Key"
+variable "shared_subscription_id" {
+  description = "The subscription ID hosting the shared Key Vault"
   type        = string
-  sensitive   = true
+}
+
+variable "shared_key_vault_name" {
+  description = "The name of the global shared Key Vault"
+  type        = string
+}
+
+variable "app_version" {
+  type    = string
+  default = "0.9"
+}
+
+variable "device_id" {
+  type    = string
+  default = "1"
+}
+
+variable "org_asid" {
+  type    = string
+  default = ""
+}
+
+variable "gp_connect_include_allergies" {
+  type    = string
+  default = "true"
+}
+
+variable "gp_connect_include_medication" {
+  type    = string
+  default = "true"
+}
+
+variable "gp_connect_include_problems" {
+  type    = string
+  default = "true"
+}
+
+variable "gp_connect_include_investigations" {
+  type    = string
+  default = "true"
+}
+
+variable "gp_connect_include_immunisations" {
+  type    = string
+  default = "true"
 }
 
 variable "registry_id" {
@@ -106,6 +149,12 @@ variable "env" {
   default     = "prod"
 }
 
+variable "ccda_expiry_hours" {
+  description = "Number of hours to cache CCDA documents"
+  type        = string
+  default     = "4"
+}
+
 variable "otel_metric_export_interval_ms" {
   description = "OpenTelemetry Metric Export Interval (ms)"
   type        = string
@@ -125,7 +174,19 @@ variable "allowed_hosts" {
 }
 
 variable "require_mtls" {
-  description = "Enforce mTLS validation in the application"
+  description = "Whether to enforce mTLS globally in the FastAPI app"
   type        = string
-  default     = "false"
+  default     = "true"
+}
+
+variable "external_relay_url" {
+  description = "The URL of the external Shared Relay Server"
+  type        = string
+  default     = ""
+}
+
+variable "external_relay_client_id" {
+  description = "The Client ID to route through on the Shared Relay Server"
+  type        = string
+  default     = "client1"
 }

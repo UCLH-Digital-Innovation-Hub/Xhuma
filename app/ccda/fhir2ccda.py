@@ -1,33 +1,29 @@
 import asyncio
 import datetime
 import json
+import logging
 import os
-import pprint
-from copy import deepcopy
-from typing import List
+from copy import copy
 
 import xmltodict
-from fhirclient.models import bundle, humanname
+from fhirclient.models import bundle, patient
 from fhirclient.models import list as fhirlist
-from fhirclient.models import medicationstatement, patient
 
-from .entries import allergy, immunization_entry, medication, problem, result
-from .helpers import date_helper, readable_date, templateId
+from app.gp_connect_config import get_gp_connect_inclusions
+from app.telemetry import measure
+
+from .entries import allergy, immunization_entry, medication, observation_entry, problem
+from .entries.allergy import allergy_onset_sort_key
+from .entries.investigation_grouping import build_investigation_graph
+from .entries.results import investigation
+from .helpers import fhir_date_is_after, fhir_to_cda_timestamp, select_patient_name, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.1.15.html
-    lists = [
-        entry.resource
-        for entry in bundle.entry
-        if isinstance(entry.resource, fhirlist.List)
-    ]
+    lists = [entry.resource for entry in bundle.entry if isinstance(entry.resource, fhirlist.List)]
 
-    subject = [
-        entry.resource
-        for entry in bundle.entry
-        if isinstance(entry.resource, patient.Patient)
-    ]
+    subject = [entry.resource for entry in bundle.entry if isinstance(entry.resource, patient.Patient)]
 
     ccda = {}
     ccda["ClinicalDocument"] = {
@@ -38,9 +34,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         "realmCode": {"@code": "GB"},
         "typeId": {"@root": "2.16.840.1.113883.1.3", "@extension": "POCD_HD000040"},
     }
-    ccda["ClinicalDocument"]["templateId"] = templateId(
-        "2.16.840.1.113883.10.20.22.1.2", "2015-08-01"
-    )
+    ccda["ClinicalDocument"]["templateId"] = templateId("2.16.840.1.113883.10.20.22.1.2", "2015-08-01")
 
     # code
     ccda["ClinicalDocument"]["code"] = {
@@ -49,22 +43,14 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     }
 
     # document level effective time, use local time
-    ccda["ClinicalDocument"]["effectiveTime"] = {
-        "@value": datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    }
+    ccda["ClinicalDocument"]["effectiveTime"] = {"@value": datetime.datetime.now().strftime("%Y%m%d%H%M%S")}
 
-    ccda["ClinicalDocument"]["title"] = {
-        "#text": "GP Connect: Access Record Structured"
-    }
+    ccda["ClinicalDocument"]["title"] = {"#text": "GP Connect: Access Record Structured"}
 
     # patient
     # TODO refine address parsing as may have multiple
 
-    # loop through names to find official name
-    for name in subject[0].name:
-        if name.use == "official":
-            official_name = name
-            break
+    selected_name = select_patient_name(subject[0].name)
 
     patient_dict = {
         "patientRole": {
@@ -75,10 +61,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "patient": {
                 "name": {
                     "@use": "L",
-                    "given": {"#text": " ".join(official_name.given)},
-                    "family": {"#text": official_name.family},
+                    "given": {"#text": " ".join(selected_name.given)},
+                    "family": {"#text": selected_name.family},
                 },
-                "birthTime": {"@value": date_helper(subject[0].birthDate.isostring)},
+                "birthTime": {"@value": fhir_to_cda_timestamp(subject[0].birthDate)},
             },
         }
     }
@@ -125,7 +111,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "@classCode": "PCPR",
             "effectiveTime": {
                 "low": {
-                    "@value": date_helper(subject[0].birthDate.isostring),
+                    "@value": fhir_to_cda_timestamp(subject[0].birthDate),
                 },
                 "high": {"@value": datetime.date.today().strftime("%Y%m%d")},
             },
@@ -137,7 +123,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # vital_signs.title = "Vital Signs"
     # lists.append(vital_signs)s
 
+    investigation_graph = None
+
     async def create_section(list: fhirlist.List) -> dict:
+        nonlocal investigation_graph
         templates = {
             "Allergies and adverse reactions": {
                 "displayName": "Allergies, adverse reactions, alerts",
@@ -176,7 +165,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             },
             "Investigations and results": {
                 "displayName": "Investigations and results",
-                "root": "2.16.840.1.113883.6.1",
+                "root": "2.16.840.1.113883.10.20.22.2.3",
                 "Code": "30954-2",
             },
         }
@@ -194,7 +183,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         # print(list.title)
         # check if list is one of the desired ones
         if list.title in sections:
-            print(list.title)
             comp = {}
             comp["section"] = {
                 "templateId": templateId(templates[list.title]["root"], "2015-08-01"),
@@ -207,55 +195,75 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "text": "",  # Will be populated with table
             }
 
-            table_headers = {
-                "Allergies and adverse reactions": [
-                    "Start Date",
-                    "Status",
-                    "Description",
-                    "Reaction",
-                ],
-                "Medications and medical devices": [
-                    "Start Date",
-                    "End Date",
-                    "Status",
-                    "Medication",
-                    "Instructions",
-                ],
-                "Active Medications": [
-                    "Start Date",
-                    "End Date",
-                    "Status",
-                    "Medication",
-                    "Instructions",
-                ],
-                "Past Medications": [
-                    "Start Date",
-                    "End Date",
-                    "Status",
-                    "Medication",
-                    "Instructions",
-                ],
-                "Problems": ["Date", "Status", "Condition"],
-                "Immunisations": ["Date", "Vaccine", "Lot Number", "Status"],
-                "Vital Signs": ["Date", "Type", "Value", "Units"],
-                "Investigations and results": ["Date", "Type", "Result"],
-            }
-
             async def parse_medications(references):
-                # run lookups concurrently (much faster than awaiting in a loop)
-                return await asyncio.gather(
-                    *(medication(entry, index) for entry in references)
+                # run lookups concurrently with return_exceptions=True so a single failure doesn't kill the section
+                results = await asyncio.gather(
+                    *(medication(entry, index) for entry in references),
+                    return_exceptions=True,
                 )
+                valid_items = []
+                for idx, res in enumerate(results):
+                    if isinstance(res, Exception):
+                        logging.error(f"Error parsing medication {getattr(references[idx], 'id', 'unknown')}: {res}")
+                    else:
+                        valid_items.append(res)
+                return valid_items
+
+            def parse_allergies(lst):
+                """Convert allergy-list resources in onset order, logging failed items.
+
+                Return paired structured entries and narrative rows so both share
+                the same order. Non-AllergyIntolerance resources use the observation
+                converter, which supports records such as 'No known allergy'.
+                """
+                valid_items = []
+                # Sort both structured entries and narrative rows by onset, oldest first.
+                # Keep source order for ties and put unknown onsets last (see sort key).
+                for entry in sorted(lst, key=allergy_onset_sort_key):
+                    try:
+                        if entry.__class__.__name__ == "AllergyIntolerance":
+                            valid_items.append(allergy(entry, index))
+                        else:
+                            valid_items.append(observation_entry(entry, index, "Allergies and adverse reactions"))
+                    except Exception as e:
+                        logging.error(f"Error parsing allergy {getattr(entry, 'id', 'unknown')}: {e}")
+                return valid_items
+
+            def parse_problems(lst):
+                valid_items = []
+                for entry in lst:
+                    try:
+                        if entry.__class__.__name__ == "Condition":
+                            valid_items.append(problem(entry))
+                        else:
+                            valid_items.append(observation_entry(entry, index, "Problems"))
+                    except Exception as e:
+                        logging.error(f"Error parsing problem {getattr(entry, 'id', 'unknown')}: {e}")
+                return valid_items
+
+            def parse_immunizations(lst):
+                valid_items = []
+                for entry in lst:
+                    try:
+                        if entry.__class__.__name__ == "Immunization":
+                            valid_items.append(immunization_entry(entry, index))
+                        else:
+                            valid_items.append(observation_entry(entry, index, "Immunisations"))
+                    except Exception as e:
+                        logging.error(f"Error parsing immunization {getattr(entry, 'id', 'unknown')}: {e}")
+                return valid_items
 
             section_setup = {
                 "Allergies and adverse reactions": {
                     "section_headers": [
-                        "Start Date",
-                        "Status",
+                        "Dates",
                         "Description",
+                        "Status",
                         "Reaction",
+                        "Severity",
+                        "Notes",
                     ],
-                    "parser": lambda list: [allergy(entry) for entry in list],
+                    "parser": parse_allergies,
                 },
                 "Medications and medical devices": {
                     "section_headers": [
@@ -299,13 +307,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 },
                 "Problems": {
                     "section_headers": ["Date", "Status", "Condition"],
-                    "parser": lambda list: [problem(entry) for entry in list],
+                    "parser": parse_problems,
                 },
                 "Immunisations": {
                     "section_headers": ["Date", "Vaccine", "Lot Number", "Status"],
-                    "parser": lambda list: [
-                        immunization_entry(entry) for entry in list
-                    ],
+                    "parser": parse_immunizations,
                 },
             }
 
@@ -338,29 +344,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 #     row.append({data})
                 return {"td": entry_data}
 
-            # if list has attribute empty reason
-            # check if the list is empty
-            # if hasattr(list, "emptyReason"):
-            #     print(f"list {list.title} is empty")
-            #     # if the list is empty
-            #     comp["section"]["text"] = {
-            #         "table": {
-            #             "thead": create_headers(list.title),
-            #             "tbody": {
-            #                 "tr": {
-            #                     "td": {
-            #                         "@colspan": len(table_headers[list.title]),
-            #                         # "#text": list.emptyReason[0].text,
-            #                         "#text": "No Information Available",
-            #                     }
-            #                 }
-            #             },
-            #         }
-            #     }
-            #     return comp
             if not list.entry:
-                # if there are no entries
-                # Initialize empty table with appropriate headers based on section
+                # An empty allergy list means no information was received;
+                # absence of records must not imply a no-known-allergy assertion.
                 comp["section"]["text"] = {
                     "paragraph": {"@styleCode": "flagData"},
                     "table": {
@@ -368,15 +354,22 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "tbody": {
                             "tr": {
                                 "td": {
-                                    "@colspan": len(table_headers[list.title]),
-                                    "#text": "No Information Available",
+                                    "@colspan": len(section_setup[list.title]["section_headers"]),
+                                    "#text": "No information received"
+                                    if list.title == "Allergies and adverse reactions"
+                                    else "No Information Available",
                                 }
                             }
                         },
                     },
                 }
-            else:
 
+                from .entries import empty_entry
+
+                empty_e = empty_entry(list.title)
+                if empty_e:
+                    comp["section"]["entry"] = empty_e
+            else:
                 comp["section"]["entry"] = []
                 rows = []
                 references = [index[entry.item.reference] for entry in list.entry]
@@ -392,10 +385,18 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 entries = [i.entry for i in items]
                 rows = [i.row for i in items if i.row is not None]
                 table_rows = [create_row(row) for row in rows]
+
                 # if mediations sort rows by status then name of medication
                 if list.title == "Medications and medical devices":
                     table_rows.sort(key=lambda x: (x["td"][2], x["td"][4]))
+
                 comp["section"]["entry"] = entries
+
+                missing_count = len(references) - len(items)
+                warning_text = ""
+                if missing_count > 0:
+                    warning_text = f"CLINICAL WARNING: {missing_count} item(s) in this section could not be safely converted and have been omitted. Please refer directly to alternative systems for complete data.<br />"
+
                 comp["section"]["text"] = {
                     "paragraph": {
                         "@styleCode": "flagData",
@@ -403,23 +404,62 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     "table": {"thead": headers, "tbody": {"tr": table_rows}},
                 }
 
-            if hasattr(list, "note") and list.note is not None:
-                # TODO changing to paragraph before text with stylecode flagData
-                # comp["section"]["text"]["list"] = {}
-                # comp["section"]["text"]["list"]["item"] = [
-                #     note.text for note in list.note
-                # ]
+                if warning_text:
+                    comp["section"]["text"]["paragraph"]["#text"] = warning_text
 
-                comp["section"]["text"]["paragraph"]["#text"] = [
-                    f"{note.text}<br />" for note in list.note
-                ]
-                comp["section"]["text"]["paragraph"]["#text"] = "".join(
-                    list.note[i].text + "<br />" for i in range(len(list.note))
-                )
+            if list.title == "Allergies and adverse reactions":
+                paragraph = comp["section"]["text"]["paragraph"]
+                paragraph["#text"] = "Some allergies may be recorded as problems.<br />" + paragraph.get("#text", "")
+
+            if hasattr(list, "note") and list.note is not None:
+                note_text = "".join(list.note[i].text + "<br />" for i in range(len(list.note)))
+                existing_text = comp["section"]["text"]["paragraph"].get("#text", "")
+                comp["section"]["text"]["paragraph"]["#text"] = existing_text + note_text
 
             return comp
 
-    def split_medications(medications: fhirlist.List) -> List[dict]:
+        elif list.title == "Investigations and results":
+            comp = {}
+            comp["section"] = {
+                "templateId": templateId(templates[list.title]["root"], "2015-08-01"),
+                "code": {
+                    "@code": templates[list.title]["Code"],
+                    "@displayName": templates[list.title]["displayName"],
+                    "@codeSystem": "2.16.840.1.113883.6.1",
+                },
+                "title": templates[list.title]["displayName"],
+                "text": "",  # Will be populated with table
+            }
+
+            # organizer_with_table = asyncio.gather(
+            #     *[investigation(entry, index) for entry in list.entry]
+            # )
+            # print(organizer_with_table)
+            # Provider completeness warnings apply even when no reports are returned.
+            warnings = [note.text for note in list.note or [] if note.text]
+            if not list.entry:
+                comp["section"]["text"] = {"paragraph": [*warnings, "No Information Available"]}
+                return comp
+            references = [index[entry.item.reference] for entry in list.entry]
+
+            if investigation_graph is None:
+                with measure("investigations.graph") as span:
+                    investigation_graph = build_investigation_graph(index)
+                    span.set_attribute("graph.observations", len(investigation_graph.observations))
+                    span.set_attribute("graph.reports", len(investigation_graph.reports))
+                    span.set_attribute("graph.edges", len(investigation_graph.edges))
+            organizer_with_table = [await investigation(ref, index, investigation_graph) for ref in references]
+
+            table_list = {
+                "@styleCode": "TOC",
+                "item": [org.table for org in organizer_with_table],
+            }
+            comp["section"]["text"] = {**({"paragraph": warnings} if warnings else {}), "list": table_list}
+            entries = [{"@typeCode": "DRIV", "organizer": org.organizer} for org in organizer_with_table]
+            comp["section"]["entry"] = entries
+            return comp
+
+    def split_medications(medications: fhirlist.List):
         """Splits medications into active and past based on status
 
         Args:
@@ -430,29 +470,30 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         """
         active = []
         past = []
+        future_meds = 0
+        today = datetime.date.today()
 
         for med in medications.entry:
-            print(med)
+            # print(med)
             referenced_med = index[med.item.reference]
-            # print(referenced_med)
+            effective_period = getattr(referenced_med, "effectivePeriod", None)
+            effective_end = getattr(effective_period, "end", None)
             # status active or end date in the future
             if referenced_med.status == "active":
                 active.append(med)
-            elif (
-                referenced_med.status == "completed"
-                and hasattr(referenced_med, "endDate")
-                and referenced_med.endDate is not None
-                and date_helper(referenced_med.endDate) > datetime.datetime.now()
-            ):
+            elif referenced_med.status == "completed" and fhir_date_is_after(effective_end, today):
                 active.append(med)
+                future_meds += 1
             else:
                 past.append(med)
         # print(f"split medications into {len(active)} active and {len(past)} past")
         # print(active)
-        return active, past
+        return active, past, future_meds
 
     def clone_list(original, new_title, new_entries):
-        new_list = deepcopy(original)
+        # Ownership links lead back to the bundle; only title and entries change.
+        # Section rendering reads the shared metadata without modifying it.
+        new_list = copy(original)
         new_list.title = new_title
         new_list.entry = new_entries
         return new_list
@@ -463,21 +504,31 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     for list_obj in lists:
         if list_obj.title == "Medications and medical devices":
             try:
-                active, past = split_medications(list_obj)
+                active, past, future_meds = split_medications(list_obj)
                 # print(f"active medications: {len(active)}, past medications: {len(past)}")
-                active_section = await create_section(
-                    clone_list(list_obj, "Active Medications", active)
-                )
+                active_section = await create_section(clone_list(list_obj, "Active Medications", active))
 
-                # delete the third column for acute medications as we don't have status for active medications and it is always active
-                for entry in active_section["section"]["text"]["table"]["tbody"]["tr"]:
-                    del entry["td"][2]
-                # delete the third columf ro the header too
-                del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
+                if active:
+                    # add warning about future medications
+                    if future_meds > 0:
+                        # append paragraph about future medications
+                        existing_text = active_section["section"]["text"]["paragraph"].get("#text", "")
+                        note_text = f"Note: There are {future_meds} medications marked as complete but considered active because of an end date in the future."
+                        active_section["section"]["text"]["paragraph"]["#text"] = (
+                            f"{existing_text}<br />{note_text}" if existing_text else note_text
+                        )
 
-                past_section = await create_section(
-                    clone_list(list_obj, "Past Medications", past)
-                )
+                    # delete the third column for acute medications as we don't have status for active medications and it is always active
+                    for entry in active_section["section"]["text"]["table"]["tbody"]["tr"]:
+                        del entry["td"][2]
+                    # delete the third column from the header too
+                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
+                else:
+                    # active is empty, adjust the header and colspan of the empty row td
+                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
+                    active_section["section"]["text"]["table"]["tbody"]["tr"]["td"]["@colspan"] = 7
+
+                past_section = await create_section(clone_list(list_obj, "Past Medications", past))
                 bundle_components.append(active_section)
                 bundle_components.append(past_section)
             except Exception as e:
@@ -492,12 +543,37 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             section = await create_section(list_obj)
             if section is not None:
                 bundle_components.append(section)
+
     caching_period = os.environ.get("CCDA_CACHING_PERIOD", "24 hours")
-    # header_components = {
-    #     "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),
-    #     "title": "Important Information",
-    #     "text": f"This record contains information from the patients GP record. It was generated on {datetime.datetime.now().strftime('%Y-%m-%d')} and information added to the record in the last {caching_period} may be missing.",
-    # }
+
+    # Get current query inclusions to build the clinical safety disclaimer
+    inclusions = get_gp_connect_inclusions()
+
+    # Map the boolean flags to their human-readable clinical section names
+    section_mapping = {
+        "include_allergies": "Allergies and adverse reactions",
+        "include_medication": "Medications and medical devices",
+        "include_problems": "Problems",
+        "include_investigations": "Investigations and results",
+        "include_immunisations": "Immunisations",
+    }
+
+    included_sections = [name for key, name in section_mapping.items() if inclusions.get(key, False)]
+    omitted_sections = [name for key, name in section_mapping.items() if not inclusions.get(key, False)]
+
+    included_str = ", ".join(included_sections) if included_sections else "None"
+
+    disclaimer_text = (
+        f"This record contains information from the patient's GP record. It was generated on {datetime.datetime.now().strftime('%Y-%m-%d')}. "
+        f"IMPORTANT: This document ONLY contains information regarding: {included_str}. "
+    )
+
+    if omitted_sections:
+        omitted_str = ", ".join(omitted_sections)
+        disclaimer_text += f"All other clinical information (such as {omitted_str}) should be sought elsewhere. "
+
+    disclaimer_text += f"Information added to the record in the last {caching_period} may be missing."
+
     header_components = {
         "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),
         "code": {
@@ -507,25 +583,22 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         },
         "title": "Important Information",
         "text": {
-            "#text": f"This record contains information from the patients GP record. It was generated on {datetime.datetime.now().strftime('%Y-%m-%d')} and information added to the record in the last {caching_period} may be missing.",
-            "footnote": "C-CDA generated by Xhuma from GP Connect on "
-            + datetime.datetime.now().strftime("%d-%m-%Y"),
+            "#text": disclaimer_text,
+            "footnote": "C-CDA generated by Xhuma from GP Connect on " + datetime.datetime.now().strftime("%d-%m-%Y"),
         },
     }
     bundle_components.insert(0, {"section": header_components})
 
     ccda["ClinicalDocument"]["component"] = {}
     ccda["ClinicalDocument"]["component"]["structuredBody"] = {}
-    ccda["ClinicalDocument"]["component"]["structuredBody"][
-        "component"
-    ] = bundle_components
+    ccda["ClinicalDocument"]["component"]["structuredBody"]["component"] = bundle_components
 
     return ccda
 
 
 if __name__ == "__main__":
     # Example usage
-    with open("app/tests/fixtures/bundles/9692136744.json", "r") as f:
+    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
         structured_dosage_bundle = json.load(f)
 
     comment_index = None
@@ -544,8 +617,8 @@ if __name__ == "__main__":
         try:
             address = f"{entry.resource.resource_type}/{entry.resource.id}"
             bundle_index[address] = entry.resource
-        except:
-            pass
+        except Exception:
+            logging.error(f"Could not index resource {entry.resource} with id {entry.resource.id}")
 
     # ccda = await convert_bundle(fhir_bundle, bundle_index)
     ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))

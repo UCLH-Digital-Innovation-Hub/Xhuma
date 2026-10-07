@@ -1,6 +1,9 @@
 name: Serverless Benchmarking
 
 on:
+  push:
+    branches:
+      - int
   workflow_dispatch:
     inputs:
       users:
@@ -15,6 +18,10 @@ on:
         description: 'Duration of the test (e.g., 3m, 5m)'
         required: true
         default: '3m'
+      patients:
+        description: 'Comma-separated approved test patient identifiers'
+        required: true
+        default: '9692136744'
       environment:
         description: 'Environment to test (e.g. int, main)'
         required: true
@@ -45,11 +52,14 @@ jobs:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
       - name: Run Serverless ACI Benchmark
+        env:
+          USERS: ${{ github.event.inputs.users || '5' }}
+          SPAWN_RATE: ${{ github.event.inputs.spawn_rate || '2' }}
+          DURATION: ${{ github.event.inputs.duration || '3m' }}
+          LOCUST_PATIENTS: ${{ github.event.inputs.patients || vars.LOCUST_PATIENTS || '9692136744' }}
+          LOCUST_ORGANIZATION_ID: ${{ vars.LOCUST_ORGANIZATION_ID || 'RRV00' }}
+          LOCUST_SAML_ISSUER: ${{ vars.LOCUST_SAML_ISSUER || 'urn:nhs:names:services:spine' }}
         run: |
-          USERS=${{ github.event.inputs.users }}
-          SPAWN_RATE=${{ github.event.inputs.spawn_rate }}
-          DURATION=${{ github.event.inputs.duration }}
-
           echo "Triggering Serverless ACI Benchmark ($USERS users, $DURATION)..."
 
           # Fetch infrastructure details
@@ -65,6 +75,25 @@ jobs:
           # We target the internal App Service FQDN
           TARGET_URL="https://${APP_NAME}.azurewebsites.net"
 
+          # Capture Locust's status and emit its report even when requests fail.
+          CONTAINER_COMMAND=$(cat <<'COMMAND'
+          /bin/sh -c 'set -eu
+          printf "%s" "$LOCUSTFILE_B64" | base64 -d > locustfile.py
+          pip install locust azure-identity azure-keyvault-secrets defusedxml
+          set +e
+          locust -f locustfile.py --headless -u "$BENCHMARK_USERS" -r "$BENCHMARK_SPAWN_RATE" -t "$BENCHMARK_DURATION" --host "$BENCHMARK_HOST" --html report.html
+          status=$?
+          if [ -f report.html ]; then
+            echo "==== REPORT_START ===="
+            base64 -w 0 report.html
+            echo
+            echo "==== REPORT_END ===="
+          fi
+          printf "BENCHMARK_EXIT=%s\n" "$status"
+          exit "$status"'
+          COMMAND
+          )
+
           # Create and execute the ephemeral container using a standard python image
           az container create \
             --resource-group $RESOURCE_GROUP \
@@ -77,23 +106,32 @@ jobs:
             --os-type Linux \
             --cpu 1 \
             --memory 2 \
-            --environment-variables KEY_VAULT_URL=$KV_URL PEM_SECRET_NAME="epic-ca-cert" AZURE_CLIENT_ID=$MI_CLIENT_ID LOCUSTFILE_B64=$SCRIPT_B64 \
-            --command-line "/bin/sh -c 'echo \$LOCUSTFILE_B64 | base64 -d > locustfile.py && pip install locust azure-identity azure-keyvault-secrets && locust -f locustfile.py --headless -u $USERS -r $SPAWN_RATE -t $DURATION --host $TARGET_URL --html report.html && echo \"==== REPORT_START ====\" && cat report.html | base64 -w 0 && echo \"==== REPORT_END ====\"'"
+            --environment-variables "KEY_VAULT_URL=$KV_URL" PEM_SECRET_NAME="epic-ca-cert" "AZURE_CLIENT_ID=$MI_CLIENT_ID" "LOCUSTFILE_B64=$SCRIPT_B64" \
+              "BENCHMARK_USERS=$USERS" "BENCHMARK_SPAWN_RATE=$SPAWN_RATE" "BENCHMARK_DURATION=$DURATION" "BENCHMARK_HOST=$TARGET_URL" \
+              "LOCUST_PATIENTS=$LOCUST_PATIENTS" "LOCUST_ORGANIZATION_ID=$LOCUST_ORGANIZATION_ID" "LOCUST_SAML_ISSUER=$LOCUST_SAML_ISSUER" \
+            --command-line "$CONTAINER_COMMAND"
 
           # Wait for completion and dump logs, saving output to extract the HTML report
-          az container attach --resource-group $RESOURCE_GROUP --name "xhuma-benchmark" | tee benchmark.log
+          az container attach --resource-group "$RESOURCE_GROUP" --name "xhuma-benchmark" | tee benchmark.log || true
 
           # Extract the base64 report and decode it
           echo "Extracting HTML report..."
-          sed -n '/==== REPORT_START ====/,/==== REPORT_END ====/p' benchmark.log | grep -v '====' > report_b64.txt
+          sed -n '/==== REPORT_START ====/,/==== REPORT_END ====/p' benchmark.log | sed '/====/d' > report_b64.txt
           if [ -s report_b64.txt ]; then
             base64 -d report_b64.txt > benchmark_report.html
             echo "Successfully generated benchmark_report.html!"
           else
             echo "Failed to extract report from logs."
+            exit 1
+          fi
+          BENCHMARK_EXIT=$(sed -n 's/^BENCHMARK_EXIT=\([0-9]*\)\r*$/\1/p' benchmark.log | tail -n 1)
+          if [ "$BENCHMARK_EXIT" != "0" ]; then
+            echo "Benchmark failed (Locust exit status: ${BENCHMARK_EXIT:-missing}). See the report artifact."
+            exit 1
           fi
 
       - name: Upload Benchmark Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-report-${{ github.event.inputs.environment || 'int' }}
