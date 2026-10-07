@@ -40,7 +40,7 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: terraform init -backend-config=backends/prd.hcl
 
-      - name: Terraform Plan
+      - name: Terraform Apply
         working-directory: infra/shared
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -48,10 +48,9 @@ jobs:
           ARM_SUBSCRIPTION_ID: "c24b0c3e-9e09-4c7c-8687-75e8b654bc8e"
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
-          terraform plan \
+          terraform apply \
             -var-file=env/shared.tfvars.example \
             -var="shared_key_vault_name=xhuma-shared-kv-prd" \
             -var="shared_resource_group_name=rg-xhuma-shared" \
             -var="tenant_id=1d5e3f6e-150d-480f-9d33-1d45ee3a71e1" \
-            -out=tfplan
-          terraform show tfplan
+            -auto-approve
