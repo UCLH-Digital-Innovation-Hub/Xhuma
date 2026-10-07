@@ -91,3 +91,20 @@ def test_target_selection_integrity():
     assert "int" not in main_ids, "main never selects INT"
     assert "prd" not in dev_ids, "dev never selects PRD"
     assert "prd" not in int_ids, "int never selects PRD"
+
+
+def test_shared_backend_file_selection():
+    dev_targets = get_selected_targets("dev")
+    int_targets = get_selected_targets("int")
+    main_targets = get_selected_targets("main")
+
+    assert dev_targets[0]["shared_backend_file"] == "backends/shared.hcl"
+    assert int_targets[0]["shared_backend_file"] == "backends/shared.hcl"
+    assert main_targets[0]["shared_backend_file"] == "backends/prd.hcl"
+
+    # Prove PRD can never resolve to shared.tfstate through its backend file
+    # Ensure prd.hcl does NOT contain 'key = "shared.tfstate"'
+    with open("infra/shared/backends/prd.hcl", "r") as f:
+        prd_hcl = f.read()
+        assert 'key                  = "shared.tfstate"' not in prd_hcl
+        assert 'key = "shared.tfstate"' not in prd_hcl

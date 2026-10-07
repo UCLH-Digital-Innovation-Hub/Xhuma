@@ -509,7 +509,7 @@ jobs:
             }' > /tmp/shared-reconcile.tfvars.json
           chmod 600 /tmp/shared-reconcile.tfvars.json
 
-          terraform init -reconfigure -backend-config="backends/shared.hcl"
+          terraform init -reconfigure -backend-config="${{ matrix.target.shared_backend_file }}"
           set +e
           terraform plan -input=false -var-file="/tmp/shared-reconcile.tfvars.json" -out="shared.tfplan" -json > shared_plan_output.json 2>&1
           TF_EXIT=$?
@@ -528,7 +528,7 @@ jobs:
         env:
           TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
         run: |
-          python ../../scripts/deploy/guard_shared_plan.py shared_plan.json "$TARGET_SUBNET_ID"
+          python ../../scripts/deploy/guard_shared_plan.py shared_plan.json "$TARGET_SUBNET_ID" "${{ matrix.target.id }}" "${{ matrix.target.shared_backend_file }}"
           if [ $? -ne 0 ]; then
             echo "::error::Shared infrastructure guard rejected the plan."
             exit 1

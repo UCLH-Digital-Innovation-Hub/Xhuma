@@ -17,9 +17,9 @@ from app.redis_connect import redis_client
 from app.security import pds_jwt
 from app.telemetry import measure, record_cache
 
-BASE_PATH = "https://sandbox.api.service.nhs.uk/"
 DEV_BASE_PATH = "https://dev.api.service.nhs.uk/"
 INT_BASE_PATH = "https://int.api.service.nhs.uk/"
+PROD_BASE_PATH = "https://api.service.nhs.uk/"
 API_KEY = os.getenv("API_KEY")
 PDS_CACHE_HOURS = int(os.getenv("PDS_CACHE_HOURS", 24))
 SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
@@ -32,6 +32,8 @@ if environment == "dev":
     BASE_PATH = DEV_BASE_PATH
 elif environment == "int":
     BASE_PATH = INT_BASE_PATH
+elif environment == "prod":
+    BASE_PATH = PROD_BASE_PATH
 else:
     raise ValueError(f"Unknown or unsupported environment: {environment}")
 
