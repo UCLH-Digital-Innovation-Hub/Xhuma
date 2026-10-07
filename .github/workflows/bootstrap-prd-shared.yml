@@ -29,7 +29,6 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           XHUMA_BACKEND_FILE: backends/prd.hcl
         run: |
-          az group create --name rg-xhuma-shared-prd --location uksouth
           ../bootstrap/setup-target.sh
 
       - name: Terraform Init
