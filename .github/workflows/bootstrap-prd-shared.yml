@@ -15,7 +15,7 @@ jobs:
       - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+          creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"c24b0c3e-9e09-4c7c-8687-75e8b654bc8e","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
@@ -25,7 +25,7 @@ jobs:
       - name: Setup Target Backend
         working-directory: infra/shared
         env:
-          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_SUBSCRIPTION_ID: "c24b0c3e-9e09-4c7c-8687-75e8b654bc8e"
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           XHUMA_BACKEND_FILE: backends/prd.hcl
         run: |
@@ -36,21 +36,22 @@ jobs:
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_SUBSCRIPTION_ID: "c24b0c3e-9e09-4c7c-8687-75e8b654bc8e"
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: terraform init -backend-config=backends/prd.hcl
 
-      - name: Terraform Apply
+      - name: Terraform Plan
         working-directory: infra/shared
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          ARM_SUBSCRIPTION_ID: "c24b0c3e-9e09-4c7c-8687-75e8b654bc8e"
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         run: |
-          terraform apply \
+          terraform plan \
             -var-file=env/shared.tfvars.example \
             -var="shared_key_vault_name=xhuma-shared-kv-prd" \
-            -var="shared_resource_group_name=rg-xhuma-shared-prd" \
+            -var="shared_resource_group_name=rg-xhuma-shared" \
             -var="tenant_id=1d5e3f6e-150d-480f-9d33-1d45ee3a71e1" \
-            -auto-approve
+            -out=tfplan
+          terraform show tfplan
