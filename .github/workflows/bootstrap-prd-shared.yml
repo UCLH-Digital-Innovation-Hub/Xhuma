@@ -53,4 +53,5 @@ jobs:
             -var="shared_key_vault_name=xhuma-shared-kv-prd" \
             -var="shared_resource_group_name=rg-xhuma-shared" \
             -var="tenant_id=1d5e3f6e-150d-480f-9d33-1d45ee3a71e1" \
+            -var='approved_subnet_ids=[]' \
             -auto-approve
