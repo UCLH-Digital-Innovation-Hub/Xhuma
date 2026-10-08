@@ -14,10 +14,10 @@ def generate_csr(out_dir: str, fqdn: str):
 
     # check if private key already exists
     if key_path.exists():
-        print(f"⚠️ Private key already exists: {key_path}")
+        print(f"Private key already exists: {key_path}")
         return
     else:
-        print(f"🔑 Generating private key at: {key_path}")
+        print(f"Generating private key at: {key_path}")
         # 1. Generate RSA private key
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         with open(key_path, "wb") as f:
@@ -28,7 +28,7 @@ def generate_csr(out_dir: str, fqdn: str):
                     serialization.NoEncryption(),
                 )
             )
-        print(f"✅ Private key written: {key_path}")
+        print(f"Private key written: {key_path}")
 
     # 2. Create CSR with Common Name (CN) = FQDN and Country = GB and SAN = FQDN
     csr = (
@@ -48,7 +48,7 @@ def generate_csr(out_dir: str, fqdn: str):
     with open(csr_path, "wb") as f:
         f.write(csr.public_bytes(serialization.Encoding.PEM))
 
-    print(f"📄 CSR written: {csr_path}")
+    print(f"CSR written: {csr_path}")
 
 
 def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
@@ -72,7 +72,7 @@ def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
         if not f.exists():
             raise FileNotFoundError(f"Required file not found: {f}")
 
-    print("✅ All required certificate files found.")
+    print("All required certificate files found.")
 
     # Combine certs into chain
     with open(chain_file, "w") as outfile:
@@ -81,7 +81,7 @@ def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
                 outfile.write(infile.read())
                 outfile.write("\n")
 
-    print(f"🔗 Combined certs into: {chain_file}")
+    print(f"Combined certs into: {chain_file}")
 
     # Generate PFX file
     command = [
@@ -98,15 +98,15 @@ def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
         "pass:",  # empty password for testing, change as needed
     ]
 
-    print("🔐 Generating PFX file using OpenSSL...")
+    print("Generating PFX file using OpenSSL...")
     result = subprocess.run(command, capture_output=True, text=True)
 
     if result.returncode != 0:
-        print("❌ OpenSSL Error:")
+        print("OpenSSL Error:")
         print(result.stderr)
         raise RuntimeError("Failed to generate .pfx file")
 
-    print(f"✅ PFX file created: {pfx_file}")
+    print(f"PFX file created: {pfx_file}")
 
     # Extract client cert (with chain)
     command = [
@@ -121,13 +121,13 @@ def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
         "-passin",
         "pass:",
     ]
-    print("📤 Extracting client certificate with chain...")
+    print("Extracting client certificate with chain...")
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
-        print("❌ OpenSSL Error (cert extract):")
+        print("OpenSSL Error (cert extract):")
         print(result.stderr)
         raise RuntimeError("Failed to extract client cert")
-    print(f"✅ Client cert PEM created: {client_cert}")
+    print(f"Client cert PEM created: {client_cert}")
 
     # Extract private key
     command = [
@@ -142,13 +142,13 @@ def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
         "-passin",
         "pass:",
     ]
-    print("🔑 Extracting private key...")
+    print("Extracting private key...")
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
-        print("❌ OpenSSL Error (key extract):")
+        print("OpenSSL Error (key extract):")
         print(result.stderr)
         raise RuntimeError("Failed to extract private key")
-    print(f"✅ Client key PEM created: {client_key}")
+    print(f"Client key PEM created: {client_key}")
 
     # Combine SubCA + RootCA into a bundle for httpx verify
     with open(nhs_bundle, "w") as out:
@@ -156,13 +156,13 @@ def generate_pfx_from_cert_chain(fqdn: str, cert_dir: str):
             with open(cert, "r") as f:
                 out.write(f.read())
                 out.write("\n")
-    print(f"🔐 NHS CA bundle created: {nhs_bundle}")
+    print(f"NHS CA bundle created: {nhs_bundle}")
 
-    print("\n🎉 All artifacts ready:")
-    print(f"  🔐 PFX: {pfx_file}")
-    print(f"  📄 client_cert.pem: {client_cert}")
-    print(f"  🔑 client_key.pem: {client_key}")
-    print(f"  🛡️  nhs_bundle.pem (use in httpx verify): {nhs_bundle}")
+    print("\nAll artifacts ready:")
+    print(f"  PFX: {pfx_file}")
+    print(f"  client_cert.pem: {client_cert}")
+    print(f"  client_key.pem: {client_key}")
+    print(f"  nhs_bundle.pem (use in httpx verify): {nhs_bundle}")
 
 
 def validate_csr(csr_path: str):
@@ -173,17 +173,17 @@ def validate_csr(csr_path: str):
             csr_data = f.read()
         csr = x509.load_pem_x509_csr(csr_data, default_backend())
     except Exception as e:
-        print(f"❌ Failed to load CSR: {e}")
+        print(f"Failed to load CSR: {e}")
         return False
 
-    print("\n🔍 Validating CSR...")
+    print("\nValidating CSR...")
 
     # Check signature validity
     if not csr.is_signature_valid:
-        print("❌ Signature: INVALID")
+        print("Signature: INVALID")
         signature_valid = False
     else:
-        print("✅ Signature: Valid")
+        print("Signature: Valid")
         signature_valid = True
 
     # Check key size
@@ -191,12 +191,12 @@ def validate_csr(csr_path: str):
     if isinstance(public_key, rsa.RSAPublicKey):
         key_size = public_key.key_size
         if key_size == 2048:
-            print(f"✅ Key Size: RSA {key_size}")
+            print(f"Key Size: RSA {key_size}")
         else:
-            print(f"❌ Key Size: RSA {key_size} (Expected 2048)")
+            print(f"Key Size: RSA {key_size} (Expected 2048)")
     else:
         key_size = 0
-        print("❌ Key Type: Not RSA")
+        print("Key Type: Not RSA")
 
     # Check subject CN and Country
     subject = csr.subject
@@ -207,29 +207,29 @@ def validate_csr(csr_path: str):
     c_value = country[0].value if country else None
 
     if cn_value == "GPC-Z6G1Z.uclhinnovationhub.nhs.uk":
-        print(f"✅ Subject CN: {cn_value}")
+        print(f"Subject CN: {cn_value}")
     else:
-        print(f"❌ Subject CN: {cn_value} (Expected GPC-Z6G1Z.uclhinnovationhub.nhs.uk)")
+        print(f"Subject CN: {cn_value} (Expected GPC-Z6G1Z.uclhinnovationhub.nhs.uk)")
 
     if c_value == "GB":
-        print(f"✅ Country: {c_value}")
+        print(f"Country: {c_value}")
     else:
-        print(f"❌ Country: {c_value} (Expected GB)")
+        print(f"Country: {c_value} (Expected GB)")
 
     # Check SAN DNS names
     try:
         san_ext = csr.extensions.get_extension_for_class(x509.SubjectAlternativeName)
         dns_names = san_ext.value.get_values_for_type(x509.DNSName)
-        print(f"ℹ️  SAN DNS names: {', '.join(dns_names)}")
+        print(f"SAN DNS names: {', '.join(dns_names)}")
     except x509.ExtensionNotFound:
-        print("ℹ️  SAN DNS names: None present")
+        print("SAN DNS names: None present")
 
     print("\nOverall Pass/Fail against NHSE Requirements:")
     if signature_valid and key_size == 2048 and cn_value == "GPC-Z6G1Z.uclhinnovationhub.nhs.uk" and c_value == "GB":
-        print("✅ PASS")
+        print("PASS")
         return True
     else:
-        print("❌ FAIL")
+        print("FAIL")
         return False
 
 
@@ -247,10 +247,10 @@ def match_key(cert_path: str, key_path: str):
             key_data = f.read()
         private_key = serialization.load_pem_private_key(key_data, password=None, backend=default_backend())
     except Exception as e:
-        print(f"❌ Failed to load certificate or key: {e}")
+        print(f"Failed to load certificate or key: {e}")
         return False
 
-    print("\n🔍 Matching Certificate and Private Key...")
+    print("\nMatching Certificate and Private Key...")
 
     # Certificate Subject
     print(f"Certificate Subject: {cert.subject.rfc4514_string()}")
@@ -265,13 +265,13 @@ def match_key(cert_path: str, key_path: str):
         priv_pub_numbers = private_key.public_key().public_numbers()
 
         if cert_pub_numbers == priv_pub_numbers:
-            print("✅ PASS: Private key matches certificate.")
+            print("PASS: Private key matches certificate.")
             return True
         else:
-            print("❌ FAIL: Private key does NOT match certificate.")
+            print("FAIL: Private key does NOT match certificate.")
             return False
     except AttributeError:
-        print("❌ FAIL: Key types do not match or are unsupported.")
+        print("FAIL: Key types do not match or are unsupported.")
         return False
 
 
