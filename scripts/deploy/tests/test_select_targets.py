@@ -1,11 +1,10 @@
 import json
 import subprocess
-import sys
 
 
 def run_script(branch):
     result = subprocess.run(
-        [sys.executable, "scripts/deploy/select_targets.py", "infra/targets.json", branch], capture_output=True, text=True
+        ["python", "scripts/deploy/select_targets.py", "infra/targets.json", branch], capture_output=True, text=True
     )
     return result
 

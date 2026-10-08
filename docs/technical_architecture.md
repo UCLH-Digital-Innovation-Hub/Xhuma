@@ -16,13 +16,13 @@ flowchart TD
     classDef boundary fill:none,color:#fff,stroke:#444,stroke-width:2px,stroke-dasharray: 5 5;
 
     %% Elements
-    Clinician(("Clinicians\n[Person]")):::person
+    Clinician(("UCLH Clinicians\n[Person]")):::person
     
     Epic["Epic Care Everywhere\n[External System]"]:::ext_system
 
-    subgraph TrustBoundary[System Boundary Trust/Site]
+    subgraph UCLHBoundary[System Boundary UCLH]
         Xhuma["Xhuma\n[System]\nStateless middleware"]:::system
-        Monitor["Site Logging & Monitoring\n[System]\nAudit trail layer"]:::system
+        Monitor["UCLH Logging & Monitoring\n[System]\nAudit trail layer"]:::system
     end
 
     NHSE["NHSE APIs\n[External System]\nPDS, SDS, GP Connect"]:::ext_system
@@ -34,7 +34,7 @@ flowchart TD
     Xhuma -->|"1. PDS/SDS Lookups<br>2. GP Connect Retrieval"| NHSE
     Xhuma -->|"Sends audit logs"| Monitor
     
-    class TrustBoundary boundary;
+    class UCLHBoundary boundary;
 ```
 
 ### Container Diagram
@@ -50,19 +50,19 @@ flowchart TD
     Epic["Epic Care Everywhere\n[External System]"]:::ext_system
     NHSE["NHSE APIs (PDS, SDS, GPC)\n[External System]"]:::ext_system
 
-    %% Trust Boundary
-    subgraph TrustBoundary[System Boundary - Xhuma / Target Site]
-        CICD["CI/CD Pipeline\n[Container]\nGitHub Actions (Control Plane)"]:::container
+    %% UCLH Boundary
+    subgraph UCLHBoundary[System Boundary - Xhuma / UCLH]
+        CICD["CI/CD Pipeline\n[Container]\nGitHub Actions"]:::container
         API["Inbound IHE/SOAP Layer\n[Container]\nFastAPI"]:::container
         PDS["Patient Discovery\n[Container]"]:::container
         Ret["Document Retrieval\n[Container]"]:::container
         Trans["Transformation Engine\n[Container]"]:::container
-        Audit[("Audit & Logging DB\n[Database]\nPostgreSQL Persistent Store")]:::db
-        Cache[("Transient Cache\n[Database]\nRedis Transient Store")]:::db
-        Mon["Logging Component\n[Container]\nApp Insights / Log Analytics"]:::container
+        Audit[("Audit & Logging DB\n[Database]")]:::db
+        Cache[("Transient Cache\n[Database]")]:::db
+        Mon["Logging Component\n[Container]\nApp Insights"]:::container
         Relay["HSCN Relay Agent\n[Container]"]:::container
     end
-    class TrustBoundary boundary;
+    class UCLHBoundary boundary;
 
     %% Relationships
     CICD -->|Deploy Image| API
@@ -149,9 +149,9 @@ flowchart TD
     %% DFD Level 0
     Epic["Epic Care Everywhere\n(External dependency, remembers linkage)"]
     NHSE["NHSE APIs\n(External dependency, risk owner)"]
-    Mon["Trust Monitoring/Audit Store\n(Audit trail required)"]
-    Admin["Trust Admins"]
-    Clinician["Clinicians"]
+    Mon["UCLH Monitoring/Audit Store\n(Audit trail required)"]
+    Admin["UCLH Admins"]
+    Clinician["UCLH Clinicians"]
     
     Xhuma(("Xhuma\n(Stateless System boundary)"))
     
@@ -181,11 +181,11 @@ flowchart TD
     Clinician["Clinician"]
     Epic["Epic EHR\n(Stores patient link permanently)"]
     NHSE["NHSE APIs\n(PDS, SDS, GP Connect)"]
-    Mon["Site Monitoring\n(App Insights/Log Analytics)"]
+    Mon["UCLH Monitoring"]
 
     %% Data Stores
-    StoreAudit[("Audit log store\n(PostgreSQL Persistent)")]:::datastore
-    StoreCache[("Transient Cache\n(Redis Transient)")]:::datastore
+    StoreAudit[("Audit log store")]:::datastore
+    StoreCache[("Transient Cache\n(Redis - transient only)")]:::datastore
     
     %% Discovery Scope
     P1(("1. Receive patient\ndiscovery request"))
@@ -283,7 +283,7 @@ sequenceDiagram
     %% Display & Reconciliation
     note over C, E: Phase 3: Display & Reconciliation
     E->>C: Displays outside chart (Read-only, provenance visible)
-    C->>E: Initiates reconciliation into Trust EHR / clinical record
+    C->>E: Initiates reconciliation into UCLH chart
     
     alt Medication Map Cleanly
         C->>E: Accepts standard mapping (Medication, Dose, Route, Frequency)
@@ -333,7 +333,7 @@ When a fatal error is caught, Xhuma dynamically determines the originating route
 
 **Assumptions / TBDs:**
 - **TBD-01**: Identity/Auth beyond core mTLS for incoming Epic requests and clinician tracing.
-- **TBD-02**: Exact granularity of Trust monitoring / operational access controls (e.g., who accesses dashboards) and role-based access logic for the Postgres audit tables.
+- **TBD-02**: Exact granularity of UCLH telemetry observability access controls (e.g., who accesses dashboards) and role-based access logic for the Postgres audit tables.
 
 ## Core Components
 

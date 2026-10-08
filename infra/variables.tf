@@ -190,3 +190,17 @@ variable "external_relay_client_id" {
   type        = string
   default     = "client1"
 }
+
+variable "nhs_relay_base_path" {
+  description = "The base path for the NHS GP Connect API over HSCN/Relay"
+  type        = string
+  default     = ""
+}
+
+variable "nhs_over_internet_path" {
+  description = "The base path for the NHS GP Connect API over the internet"
+  type        = string
+  default     = ""
+}
+
+

@@ -18,7 +18,8 @@ Xhuma's cloud infrastructure is provisioned via Terraform (`infra/main.tf`). The
 
 Xhuma uses GitHub Actions for automated deployment. The architecture is currently migrating to a target-isolated matrix deployment model.
 
-- **Matrix Pipeline (`matrix-deploy.yml`)**: The authoritative deployment path managing `play`, `int`, and `prd` targets. It enforces strict environment approvals, immutable Docker image digests, target-isolated boundaries, and centralised shared services. The legacy deployment pipelines have been retired.
+- **Legacy Pipelines (`cd.yml` / `infra.yml`)**: Currently manage the integration (`int`) and production (`prd`) environments.
+- **Matrix Pipeline (`matrix-deploy.yml`)**: Currently manages the `play` rehearsal environment, introducing strict environment approvals, immutable Docker image digests, and centralised shared services.
 
 ### General Deployment Flow (Matrix Example)
 
@@ -42,8 +43,8 @@ The Trust's Epic EHR connects to Xhuma over the public internet utilising mutual
 ### 3.2 Outbound Integrations (Xhuma -> NHS)
 Xhuma processes the inbound IHE ITI requests and converts them into NHS FHIR calls.
 
-* **PDS (Patient Demographics Service):** Routed over the public internet to environment-dependent NHS API endpoints (e.g., development, integration, or production APIs). Secured via NHS OAuth2 Client Credentials (JWT assertion).
-* **SDS (Spine Directory Service):** Routed over the public internet to query environment-dependent FHIR endpoints and routing identifiers using API keys.
+* **PDS (Patient Demographics Service):** Routed over the public internet via `https://int.api.service.nhs.uk/`. Secured via NHS OAuth2 Client Credentials (JWT assertion).
+* **SDS (Spine Directory Service):** Routed over the public internet to query FHIR endpoints and routing identifiers using API keys.
 * **GP Connect (Structured Records):** GP Connect requests have separate network requirements, detailed below.
 
 ---
@@ -58,7 +59,7 @@ Due to NHS England restrictions on GP Connect via the public internet, Xhuma lev
 
 An HSCN-connected agent (e.g., via Azure Private Link or an internal NHS VPN Gateway) establishes a WebSocket connection inbound to the Xhuma Azure App Service. GP Connect requests are securely tunnelled back down this WebSocket to the agent, which executes the query natively against HSCN. This allows Xhuma's main infrastructure to remain purely cloud-native while satisfying strict NHS network requirements.
 
-> **Note on Custom Domains:** External integration endpoints (including Epic and the Relay) do not target the default Azure App Service hostname directly. They target an externally agreed environment custom FQDN (e.g., `<environment>.<trust-domain>`), which is then bound to the Xhuma App Service via an operator-managed Azure hostname binding. DNS and the associated custom TLS certificates are currently managed manually outside of the Terraform infrastructure lifecycle.
+> **Note on Custom Domains:** External integration endpoints (including Epic and the Relay) do not target the default Azure App Service hostname directly. They target an externally agreed environment custom FQDN (e.g., `int.uclh.xhuma.co.uk`), which is then bound to the Xhuma App Service via an operator-managed Azure hostname binding. DNS and the associated custom TLS certificates are currently managed manually outside of the Terraform infrastructure lifecycle.
 
 ```mermaid
 flowchart TD

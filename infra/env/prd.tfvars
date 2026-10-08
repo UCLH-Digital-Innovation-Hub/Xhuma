@@ -9,10 +9,7 @@ redis_family   = "C"
 redis_capacity = 1
 
 org_code       = "RRV00"
-# Production ASID not yet issued.
-# GP Connect production functional readiness remains blocked until
-# the issued production ASID is configured.
-org_asid       = ""
+org_asid       = "200000087786"
 device_id      = "1"
 env            = "prod"
 app_version    = "0.9"
@@ -31,3 +28,5 @@ gp_connect_include_investigations = "true"
 gp_connect_include_immunisations  = "true"
 
 ccda_expiry_hours = "4"
+nhs_relay_base_path = "https://proxy.national.ncrs.nhs.uk"
+nhs_over_internet_path = ""

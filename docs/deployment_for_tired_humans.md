@@ -1,13 +1,14 @@
 # Xhuma Deployment for Tired Humans
 
 > [!IMPORTANT]
-> **Matrix Deployment Notice:** The matrix deployment workflow is now the authoritative path for `play`, `int`, and `prd` targets. The legacy deployment path has been retired.
-> 
-> - **INT** is a brownfield migration. It requires existing Terraform state (`require_existing_state=true`). The existing-state preflight is mandatory and will block execution if state is missing.
-> - **PRD** is a greenfield deployment. It does not require existing state (`require_existing_state=false`).
-> - The `int-plan` and `prd-plan` GitHub Environments are protected.
-> - Existing custom domains (e.g., `<environment>.<trust-domain>`) already exist and must survive.
-> - Infrastructure deployment does not imply clinical commissioning; production commissioning requires configuration, connectivity, and functional/clinical acceptance.
+> **INT Migration Notice:** The `INT` environment is the first brownfield matrix migration.
+> - It explicitly reuses existing `INT` Terraform state.
+> - The `int-plan` GitHub Environment is protected during migration.
+> - The existing-state preflight is mandatory and will block execution if state is missing.
+> - The first plan is expected to include PostgreSQL audit convergence.
+> - The existing custom domain `int.uclh.xhuma.co.uk` already exists and must survive.
+> - `EPIC_CA_CERT` is already populated and resolved.
+> - The `main`/`PRD` environment remains on the legacy pipeline and is untouched.
 
 > The short version for when you need to deploy Xhuma without reading the entire Operator's Manual first.
 
@@ -100,7 +101,7 @@ terraform show -json <plan> | jq -r '
 ## 5. The second approval is the important one
 
 ![Infrastructure Apply Approval Gate](./assets/play-infra-apply-approval-gate.png)
-*Figure 6 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `<target>-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
+*Figure 6 — Infrastructure Apply approval gate — after Terraform Plan completes, Run #32 pauses at `rg-xhuma-play-infra`. The immutable plan hash, target and expected container digest remain visible before the reviewed plan can be applied.*
 
 At this point:
 - CI has passed;
@@ -109,7 +110,7 @@ At this point:
 - the exact plan has a SHA256 hash;
 - Apply is still BLOCKED.
 
-Before approving `<target>-infra` ask:
+Before approving `rg-xhuma-play-infra` ask:
 - Is this the correct target?
 - Is this the correct commit/run?
 - Do I understand every infrastructure change?
