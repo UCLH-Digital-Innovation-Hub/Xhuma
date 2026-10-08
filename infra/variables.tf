@@ -203,4 +203,9 @@ variable "nhs_over_internet_path" {
   default     = ""
 }
 
+variable "dmd_base_url" {
+  description = "The FHIR Terminology base URL for DMD"
+  type        = string
+  default     = "https://ontology.nhs.uk/production1/fhir"
+}
 

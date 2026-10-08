@@ -315,6 +315,7 @@ resource "azurerm_linux_web_app" "app" {
     "JWTKEY"            = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=jwtkey)"
     "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
+    "DMD_BASE_URL"      = var.dmd_base_url
     "EPIC_CA_CERT"      = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.local_kv.name};SecretName=epic-ca-cert)"
 
     # NHS GP Connect Certificates (Shared Vault) - Required only for direct/non-relay HTTP path

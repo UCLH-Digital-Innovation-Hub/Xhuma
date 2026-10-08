@@ -134,7 +134,7 @@ async def lifespan(app: FastAPI):
                     "Warning: Failed to hydrate NHS certificates to ephemeral storage (malformed material). GP Connect will fail closed."
                 )
         else:
-            if os.getenv("ENV", "prod").lower() == "prod" and not os.getenv("USE_RELAY"):
+            if os.getenv("ENV", "prod").lower() == "prod" and os.getenv("USE_RELAY") not in ("1", "true", "True"):
                 print(
                     "Warning: Missing NHS_CLIENT_CERT, NHS_CLIENT_KEY or NHS_BUNDLE in production. Direct GP Connect will fail closed."
                 )
