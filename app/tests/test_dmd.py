@@ -256,3 +256,31 @@ async def test_terminology_token_cache_write_is_awaited():
         factory.return_value.__aenter__.return_value = client
         assert await get_terminology_token() == "cached-token"
         cache.setex.assert_awaited_once_with("dmd_token", 30 * 60, "cached-token")
+
+
+@pytest.mark.asyncio
+async def test_dmd_base_url_configurable(monkeypatch):
+    import httpx
+
+    from app.ccda.dmd import get_dmd_concept
+
+    monkeypatch.setenv("DMD_BASE_URL", "https://ontology.nhs.uk/production2/fhir")
+
+    with (
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
+        patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock) as token_mock,
+        patch("app.ccda.dmd.httpx.AsyncClient") as factory,
+    ):
+        cache.get.return_value = None
+        cache.setex.return_value = True
+        token_mock.return_value = "fake-token"
+
+        client = AsyncMock()
+        client.get.return_value = httpx.Response(200, json={}, request=httpx.Request("GET", "https://example.test"))
+        factory.return_value.__aenter__.return_value = client
+
+        await get_dmd_concept(123)
+
+        # Verify the requested URL used production2
+        call_args = client.get.call_args[0]
+        assert call_args[0].startswith("https://ontology.nhs.uk/production2/fhir/CodeSystem/$lookup")

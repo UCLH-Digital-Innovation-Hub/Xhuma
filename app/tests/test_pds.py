@@ -1,10 +1,13 @@
 import asyncio
 import json
+import os
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+
+os.environ["NHS_API_KEY"] = "test_client_id"
 from fastapi import HTTPException
 
 from app.pds.pds import lookup_patient, pds_cache_key, sds_cache_key, sds_trace
@@ -249,3 +252,35 @@ def test_nhs_api_environment_selection():
     # Restore to avoid side effects
     os.environ["ENV"] = "dev"
     importlib.reload(app.pds.pds)
+
+
+@pytest.mark.asyncio
+async def test_nhs_api_key_used_for_pds_and_sds(monkeypatch):
+    monkeypatch.setenv("NHS_API_KEY", "nhs_special_key")
+    monkeypatch.setenv("API_KEY", "xhuma_internal_key")
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.pds_jwt", return_value="jwt") as mock_pds_jwt,
+        patch("app.pds.pds.attempt_audit"),
+    ):
+        cache.exists.return_value = False
+        cache.get.return_value = None
+
+        client = AsyncMock()
+        client.post.return_value = MagicMock(text='{"access_token": "token", "expires_in": 3600}')
+        client.get.return_value = MagicMock(status_code=200, text='{"resourceType": "Bundle"}')
+        factory.return_value.__aenter__.return_value = client
+
+        await lookup_patient(9692140466, saml=saml)
+
+        # Verify PDS JWT generation uses NHS_API_KEY
+        mock_pds_jwt.assert_called_once_with(
+            "nhs_special_key", "nhs_special_key", "https://dev.api.service.nhs.uk/oauth2/token", "test-1"
+        )
+
+        # Verify SDS trace header uses NHS_API_KEY
+        await sds_trace("ods", "identifier")
+        call_kwargs = client.get.call_args.kwargs
+        assert call_kwargs["headers"]["apikey"] == "nhs_special_key"

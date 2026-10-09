@@ -104,6 +104,41 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"Warning: Failed to connect to Redis during startup: {e}")
 
+        # Handle NHS Certificates securely
+        import tempfile
+
+        from app.security import fix_pem_formatting
+
+        cert_dir_obj = tempfile.TemporaryDirectory()
+        resources.callback(cert_dir_obj.cleanup)
+        app.state.nhs_cert_dir_obj = cert_dir_obj
+        cert_dir = cert_dir_obj.name
+        os.chmod(cert_dir, 0o700)
+        os.environ["NHS_CERT_DIR_EPHEMERAL"] = cert_dir
+
+        if os.getenv("NHS_CLIENT_CERT") and os.getenv("NHS_CLIENT_KEY") and os.getenv("NHS_BUNDLE"):
+            try:
+                cert_path = os.path.join(cert_dir, "client_cert.pem")
+                key_path = os.path.join(cert_dir, "client_key.pem")
+                bundle_path = os.path.join(cert_dir, "nhs_bundle.pem")
+
+                with open(cert_path, "w") as f:
+                    f.write(fix_pem_formatting(os.getenv("NHS_CLIENT_CERT")))
+                with os.fdopen(os.open(key_path, os.O_WRONLY | os.O_CREAT, 0o600), "w") as f:
+                    f.write(fix_pem_formatting(os.getenv("NHS_CLIENT_KEY")))
+                with open(bundle_path, "w") as f:
+                    f.write(fix_pem_formatting(os.getenv("NHS_BUNDLE")))
+                print("Successfully hydrated NHS certificates to ephemeral filesystem storage.")
+            except Exception:
+                print(
+                    "Warning: Failed to hydrate NHS certificates to ephemeral storage (malformed material). GP Connect will fail closed."
+                )
+        else:
+            if os.getenv("ENV", "prod").lower() == "prod" and os.getenv("USE_RELAY") not in ("1", "true", "True"):
+                print(
+                    "Warning: Missing NHS_CLIENT_CERT, NHS_CLIENT_KEY or NHS_BUNDLE in production. Direct GP Connect will fail closed."
+                )
+
         # Handle JWK generation/verification securely entirely in-memory
         jwt_key = os.getenv("JWTKEY")
         app.state.jwk_json = {}

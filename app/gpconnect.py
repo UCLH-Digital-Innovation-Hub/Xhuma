@@ -35,13 +35,38 @@ router = APIRouter()
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
 
-environment = os.getenv("ENV", "dev")
-if environment.lower() in ["dev", "int"]:
+environment = os.getenv("ENV", "dev").lower()
+if environment in ["dev", "int"]:
     RELAY_BASE_PATH = "https://proxy.int.spine2.ncrs.nhs.uk"
-    IS_DEV = environment.lower() == "dev"
+    IS_DEV = environment == "dev"
     OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk"
+elif environment == "prod":
+    RELAY_BASE_PATH = os.getenv("NHS_RELAY_BASE_PATH")
+    OVER_INTERNET_PATH = os.getenv("NHS_OVER_INTERNET_PATH")
+    IS_DEV = False
 else:
     raise ValueError(f"Unknown or unsupported environment: {environment}")
+
+
+def get_nhs_cert_paths():
+    cert_dir = os.environ.get("NHS_CERT_DIR_EPHEMERAL", "/tmp/nhs_certs")
+    if os.path.exists(os.path.join(cert_dir, "client_cert.pem")):
+        return (
+            os.path.join(cert_dir, "client_cert.pem"),
+            os.path.join(cert_dir, "client_key.pem"),
+            os.path.join(cert_dir, "nhs_bundle.pem"),
+        )
+
+    environment = os.getenv("ENV", "dev").lower()
+    if environment == "prod":
+        # In production, we must fail closed and never fall back to repo keys
+        raise FileNotFoundError("Production NHS certificates not found in ephemeral storage")
+
+    return (
+        "keys/nhs_certs/client_cert.pem",
+        "keys/nhs_certs/client_key.pem",
+        "keys/nhs_certs/nhs_bundle.pem",
+    )
 
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
@@ -321,13 +346,10 @@ async def _fetch_gpconnect_record(
 
     async def _direct_http_call(url: str, headers: dict, body: dict) -> httpx.Response:
         """Make a direct POST and return an httpx.Response."""
+        cert_path, key_path, ca_path = get_nhs_cert_paths()
         async with httpx.AsyncClient(
-            cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
-            verify=create_nhs_ssl_context(
-                "keys/nhs_certs/client_cert.pem",
-                "keys/nhs_certs/client_key.pem",
-                "keys/nhs_certs/nhs_bundle.pem",
-            ),
+            cert=(cert_path, key_path),
+            verify=create_nhs_ssl_context(cert_path, key_path, ca_path),
             timeout=httpx.Timeout(30.0),
             http2=False,
         ) as session:
@@ -395,6 +417,8 @@ async def _fetch_gpconnect_record(
     resp = None
     try:
         if USE_RELAY:
+            if environment == "prod" and not RELAY_BASE_PATH:
+                raise ValueError("NHS_RELAY_BASE_PATH not configured for production. Failing closed.")
             url = f"{RELAY_BASE_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             with measure("gpconnect.http", transport="relay"):
                 resp = await _relay_call(url, headers, body)
@@ -403,6 +427,8 @@ async def _fetch_gpconnect_record(
             # resp = httpx.Response(status_code=status_code, content=resp_text)
 
         else:
+            if environment == "prod" and not OVER_INTERNET_PATH:
+                raise ValueError("NHS_OVER_INTERNET_PATH not configured for production. Failing closed.")
             url = f"{OVER_INTERNET_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             with measure("gpconnect.http", transport="direct"):
                 resp = await _direct_http_call(url, headers, body)

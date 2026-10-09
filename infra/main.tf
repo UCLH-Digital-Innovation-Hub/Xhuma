@@ -315,12 +315,18 @@ resource "azurerm_linux_web_app" "app" {
     "JWTKEY"            = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=jwtkey)"
     "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
+    "DMD_BASE_URL"      = var.dmd_base_url
     "EPIC_CA_CERT"      = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.local_kv.name};SecretName=epic-ca-cert)"
+
+    # NHS GP Connect Certificates (Shared Vault) - Required only for direct/non-relay HTTP path
+    "NHS_CLIENT_CERT" = var.nhs_over_internet_path != "" ? "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=xhuma-nhs-client-cert)" : null
+    "NHS_CLIENT_KEY"  = var.nhs_over_internet_path != "" ? "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=xhuma-nhs-client-key)" : null
+    "NHS_BUNDLE"      = var.nhs_over_internet_path != "" ? "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=xhuma-nhs-bundle)" : null
 
     # New Security Mitigations
     "MTLS_TRUSTED_THUMBPRINTS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=mtls-trusted-thumbprints)"
-    "SAML_TRUSTED_ISSUER"      = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=saml-trusted-issuer)"
-    "ALLOWED_REPLY_TO_DOMAINS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=allowed-reply-to-domains)"
+    "SAML_TRUSTED_ISSUER"      = "urn:nhs:names:services:spine"
+    "ALLOWED_REPLY_TO_DOMAINS" = ".nhs.uk"
 
     "REGISTRY_ID"    = var.registry_id
     "REDIS_HOST"     = azurerm_redis_cache.redis.hostname
@@ -334,8 +340,12 @@ resource "azurerm_linux_web_app" "app" {
     "EXTERNAL_RELAY_CLIENT_ID" = var.external_relay_client_id
     "RELAY_CLIENT_CERT_HEADER" = "X-ARR-ClientCert" # Required for Azure App Service mTLS
 
+    # NHS Relay endpoints
+    "NHS_RELAY_BASE_PATH"    = var.nhs_relay_base_path
+    "NHS_OVER_INTERNET_PATH" = var.nhs_over_internet_path
+
     # Secure Key Vault References for Relay
-    "EXTERNAL_RELAY_TOKEN"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=external-relay-token)"
+    "EXTERNAL_RELAY_TOKEN"           = var.external_relay_url != "" ? "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=external-relay-token)" : null
     "RELAY_MTLS_ALLOWED_CERT_SHA256" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=relay-mtls-allowed-cert-sha256)"
 
     # Postgres Config
@@ -357,6 +367,7 @@ resource "azurerm_linux_web_app" "app" {
     "VERSION"           = var.app_version
     "DEVICE_ID"         = var.device_id
     "ORG_ASID"          = var.org_asid
+    "NHS_API_KEY"       = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=nhs-api-key)"
 
     "GP_CONNECT_INCLUDE_ALLERGIES"      = var.gp_connect_include_allergies
     "GP_CONNECT_INCLUDE_MEDICATION"     = var.gp_connect_include_medication
@@ -369,7 +380,6 @@ resource "azurerm_linux_web_app" "app" {
     "ALLOWED_HOSTS" = var.allowed_hosts
     "REQUIRE_MTLS"  = var.require_mtls
   }
-
 }
 
 # Access Policy for Local Vault

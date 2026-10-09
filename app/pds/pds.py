@@ -87,7 +87,10 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
     async def get_pds_token(kid: str):
         full_path = f"{BASE_PATH}oauth2/token"
-        jwt_token = pds_jwt(API_KEY, API_KEY, full_path, kid)
+        nhs_api_key = os.getenv("NHS_API_KEY")
+        if not nhs_api_key:
+            raise ValueError("NHS_API_KEY is not configured")
+        jwt_token = pds_jwt(nhs_api_key, nhs_api_key, full_path, kid)
         # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {
@@ -230,10 +233,10 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     url = f"{BASE_PATH}spine-directory/FHIR/R4/{suffix}"
     organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|{ods}"
 
-    api_key = os.environ.get("API_KEY")
+    api_key = os.environ.get("NHS_API_KEY")
     # if no API key is set, raise an exception
     if not api_key:
-        raise Exception("API_KEY environment variable is not set")
+        raise Exception("NHS_API_KEY environment variable is not set")
     parameters = {
         "organization": organisation,
         "identifier": identifier,
