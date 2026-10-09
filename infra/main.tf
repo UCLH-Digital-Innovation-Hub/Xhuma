@@ -325,7 +325,7 @@ resource "azurerm_linux_web_app" "app" {
 
     # New Security Mitigations
     "MTLS_TRUSTED_THUMBPRINTS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=mtls-trusted-thumbprints)"
-    "SAML_TRUSTED_ISSUER"      = "urn:nhs:names:services:spine"
+    "SAML_TRUSTED_ISSUER"      = var.saml_trusted_issuer
     "ALLOWED_REPLY_TO_DOMAINS" = ".nhs.uk"
 
     "REGISTRY_ID"    = var.registry_id

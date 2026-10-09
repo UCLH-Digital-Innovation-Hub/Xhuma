@@ -139,6 +139,21 @@ async def lifespan(app: FastAPI):
                     "Warning: Missing NHS_CLIENT_CERT, NHS_CLIENT_KEY or NHS_BUNDLE in production. Direct GP Connect will fail closed."
                 )
 
+        # Check configuration separation
+        api_key = os.getenv("API_KEY")
+        nhs_api_key = os.getenv("NHS_API_KEY")
+        is_prod = os.getenv("ENV", "prod").lower() == "prod"
+
+        if api_key and nhs_api_key and api_key == nhs_api_key:
+            if is_prod:
+                raise RuntimeError(
+                    "CRITICAL: API_KEY and NHS_API_KEY must not be identical in production. Failing closed."
+                )
+            else:
+                print(
+                    "Warning: API_KEY and NHS_API_KEY are identical. This is allowed in dev/int but forbidden in prod."
+                )
+
         # Handle JWK generation/verification securely entirely in-memory
         jwt_key = os.getenv("JWTKEY")
         app.state.jwk_json = {}
@@ -146,9 +161,24 @@ async def lifespan(app: FastAPI):
         if jwt_key:
             try:
                 # Reformat env var newlines safely and convert to JWK
+                from cryptography.hazmat.backends import default_backend
+                from cryptography.hazmat.primitives import serialization
+                from cryptography.hazmat.primitives.asymmetric import rsa
+
                 from app.security import fix_pem_formatting
 
                 private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
+
+                # Check RSA key policy
+                private_key = serialization.load_pem_private_key(private_pem, password=None, backend=default_backend())
+                if isinstance(private_key, rsa.RSAPrivateKey):
+                    if private_key.key_size != 4096:
+                        print(
+                            f"CRITICAL WARNING: JWTKEY is {private_key.key_size}-bit RSA. Production policy requires 4096-bit RSA."
+                        )
+                else:
+                    print("CRITICAL WARNING: JWTKEY is not an RSA key.")
+
                 public_jwk = jwk.JWK.from_pem(private_pem)
                 jwk_dict = public_jwk.export_public(as_dict=True)
                 jwk_dict["alg"] = "RS512"

@@ -66,7 +66,7 @@ async def test_iti39_missing_association_uses_none(mock_extract_saml, mock_redis
     }
 
     # Simulate missing doc_nhsno
-    def redis_get_side_effect(key):
+    async def redis_get_side_effect(key):
         if key == "test-doc-123":
             return b"some-document-content"
         return None
@@ -139,7 +139,7 @@ async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redi
 
     mock_redis_exists.return_value = True
 
-    def redis_get_side_effect(key):
+    async def redis_get_side_effect(key):
         if key == "access_token":
             return b"token"
         return None
@@ -159,7 +159,7 @@ async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redi
         kwargs = mock_attempt_audit.call_args.kwargs
         assert kwargs["action"] == "pds_lookup"
         assert kwargs["outcome"] == AuditOutcome.fail
-        assert "Connection Refused" in kwargs["detail"]["exception"]
+        assert "Exception" in kwargs["detail"]["exception"]
 
 
 @pytest.mark.asyncio

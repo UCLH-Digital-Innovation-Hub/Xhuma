@@ -209,3 +209,9 @@ variable "dmd_base_url" {
   default     = "https://ontology.nhs.uk/production1/fhir"
 }
 
+variable "saml_trusted_issuer" {
+  description = "The trusted SAML issuer for the Epic integration"
+  type        = string
+  default     = "urn:nhs:names:services:spine"
+}
+

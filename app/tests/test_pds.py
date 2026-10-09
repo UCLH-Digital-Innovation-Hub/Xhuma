@@ -26,12 +26,14 @@ async def test_get_data_success(mock_async_client, mock_redis, mock_attempt_audi
 
     # --- mock token response ---
     token_response = MagicMock()
-    token_response.text = json.dumps({"access_token": "fake-token", "expires_in": 300})
+    token_response.status_code = 200
+    token_response.json.return_value = {"access_token": "fake-token", "expires_in": 300}
 
     # --- mock patient response ---
     mock_client_instance = AsyncMock()
     mock_response = MagicMock()
-    mock_response.text = json.dumps({"resourceType": "Patient", "id": "9690937278"})
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"resourceType": "Patient", "id": "9690937278"}
 
     mock_client_instance.post.return_value = token_response
     mock_client_instance.get.return_value = mock_response
@@ -269,8 +271,16 @@ async def test_nhs_api_key_used_for_pds_and_sds(monkeypatch):
         cache.get.return_value = None
 
         client = AsyncMock()
-        client.post.return_value = MagicMock(text='{"access_token": "token", "expires_in": 3600}')
-        client.get.return_value = MagicMock(status_code=200, text='{"resourceType": "Bundle"}')
+        post_resp = MagicMock()
+        post_resp.status_code = 200
+        post_resp.json.return_value = {"access_token": "token", "expires_in": 3600}
+        client.post.return_value = post_resp
+
+        get_resp = MagicMock()
+        get_resp.status_code = 200
+        get_resp.json.return_value = {"resourceType": "Bundle"}
+        get_resp.text = '{"resourceType": "Bundle"}'
+        client.get.return_value = get_resp
         factory.return_value.__aenter__.return_value = client
 
         await lookup_patient(9692140466, saml=saml)
@@ -284,3 +294,107 @@ async def test_nhs_api_key_used_for_pds_and_sds(monkeypatch):
         await sds_trace("ods", "identifier")
         call_kwargs = client.get.call_args.kwargs
         assert call_kwargs["headers"]["apikey"] == "nhs_special_key"
+
+
+@pytest.mark.asyncio
+async def test_pds_error_classifications(monkeypatch):
+    monkeypatch.setenv("NHS_API_KEY", "dummy")
+
+    import fastapi
+
+    from app.pds.pds import lookup_patient
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.attempt_audit", new_callable=AsyncMock),
+    ):
+        cache.exists.return_value = False
+
+        async def _redis_get(key):
+            if key == "access_token":
+                return b"cached_token"
+            return None
+
+        cache.get.side_effect = _redis_get
+
+        client = AsyncMock()
+        factory.return_value.__aenter__.return_value = client
+
+        # 404 test
+        resp_404 = MagicMock()
+        resp_404.status_code = 404
+        resp_404.json.return_value = {"issue": [{"diagnostics": "Not found"}]}
+        client.get.return_value = resp_404
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 404
+        assert excinfo.value.detail == "Patient not found on PDS"
+
+        # 401 test (Entitlement)
+        resp_401 = MagicMock()
+        resp_401.status_code = 401
+        resp_401.json.return_value = {"issue": [{"diagnostics": "Unauthorised"}]}
+        client.get.return_value = resp_401
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "PDS Entitlement or Token Failure"
+
+        # Upstream Exception test (network failure)
+        client.get.side_effect = Exception("Connection Refused")
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "PDS lookup upstream failure"
+
+
+@pytest.mark.asyncio
+async def test_pds_diagnostic_sanitization(caplog, monkeypatch):
+    monkeypatch.setenv("NHS_API_KEY", "dummy")
+    import httpx
+
+    from app.pds.pds import lookup_patient
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.attempt_audit", new_callable=AsyncMock),
+    ):
+        cache.exists.return_value = False
+
+        async def _redis_get_2(key):
+            if key == "access_token":
+                return b"cached_token"
+            return None
+
+        cache.get.side_effect = _redis_get_2
+
+        client = AsyncMock()
+        factory.return_value.__aenter__.return_value = client
+
+        # Response with sensitive looking text and newlines
+        sensitive_text = "Detailed error: user token BEARER 12345-ABC \n and Patient NHSNO: 9999999999 failed\r\n"
+        resp_error = MagicMock()
+        resp_error.status_code = 500
+        resp_error.json.return_value = {"issue": [{"diagnostics": sensitive_text}]}
+        resp_error.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500 Error", request=MagicMock(), response=resp_error
+        )
+        client.get.return_value = resp_error
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await lookup_patient(12345, saml=MagicMock())
+
+        # Verify sanitization stripped newlines and redacted sensitive info
+        log_records = [r for r in caplog.records if "PDS API Failure" in r.message]
+        assert len(log_records) == 1
+        msg = log_records[0].message
+        assert "\n" not in msg
+        assert "\r" not in msg
+        assert "9999999999" not in msg
+        assert "[REDACTED_NHSNO]" in msg
+        assert "12345-ABC" not in msg
+        assert "Bearer [REDACTED_TOKEN]" in msg
