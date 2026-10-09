@@ -42,7 +42,7 @@ from .responses import (
     iti_55_error,
     iti_55_response,
 )
-from .saml_helper import InvalidSAMLContext, extract_trusted_saml_assertion
+from .saml_helper import InvalidSAMLContext, extract_trusted_saml_assertion, validate_saml_attributes
 
 
 def log_info(req_body, res_body, client_ip, method, url, status_code):
@@ -163,18 +163,10 @@ async def iti55(request: Request):
             raise HTTPException(status_code=401, detail=str(e))
 
         saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
-        if not all(
-            (
-                saml_attrs.subject_id,
-                saml_attrs.organization,
-                saml_attrs.organization_id,
-                saml_attrs.role,
-            )
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail="Incomplete SAML security context",
-            )
+        try:
+            validate_saml_attributes(saml_attrs)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
         try:
             soap_request = ITI55Request.model_validate(envelope)
@@ -299,18 +291,10 @@ async def iti38(request: Request):
             raise HTTPException(status_code=401, detail=str(e))
 
         saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
-        if not all(
-            (
-                saml_attrs.subject_id,
-                saml_attrs.organization,
-                saml_attrs.organization_id,
-                saml_attrs.role,
-            )
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail="Incomplete SAML security context",
-            )
+        try:
+            validate_saml_attributes(saml_attrs)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
         try:
             soap_request = ITI38Request.model_validate(envelope)
@@ -398,18 +382,10 @@ async def iti39(request: Request):
             raise HTTPException(status_code=401, detail=str(e))
 
         saml_attrs = process_saml_attributes(assertion.get("AttributeStatement", {}))
-        if not all(
-            (
-                saml_attrs.subject_id,
-                saml_attrs.organization,
-                saml_attrs.organization_id,
-                saml_attrs.role,
-            )
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail="Incomplete SAML security context",
-            )
+        try:
+            validate_saml_attributes(saml_attrs)
+        except InvalidSAMLContext as e:
+            raise HTTPException(status_code=401, detail=str(e))
 
         try:
             soap_request = ITI39Request.model_validate(envelope)
