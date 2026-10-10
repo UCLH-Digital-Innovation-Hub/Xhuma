@@ -45,13 +45,28 @@ from .middleware.mtls import MTLSMiddleware
 from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
-from .security import verify_api_key
+from .security import fix_pem_formatting, verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 from .telemetry import monitor_event_loop
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
+
+
+def _append_public_jwk(app: FastAPI, private_pem: bytes):
+    """Retain public keys for rotation and track the currently configured key."""
+    public_jwk = jwk.JWK.from_pem(private_pem).export_public(as_dict=True)
+    public_jwk["alg"] = "RS512"
+    public_jwk["use"] = "sig"
+
+    if not hasattr(app.state, "jwk_keys"):
+        existing_key = getattr(app.state, "jwk_json", {})
+        app.state.jwk_keys = [existing_key] if existing_key else []
+    if not any(key.get("kid") == public_jwk["kid"] for key in app.state.jwk_keys):
+        app.state.jwk_keys.append(public_jwk)
+    # PDS signing reads the active key ID from jwk_json.
+    app.state.jwk_json = public_jwk
 
 
 @asynccontextmanager
@@ -107,18 +122,13 @@ async def lifespan(app: FastAPI):
         # Handle JWK generation/verification securely entirely in-memory
         jwt_key = os.getenv("JWTKEY")
         app.state.jwk_json = {}
+        app.state.jwk_keys = []
 
         if jwt_key:
             try:
-                # Reformat env var newlines safely and convert to JWK
-                from app.security import fix_pem_formatting
-
+                # Reformat env var newlines safely and retain only the public JWK
                 private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
-                public_jwk = jwk.JWK.from_pem(private_pem)
-                jwk_dict = public_jwk.export_public(as_dict=True)
-                jwk_dict["alg"] = "RS512"
-                jwk_dict["use"] = "sig"
-                app.state.jwk_json = jwk_dict
+                _append_public_jwk(app, private_pem)
             except Exception as e:
                 print(f"Warning: Failed to load JWTKEY from environment: {e}")
         elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
@@ -126,11 +136,7 @@ async def lifespan(app: FastAPI):
             print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
             with open("keys/test-1.pem", "rb") as pemfile:
                 private_pem = pemfile.read()
-                public_jwk = jwk.JWK.from_pem(data=private_pem)
-                jwk_dict = public_jwk.export_public(as_dict=True)
-                jwk_dict["alg"] = "RS512"
-                jwk_dict["use"] = "sig"
-                app.state.jwk_json = jwk_dict
+                _append_public_jwk(app, private_pem)
         else:
             print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
 
@@ -349,7 +355,7 @@ async def health_check():
 @app.get("/jwk")
 async def get_jwk(request: Request):
     """
-    Public endpoint that provides access to the service's JSON Web Key.
+    Public endpoint that provides the service's JSON Web Key Set.
 
     This endpoint is used by clients to verify JWT signatures and establish
     trust with the service.
@@ -357,8 +363,17 @@ async def get_jwk(request: Request):
     Returns:
         dict: JSON Web Key Set in dictionary format.
     """
-    if hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
-        return {"keys": [request.app.state.jwk_json]}
+    jwt_key = os.getenv("JWTKEY")
+    if jwt_key:
+        try:
+            private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
+            _append_public_jwk(request.app, private_pem)
+        except Exception:
+            logging.warning("Failed to load JWTKEY; retaining existing public keychain")
+
+    keys = getattr(request.app.state, "jwk_keys", None)
+    if keys:
+        return {"keys": keys}
     return {"error": "JWK not configured on this server"}
 
 
