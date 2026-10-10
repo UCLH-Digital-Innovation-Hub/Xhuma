@@ -1,6 +1,7 @@
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import jwt
 import pytest
 from httpx import Response
 
@@ -9,6 +10,7 @@ from app.tests.configure_tests import get_nhs_ids, load_bundle, load_pds
 from app.tests.fixtures.saml_attributes import saml
 
 pytest_plugins = ("pytest_asyncio",)
+pytestmark = pytest.mark.usefixtures("mock_self_issuer")
 
 
 def get_mock_request():
@@ -105,10 +107,50 @@ async def test_gpconnect_with_nhs_data(
     )
     assert mock_sds_trace.call_count == 2
     mock_client.post.assert_called_once()
+    sent_headers = mock_client.post.call_args.kwargs["headers"]
+    claims = jwt.decode(sent_headers["Authorization"].removeprefix("Bearer "), options={"verify_signature": False})
+    assert claims["iss"] == "https://consumer.test/spine"
+    assert claims["aud"] == "fake-gpconnect-endpoint"
+    assert sent_headers["Ssp-From"] == "123"
     mock_convert_bundle.assert_called_once()
     mock_base64_xml.assert_called_once()
     mock_redis_pipeline.return_value.execute.assert_awaited_once()
     mock_redis_pipeline.return_value.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_fails", [False, True])
+async def test_self_lookup_failure_is_audited_without_downstream_request(mock_self_issuer, audit_fails):
+    from app.audit.audit import AuditFailureException
+    from app.audit.models import AuditOutcome
+
+    mock_self_issuer.side_effect = ValueError("SYNTHETIC_SENSITIVE_LOOKUP_ERROR")
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+        patch("app.gpconnect.redis_client.pipeline") as cache,
+    ):
+        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        if audit_fails:
+
+            async def fail_audit(**kwargs):
+                if kwargs["action"] == "sds_self_lookup":
+                    raise AuditFailureException("Audit unavailable")
+
+            audit.side_effect = fail_audit
+            with pytest.raises(AuditFailureException):
+                await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+        else:
+            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+            assert response.status_code == 502
+            assert json.loads(response.body) == {"success": False, "error": "SDS consumer issuer lookup failed"}
+        assert audit.await_args.kwargs["action"] == "sds_self_lookup"
+        assert audit.await_args.kwargs["outcome"] == AuditOutcome.fail
+        assert audit.await_args.kwargs["detail"] == {"exception_type": "ValueError"}
+        client.assert_not_called()
+        cache.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -210,7 +252,7 @@ async def test_gpconnect_readerror_audits_failure(
     assert body["success"] is False
     assert "ReadError: server closed connection before responding" in body["error"]
 
-    assert mock_attempt_audit.call_count == 3
+    assert mock_attempt_audit.call_count == 4
     audit_args = mock_attempt_audit.call_args.kwargs
     assert audit_args["action"] == "gpconnect_request"
     assert audit_args["error_code"] == "502"

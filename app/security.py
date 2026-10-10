@@ -9,7 +9,8 @@ The module provides two main JWT creation functions:
 1. pds_jwt: Creates JWTs for PDS FHIR API authentication
 2. create_jwt: Creates JWTs for GP Connect access
 
-All tokens are signed using RS512 algorithm and have a 5-minute expiration time.
+PDS tokens are signed using RS512; GP Connect tokens use the none algorithm.
+Both have a 5-minute expiration time.
 """
 
 import os
@@ -119,6 +120,8 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
 def create_jwt(
     audit: SAMLAttributes,
     audience: str = "https://orange.testlab.nhs.uk/B82617/STU3/1/gpconnect/documents/fhir",
+    *,
+    issuer: str,
 ) -> str:
     """
     Creates a JWT for GP Connect access with specific claims required by NHS Digital.
@@ -126,6 +129,7 @@ def create_jwt(
     Args:
         audit (dict): Audit information for the JWT from the SOAP SAML headers
         audience (str): The intended audience (aud claim). Defaults to test environment.
+        issuer (str): The consumer's Spine Endpoint address resolved through SDS.
 
     Returns:
         str: Encoded JWT string
@@ -139,6 +143,8 @@ def create_jwt(
         - requesting_practitioner
 
     """
+    if not issuer or not issuer.strip():
+        raise ValueError("A consumer Spine Endpoint address is required as the GP Connect JWT issuer")
     created_time = int(time())
 
     subject_id_str = audit.subject_id
@@ -148,7 +154,7 @@ def create_jwt(
         family, given = subject_id_str, "User"
 
     payload = {
-        "iss": "http://int.apis.ptl.api.platform.nhs.uk/Device/EA2027FD-B486-4033-B48C-E87222F6FA1C",
+        "iss": issuer,
         "sub": subject_id_str,
         "aud": audience,
         "iat": created_time,
@@ -230,6 +236,10 @@ def create_jwt(
 
 
 if __name__ == "__main__":
+    import asyncio
+
+    from app.pds.pds import lookup_self_issuer
+
     # Example usage
     audit = {
         "subject_id": "CONE, Stephen",
@@ -263,5 +273,5 @@ if __name__ == "__main__":
         "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
     }
     print("RAW TOKEN")
-    token = create_jwt(audit)
+    token = create_jwt(SAMLAttributes.model_validate(audit), issuer=asyncio.run(lookup_self_issuer()))
     print(token)
