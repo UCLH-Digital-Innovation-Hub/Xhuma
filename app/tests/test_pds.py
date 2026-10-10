@@ -79,7 +79,7 @@ async def test_sds_trace_caches_result(mock_async_client, mock_redis):
     assert trace == {"resourceType": "Bundle"}
     client.get.assert_awaited_once()
     mock_redis.setex.assert_awaited_once_with(
-        "pds:sds:device:A82038",
+        sds_cache_key("A82038"),
         12 * 60 * 60,
         json.dumps({"resourceType": "Bundle"}),
     )

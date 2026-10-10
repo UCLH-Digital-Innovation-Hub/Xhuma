@@ -1,6 +1,16 @@
 import os
+from unittest.mock import AsyncMock, patch
 
 import pytest
+
+
+@pytest.fixture
+def mock_self_issuer():
+    """Isolate the consumer SDS lookup in tests covering the rest of GP Connect."""
+    with patch("app.gpconnect.lookup_self_issuer", new_callable=AsyncMock) as lookup:
+        lookup.return_value = "https://consumer.test/spine"
+        yield lookup
+
 
 os.environ["API_KEY"] = "test-api-key"
 os.environ["ORG_CODE"] = "RRV00"

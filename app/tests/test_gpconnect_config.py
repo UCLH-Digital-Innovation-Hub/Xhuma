@@ -7,6 +7,8 @@ from fastapi import FastAPI
 from app.gpconnect import _fetch_gpconnect_record
 from app.main import lifespan
 
+pytestmark = pytest.mark.usefixtures("mock_self_issuer")
+
 
 @pytest.fixture(autouse=True)
 def isolate_startup_io():

@@ -56,7 +56,7 @@ def test_create_jwt():
     saml_header = _parse(xml39)
     saml = process_saml_attributes(saml_header["AttributeStatement"])
 
-    token = create_jwt(saml)
+    token = create_jwt(saml, issuer="https://consumer.test/spine")
 
     assert token is not None
     assert isinstance(token, str)

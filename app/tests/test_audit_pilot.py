@@ -176,7 +176,9 @@ async def test_gpconnect_restricted_patient_denial(mock_lookup, mock_attempt_aud
 @patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.redis_client.pipeline")
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
-async def test_redis_publication_audit_failure_interaction(mock_lookup, mock_pipeline, mock_attempt_audit, mock_ssl):
+async def test_redis_publication_audit_failure_interaction(
+    mock_lookup, mock_pipeline, mock_attempt_audit, mock_ssl, mock_self_issuer
+):
     # Setup happy path until attempt_audit fails on save
     mock_lookup.return_value = {
         "meta": {"security": [{"code": "U"}]},
