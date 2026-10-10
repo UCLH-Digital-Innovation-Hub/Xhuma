@@ -19,7 +19,7 @@ from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
 from .gp_connect_config import GP_CONNECT_PARAMETERS
 from .logging import record_application_failure
-from .pds.pds import lookup_patient, sds_trace
+from .pds.pds import lookup_patient, lookup_self_issuer, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
@@ -281,7 +281,32 @@ async def _fetch_gpconnect_record(
     fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
 
     # 6) Build request
-    token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}")
+    try:
+        with measure("sds.self"):
+            issuer = await lookup_self_issuer()
+        token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}", issuer=issuer)
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="sds_self_lookup",
+            outcome=AuditOutcome.ok,
+        )
+    except AuditFailureException:
+        raise
+    except Exception as e:
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="sds_self_lookup",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail={"exception_type": type(e).__name__},
+        )
+        record_application_failure(e)
+        logging.exception("SDS consumer issuer lookup failed")
+        return JSONResponse(status_code=502, content={"success": False, "error": "SDS consumer issuer lookup failed"})
     headers = {
         "Ssp-TraceID": str(uuid4()),
         "Ssp-From": os.environ["ORG_ASID"],
