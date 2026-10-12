@@ -434,8 +434,6 @@ def create_jwt(
             ],
         },
     }
-    print("JWT PAYLOAD:")
-    print(payload)
 
     # audit_role = audit.role.model_dump(by_alias=True)
     # audit_role.pop("@xsi:type", None)  # Remove XML type info for JWT payload
