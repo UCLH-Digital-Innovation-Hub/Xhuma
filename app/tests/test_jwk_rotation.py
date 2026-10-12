@@ -92,9 +92,9 @@ def mock_kv(monkeypatch):
 
 @pytest.fixture
 def test_keys():
-    """Generate 3 distinct 2048-bit RSA keys for test execution."""
+    """Generate 4 distinct 2048-bit RSA keys for test execution."""
     keys = []
-    for _ in range(3):
+    for _ in range(4):
         k = jwk.JWK.generate(kty="RSA", size=2048)
         pem = k.export_to_pem(private_key=True, password=None).decode("utf-8")
         keys.append((k, pem))
@@ -670,3 +670,79 @@ async def test_pds_lookup_flow_with_key_vault(mock_kv, test_keys, test_app):
         req = Request({"type": "http", "app": test_app})
         res = await lookup_patient(9690937278, request=req, saml=saml)
         assert res == {"resourceType": "Patient"}
+
+
+# -------------------------------------------------------------------------
+# Test 22: Deduplication - Two secret versions containing identical key material -> one JWKS entry
+# -------------------------------------------------------------------------
+def test_two_versions_with_identical_key_material_publishes_one_jwk(mock_kv, test_keys, test_app):
+    k_a, pem_a = test_keys[0]
+    t0 = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 2, 10, 0, tzinfo=timezone.utc)
+    mock_kv.add_version("v1", pem_a, created_on=t0)
+    mock_kv.add_version("v2", pem_a, created_on=t1)
+
+    with TestClient(test_app) as client:
+        res = client.get("/jwk")
+        assert res.status_code == 200
+        keys = res.json()["keys"]
+        assert len(keys) == 1
+        assert keys[0]["kid"] == k_a.thumbprint()
+
+    # Signing uses the newest version
+    token = pds_jwt("iss-test", "sub-test", "aud-test")
+    assert jwt.get_unverified_header(token)["kid"] == k_a.thumbprint()
+
+
+# -------------------------------------------------------------------------
+# Test 23: Deduplication - Newest two versions both key A, older version key B -> [A, B]
+# -------------------------------------------------------------------------
+def test_newest_two_identical_older_distinct_publishes_a_b(mock_kv, test_keys, test_app):
+    k_a, pem_a = test_keys[0]
+    k_b, pem_b = test_keys[1]
+    t0 = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 2, 10, 0, tzinfo=timezone.utc)
+    t2 = datetime(2026, 1, 3, 10, 0, tzinfo=timezone.utc)
+    mock_kv.add_version("v1", pem_b, created_on=t0)
+    mock_kv.add_version("v2", pem_a, created_on=t1)
+    mock_kv.add_version("v3", pem_a, created_on=t2)
+
+    with TestClient(test_app) as client:
+        res = client.get("/jwk")
+        assert res.status_code == 200
+        keys = res.json()["keys"]
+        assert len(keys) == 2
+        assert keys[0]["kid"] == k_a.thumbprint()
+        assert keys[1]["kid"] == k_b.thumbprint()
+
+    token = pds_jwt("iss-test", "sub-test", "aud-test")
+    assert jwt.get_unverified_header(token)["kid"] == k_a.thumbprint()
+
+
+# -------------------------------------------------------------------------
+# Test 24: Deduplication - A/A/B/C versions -> [A, B]
+# -------------------------------------------------------------------------
+def test_four_versions_a_a_b_c_publishes_a_b(mock_kv, test_keys, test_app):
+    k_a, pem_a = test_keys[0]
+    k_b, pem_b = test_keys[1]
+    k_c, pem_c = test_keys[2]
+    t0 = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 1, 2, 10, 0, tzinfo=timezone.utc)
+    t2 = datetime(2026, 1, 3, 10, 0, tzinfo=timezone.utc)
+    t3 = datetime(2026, 1, 4, 10, 0, tzinfo=timezone.utc)
+    mock_kv.add_version("v1", pem_c, created_on=t0)
+    mock_kv.add_version("v2", pem_b, created_on=t1)
+    mock_kv.add_version("v3", pem_a, created_on=t2)
+    mock_kv.add_version("v4", pem_a, created_on=t3)
+
+    with TestClient(test_app) as client:
+        res = client.get("/jwk")
+        assert res.status_code == 200
+        keys = res.json()["keys"]
+        assert len(keys) == 2
+        assert keys[0]["kid"] == k_a.thumbprint()
+        assert keys[1]["kid"] == k_b.thumbprint()
+        assert k_c.thumbprint() not in [k["kid"] for k in keys]
+
+    token = pds_jwt("iss-test", "sub-test", "aud-test")
+    assert jwt.get_unverified_header(token)["kid"] == k_a.thumbprint()
