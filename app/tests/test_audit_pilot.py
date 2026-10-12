@@ -344,7 +344,7 @@ async def test_audit_boundary_failure_closure():
     saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
 
     # Real builder, real store, mock DB boundary
-    with patch.dict(os.environ, {"API_KEY": "test"}):
+    with patch.dict(os.environ, {"API_KEY": "test", "ENV": "prod"}):
         with pytest.raises(AuditFailureException, match="Failed to persist audit event"):
             await attempt_audit(
                 request=request,

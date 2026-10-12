@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 from app.audit.models import SAMLAttributes
@@ -71,20 +72,27 @@ async def attempt_audit(
     document_id: str | None = None,
     request_id: str | None = None,
 ) -> None:
-    """Attempt to write an audit event, failing the main request if it fails."""
+    """Write an audit event; failures are non-fatal only in dev and int."""
     import logging
 
     from .build import build_audit_event
     from .store import insert_audit_event
 
+    environment = os.getenv("ENV", "prod").strip().lower()
+
+    def audit_failure(message: str) -> None:
+        if environment in ("dev", "int"):
+            logging.warning("AuditFailure: %s (ENV=%s; continuing)", message, environment)
+            return
+        logging.error("AuditFailure: %s", message)
+        raise AuditFailureException(message) from None
+
     if not request or not hasattr(request, "app"):
-        logging.error("AuditFailure: No request or app found")
-        raise AuditFailureException("Audit context missing")
+        return audit_failure("Audit context missing")
 
     SessionLocal = getattr(request.app.state, "SessionLocal", None)
     if not SessionLocal:
-        logging.error("AuditFailure: No SessionLocal found in app state")
-        raise AuditFailureException("Audit persistence context missing")
+        return audit_failure("Audit persistence context missing")
 
     try:
         with measure("audit.persist"):
@@ -106,5 +114,4 @@ async def attempt_audit(
                 await session.commit()
     except Exception:
         # Do not log raw database exceptions containing SQL parameters.
-        logging.error("AuditFailure: Database persistence failed")
-        raise AuditFailureException("Failed to persist audit event") from None
+        return audit_failure("Failed to persist audit event")

@@ -337,6 +337,7 @@ def pds_jwt(issuer: str, subject: str, audience: str) -> str:
 
     private_key, key_id = get_signing_key()
     headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
+
     return jwt.encode(payload, private_key, algorithm="RS512", headers=headers)
 
 
@@ -387,8 +388,8 @@ def create_jwt(
             "resourceType": "Device",
             "identifier": [
                 {
-                    "system": "https://xhumademo.com",
-                    "value": os.getenv("DEVICE_ID", "1"),
+                    "system": "https://xhuma.co.uk",
+                    "value": os.getenv("ORG_ASID", "1"),
                 }
             ],
             "model": "Xhuma",
@@ -433,6 +434,8 @@ def create_jwt(
             ],
         },
     }
+    print("JWT PAYLOAD:")
+    print(payload)
 
     # audit_role = audit.role.model_dump(by_alias=True)
     # audit_role.pop("@xsi:type", None)  # Remove XML type info for JWT payload

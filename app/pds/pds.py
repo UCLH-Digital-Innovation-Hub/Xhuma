@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import fastapi
 import httpx
 
-from app.audit.audit import AuditFailureException, attempt_audit
+from app.audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
 from app.audit.models import AuditOutcome, SAMLAttributes
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
@@ -329,8 +329,40 @@ async def lookup_self_issuer() -> str:
 
 
 if __name__ == "__main__":
-    patient = asyncio.run(lookup_patient(9658218873))
-    pprint.pprint(patient)
+    import xmltodict
+
+    from app.db import make_engine, make_sessionmaker
+
+    xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
+    saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
+
+    async def main():
+        engine = make_engine()
+        try:
+            app = fastapi.FastAPI()
+            app.state.SessionLocal = make_sessionmaker(engine)
+
+            request = fastapi.Request(
+                {
+                    "type": "http",
+                    "app": app,
+                    "headers": [],
+                }
+            )
+
+            issuer = await lookup_self_issuer()
+            print(f"GP Connect issuer: {issuer}")
+
+            return await lookup_patient(
+                9658218873,
+                request=request,
+                saml=saml,
+            )
+        finally:
+            await engine.dispose()
+            await redis_client.close()
+
+    pprint.pprint(asyncio.run(main()))
 
     # print(patient.gender)
     # print(patient.name[0].family)

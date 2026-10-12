@@ -8,7 +8,8 @@ from app.tests.fixtures.saml_attributes import saml
 
 
 @pytest.mark.asyncio
-async def test_audit_fail_closed_missing_request():
+async def test_audit_fail_closed_missing_request(monkeypatch):
+    monkeypatch.setenv("ENV", "prod")
     with pytest.raises(AuditFailureException) as excinfo:
         await attempt_audit(
             request=None,
@@ -21,7 +22,8 @@ async def test_audit_fail_closed_missing_request():
 
 
 @pytest.mark.asyncio
-async def test_audit_fail_closed_missing_sessionlocal():
+async def test_audit_fail_closed_missing_sessionlocal(monkeypatch):
+    monkeypatch.setenv("ENV", "prod")
     mock_request = MagicMock()
     mock_request.app = MagicMock()
     mock_request.app.state = MagicMock()
@@ -39,7 +41,8 @@ async def test_audit_fail_closed_missing_sessionlocal():
 
 
 @pytest.mark.asyncio
-async def test_audit_fail_closed_db_exception():
+async def test_audit_fail_closed_db_exception(monkeypatch):
+    monkeypatch.setenv("ENV", "prod")
     mock_request = MagicMock()
     mock_request.app = MagicMock()
     mock_sessionlocal = MagicMock()
