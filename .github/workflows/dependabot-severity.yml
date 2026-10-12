@@ -1,0 +1,228 @@
+name: Label Dependabot security fixes
+
+on:
+  pull_request_target:
+    branches: [dev]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: dependabot-severity-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  label:
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      # Deliberately no checkout or installation of PR dependencies.
+      - name: Compare lockfiles and label security fixes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCKFILE: uv.lock
+        shell: python
+        run: |
+          import base64
+          import json
+          import os
+          import re
+          import tomllib
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          from functools import cache
+
+          api = os.environ["GITHUB_API_URL"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+
+          with open(os.environ["GITHUB_EVENT_PATH"]) as f:
+              event = json.load(f)
+
+          number = event["pull_request"]["number"]
+          repo_path = f"/repos/{repo}"
+          issue_path = f"{repo_path}/issues/{number}"
+
+          def request(path, method="GET", data=None, include_headers=False):
+              body = None if data is None else json.dumps(data).encode()
+              req = urllib.request.Request(
+                  api + path,
+                  data=body,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "Content-Type": "application/json",
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  content = response.read()
+                  result = json.loads(content) if content else None
+                  return (result, response.headers) if include_headers else result
+
+          # Fetch current PR state in case an earlier event was queued.
+          pr = request(f"{repo_path}/pulls/{number}")
+          if pr["state"] != "open":
+              raise SystemExit(0)
+
+          def packages(sha):
+              path = urllib.parse.quote(os.environ["LOCKFILE"], safe="/")
+              blob = request(f"{repo_path}/contents/{path}?ref={sha}")
+              if blob.get("encoding") != "base64":
+                  raise RuntimeError("Expected a base64-encoded lockfile")
+
+              lock = tomllib.loads(
+                  base64.b64decode(blob["content"]).decode()
+              )
+              result = {}
+              for package in lock.get("package", []):
+                  # Only public PyPI packages; skip private/path/git sources.
+                  registry = package.get("source", {}).get("registry", "")
+                  if registry.rstrip("/") not in {
+                      "https://pypi.org/simple",
+                      "https://pypi.python.org/simple",
+                  }:
+                      continue
+                  name = re.sub(r"[-_.]+", "-", package["name"]).lower()
+                  result.setdefault(name, set()).add(package["version"])
+              return result
+
+          @cache
+          def advisories(name, version):
+              found = {}
+              parameters = {
+                  "ecosystem": "pip",
+                  "affects": f"{name}@{version}",
+                  "type": "reviewed",
+                  "is_withdrawn": "false",
+                  "per_page": 100,
+              }
+              seen_cursors = set()
+              while True:
+                  query = urllib.parse.urlencode(parameters)
+                  batch, headers = request(
+                      "/advisories?" + query, include_headers=True,
+                  )
+                  for advisory in batch:
+                      found[advisory["ghsa_id"]] = advisory
+
+                  # The global advisories API uses Link-header cursors.
+                  next_link = re.search(
+                      r'<([^>]+)>;\s*rel="next"', headers.get("Link", ""),
+                  )
+                  if next_link is None:
+                      return found
+                  next_query = urllib.parse.parse_qs(
+                      urllib.parse.urlsplit(next_link.group(1)).query,
+                  )
+                  cursor = next_query.get("after", [None])[0]
+                  if not cursor or cursor in seen_cursors:
+                      raise RuntimeError("Invalid or repeated advisory pagination cursor")
+                  seen_cursors.add(cursor)
+                  parameters["after"] = cursor
+
+          def all_advisories(name, versions):
+              result = {}
+              for version in sorted(versions):
+                  result.update(advisories(name, version))
+              return result
+
+          before = packages(pr["base"]["sha"])
+          after = packages(pr["head"]["sha"])
+          fixed = {}
+
+          for name in sorted(before.keys() & after.keys()):
+              if before[name] == after[name]:
+                  continue
+
+              old = all_advisories(name, before[name])
+              new = all_advisories(name, after[name])
+
+              # A vulnerability must be absent from EVERY new locked
+              # version of this package before it counts as fixed.
+              for advisory_id in old.keys() - new.keys():
+                  fixed[(name, advisory_id)] = old[advisory_id]
+
+          colours = {
+              "security": "b60205",
+              "severity:critical": "b60205",
+              "severity:high": "d93f0b",
+              "severity:moderate": "fbca04",
+              "severity:low": "0e8a16",
+              "severity:unknown": "ededed",
+          }
+          ranks = {
+              "unknown": 0, "low": 1, "moderate": 2,
+              "high": 3, "critical": 4,
+          }
+
+          def severity(advisory):
+              value = advisory.get("severity", "unknown")
+              value = {"medium": "moderate"}.get(value, value)
+              return value if value in ranks else "unknown"
+
+          wanted = set()
+          if fixed:
+              highest = max(
+                  (severity(a) for a in fixed.values()),
+                  key=ranks.get,
+              )
+              wanted = {"security", f"severity:{highest}"}
+
+          # Do not apply results if the PR changed during the scan.
+          latest = request(f"{repo_path}/pulls/{number}")
+          if (
+              latest["state"] != "open"
+              or latest["head"]["sha"] != pr["head"]["sha"]
+              or latest["base"]["sha"] != pr["base"]["sha"]
+          ):
+              raise RuntimeError("PR changed during scan; rerun this workflow")
+
+          # Create missing labels.
+          for label in sorted(wanted):
+              encoded = urllib.parse.quote(label, safe="")
+              try:
+                  request(f"{repo_path}/labels/{encoded}")
+              except urllib.error.HTTPError as error:
+                  if error.code != 404:
+                      raise
+                  request(f"{repo_path}/labels", "POST", {
+                      "name": label,
+                      "color": colours[label],
+                  })
+
+          # Remove only labels managed by this workflow.
+          current = {
+              label["name"]
+              for label in request(issue_path)["labels"]
+          }
+          for label in sorted((current & colours.keys()) - wanted):
+              encoded = urllib.parse.quote(label, safe="")
+              request(f"{issue_path}/labels/{encoded}", "DELETE")
+
+          if wanted:
+              request(f"{issue_path}/labels", "POST", {
+                  "labels": sorted(wanted),
+              })
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Dependency security fixes\n\n")
+              if not fixed:
+                  summary.write(
+                      "No fixes matched in GitHub-reviewed advisories.\n"
+                  )
+              for (name, advisory_id), advisory in sorted(fixed.items()):
+                  summary.write(
+                      f"- **{name}**: [{advisory_id}]"
+                      f"(https://github.com/advisories/{advisory_id})"
+                      f" — {severity(advisory)}\n"
+                  )
