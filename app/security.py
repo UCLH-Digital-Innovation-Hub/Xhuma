@@ -366,6 +366,7 @@ def create_jwt(
         - requesting_organization
         - requesting_practitioner
 
+    """
     if not issuer or not issuer.strip():
         raise ValueError("A consumer Spine Endpoint address is required as the GP Connect JWT issuer")
     created_time = int(time.time())

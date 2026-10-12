@@ -179,10 +179,11 @@ Replace the placeholder credentials in `.env`. The table summarises the main set
 | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB` | Audit database connection | `postgres`, `5432`, `xhuma` in Compose | Running the service |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD` | Audit database credentials | `postgres`; replace the example password | Running the service |
 | `DATABASE_URL` | Complete async PostgreSQL connection URL; overrides `POSTGRES_*` in the application | Otherwise built from `POSTGRES_*` with TLS required | Local non-TLS PostgreSQL; or when supplying a connection URL |
+| `AUDIT_FAIL_OPEN` | Local-development escape hatch allowing service to continue when audit persistence fails | `false` | Local non-prod development only; ignored when `ENV=prod` |
 | `GPCON_PORT` | Published application port on the Docker host | `80` | Optional override |
 | `DMD_CLIENT_ID`, `DMD_CLIENT_SECRET` | NHS Terminology Server client credentials | No usable default | Live dm+d terminology lookups |
 
-PostgreSQL stores clinical audit records and must be available for clinical requests. Compose runs Alembic migrations before starting the application.
+PostgreSQL stores clinical audit records and must be available for clinical requests. Audit persistence failures are fail-closed in deployed environments (`ENV=prod` is always fail-closed). Compose runs Alembic migrations before starting the application.
 
 Direct GP Connect calls also require `keys/nhs_certs/client_cert.pem`, `client_key.pem` and `nhs_bundle.pem`. Compose mounts the `keys/` directory read-only. For deployed certificate and secret management, follow the [Operator's Manual](docs/operators_manual.md).
 

@@ -59,6 +59,21 @@ class AuditFailureException(Exception):
     pass
 
 
+def is_audit_fail_open() -> bool:
+    """
+    Determine if audit persistence failures should fail open.
+
+    Fail-open is strictly an explicit opt-in via AUDIT_FAIL_OPEN for local development.
+    Production (ENV=prod) MUST ALWAYS remain fail-closed regardless of AUDIT_FAIL_OPEN.
+    Never infers fail-open behaviour from ENV=dev or ENV=int.
+    """
+    environment = os.getenv("ENV", "prod").strip().lower()
+    if environment in ("prod", "production"):
+        return False
+    val = os.getenv("AUDIT_FAIL_OPEN", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
 async def attempt_audit(
     request: Any,
     *,
@@ -72,17 +87,15 @@ async def attempt_audit(
     document_id: str | None = None,
     request_id: str | None = None,
 ) -> None:
-    """Write an audit event; failures are non-fatal only in dev and int."""
+    """Write an audit event; failures are fail-closed unless AUDIT_FAIL_OPEN is explicitly enabled in non-prod."""
     import logging
 
     from .build import build_audit_event
     from .store import insert_audit_event
 
-    environment = os.getenv("ENV", "prod").strip().lower()
-
     def audit_failure(message: str) -> None:
-        if environment in ("dev", "int"):
-            logging.warning("AuditFailure: %s (ENV=%s; continuing)", message, environment)
+        if is_audit_fail_open():
+            logging.warning("AuditFailure: %s (AUDIT_FAIL_OPEN enabled; continuing)", message)
             return
         logging.error("AuditFailure: %s", message)
         raise AuditFailureException(message) from None
