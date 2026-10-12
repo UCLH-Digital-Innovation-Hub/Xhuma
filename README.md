@@ -155,19 +155,22 @@ When using the bundled Nginx proxy, point the public site at `NGINX_PUBLIC_SERVE
 
 The service will be available at `http://localhost:8000`
 
-For Azure JWT signing, configure `KEY_VAULT_URL` with the shared vault URL
-(for example, `https://your-shared-vault.vault.azure.net`). The app uses its
-system-assigned managed identity to read the latest `jwtkey` secret at startup,
-before issuing a PDS JWT, and when `/jwk` is requested. Terraform configures this
-URL and the existing vault read permissions. While the process runs, `/jwk`
-retains at most the current and previous public keys; a restart loads only the
-current key. Key Vault failures preserve the existing public keychain but fail
-new signing attempts rather than switching to a local test key.
+### Key Management and JWK Rotation
 
-For local testing, leave `KEY_VAULT_URL` unset and supply `JWTKEY` as before.
-If `JWTKEY` is absent, `ENV=dev` or `ENV=local` enables the `keys/test-1.pem`
-fallback; use `ENV=dev` when exercising PDS because its environment selector
-accepts `dev`, `int`, or `prod`.
+For Azure deployment, Azure Key Vault is the authoritative source of truth for JWT signing keys. Configure `KEY_VAULT_URL` with the shared vault URI (e.g., `https://your-shared-vault.vault.azure.net`). The application accesses Key Vault directly using its App Service system-assigned managed identity (`Get` and `List` secret permissions on the shared Key Vault):
+
+- **Key Vault as Source of Truth:** The application lists enabled versions of the `jwtkey` secret, ignoring disabled, expired, or not-yet-valid versions, and orders them by creation time.
+- **Current + Previous Version Publication:** The `/jwk` endpoint dynamically publishes at most the two newest enabled versions: `[current, previous]`. New assertions (e.g. for PDS authentication) are signed exclusively with the newest (current) active key version.
+- **Operator-Controlled Rotation Sequence:**
+  1. Operator creates secret version N+1 in Key Vault.
+  2. The application detects version N+1 and publishes both N+1 and N on `/jwk`.
+  3. Outbound PDS assertions sign using version N+1.
+  4. After NHS verifies version N+1 and the agreed cache grace period elapses, the operator disables version N in Key Vault.
+  5. The application detects the disabled status and publishes only version N+1 on `/jwk`.
+- **Multi-Instance and Restart Consistency:** Multiple application instances (e.g. App instance A and B) and restarts evaluate the exact same Key Vault state independently. Rotation state does not depend on worker-local in-memory state or worker restart timing.
+- **Fail-Closed Failure Semantics:** If `KEY_VAULT_URL` is configured and Key Vault is unavailable or returns an error, signing fails closed immediately. The application will not fall back to local/test keys under any circumstance when Key Vault is configured.
+
+For local testing and offline CI, leave `KEY_VAULT_URL` unset and supply `JWTKEY` via environment variable, or use the dev fallback key `keys/test-1.pem` with `ENV=dev` or `ENV=local`.
 
 ## Azure Deployment (NHS TRE)
 

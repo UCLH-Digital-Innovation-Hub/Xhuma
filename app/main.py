@@ -10,22 +10,20 @@ profiles for healthcare interoperability.
 """
 
 import asyncio
+import logging
 import os
+import traceback
+import uuid
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from uuid import uuid4
-
-from fastapi import FastAPI, Form, Request
 
 # Configure Azure Monitor OpenTelemetry if connection string is present
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor()
-import logging
-import traceback
-import uuid
 
-from fastapi import Depends
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -44,7 +42,7 @@ from .middleware.mtls import MTLSMiddleware
 from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
-from .security import append_public_jwk, get_jwt_key, verify_api_key
+from .security import get_jwk_keyset, verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 from .telemetry import monitor_event_loop
@@ -108,13 +106,14 @@ async def lifespan(app: FastAPI):
         app.state.jwk_keys = []
 
         try:
-            jwt_key = await asyncio.to_thread(get_jwt_key)
-            if jwt_key:
-                append_public_jwk(app, jwt_key.encode("utf-8"))
+            keys = await asyncio.to_thread(get_jwk_keyset)
+            if keys:
+                app.state.jwk_keys = keys
+                app.state.jwk_json = keys[0]
             else:
                 logging.warning("No JWT signing key configured; /jwk will return an error")
-        except Exception:
-            logging.warning("Failed to load JWT signing key during startup")
+        except Exception as e:
+            logging.warning(f"Failed to load JWT signing key during startup: {e}")
 
         # Set up OpenTelemetry metrics
         otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
@@ -340,16 +339,23 @@ async def get_jwk(request: Request):
         dict: JSON Web Key Set in dictionary format.
     """
     try:
-        jwt_key = await asyncio.to_thread(get_jwt_key)
-        if jwt_key:
-            append_public_jwk(request.app, jwt_key.encode("utf-8"))
-    except Exception:
-        logging.warning("Failed to load JWT signing key; retaining existing public keychain")
+        keys = await asyncio.to_thread(get_jwk_keyset)
+        if keys:
+            if hasattr(request, "app") and hasattr(request.app, "state"):
+                request.app.state.jwk_keys = keys
+                request.app.state.jwk_json = keys[0]
+            return {"keys": keys}
+    except Exception as e:
+        logging.warning(f"Failed to load JWT signing key: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWKS unavailable",
+        )
 
-    keys = getattr(request.app.state, "jwk_keys", None)
-    if keys:
-        return {"keys": keys}
-    return {"error": "JWK not configured on this server"}
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="JWKS unavailable",
+    )
 
 
 # --- Dev-only audit viewer ---
