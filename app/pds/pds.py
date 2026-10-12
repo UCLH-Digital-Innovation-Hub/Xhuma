@@ -26,6 +26,25 @@ PDS_CACHE_HOURS = int(os.getenv("PDS_CACHE_HOURS", 24))
 SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
 GP_CONNECT_INTERACTION_ID = "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
 
+
+def _sanitize_diagnostic(text: str) -> str:
+    """Safely bounds and sanitizes diagnostic strings from upstream responses."""
+    if not isinstance(text, str):
+        text = str(text)
+    import re
+
+    # Redact potential NHS numbers (10 consecutive digits)
+    text = re.sub(r"\b\d{10}\b", "[REDACTED_NHSNO]", text)
+    # Redact potential Bearer tokens and JWTs
+    text = re.sub(r"(?i)bearer\s+[A-Za-z0-9\-\._~+\/]+", "Bearer [REDACTED_TOKEN]", text)
+    # Redact UUID-like API keys
+    text = re.sub(
+        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", "[REDACTED_UUID]", text
+    )
+
+    return text.replace("\n", " ").replace("\r", "")[:200]
+
+
 # router = fastapi.APIRouter(prefix="/pds")
 
 # use environment to set path
@@ -95,7 +114,10 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
     async def get_pds_token():
         full_path = f"{BASE_PATH}oauth2/token"
-        jwt_token = await asyncio.to_thread(pds_jwt, API_KEY, API_KEY, full_path)
+        nhs_api_key = os.getenv("NHS_API_KEY", "").strip()
+        if not nhs_api_key:
+            raise ValueError("NHS_API_KEY is not configured")
+        jwt_token = await asyncio.to_thread(pds_jwt, nhs_api_key, nhs_api_key, full_path)
         # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {
@@ -106,12 +128,34 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         async with httpx.AsyncClient() as client:
             r = await client.post(full_path, data=oauth_params)
 
-        response_dict = json.loads(r.text)
-        if "access_token" not in response_dict:
-            error_msg = f"Failed to retrieve PDS access token. NHS API Response: {r.text}"
-            logging.error(error_msg)
-            print(f"CRITICAL NHS AUTH ERROR: {error_msg}", flush=True)  # Print directly to Azure logs
-            raise fastapi.HTTPException(status_code=500, detail="NHS API Authentication Failed")
+        try:
+            response_dict = r.json()
+        except Exception:
+            response_dict = {}
+
+        if r.status_code != 200 or "access_token" not in response_dict:
+            err_code = (
+                response_dict.get("issue", [{}])[0].get("details", {}).get("coding", [{}])[0].get("code", "unknown")
+            )
+            err_desc = _sanitize_diagnostic(response_dict.get("issue", [{}])[0].get("diagnostics", "Unknown error"))
+
+            if "error" in response_dict:
+                err_code = str(response_dict.get("error"))[:50]
+                err_desc = _sanitize_diagnostic(response_dict.get("error_description", err_desc))
+
+            req_id = r.headers.get("x-request-id", "")
+            corr_id = r.headers.get("x-correlation-id", "")
+
+            safe_log = (
+                f"PDS OAuth Failure | Status: {r.status_code} | "
+                f"Code: {err_code} | Desc: {err_desc} | "
+                f"ReqID: {req_id} | CorrID: {corr_id}"
+            )
+            logging.error(safe_log)
+
+            if r.status_code in (401, 403):
+                raise fastapi.HTTPException(status_code=502, detail="NHS API Authentication or Entitlement Failed")
+            raise fastapi.HTTPException(status_code=502, detail="Upstream NHS API Availability Failure")
 
         nhs_token = response_dict["access_token"]
 
@@ -130,6 +174,17 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             nhs_token = cached_token.decode("utf-8") if isinstance(cached_token, bytes) else cached_token
     except AuditFailureException:
         raise
+    except fastapi.HTTPException as e:
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml,
+            action="pds_token_fetch",
+            outcome=AuditOutcome.fail,
+            detail={"exception": e.detail},
+            error_code=str(e.status_code),
+        )
+        raise
     except Exception as e:
         await attempt_audit(
             request=request,
@@ -137,10 +192,10 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             saml=saml,
             action="pds_token_fetch",
             outcome=AuditOutcome.fail,
-            detail={"exception": str(e)},
+            detail={"exception": type(e).__name__},
             error_code="502",
         )
-        raise fastapi.HTTPException(status_code=502, detail=f"Failed to obtain PDS token: {e}")
+        raise fastapi.HTTPException(status_code=502, detail="Failed to obtain PDS token due to upstream error")
 
     # print(f"nhs_token: {nhs_token}")
     # set headers for pds request
@@ -156,9 +211,51 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
     try:
         async with httpx.AsyncClient(event_hooks={"request": [log_request], "response": [log_response]}) as client:
             r = await client.get(url, headers=headers)
-            r.raise_for_status()
-            patient_dict = json.loads(r.text)
+            if r.status_code != 200:
+                error_data = {}
+                try:
+                    error_data = r.json()
+                except Exception:
+                    pass
+
+                err_code = (
+                    error_data.get("issue", [{}])[0].get("details", {}).get("coding", [{}])[0].get("code", "unknown")
+                )
+                err_desc = _sanitize_diagnostic(error_data.get("issue", [{}])[0].get("diagnostics", "Unknown error"))
+
+                if "error" in error_data:
+                    err_code = str(error_data.get("error"))[:50]
+                    err_desc = _sanitize_diagnostic(error_data.get("error_description", err_desc))
+
+                req_id = r.headers.get("x-request-id", "")
+                corr_id = r.headers.get("x-correlation-id", "")
+
+                safe_log = (
+                    f"PDS API Failure | Status: {r.status_code} | "
+                    f"Code: {err_code} | Desc: {err_desc} | "
+                    f"ReqID: {req_id} | CorrID: {corr_id}"
+                )
+                logging.error(safe_log)
+
+                if r.status_code == 404:
+                    raise fastapi.HTTPException(status_code=404, detail="Patient not found on PDS")
+                if r.status_code in (401, 403):
+                    raise fastapi.HTTPException(status_code=502, detail="PDS Entitlement or Token Failure")
+                raise fastapi.HTTPException(status_code=502, detail="PDS lookup upstream failure")
+
+            patient_dict = r.json()
     except AuditFailureException:
+        raise
+    except fastapi.HTTPException as e:
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml,
+            action="pds_lookup",
+            outcome=AuditOutcome.fail,
+            detail={"cache_hit": False, "status_code": e.status_code, "detail": e.detail},
+            error_code=str(e.status_code),
+        )
         raise
     except Exception as e:
         await attempt_audit(
@@ -167,10 +264,10 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             saml=saml,
             action="pds_lookup",
             outcome=AuditOutcome.fail,
-            detail={"cache_hit": False, "exception": str(e)},
+            detail={"cache_hit": False, "exception": type(e).__name__},
             error_code="502",
         )
-        raise fastapi.HTTPException(status_code=502, detail=f"PDS lookup failed: {e}")
+        raise fastapi.HTTPException(status_code=502, detail="PDS lookup upstream failure")
 
     outcome = (
         AuditOutcome.fail
@@ -231,10 +328,9 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     url = f"{BASE_PATH}spine-directory/FHIR/R4/{suffix}"
     organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|{ods}"
 
-    api_key = os.environ.get("API_KEY")
-    # if no API key is set, raise an exception
-    if not api_key:
-        raise Exception("API_KEY environment variable is not set")
+    nhs_api_key = os.getenv("NHS_API_KEY", "").strip()
+    if not nhs_api_key:
+        raise ValueError("NHS_API_KEY environment variable is not set")
     parameters = {
         "organization": organisation,
         "identifier": identifier,
@@ -243,7 +339,7 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
         "accept": "application/fhir+json",
-        "apikey": api_key,
+        "apikey": nhs_api_key,
     }
     async with httpx.AsyncClient() as client:
         r = await client.get(url, headers=headers, params=parameters)

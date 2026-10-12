@@ -166,6 +166,7 @@ Replace the placeholder credentials in `.env`. The table summarises the main set
 | --- | --- | --- | --- |
 | `ENV` | NHS environment selection | `dev`; use `int` for integration | Always; the current GP Connect client supports `dev` and `int` |
 | `API_KEY` | Xhuma inbound API authentication secret | No usable default | Running the service |
+| `NHS_API_KEY` | NHS API Platform credential/application identifier (used for PDS OAuth iss/sub and SDS apikey header) | No usable default | Making upstream NHS PDS/SDS calls |
 | `JWTKEY` | PEM private key registered with the NHS API platform | Development fallback: `keys/test-1.pem` | Making live NHS calls |
 | `ORG_CODE` | Originating care organisation's ODS code | Set for the care organisation | Running the service |
 | `ORG_ASID` | Xhuma's registered Spine system ASID | Set for the registered system | Running the service |

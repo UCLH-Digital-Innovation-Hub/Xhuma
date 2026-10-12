@@ -312,6 +312,7 @@ resource "azurerm_linux_web_app" "app" {
 
     # App Config (Key Vault References)
     "API_KEY"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=api-key)"
+    "NHS_API_KEY"       = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=nhs-api-key)"
     "KEY_VAULT_URL"     = data.azurerm_key_vault.shared_kv.vault_uri
     "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"

@@ -159,7 +159,7 @@ async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redi
         kwargs = mock_attempt_audit.call_args.kwargs
         assert kwargs["action"] == "pds_lookup"
         assert kwargs["outcome"] == AuditOutcome.fail
-        assert "Connection Refused" in kwargs["detail"]["exception"]
+        assert "Exception" in kwargs["detail"]["exception"]
 
 
 @pytest.mark.asyncio

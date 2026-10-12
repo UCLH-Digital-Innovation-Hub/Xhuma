@@ -13,6 +13,7 @@ def mock_self_issuer():
 
 
 os.environ["API_KEY"] = "test-api-key"
+os.environ["NHS_API_KEY"] = "test-nhs-api-key"
 os.environ["ORG_CODE"] = "RRV00"
 os.environ["ORG_ASID"] = "123"
 os.environ["CCDA_EXPIRY_HOURS"] = "4"
@@ -56,6 +57,7 @@ def mock_settings(monkeypatch):
     monkeypatch.setenv("JWTKEY", TEST_PRIVATE_KEY)
     monkeypatch.delenv("KEY_VAULT_URL", raising=False)
     monkeypatch.setenv("API_KEY", "test-api-key")
+    monkeypatch.setenv("NHS_API_KEY", "test-nhs-api-key")
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
     monkeypatch.setenv("POSTGRES_HOST", "localhost")
