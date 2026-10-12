@@ -143,6 +143,11 @@ variable "org_code" {
   default     = "RRV00"
 }
 
+variable "xhuma_ods_code" {
+  description = "ODS code identifying the Xhuma/supplier organisation in SDS"
+  type        = string
+}
+
 variable "env" {
   description = "Environment Name"
   type        = string

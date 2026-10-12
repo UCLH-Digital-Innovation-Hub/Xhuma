@@ -249,3 +249,70 @@ def test_nhs_api_environment_selection():
     # Restore to avoid side effects
     os.environ["ENV"] = "dev"
     importlib.reload(app.pds.pds)
+
+
+@pytest.mark.asyncio
+async def test_lookup_self_device_missing_ods_code_raises(monkeypatch):
+    from app.pds.pds import lookup_self_device
+
+    monkeypatch.delenv("XHUMA_ODS_CODE", raising=False)
+    monkeypatch.setenv("ORG_ASID", "123")
+    with pytest.raises(ValueError, match="XHUMA_ODS_CODE and ORG_ASID are required for the SDS self lookup"):
+        await lookup_self_device()
+
+
+@pytest.mark.asyncio
+async def test_lookup_self_device_missing_org_asid_raises(monkeypatch):
+    from app.pds.pds import lookup_self_device
+
+    monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    monkeypatch.delenv("ORG_ASID", raising=False)
+    with pytest.raises(ValueError, match="XHUMA_ODS_CODE and ORG_ASID are required for the SDS self lookup"):
+        await lookup_self_device()
+
+
+@pytest.mark.asyncio
+async def test_lookup_self_device_success(monkeypatch):
+    from app.pds.pds import lookup_self_device
+
+    monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    monkeypatch.setenv("ORG_ASID", "200000002574")
+    monkeypatch.delenv("XHUMA_MHS_PARTY_KEY", raising=False)
+
+    fake_device_entry = {
+        "resource": {
+            "resourceType": "Device",
+            "identifier": [
+                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000002574"},
+                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "TEST-PARTY-KEY"},
+            ],
+        }
+    }
+    fake_bundle = {
+        "resourceType": "Bundle",
+        "entry": [fake_device_entry],
+    }
+
+    with patch("app.pds.pds.sds_trace", new_callable=AsyncMock) as mock_sds:
+        mock_sds.return_value = fake_bundle
+        device = await lookup_self_device()
+        assert device == fake_device_entry
+        mock_sds.assert_awaited_once_with("Z6G1Z", mhsparty=None)
+
+
+def test_terraform_app_service_xhuma_ods_code_configured():
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    variables_tf = (repo_root / "infra" / "variables.tf").read_text()
+    main_tf = (repo_root / "infra" / "main.tf").read_text()
+    play_tfvars = (repo_root / "infra" / "env" / "play.tfvars").read_text()
+    int_tfvars = (repo_root / "infra" / "env" / "int.tfvars").read_text()
+
+    assert 'variable "xhuma_ods_code"' in variables_tf
+    assert '"XHUMA_ODS_CODE"    = var.xhuma_ods_code' in main_tf or '"XHUMA_ODS_CODE" = var.xhuma_ods_code' in main_tf
+    assert "xhuma_ods_code" in play_tfvars and '"Z6G1Z"' in play_tfvars
+    assert "xhuma_ods_code" in int_tfvars and '"Z6G1Z"' in int_tfvars
+    # Ensure AUDIT_FAIL_OPEN and XHUMA_MHS_PARTY_KEY are unset in Terraform
+    assert "AUDIT_FAIL_OPEN" not in main_tf
+    assert "XHUMA_MHS_PARTY_KEY" not in main_tf
