@@ -85,9 +85,9 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
     logging.info("Cache miss for PDS patient query. Fetching from PDS API.")
 
-    async def get_pds_token(kid: str):
+    async def get_pds_token():
         full_path = f"{BASE_PATH}oauth2/token"
-        jwt_token = pds_jwt(API_KEY, API_KEY, full_path, kid)
+        jwt_token = pds_jwt(API_KEY, API_KEY, full_path)
         # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {
@@ -116,12 +116,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         cached_token = await redis_client.get("access_token")
         if not cached_token:
             logging.info("NHS token expired or not found, getting new one")
-            # Extract dynamically generated Key ID, fallback to 'test-1'
-            kid = "test-1"
-            if request and hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
-                kid = request.app.state.jwk_json.get("kid", "test-1")
-
-            nhs_token = await get_pds_token(kid)
+            nhs_token = await get_pds_token()
         else:
             logging.info("NHS token found in cache")
             nhs_token = cached_token.decode("utf-8") if isinstance(cached_token, bytes) else cached_token

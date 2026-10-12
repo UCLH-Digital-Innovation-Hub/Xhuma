@@ -17,8 +17,9 @@ import uuid
 from time import time
 
 import jwt
-from fastapi import HTTPException, Security, status
+from fastapi import FastAPI, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
+from jwcrypto import jwk
 
 from .audit.models import SAMLAttributes
 
@@ -66,7 +67,23 @@ def fix_pem_formatting(pem_string: str) -> str:
     return pem_string
 
 
-def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
+def append_public_jwk(app: FastAPI, private_pem: bytes):
+    """Retain only the current and previous public keys for rotation."""
+    public_jwk = jwk.JWK.from_pem(private_pem).export_public(as_dict=True)
+    public_jwk["alg"] = "RS512"
+    public_jwk["use"] = "sig"
+
+    if not hasattr(app.state, "jwk_keys"):
+        existing_key = getattr(app.state, "jwk_json", {})
+        app.state.jwk_keys = [existing_key] if existing_key else []
+    # Move reused keys to the current position and discard older rotation history.
+    previous_keys = [key for key in app.state.jwk_keys if key.get("kid") != public_jwk["kid"]]
+    app.state.jwk_keys = previous_keys[-1:] + [public_jwk]
+    # Track the currently configured public key separately from the full keychain.
+    app.state.jwk_json = public_jwk
+
+
+def pds_jwt(issuer: str, subject: str, audience: str) -> str:
     """
     Creates a JWT for PDS FHIR API authentication.
 
@@ -74,7 +91,6 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         issuer (str): The JWT issuer (iss claim)
         subject (str): The JWT subject (sub claim)
         audience (str): The intended audience (aud claim)
-        key_id (str): The key identifier (kid header)
 
     Returns:
         str: Encoded JWT string
@@ -83,6 +99,7 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         The token is signed using RS512 algorithm and includes:
         - A unique JWT ID (jti claim)
         - 5-minute expiration time (exp claim)
+        - A key ID derived from the same private key used to sign the token
     """
     payload = {
         "sub": subject,
@@ -91,8 +108,6 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
         "aud": audience,
         "exp": int(time()) + 300,
     }
-
-    headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
 
     # Get private key from environment or file
     private_key = os.getenv("JWTKEY")
@@ -113,6 +128,9 @@ def pds_jwt(issuer: str, subject: str, audience: str, key_id: str) -> str:
     if private_key is None:
         raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
 
+    # Use one key snapshot for both the ID and signature, independent of /jwk requests.
+    key_id = jwk.JWK.from_pem(private_key.encode("utf-8")).thumbprint()
+    headers = {"alg": "RS512", "typ": "JWT", "kid": key_id}
     return jwt.encode(payload, private_key, algorithm="RS512", headers=headers)
 
 

@@ -30,7 +30,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fhirclient.models.operationoutcome import OperationOutcome, OperationOutcomeIssue
-from jwcrypto import jwk
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.metrics import MeterProvider
@@ -45,28 +44,13 @@ from .middleware.mtls import MTLSMiddleware
 from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
-from .security import fix_pem_formatting, verify_api_key
+from .security import append_public_jwk, fix_pem_formatting, verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 from .telemetry import monitor_event_loop
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
-
-
-def _append_public_jwk(app: FastAPI, private_pem: bytes):
-    """Retain public keys for rotation and track the currently configured key."""
-    public_jwk = jwk.JWK.from_pem(private_pem).export_public(as_dict=True)
-    public_jwk["alg"] = "RS512"
-    public_jwk["use"] = "sig"
-
-    if not hasattr(app.state, "jwk_keys"):
-        existing_key = getattr(app.state, "jwk_json", {})
-        app.state.jwk_keys = [existing_key] if existing_key else []
-    if not any(key.get("kid") == public_jwk["kid"] for key in app.state.jwk_keys):
-        app.state.jwk_keys.append(public_jwk)
-    # PDS signing reads the active key ID from jwk_json.
-    app.state.jwk_json = public_jwk
 
 
 @asynccontextmanager
@@ -128,7 +112,7 @@ async def lifespan(app: FastAPI):
             try:
                 # Reformat env var newlines safely and retain only the public JWK
                 private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
-                _append_public_jwk(app, private_pem)
+                append_public_jwk(app, private_pem)
             except Exception as e:
                 print(f"Warning: Failed to load JWTKEY from environment: {e}")
         elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
@@ -136,7 +120,7 @@ async def lifespan(app: FastAPI):
             print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
             with open("keys/test-1.pem", "rb") as pemfile:
                 private_pem = pemfile.read()
-                _append_public_jwk(app, private_pem)
+                append_public_jwk(app, private_pem)
         else:
             print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
 
@@ -367,7 +351,7 @@ async def get_jwk(request: Request):
     if jwt_key:
         try:
             private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
-            _append_public_jwk(request.app, private_pem)
+            append_public_jwk(request.app, private_pem)
         except Exception:
             logging.warning("Failed to load JWTKEY; retaining existing public keychain")
 
