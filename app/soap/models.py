@@ -430,8 +430,9 @@ class RegistryError(XmlModel):
 
 
 class RegistryErrorList(XmlModel):
+    xmlns_rs: str = Field(default="urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0", alias="@xmlns:rs")
     highest_severity: str = Field(alias="@highestSeverity")
-    error: RegistryError = Field(alias="RegistryError")
+    error: RegistryError = Field(alias="rs:RegistryError")
 
 
 class SlotValueList(XmlModel):
@@ -492,7 +493,7 @@ class RegistryObjectList(XmlModel):
 class AdhocQueryResponse(XmlModel):
     status: str = Field(default=XDS_SUCCESS_STATUS, alias="@status")
     xmlns: str = Field(default="urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0", alias="@xmlns")
-    registry_error_list: RegistryErrorList | None = Field(default=None, alias="RegistryErrorList")
+    registry_error_list: RegistryErrorList | None = Field(default=None, alias="rs:RegistryErrorList")
     registry_object_list: RegistryObjectList | dict[str, Any] | None = Field(default=None, alias="RegistryObjectList")
 
 
