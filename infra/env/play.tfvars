@@ -9,6 +9,7 @@ postgres_server_name = "xhuma-psql-play"
 org_code                 = "RRV00"
 org_asid                 = "200000000000"
 device_id                = "1"
+xhuma_ods_code           = "Z6G1Z"
 env                      = "int" # Non-production
 ccda_expiry_hours        = "4"
 allowed_hosts            = "*"

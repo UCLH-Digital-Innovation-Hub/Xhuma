@@ -357,6 +357,7 @@ resource "azurerm_linux_web_app" "app" {
     "VERSION"           = var.app_version
     "DEVICE_ID"         = var.device_id
     "ORG_ASID"          = var.org_asid
+    "XHUMA_ODS_CODE"    = var.xhuma_ods_code
 
     "GP_CONNECT_INCLUDE_ALLERGIES"      = var.gp_connect_include_allergies
     "GP_CONNECT_INCLUDE_MEDICATION"     = var.gp_connect_include_medication
