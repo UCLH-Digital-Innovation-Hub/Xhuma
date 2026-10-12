@@ -100,12 +100,14 @@ def clear_jwks_cache():
 
 def get_key_vault_publishable_jwks() -> list[dict]:
     """
-    Retrieve at most the newest two publishable public JWKs from Azure Key Vault.
+    Retrieve at most the newest two unique publishable public JWKs from Azure Key Vault.
 
     A version is publishable if:
     - enabled is True
     - not expired (expires_on is None or > now)
     Future not_before versions are publishable so clients can fetch keys ahead of activation.
+    Versions are evaluated newest-first and deduplicated by deterministic kid. Older versions
+    are inspected until up to two unique JWKs have been collected or eligible versions are exhausted.
     """
     vault_url = os.getenv("KEY_VAULT_URL")
     if not vault_url:
@@ -134,12 +136,12 @@ def get_key_vault_publishable_jwks() -> list[dict]:
                 return (created, p.version or "")
 
             publishable_props.sort(key=_sort_key, reverse=True)
-            target_props = publishable_props[:2]
-            if not target_props:
+            if not publishable_props:
                 raise RuntimeError(f"No enabled active versions of secret '{secret_name}' found in Key Vault")
 
             keys = []
-            for prop in target_props:
+            seen_kids = set()
+            for prop in publishable_props:
                 secret = client.get_secret(secret_name, version=prop.version)
                 val = getattr(secret, "value", None)
                 if not val or not val.strip():
@@ -151,8 +153,13 @@ def get_key_vault_publishable_jwks() -> list[dict]:
                 pub_jwk["use"] = "sig"
                 _clean_public_jwk(pub_jwk)
                 kid = pub_jwk.get("kid") or jwk_obj.thumbprint()
+                if kid in seen_kids:
+                    continue
                 pub_jwk["kid"] = kid
+                seen_kids.add(kid)
                 keys.append(pub_jwk)
+                if len(keys) == 2:
+                    break
 
             if not keys:
                 raise RuntimeError(f"No valid public keys loaded from secret '{secret_name}' in Key Vault")
