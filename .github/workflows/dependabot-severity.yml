@@ -153,7 +153,7 @@ jobs:
                   fixed[(name, advisory_id)] = old[advisory_id]
 
           colours = {
-              "security": "b60205",
+              "security": "5319e7",
               "severity:critical": "b60205",
               "severity:high": "d93f0b",
               "severity:moderate": "fbca04",
