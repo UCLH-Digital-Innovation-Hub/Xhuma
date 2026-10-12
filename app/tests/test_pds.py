@@ -23,11 +23,15 @@ async def test_get_data_success(mock_async_client, mock_redis, mock_attempt_audi
 
     # --- mock token response ---
     token_response = MagicMock()
+    token_response.status_code = 200
+    token_response.json.return_value = {"access_token": "fake-token", "expires_in": 300}
     token_response.text = json.dumps({"access_token": "fake-token", "expires_in": 300})
 
     # --- mock patient response ---
     mock_client_instance = AsyncMock()
     mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"resourceType": "Patient", "id": "9690937278"}
     mock_response.text = json.dumps({"resourceType": "Patient", "id": "9690937278"})
 
     mock_client_instance.post.return_value = token_response
@@ -316,3 +320,309 @@ def test_terraform_app_service_xhuma_ods_code_configured():
     # Ensure AUDIT_FAIL_OPEN and XHUMA_MHS_PARTY_KEY are unset in Terraform
     assert "AUDIT_FAIL_OPEN" not in main_tf
     assert "XHUMA_MHS_PARTY_KEY" not in main_tf
+
+
+def test_terraform_app_service_nhs_api_key_configured():
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    main_tf = (repo_root / "infra" / "main.tf").read_text()
+    assert (
+        '"NHS_API_KEY"       = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=nhs-api-key)"'
+        in main_tf
+        or '"NHS_API_KEY" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=nhs-api-key)"'
+        in main_tf
+    )
+
+
+@pytest.mark.asyncio
+async def test_pds_error_classifications(monkeypatch):
+    monkeypatch.setenv("NHS_API_KEY", "dummy")
+
+    import fastapi
+
+    from app.pds.pds import lookup_patient
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.attempt_audit", new_callable=AsyncMock),
+    ):
+        cache.exists.return_value = False
+
+        async def _redis_get(key):
+            if key == "access_token":
+                return b"cached_token"
+            return None
+
+        cache.get.side_effect = _redis_get
+
+        client = AsyncMock()
+        factory.return_value.__aenter__.return_value = client
+
+        # 1. 404 test
+        resp_404 = MagicMock()
+        resp_404.status_code = 404
+        resp_404.json.return_value = {"issue": [{"diagnostics": "Not found"}]}
+        client.get.return_value = resp_404
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 404
+        assert excinfo.value.detail == "Patient not found on PDS"
+
+        # 2. 401 test (Entitlement)
+        resp_401 = MagicMock()
+        resp_401.status_code = 401
+        resp_401.json.return_value = {"issue": [{"diagnostics": "Unauthorised"}]}
+        client.get.return_value = resp_401
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "PDS Entitlement or Token Failure"
+
+        # 3. 403 test (Forbidden/Entitlement)
+        resp_403 = MagicMock()
+        resp_403.status_code = 403
+        resp_403.json.return_value = {"issue": [{"diagnostics": "Forbidden"}]}
+        client.get.return_value = resp_403
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "PDS Entitlement or Token Failure"
+
+        # 4. upstream 500 test
+        resp_500 = MagicMock()
+        resp_500.status_code = 500
+        resp_500.json.return_value = {"issue": [{"diagnostics": "Internal Server Error"}]}
+        client.get.return_value = resp_500
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "PDS lookup upstream failure"
+
+        # 5. upstream 503 test
+        resp_503 = MagicMock()
+        resp_503.status_code = 503
+        resp_503.json.return_value = {"issue": [{"diagnostics": "Service Unavailable"}]}
+        client.get.return_value = resp_503
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "PDS lookup upstream failure"
+
+        # 6. Upstream Exception test (network failure)
+        client.get.side_effect = Exception("Connection Refused")
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "PDS lookup upstream failure"
+
+
+@pytest.mark.asyncio
+async def test_pds_diagnostic_sanitization(caplog, monkeypatch):
+    monkeypatch.setenv("NHS_API_KEY", "dummy")
+
+    import fastapi
+
+    from app.pds.pds import lookup_patient
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.attempt_audit", new_callable=AsyncMock),
+    ):
+        cache.exists.return_value = False
+
+        async def _redis_get_2(key):
+            if key == "access_token":
+                return b"cached_token"
+            return None
+
+        cache.get.side_effect = _redis_get_2
+
+        client = AsyncMock()
+        factory.return_value.__aenter__.return_value = client
+
+        # Response with sensitive looking text, UUID API key, and newlines
+        sensitive_text = (
+            "Detailed error: user token BEARER 12345-ABC \n and Patient NHSNO: 9999999999 and key "
+            "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d failed\r\n"
+        )
+        resp_error = MagicMock()
+        resp_error.status_code = 500
+        resp_error.json.return_value = {"issue": [{"diagnostics": sensitive_text}]}
+        client.get.return_value = resp_error
+
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(12345, saml=MagicMock())
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "PDS lookup upstream failure"
+
+        # Verify sanitization stripped newlines and redacted sensitive info
+        log_records = [r for r in caplog.records if "PDS API Failure" in r.message]
+        assert len(log_records) == 1
+        msg = log_records[0].message
+        assert "\n" not in msg
+        assert "\r" not in msg
+        assert "9999999999" not in msg
+        assert "[REDACTED_NHSNO]" in msg
+        assert "12345-ABC" not in msg
+        assert "Bearer [REDACTED_TOKEN]" in msg
+        assert "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d" not in msg
+        assert "[REDACTED_UUID]" in msg
+
+
+@pytest.mark.asyncio
+async def test_api_key_and_nhs_api_key_divergence_supported(monkeypatch):
+    """Proves scenario 1: API_KEY != NHS_API_KEY is supported and expected."""
+    monkeypatch.setenv("API_KEY", "xhuma-internal-secret")
+    monkeypatch.setenv("NHS_API_KEY", "nhs-platform-credential")
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.attempt_audit", new_callable=AsyncMock),
+        patch("app.pds.pds.pds_jwt", return_value="test-jwt") as mock_jwt,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+    ):
+        cache.exists.return_value = False
+        cache.get.return_value = None
+
+        client = AsyncMock()
+        token_resp = MagicMock()
+        token_resp.status_code = 200
+        token_resp.json.return_value = {"access_token": "bearer-token", "expires_in": 300}
+        client.post.return_value = token_resp
+
+        patient_resp = MagicMock()
+        patient_resp.status_code = 200
+        patient_resp.json.return_value = {"resourceType": "Patient", "id": "9690937278"}
+        client.get.return_value = patient_resp
+
+        factory.return_value.__aenter__.return_value = client
+
+        patient = await lookup_patient(9690937278, saml=saml)
+        assert patient["id"] == "9690937278"
+
+        # Verify pds_jwt was called with NHS_API_KEY, not API_KEY
+        mock_jwt.assert_called_once()
+        args, kwargs = mock_jwt.call_args
+        assert args[0] == "nhs-platform-credential"  # iss
+        assert args[1] == "nhs-platform-credential"  # sub
+        assert "xhuma-internal-secret" not in args
+
+
+@pytest.mark.asyncio
+async def test_pds_oauth_uses_only_nhs_api_key(monkeypatch):
+    """Proves scenario 2: PDS OAuth uses only NHS_API_KEY."""
+    monkeypatch.setenv("API_KEY", "internal-xhuma-api-key")
+    monkeypatch.setenv("NHS_API_KEY", "nhs-credential-xyz")
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.attempt_audit", new_callable=AsyncMock),
+        patch("app.pds.pds.pds_jwt", return_value="test-assertion") as mock_jwt,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+    ):
+        cache.exists.return_value = False
+        cache.get.return_value = None
+
+        client = AsyncMock()
+        client.post.return_value = MagicMock(status_code=200, json=lambda: {"access_token": "tok", "expires_in": 300})
+        client.get.return_value = MagicMock(status_code=200, json=lambda: {"resourceType": "Patient", "id": "1"})
+        factory.return_value.__aenter__.return_value = client
+
+        await lookup_patient(1, saml=saml)
+
+        # pds_jwt must be called with (nhs_api_key, nhs_api_key, full_path)
+        assert mock_jwt.call_count == 1
+        call_args = mock_jwt.call_args[0]
+        assert call_args[0] == "nhs-credential-xyz"
+        assert call_args[1] == "nhs-credential-xyz"
+        assert call_args[0] != "internal-xhuma-api-key"
+
+
+@pytest.mark.asyncio
+async def test_sds_apikey_uses_only_nhs_api_key(monkeypatch):
+    """Proves scenario 3: SDS apikey uses only NHS_API_KEY."""
+    monkeypatch.setenv("API_KEY", "internal-xhuma-api-key")
+    monkeypatch.setenv("NHS_API_KEY", "nhs-credential-xyz")
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+    ):
+        cache.get.return_value = None
+
+        client = AsyncMock()
+        client.get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"resourceType": "Bundle"},
+            text='{"resourceType": "Bundle"}',
+        )
+        factory.return_value.__aenter__.return_value = client
+
+        await sds_trace("A82038")
+
+        client.get.assert_awaited_once()
+        headers = client.get.await_args.kwargs["headers"]
+        assert headers["apikey"] == "nhs-credential-xyz"
+        assert headers["apikey"] != "internal-xhuma-api-key"
+
+
+@pytest.mark.asyncio
+async def test_missing_nhs_api_key_fails_closed(monkeypatch):
+    """Proves scenario 4: Missing NHS_API_KEY fails closed in PDS and SDS."""
+    monkeypatch.setenv("API_KEY", "internal-xhuma-api-key")
+    monkeypatch.delenv("NHS_API_KEY", raising=False)
+
+    import fastapi
+
+    from app.audit.models import AuditOutcome
+
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.attempt_audit", new_callable=AsyncMock) as mock_audit,
+    ):
+        cache.get.return_value = None
+        cache.exists.return_value = False
+
+        # 1. SDS lookup fails closed without fallback to API_KEY
+        with pytest.raises(ValueError, match="NHS_API_KEY environment variable is not set"):
+            await sds_trace("A82038")
+
+        # 2. PDS lookup fails closed without fallback to API_KEY
+        with pytest.raises(fastapi.HTTPException) as excinfo:
+            await lookup_patient(9690937278, saml=saml)
+        assert excinfo.value.status_code == 502
+        assert excinfo.value.detail == "Failed to obtain PDS token due to upstream error"
+
+        # Verify audit recorded failure
+        mock_audit.assert_called_once()
+        assert mock_audit.call_args.kwargs["outcome"] == AuditOutcome.fail
+        assert mock_audit.call_args.kwargs["detail"]["exception"] == "ValueError"
+
+
+def test_api_key_remains_usable_for_xhuma_local_purposes(monkeypatch):
+    """Proves scenario 5: API_KEY remains usable for its existing Xhuma-local purposes."""
+    from app.pds.pds import pds_cache_key
+
+    # When PDS_CACHE_HMAC_SECRET is unset, pds_cache_key falls back to API_KEY
+    monkeypatch.delenv("PDS_CACHE_HMAC_SECRET", raising=False)
+    monkeypatch.setattr("app.pds.pds.API_KEY", "xhuma-local-secret-1")
+    key1 = pds_cache_key(9690937278)
+
+    monkeypatch.setattr("app.pds.pds.API_KEY", "xhuma-local-secret-2")
+    key2 = pds_cache_key(9690937278)
+
+    # Different local API_KEY produces different HMAC cache keys
+    assert key1 != key2
+
+    # NHS_API_KEY changes have zero effect on local HMAC cache key
+    monkeypatch.setenv("NHS_API_KEY", "some-unrelated-nhs-key")
+    key2_again = pds_cache_key(9690937278)
+    assert key2 == key2_again

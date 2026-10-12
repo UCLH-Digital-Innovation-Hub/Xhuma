@@ -58,12 +58,23 @@ async def lifespan(app: FastAPI):
     """
     # --- Startup logic ---
     # Validate required configuration
-    for var in ["API_KEY", "ORG_ASID", "ORG_CODE"]:
+    for var in ["API_KEY", "NHS_API_KEY", "ORG_ASID", "ORG_CODE"]:
         val = os.getenv(var)
         if not val or not val.strip():
             raise RuntimeError(f"Missing required configuration: {var}")
         if val.strip().startswith("@Microsoft.KeyVault("):
             raise RuntimeError(f"Unresolved KeyVault reference for required configuration: {var}")
+
+    # Check configuration separation
+    api_key = os.getenv("API_KEY")
+    nhs_api_key = os.getenv("NHS_API_KEY")
+    is_prod = os.getenv("ENV", "prod").lower() == "prod"
+
+    if api_key and nhs_api_key and api_key == nhs_api_key:
+        if is_prod:
+            raise RuntimeError("CRITICAL: API_KEY and NHS_API_KEY must not be identical in production. Failing closed.")
+        else:
+            print("Warning: API_KEY and NHS_API_KEY are identical. This is allowed in dev/int but forbidden in prod.")
 
     import datetime
     import math
