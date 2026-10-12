@@ -87,7 +87,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
     async def get_pds_token():
         full_path = f"{BASE_PATH}oauth2/token"
-        jwt_token = pds_jwt(API_KEY, API_KEY, full_path)
+        jwt_token = await asyncio.to_thread(pds_jwt, API_KEY, API_KEY, full_path)
         # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {

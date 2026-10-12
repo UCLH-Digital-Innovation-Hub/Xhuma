@@ -155,6 +155,20 @@ When using the bundled Nginx proxy, point the public site at `NGINX_PUBLIC_SERVE
 
 The service will be available at `http://localhost:8000`
 
+For Azure JWT signing, configure `KEY_VAULT_URL` with the shared vault URL
+(for example, `https://your-shared-vault.vault.azure.net`). The app uses its
+system-assigned managed identity to read the latest `jwtkey` secret at startup,
+before issuing a PDS JWT, and when `/jwk` is requested. Terraform configures this
+URL and the existing vault read permissions. While the process runs, `/jwk`
+retains at most the current and previous public keys; a restart loads only the
+current key. Key Vault failures preserve the existing public keychain but fail
+new signing attempts rather than switching to a local test key.
+
+For local testing, leave `KEY_VAULT_URL` unset and supply `JWTKEY` as before.
+If `JWTKEY` is absent, `ENV=dev` or `ENV=local` enables the `keys/test-1.pem`
+fallback; use `ENV=dev` when exercising PDS because its environment selector
+accepts `dev`, `int`, or `prod`.
+
 ## Azure Deployment (NHS TRE)
 
 Infrastructure as Code (Terraform) and CI/CD pipelines (GitHub Actions) are provided for deploying to the NHS Azure TRE.

@@ -44,7 +44,7 @@ from .middleware.mtls import MTLSMiddleware
 from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
-from .security import append_public_jwk, fix_pem_formatting, verify_api_key
+from .security import append_public_jwk, get_jwt_key, verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 from .telemetry import monitor_event_loop
@@ -104,25 +104,17 @@ async def lifespan(app: FastAPI):
             print(f"Warning: Failed to connect to Redis during startup: {e}")
 
         # Handle JWK generation/verification securely entirely in-memory
-        jwt_key = os.getenv("JWTKEY")
         app.state.jwk_json = {}
         app.state.jwk_keys = []
 
-        if jwt_key:
-            try:
-                # Reformat env var newlines safely and retain only the public JWK
-                private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
-                append_public_jwk(app, private_pem)
-            except Exception as e:
-                print(f"Warning: Failed to load JWTKEY from environment: {e}")
-        elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
-            # Local development fallback
-            print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
-            with open("keys/test-1.pem", "rb") as pemfile:
-                private_pem = pemfile.read()
-                append_public_jwk(app, private_pem)
-        else:
-            print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
+        try:
+            jwt_key = await asyncio.to_thread(get_jwt_key)
+            if jwt_key:
+                append_public_jwk(app, jwt_key.encode("utf-8"))
+            else:
+                logging.warning("No JWT signing key configured; /jwk will return an error")
+        except Exception:
+            logging.warning("Failed to load JWT signing key during startup")
 
         # Set up OpenTelemetry metrics
         otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
@@ -347,13 +339,12 @@ async def get_jwk(request: Request):
     Returns:
         dict: JSON Web Key Set in dictionary format.
     """
-    jwt_key = os.getenv("JWTKEY")
-    if jwt_key:
-        try:
-            private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
-            append_public_jwk(request.app, private_pem)
-        except Exception:
-            logging.warning("Failed to load JWTKEY; retaining existing public keychain")
+    try:
+        jwt_key = await asyncio.to_thread(get_jwt_key)
+        if jwt_key:
+            append_public_jwk(request.app, jwt_key.encode("utf-8"))
+    except Exception:
+        logging.warning("Failed to load JWT signing key; retaining existing public keychain")
 
     keys = getattr(request.app.state, "jwk_keys", None)
     if keys:

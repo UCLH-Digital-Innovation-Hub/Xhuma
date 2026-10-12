@@ -18,8 +18,26 @@ def signing_keys():
     return [jwk.JWK.generate(kty="RSA", size=2048) for _ in range(3)]
 
 
+@pytest.fixture(params=["environment", "key_vault"])
+def set_signing_key(request, monkeypatch):
+    if request.param == "environment":
+        yield lambda pem: monkeypatch.setenv("JWTKEY", pem)
+    else:
+        monkeypatch.setenv("KEY_VAULT_URL", "https://test-vault.vault.azure.net")
+        with patch("app.security.ManagedIdentityCredential"), patch("app.security.SecretClient") as factory:
+            client = factory.return_value.__enter__.return_value
+
+            def set_secret(pem):
+                client.get_secret.return_value.value = pem
+
+            yield set_secret
+            client.get_secret.assert_called_with("jwtkey")
+
+
 @pytest.fixture
-def jwk_client():
+def jwk_client(monkeypatch, tmp_path):
+    # Keep tests of missing keys independent of the repository's local test PEM.
+    monkeypatch.chdir(tmp_path)
     app = FastAPI()
     app.state.jwk_json = {}
     app.state.jwk_keys = []
@@ -28,7 +46,7 @@ def jwk_client():
         yield client
 
 
-def test_rotation_retains_only_current_and_previous_keys(jwk_client, signing_keys, monkeypatch):
+def test_rotation_retains_only_current_and_previous_keys(jwk_client, signing_keys, set_signing_key):
     old_key, new_key, third_key = signing_keys
     append_public_jwk(jwk_client.app, old_key.export_to_pem(private_key=True, password=None))
     for previous_key, key in zip(signing_keys, signing_keys[1:]):
@@ -37,7 +55,7 @@ def test_rotation_retains_only_current_and_previous_keys(jwk_client, signing_key
         )
         # Environment secrets can contain escaped newlines.
         pem = key.export_to_pem(private_key=True, password=None).decode().replace("\n", "\\n")
-        monkeypatch.setenv("JWTKEY", pem)
+        set_signing_key(pem)
         response = jwk_client.get("/jwk")
         assert response.status_code == 200
         public_keys = response.json()["keys"]
@@ -51,14 +69,14 @@ def test_rotation_retains_only_current_and_previous_keys(jwk_client, signing_key
         assert key["use"] == "sig"
         assert not ({"d", "p", "q", "dp", "dq", "qi", "oth"} & key.keys())
     # Reusing the previous key makes the former current key the previous one.
-    monkeypatch.setenv("JWTKEY", new_key.export_to_pem(private_key=True, password=None).decode())
+    set_signing_key(new_key.export_to_pem(private_key=True, password=None).decode())
     public_keys = jwk_client.get("/jwk").json()["keys"]
     assert [key["kid"] for key in public_keys] == [third_key.thumbprint(), new_key.thumbprint()]
     assert jwk_client.get("/jwk").json()["keys"] == public_keys
     assert jwk_client.app.state.jwk_json["kid"] == new_key.thumbprint()
 
     # Reintroducing an evicted key still retains only the last two distinct keys.
-    monkeypatch.setenv("JWTKEY", old_key.export_to_pem(private_key=True, password=None).decode())
+    set_signing_key(old_key.export_to_pem(private_key=True, password=None).decode())
     public_keys = jwk_client.get("/jwk").json()["keys"]
     assert [key["kid"] for key in public_keys] == [new_key.thumbprint(), old_key.thumbprint()]
     assert jwk_client.get("/jwk").json()["keys"] == public_keys
@@ -100,10 +118,10 @@ def test_invalid_key_without_existing_chain_returns_configuration_error(jwk_clie
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_request", [True, False])
-async def test_pds_signs_with_new_kid_before_nhs_fetches_jwk(jwk_client, signing_keys, monkeypatch, with_request):
+async def test_pds_signs_with_new_kid_before_nhs_fetches_jwk(jwk_client, signing_keys, set_signing_key, with_request):
     old_key, new_key, _ = signing_keys
     append_public_jwk(jwk_client.app, old_key.export_to_pem(private_key=True, password=None))
-    monkeypatch.setenv("JWTKEY", new_key.export_to_pem(private_key=True, password=None).decode())
+    set_signing_key(new_key.export_to_pem(private_key=True, password=None).decode())
 
     async def nhs_token_endpoint(url, *, data):
         token = data["client_assertion"]
@@ -138,6 +156,7 @@ async def test_pds_signs_with_new_kid_before_nhs_fetches_jwk(jwk_client, signing
 
 def test_pds_fallback_key_id_matches_signing_key(signing_keys, monkeypatch, tmp_path):
     monkeypatch.delenv("JWTKEY")
+    monkeypatch.setenv("ENV", "dev")
     monkeypatch.chdir(tmp_path)
     key = signing_keys[0]
     key_dir = tmp_path / "keys"

@@ -44,6 +44,7 @@ def mock_settings(monkeypatch):
     Automatically mock environment variables for all tests.
     """
     monkeypatch.setenv("JWTKEY", TEST_PRIVATE_KEY)
+    monkeypatch.delenv("KEY_VAULT_URL", raising=False)
     monkeypatch.setenv("API_KEY", "test-api-key")
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")

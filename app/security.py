@@ -14,16 +14,18 @@ All tokens are signed using RS512 algorithm and have a 5-minute expiration time.
 
 import os
 import uuid
+from pathlib import Path
 from time import time
 
 import jwt
+from azure.identity import ManagedIdentityCredential
+from azure.keyvault.secrets import SecretClient
 from fastapi import FastAPI, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from jwcrypto import jwk
 
 from .audit.models import SAMLAttributes
 
-JWTKEY = os.getenv("JWTKEY")
 API_KEY = os.getenv("API_KEY")
 api_key_header_scheme = APIKeyHeader(name="X-API-Key", auto_error=True)
 
@@ -65,6 +67,27 @@ def fix_pem_formatting(pem_string: str) -> str:
         if formatted_certs:
             return "\n".join(formatted_certs)
     return pem_string
+
+
+def get_jwt_key() -> str | None:
+    """Read the latest Azure signing secret, or use the local testing configuration."""
+    vault_url = os.getenv("KEY_VAULT_URL")
+    if vault_url:
+        with ManagedIdentityCredential() as credential:
+            with SecretClient(vault_url=vault_url, credential=credential) as client:
+                private_key = client.get_secret("jwtkey").value
+        if not private_key or not private_key.strip():
+            raise ValueError("Key Vault jwtkey secret is empty")
+        return fix_pem_formatting(private_key)
+
+    private_key = os.getenv("JWTKEY")
+    if private_key:
+        return fix_pem_formatting(private_key)
+
+    key_path = Path("keys/test-1.pem")
+    if os.getenv("ENV", "prod").lower() in ("dev", "local") and key_path.is_file():
+        return fix_pem_formatting(key_path.read_text())
+    return None
 
 
 def append_public_jwk(app: FastAPI, private_pem: bytes):
@@ -109,24 +132,9 @@ def pds_jwt(issuer: str, subject: str, audience: str) -> str:
         "exp": int(time()) + 300,
     }
 
-    # Get private key from environment or file
-    private_key = os.getenv("JWTKEY")
-    if private_key is not None:
-        private_key = fix_pem_formatting(private_key)
-
+    private_key = get_jwt_key()
     if private_key is None:
-        # Fallback to local file if it exists, otherwise raise clear error
-        key_path = "keys/test-1.pem"
-        if os.path.exists(key_path):
-            with open(key_path, "r") as f:
-                private_key = f.read()
-        else:
-            # During tests/CI, we might not have keys.
-            # Warning: This will fail if code tries to sign a token!
-            private_key = None
-
-    if private_key is None:
-        raise FileNotFoundError("JWTKEY env var not set and keys/test-1.pem not found.")
+        raise FileNotFoundError("No JWT signing key configured; set KEY_VAULT_URL or a local JWTKEY/test PEM.")
 
     # Use one key snapshot for both the ID and signature, independent of /jwk requests.
     key_id = jwk.JWK.from_pem(private_key.encode("utf-8")).thumbprint()
