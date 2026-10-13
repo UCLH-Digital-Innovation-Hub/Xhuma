@@ -67,13 +67,19 @@ def pds_cache_key(nhsno: int, secret: str = None) -> str:
 
 
 def sds_cache_key(
-    ods: str, endpoint: bool = False, partykey: str = None, interaction_id: str | None = GP_CONNECT_INTERACTION_ID
+    ods: str,
+    endpoint: bool = False,
+    partykey: str = None,
+    interaction_id: str | None = GP_CONNECT_INTERACTION_ID,
+    manufacturer_ods: str = None,
 ) -> str:
     """Return the deterministic Redis key for an SDS query."""
     resource = "endpoint" if endpoint else "device"
     key = f"pds:sds:{environment}:{resource}:{str(ods).upper()}"
     if partykey:
         key = f"{key}:{partykey}"
+    if manufacturer_ods:
+        key = f"{key}:manufacturer:{str(manufacturer_ods).upper()}"
     if interaction_id != GP_CONNECT_INTERACTION_ID:
         key = f"{key}:interaction:{interaction_id or 'all'}"
     return key
@@ -302,10 +308,17 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     fhir bundle of the SDS trace
     """
     partykey = kwargs.get("mhsparty")
+    manufacturer_ods = kwargs.get("manufacturer_ods")
     interaction_id = kwargs.get("interaction_id", GP_CONNECT_INTERACTION_ID)
     if not interaction_id and (not endpoint or not partykey):
         raise ValueError("An SDS search without an interaction ID requires an Endpoint and MHS Party Key")
-    cache_key = sds_cache_key(ods, endpoint, partykey, interaction_id)
+    cache_key = sds_cache_key(
+        ods,
+        endpoint=endpoint,
+        partykey=partykey,
+        interaction_id=interaction_id,
+        manufacturer_ods=manufacturer_ods,
+    )
     with measure("sds.cache.read") as span:
         cached_trace = await redis_client.get(cache_key)
         span.set_attribute("cache.hit", bool(cached_trace))
@@ -335,6 +348,10 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
         "organization": organisation,
         "identifier": identifier,
     }
+    if manufacturer_ods:
+        parameters["manufacturing-organization"] = (
+            f"https://fhir.nhs.uk/Id/ods-organization-code|{manufacturer_ods.strip().upper()}"
+        )
     # print(parameters)
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
@@ -352,14 +369,15 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
 
 
 async def lookup_self_device() -> dict:
-    """Resolve Xhuma's SDS Device independently of the originating care organisation."""
-    ods = os.getenv("XHUMA_ODS_CODE", "").strip().upper()
+    """Resolve Xhuma's SDS consumer Device from the care organisation and manufacturer."""
+    manufacturer_ods = os.getenv("XHUMA_ODS_CODE", "").strip().upper()
+    consumer_ods = os.getenv("ORG_CODE", "").strip().upper()
     partykey = os.getenv("XHUMA_MHS_PARTY_KEY", "").strip()
     asid = os.getenv("ORG_ASID", "").strip()
-    if not ods or not asid:
-        raise ValueError("XHUMA_ODS_CODE and ORG_ASID are required for the SDS self lookup")
+    if not manufacturer_ods or not consumer_ods or not asid:
+        raise ValueError("XHUMA_ODS_CODE, ORG_CODE and ORG_ASID are required for the SDS self lookup")
 
-    trace = await sds_trace(ods, mhsparty=partykey or None)
+    trace = await sds_trace(consumer_ods, manufacturer_ods=manufacturer_ods)
     if trace.get("resourceType") != "Bundle":
         raise ValueError("SDS self lookup did not return a Bundle")
 
