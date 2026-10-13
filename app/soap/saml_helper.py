@@ -50,8 +50,9 @@ def extract_trusted_saml_assertion(envelope: dict) -> dict:
 
     if not trusted or issuer not in trusted:
         logger.warning("SAML Validation Failed: Untrusted SAML issuer")
+        safe_issuer = issuer.replace("\r", "").replace("\n", "")[:512]
         print(
-            f"SAML Validation Failed: Untrusted SAML issuer received={issuer!r} trusted={sorted(trusted)!r}",
+            f"SAML Validation Failed: Untrusted SAML issuer received={safe_issuer!r}",
             flush=True,
         )
         raise InvalidSAMLContext("Untrusted SAML issuer")
