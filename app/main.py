@@ -157,7 +157,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Xhuma",
     description="A stateless middleware service for GP Connect to CCDA conversion",
-    version="1.0.0",
+    version="0.9.2",
     lifespan=lifespan,
 )
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
