@@ -5,15 +5,16 @@ redis_name           = "xhuma-redis-int"
 postgres_server_name = "xhuma-psql-int"
 
 
-redis_sku_name = "Standard"
-redis_family   = "C"
-redis_capacity = 1
-org_code       = "RRV00"
-org_asid       = "200000002574"
-device_id      = "1"
-xhuma_ods_code = "Z6G1Z"
-env            = "int"
-app_version    = "0.9.2"
+redis_sku_name      = "Standard"
+redis_family        = "C"
+redis_capacity      = 1
+org_code            = "RRV00"
+org_asid            = "200000002574"
+device_id           = "1"
+xhuma_ods_code      = "RRV00"
+xhuma_mhs_party_key = "RRV00-824607"
+env                 = "int"
+app_version         = "0.9.2"
 
 allowed_hosts = "*"
 cors_origins  = "*"
