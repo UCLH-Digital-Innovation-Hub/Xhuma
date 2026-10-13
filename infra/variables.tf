@@ -148,6 +148,12 @@ variable "xhuma_ods_code" {
   type        = string
 }
 
+variable "xhuma_mhs_party_key" {
+  description = "MHS Party Key identifying Xhuma's consumer Device in SDS"
+  type        = string
+  default     = ""
+}
+
 variable "env" {
   description = "Environment Name"
   type        = string

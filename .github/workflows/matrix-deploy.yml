@@ -1,6 +1,7 @@
 name: Matrix Deployment Pilot
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - dev
@@ -575,6 +576,7 @@ jobs:
           MAX_RETRIES=6
           ATTEMPT=1
           BACKOFFS=(10 15 20 30 45 60)
+          RETRYABLE_PATTERN="Conflict|GatewayTimeout|Gateway[[:space:]]+Timeout|ServiceUnavailable|Service[[:space:]]+Unavailable|RequestTimeout|Request[[:space:]]+Timeout|TooManyRequests|Too[[:space:]]+Many[[:space:]]+Requests|InternalServerError|Internal[[:space:]]+Server[[:space:]]+Error|Bad[[:space:]]+Gateway|HTTP[[:space:]]*(429|500|502|503|504)|\((429|500|502|503|504)\)"
 
           while [ $ATTEMPT -le $MAX_RETRIES ]; do
             set +e
@@ -587,13 +589,15 @@ jobs:
               break
             fi
 
-            if echo "$ERROR_OUTPUT" | grep -qi "Conflict"; then
+            if echo "$ERROR_OUTPUT" | grep -E -qi "$RETRYABLE_PATTERN"; then
               if [ $ATTEMPT -eq $MAX_RETRIES ]; then
-                echo "::error::Refresh failed after $MAX_RETRIES attempts due to Conflict."
+                echo "::error::Refresh failed after $MAX_RETRIES attempts due to transient error."
+                echo "$ERROR_OUTPUT" | head -n 3
                 exit 1
               fi
               WAIT_TIME=${BACKOFFS[$((ATTEMPT-1))]}
-              echo "Conflict detected (operation in progress). Retrying in ${WAIT_TIME}s (Attempt $ATTEMPT of $MAX_RETRIES)..."
+              echo "Transient Azure control-plane error detected. Retrying in ${WAIT_TIME}s (Attempt $ATTEMPT of $MAX_RETRIES)..."
+              echo "$ERROR_OUTPUT" | head -n 2
               sleep $WAIT_TIME
               ATTEMPT=$((ATTEMPT+1))
             else
