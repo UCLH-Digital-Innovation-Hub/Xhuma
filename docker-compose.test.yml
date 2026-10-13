@@ -21,3 +21,5 @@ services:
     command: ["sh", "-c", "uv sync --locked && pytest"]
     volumes:
       - ./app:/code/app
+      # Use the repository's default exclusions, including the NIR MVP tests.
+      - ./pytest.ini:/code/pytest.ini:ro

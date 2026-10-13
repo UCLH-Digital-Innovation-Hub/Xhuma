@@ -27,6 +27,7 @@ The service is built on FastAPI and follows a modular design pattern. For detail
 - [Data Flow Documentation](docs/data_flow.md)
 - [Technical Resources](docs/technical_resources.md)
 - [Structured Dose Mapping](docs/dm+d_mapping.md)
+- [National Imaging Registry Workflow](docs/nir_workflow.md)
 
 ## System Flow
 
@@ -102,6 +103,89 @@ uv run --locked ruff format --check .
 
 
 ## Deployment
+
+### National Imaging Registry MVP
+
+See the [NIR workflow](docs/nir_workflow.md) for the discovery and retrieval
+steps, diagrams, environment settings and code responsibilities.
+
+The NIR consumer lives in `app/nir`; its IHE models, SOAP query builders and
+response parsers live in `app/soap/nir_*`. It can be used independently of the
+existing GP Connect routes, PDS lookups, Redis and relay.
+
+Set `NIR_ENV=sandbox` (or `dev`) to use the open sandbox while GP Connect uses
+`ENV=int`. NIR reads only its own settings: `NIR_ENV`, `NIR_BASE_URL` (optional
+override), `NIR_TIMEOUT`, `NIR_TLS_CERT_PATH`, `NIR_TLS_KEY_PATH` and
+`NIR_CA_BUNDLE_PATH`. Compose already loads these from `.env`.
+
+To query the three NHS-published test patients and check their document
+identifiers, run from the repository root:
+
+```bash
+NIR_ENV=sandbox uv run --locked python -m app.nir.sandbox
+# Also retrieve the reports/manifests and check that document bytes are returned:
+NIR_ENV=sandbox uv run --locked python -m app.nir.sandbox --retrieve
+```
+
+The check exits with a nonzero status if a request fails or any published
+document is missing. It also reports additional sandbox documents. It prints
+document identifiers and byte counts; it does not save document contents. When running Python locally,
+export any optional `NIR_*` settings first; the client does not load `.env`.
+
+NIR unit tests live in `app/tests/nir` and are excluded from the default pytest
+run used by CI and deployment checks. Run them explicitly during development:
+
+```bash
+uv run --locked pytest app/tests/nir
+```
+
+```python
+from app.nir import NIRClient
+
+
+async def get_imaging_reports(nhs_number: str):
+    async with NIRClient() as client:
+        query = await client.query_documents(nhs_number)
+        if not query.success:
+            raise RuntimeError(query.errors)
+        return await client.retrieve_documents(query.documents)
+```
+
+| Client method | NIR endpoint |
+| --- | --- |
+| `health()` | `GET /health` |
+| `query_documents(nhs_number)` | `POST /xca/iti-38` |
+| `retrieve_documents(documents)` | `POST /xca/iti-39` |
+| `retrieve_imaging_documents(studies)` | `POST /xcai/rad-75` |
+| `get_wsdl(transaction)` | `GET /xca/iti-38/service.wsdl`, `/xca/iti-39/service.wsdl`, `/xcai/rad-75/service.wsdl` |
+| `get_schema(transaction, schema_file)` | `GET /xca/iti-38/schema/{schema_file}`, `/xca/iti-39/schema/{schema_file}`, `/xcai/rad-75/schema/{schema_file}` |
+
+`transaction` is `iti38`, `iti39` or `rad75`; schema paths can include directories
+such as `ebRS/rs.xsd`. Retrieval returns typed documents with binary `content`,
+including MTOM attachments. RAD-75 takes `NIRImagingStudyRequest` and
+`NIRImagingSeriesRequest` models from `app.soap.nir_models`, with study, series and
+document identifiers obtained from the DICOM manifest; manifest decoding is not
+part of this MVP.
+
+Generated ITI-39 requests are sent separately for each home community and their
+results combined. This supports patients with documents in multiple imaging
+networks; supplied signed envelopes are sent as supplied. Sandbox verification
+on 13 October 2026 found and retrieved 1, 2 and 4 documents for the three patients
+(the third includes two additional documents). The published RAD-75 image
+example, health endpoint and all WSDL/schema endpoint families also responded
+successfully.
+
+For `NIR_ENV=int` or `production`, configure dedicated NIR mTLS certificates.
+The transaction methods also require a caller-supplied, signed WS-Security
+envelope through `soap_envelope=...`; `send_soap(transaction, envelope)` is
+available for prepared envelopes. This MVP builds unsigned sandbox requests and
+does not generate XUA assertions or message signatures. INT requires NIR
+onboarding, certificate trust and IP allow listing.
+
+Sources: [NIR API specification](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api)
+and [NIR test data](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api/test-data).
+
+### GP Connect deployment
 
 1. Clone the repository:
 ```bash
