@@ -261,6 +261,181 @@ uv run --locked pytest app/tests/nir
 These tests use mocked HTTP responses and synthetic document data. The sandbox
 command above exercises the live NHS sandbox separately.
 
+## Future development
+
+The client above is the standalone MVP. The following work is proposed to
+complete its integration into Xhuma; these routes, security controls and image
+delivery workers are not implemented yet. Development and NHS onboarding can
+progress together, but INT testing and production access have separate gates.
+
+### 1. Agree the receiving-system contract
+
+Keep ITI-55 and the existing patient discovery workflow. For an incoming ITI-38,
+validate the patient and caller, then run the GP Connect lookup and an outgoing
+NIR ITI-38 in parallel. Return the GP document metadata and the NIR document
+metadata in one ITI-38 response. Retrieval remains a separate request.
+
+Agree with the requesting organisation how it will retrieve documents belonging
+to external home communities through Xhuma. Preserve the original home
+community, repository and document unique IDs. If the receiver requires local
+identifiers, agree and persist a reversible mapping before implementing it.
+
+Confirm which reports and DICOM objects the receiver can import and display.
+For image retrieval, agree Xhuma's IHE actor role and whether the receiving
+interface uses RAD-69 or RAD-75. The existing ITI-39 document interface alone
+does not provide an imaging viewer; images need a compatible viewer or PACS.
+
+### 2. Connect identity, access checks and NIR security
+
+Apply shared patient and access validation before either downstream request,
+including when the GP document is already cached. Validate the identifier's
+assigning authority as well as its digits, and carry trusted user, organisation,
+patient and request context through discovery, retrieval and any worker job.
+An identity or access denial must stop the request, rather than becoming a
+partial result from the other source.
+
+Implement the NIR issuer-signed SAML assertion and WS-Security envelope using
+the authenticated user's context, with the required audience, role, purpose
+of use and originating home community. Rebuild addressing and security for
+each SOAP hop. Queued work needs a valid assertion at dispatch, rather than
+reusing an expired incoming envelope. Keep NIR credentials, certificates and
+environment settings independent of GP Connect.
+Follow the [NIR XUA and WS-Security requirements](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api/xca-saml-requirements-guide/xca-saml-and-ws-security-requirements).
+
+### 3. Merge discovery responses without losing metadata
+
+Extend the current single-document GP response and the reduced NIR reference
+parser to support complete registry entries. Preserve slots, classifications,
+external identifiers, associations and source provenance, including the
+retrieval address. Returning document IDs alone is insufficient for the
+receiving system to select and retrieve the correct content.
+
+Support the incoming query type, return type, filters and target communities
+that the agreed interface allows. Use bounded downstream deadlines and define
+how source failures produce registry errors and partial results. Distinguish
+an empty successful query from an unavailable source, and retain usable
+documents when an availability failure permits partial success. Validate the
+merged response against the [ITI-38 transaction requirements](https://profiles.ihe.net/ITI/TF/Volume2/ITI-38.html).
+
+### 4. Route ITI-39 to the correct source
+
+Handle every document request in an incoming ITI-39, rather than only the first.
+Route local GP documents to the existing cache and NIR documents to outgoing
+ITI-39 requests, grouped by home community where necessary. Persist an
+authorised patient association for the full home/repository/document address
+so that retrieval and audit do not depend on the document UID alone.
+
+Return PDF, text and DICOM payloads with their correct MIME types and MTOM
+attachment references. Build a response addressed and correlated to the
+original requester; NIR's response headers relate to Xhuma's outbound request
+and cannot simply be forwarded. Check requested and returned identifiers,
+attachment completeness and available size or hash metadata before recording
+successful retrieval and delivery.
+
+### 5. Decode manifests and build image delivery
+
+Identify DICOM Key Object Selection manifests by SOP Class UID, rather than
+assuming every `application/dicom` object is a manifest. Extract the study,
+series and referenced SOP instance UIDs, together with the retrieval location
+or configured AE-title mapping needed for RAD-75. The image repository may
+differ from the repository that supplied the manifest. Check patient association
+using identifier issuers: a DICOM Patient ID may be local and differ from the
+NHS number.
+
+Use a durable worker queue for large image retrievals. Add streaming support to
+the current client, which buffers complete responses, and stage content in
+protected temporary files or object storage. Bound study size, batch size,
+concurrency and storage use; validate the retrieved instances and transfer
+syntaxes, then stream the final MTOM response to the receiving organisation.
+Define retries, cancellation, expiry and cleanup for failed or abandoned jobs.
+
+Agree delivery semantics before building the worker interface. A synchronous
+IHE request needs its connection held open for the response. An agreed IHE
+asynchronous exchange needs the appropriate acknowledgement and a correlated
+SOAP callback to a configured endpoint, with delivery retries; a JSON job ID
+would require a separately agreed API. Do not assume NIR supports an upstream
+callback: a worker can make ordinary request/response calls to NIR. See the
+[IHE asynchronous exchange rules](https://profiles.ihe.net/ITI/TF/Volume2/ch-V.html#V.5).
+
+Determine final retrieval status before emitting the response's SOAP root.
+Once streaming has begun, a later failure cannot change an already-sent success
+status. Record interrupted transfers and distinguish successful retrieval from
+successful delivery in the audit trail. Agree what evidence establishes delivery,
+including any receiver acknowledgement, and record import/display acceptance
+separately from completion of the server's stream.
+
+### 6. Complete NHS onboarding and obtain INT access
+
+Use the [NIR onboarding guidance](https://digital.nhs.uk/services/national-imaging-registry/nir-onboarding-guidance)
+to agree Xhuma's supplier role and the deploying organisation's responsibilities:
+
+1. Register with the Developer and Integration Hub and National Service Desk,
+   and submit the appropriate use-case application. Confirm the supplier/data
+   processor and end-user organisation/data controller roles and the permitted
+   direct-care use case.
+2. Prepare the supplier's clinical safety evidence and DCB0129 sign-off. The
+   deploying organisation needs its own DCB0160 assurance and an approved local
+   DPIA. Both parties need an active ODS code and acceptable in-year DSPT status,
+   alongside their information governance work. Confirm which agreements apply
+   to each party using the
+   [NIR governance guidance](https://digital.nhs.uk/services/national-imaging-registry/governance).
+3. Complete product-version Digital Onboarding Service accreditation and
+   technical conformance, then sign the NHS England Connection Agreement.
+   Supplier conformance can progress before a deploying organisation commissions
+   the product; the
+   [supplier onboarding pack](https://digital.nhs.uk/binaries/content/assets/website-assets/services/national-imaging-registry/onboarding-pack-v4-suppliers.pdf)
+   explains the supplier route.
+4. Obtain formal commissioning and a Home Community ID from an end-user
+   organisation that has completed its governance assurance before requesting
+   INT access. DOS approval alone does not grant INT access. Arrange static
+   source IP allow listing and public certificate trust, then exercise mTLS and
+   signed XUA/WS-Security requests using synthetic patients. These access
+   requirements are described in the
+   [NIR INT testing guidance](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api/test-data).
+5. If the scope expands to publishing imaging into NIR, complete the additional
+   provider onboarding, responding endpoint registration and inbound network
+   requirements. Acting as a consumer for Xhuma's requesting organisations does
+   not itself make Xhuma an imaging provider. Agree that scope with NIR before
+   adding provider functionality.
+
+### 7. Prove the complete workflow in INT
+
+Test ITI-55 through combined ITI-38 and subsequent retrieval with the actual
+receiving system. Include report display, manifest interpretation, image
+import/display, patient association and audit correlation. Sandbox placeholder
+content cannot establish that clinical documents will display correctly.
+
+Cover authentication and access failures, empty and partial results, multiple
+communities, repeated UIDs, query filters, multiple requested documents and
+malformed attachments. For workers, exercise process restarts, retries, slow
+receivers, disconnected clients, expired assertions and storage limits. Confirm
+that no outcome is recorded as complete when content or delivery is incomplete.
+
+Keep development tests in `app/tests/nir/` and run them explicitly while this
+work remains experimental. Once the integration is stable, agree and restore
+NIR release-gate coverage so production changes cannot bypass it. Continue the
+existing GP Connect regression checks throughout integration.
+
+### 8. Prepare and approve production rollout
+
+Complete the applicable supplier and organisation agreements, local assurance,
+operating procedures, user training and support arrangements. Agree monitoring,
+retention, incident handling, business continuity and rollback, including a way
+to disable NIR independently while retaining the GP Connect service. Obtain the
+end-user organisation's go/no-go sign-off and an agreed activation date before
+production access and rollout; arrange the NIR hypercare period described in
+the [onboarding guidance](https://digital.nhs.uk/services/national-imaging-registry/nir-onboarding-guidance).
+
+Configure the production NIR endpoint, credentials and network access
+independently of GP Connect. Verify delivery and audit in a limited rollout,
+and monitor errors, partial results, latency, interrupted transfers, queue depth
+and temporary storage use before widening access.
+
+This line of work is complete when the agreed discovery and retrieval paths
+work in INT with the receiving organisation, patient access and delivery are
+auditable, report and image interpretation have been accepted, release checks
+cover NIR, and the required NHS and local approvals permit production use.
+
 ## References
 
 - [NIR API specification](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api)
