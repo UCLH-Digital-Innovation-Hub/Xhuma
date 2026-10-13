@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 from app.audit.models import SAMLAttributes
@@ -58,6 +59,21 @@ class AuditFailureException(Exception):
     pass
 
 
+def is_audit_fail_open() -> bool:
+    """
+    Determine if audit persistence failures should fail open.
+
+    Fail-open is strictly an explicit opt-in via AUDIT_FAIL_OPEN for local development.
+    Production (ENV=prod) MUST ALWAYS remain fail-closed regardless of AUDIT_FAIL_OPEN.
+    Never infers fail-open behaviour from ENV=dev or ENV=int.
+    """
+    environment = os.getenv("ENV", "prod").strip().lower()
+    if environment in ("prod", "production"):
+        return False
+    val = os.getenv("AUDIT_FAIL_OPEN", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
 async def attempt_audit(
     request: Any,
     *,
@@ -71,20 +87,25 @@ async def attempt_audit(
     document_id: str | None = None,
     request_id: str | None = None,
 ) -> None:
-    """Attempt to write an audit event, failing the main request if it fails."""
+    """Write an audit event; failures are fail-closed unless AUDIT_FAIL_OPEN is explicitly enabled in non-prod."""
     import logging
 
     from .build import build_audit_event
     from .store import insert_audit_event
 
+    def audit_failure(message: str) -> None:
+        if is_audit_fail_open():
+            logging.warning("AuditFailure: %s (AUDIT_FAIL_OPEN enabled; continuing)", message)
+            return
+        logging.error("AuditFailure: %s", message)
+        raise AuditFailureException(message) from None
+
     if not request or not hasattr(request, "app"):
-        logging.error("AuditFailure: No request or app found")
-        raise AuditFailureException("Audit context missing")
+        return audit_failure("Audit context missing")
 
     SessionLocal = getattr(request.app.state, "SessionLocal", None)
     if not SessionLocal:
-        logging.error("AuditFailure: No SessionLocal found in app state")
-        raise AuditFailureException("Audit persistence context missing")
+        return audit_failure("Audit persistence context missing")
 
     try:
         with measure("audit.persist"):
@@ -106,5 +127,4 @@ async def attempt_audit(
                 await session.commit()
     except Exception:
         # Do not log raw database exceptions containing SQL parameters.
-        logging.error("AuditFailure: Database persistence failed")
-        raise AuditFailureException("Failed to persist audit event") from None
+        return audit_failure("Failed to persist audit event")

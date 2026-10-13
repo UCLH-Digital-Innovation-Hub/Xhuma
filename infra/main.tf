@@ -312,7 +312,8 @@ resource "azurerm_linux_web_app" "app" {
 
     # App Config (Key Vault References)
     "API_KEY"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=api-key)"
-    "JWTKEY"            = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=jwtkey)"
+    "NHS_API_KEY"       = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=nhs-api-key)"
+    "KEY_VAULT_URL"     = data.azurerm_key_vault.shared_kv.vault_uri
     "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
     "EPIC_CA_CERT"      = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.local_kv.name};SecretName=epic-ca-cert)"
@@ -357,6 +358,7 @@ resource "azurerm_linux_web_app" "app" {
     "VERSION"           = var.app_version
     "DEVICE_ID"         = var.device_id
     "ORG_ASID"          = var.org_asid
+    "XHUMA_ODS_CODE"    = var.xhuma_ods_code
 
     "GP_CONNECT_INCLUDE_ALLERGIES"      = var.gp_connect_include_allergies
     "GP_CONNECT_INCLUDE_MEDICATION"     = var.gp_connect_include_medication

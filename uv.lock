@@ -2772,11 +2772,13 @@ wheels = [
 
 [[package]]
 name = "xhuma"
-version = "0.9"
+version = "0.9.2"
 source = { virtual = "." }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
+    { name = "azure-identity" },
+    { name = "azure-keyvault-secrets" },
     { name = "azure-monitor-opentelemetry" },
     { name = "cryptography" },
     { name = "defusedxml" },
@@ -2808,8 +2810,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "azure-identity" },
-    { name = "azure-keyvault-secrets" },
     { name = "coverage" },
     { name = "hypothesis" },
     { name = "locust" },
@@ -2829,6 +2829,8 @@ dev = [
 requires-dist = [
     { name = "alembic" },
     { name = "asyncpg" },
+    { name = "azure-identity" },
+    { name = "azure-keyvault-secrets" },
     { name = "azure-monitor-opentelemetry", specifier = ">=1.8.7" },
     { name = "cryptography", specifier = ">=48.0.1" },
     { name = "defusedxml", specifier = ">=0.7.1" },
@@ -2860,8 +2862,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "azure-identity" },
-    { name = "azure-keyvault-secrets" },
     { name = "coverage" },
     { name = "hypothesis", specifier = ">=6.165.10" },
     { name = "locust" },
