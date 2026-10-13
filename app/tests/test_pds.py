@@ -304,7 +304,7 @@ async def test_lookup_self_device_success(monkeypatch):
         mock_sds.assert_awaited_once_with("Z6G1Z", mhsparty=None)
 
 
-def test_terraform_app_service_xhuma_ods_code_configured():
+def test_terraform_app_service_sds_self_identity_configured():
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -312,14 +312,130 @@ def test_terraform_app_service_xhuma_ods_code_configured():
     main_tf = (repo_root / "infra" / "main.tf").read_text()
     play_tfvars = (repo_root / "infra" / "env" / "play.tfvars").read_text()
     int_tfvars = (repo_root / "infra" / "env" / "int.tfvars").read_text()
+    prd_tfvars = (repo_root / "infra" / "env" / "prd.tfvars").read_text()
 
     assert 'variable "xhuma_ods_code"' in variables_tf
-    assert '"XHUMA_ODS_CODE"    = var.xhuma_ods_code' in main_tf or '"XHUMA_ODS_CODE" = var.xhuma_ods_code' in main_tf
+    assert 'variable "xhuma_mhs_party_key"' in variables_tf
+    assert '"XHUMA_ODS_CODE"' in main_tf and "var.xhuma_ods_code" in main_tf
+    assert '"XHUMA_MHS_PARTY_KEY"' in main_tf and "var.xhuma_mhs_party_key" in main_tf
+
+    # Play configuration
     assert "xhuma_ods_code" in play_tfvars and '"Z6G1Z"' in play_tfvars
-    assert "xhuma_ods_code" in int_tfvars and '"Z6G1Z"' in int_tfvars
-    # Ensure AUDIT_FAIL_OPEN and XHUMA_MHS_PARTY_KEY are unset in Terraform
+    assert "RRV00-824607" not in play_tfvars
+    assert "Z6G1Z-838808" not in play_tfvars
+
+    # INT configuration
+    assert "200000002574" in int_tfvars
+    assert 'xhuma_ods_code      = "RRV00"' in int_tfvars or 'xhuma_ods_code = "RRV00"' in int_tfvars
+    assert 'xhuma_mhs_party_key = "RRV00-824607"' in int_tfvars
+
+    # PRD configuration
+    assert "200000087786" in prd_tfvars
+    assert 'xhuma_ods_code      = "Z6G1Z"' in prd_tfvars or 'xhuma_ods_code = "Z6G1Z"' in prd_tfvars
+    assert 'xhuma_mhs_party_key = "Z6G1Z-838808"' in prd_tfvars
+
+    # Ensure AUDIT_FAIL_OPEN remains unset in Terraform
     assert "AUDIT_FAIL_OPEN" not in main_tf
-    assert "XHUMA_MHS_PARTY_KEY" not in main_tf
+
+
+@pytest.mark.asyncio
+async def test_lookup_self_device_with_party_key_success(monkeypatch):
+    from app.pds.pds import lookup_self_device
+
+    monkeypatch.setenv("XHUMA_ODS_CODE", "RRV00")
+    monkeypatch.setenv("ORG_ASID", "200000002574")
+    monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "RRV00-824607")
+
+    matching_device = {
+        "resource": {
+            "resourceType": "Device",
+            "identifier": [
+                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000002574"},
+                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "RRV00-824607"},
+            ],
+        }
+    }
+    other_device = {
+        "resource": {
+            "resourceType": "Device",
+            "identifier": [
+                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "999999999999"},
+                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "RRV00-111111"},
+            ],
+        }
+    }
+    bundle = {
+        "resourceType": "Bundle",
+        "entry": [matching_device, other_device],
+    }
+
+    with patch("app.pds.pds.sds_trace", new_callable=AsyncMock) as mock_sds:
+        mock_sds.return_value = bundle
+        device = await lookup_self_device()
+        assert device == matching_device
+        mock_sds.assert_awaited_once_with("RRV00", mhsparty="RRV00-824607")
+
+
+@pytest.mark.asyncio
+async def test_lookup_self_device_with_party_key_mismatch_rejected(monkeypatch):
+    from app.pds.pds import lookup_self_device
+
+    monkeypatch.setenv("XHUMA_ODS_CODE", "RRV00")
+    monkeypatch.setenv("ORG_ASID", "200000002574")
+    monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "RRV00-824607")
+
+    # Device has matching ASID but different party key
+    wrong_party_device = {
+        "resource": {
+            "resourceType": "Device",
+            "identifier": [
+                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000002574"},
+                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "RRV00-WRONG"},
+            ],
+        }
+    }
+    bundle = {
+        "resourceType": "Bundle",
+        "entry": [wrong_party_device],
+    }
+
+    with patch("app.pds.pds.sds_trace", new_callable=AsyncMock) as mock_sds:
+        mock_sds.return_value = bundle
+        with pytest.raises(
+            ValueError, match="SDS self lookup must return exactly one Device matching the configured Spine identity"
+        ):
+            await lookup_self_device()
+
+
+@pytest.mark.asyncio
+async def test_lookup_self_device_with_asid_mismatch_rejected(monkeypatch):
+    from app.pds.pds import lookup_self_device
+
+    monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    monkeypatch.setenv("ORG_ASID", "200000087786")
+    monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "Z6G1Z-838808")
+
+    # Device has matching party key but different ASID
+    wrong_asid_device = {
+        "resource": {
+            "resourceType": "Device",
+            "identifier": [
+                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "999999999999"},
+                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "Z6G1Z-838808"},
+            ],
+        }
+    }
+    bundle = {
+        "resourceType": "Bundle",
+        "entry": [wrong_asid_device],
+    }
+
+    with patch("app.pds.pds.sds_trace", new_callable=AsyncMock) as mock_sds:
+        mock_sds.return_value = bundle
+        with pytest.raises(
+            ValueError, match="SDS self lookup must return exactly one Device matching the configured Spine identity"
+        ):
+            await lookup_self_device()
 
 
 def test_terraform_app_service_nhs_api_key_configured():
