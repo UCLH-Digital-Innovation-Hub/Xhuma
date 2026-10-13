@@ -16,7 +16,7 @@
           "id", "stage", "source_branch", "enabled", "hold",
           "rollout_ring", "github_environment", "github_infra_environment",
           "resource_group", "location",
-          "app_service_name", "tfvars_file", "backend_file",
+          "app_service_name", "tfvars_file", "backend_file", "shared_backend_file",
           "runner_label", "owner", "support_route"
         ],
         "properties": {
@@ -35,6 +35,7 @@
           "app_service_name": { "type": "string" },
           "tfvars_file": { "type": "string" },
           "backend_file": { "type": "string" },
+          "shared_backend_file": { "type": "string" },
           "runner_label": { "type": "string" },
           "require_existing_state": { "type": "boolean" },
           "owner": { "type": "string" },

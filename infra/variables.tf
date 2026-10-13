@@ -71,7 +71,7 @@ variable "shared_key_vault_name" {
 
 variable "app_version" {
   type    = string
-  default = "0.9"
+  default = "0.9.2"
 }
 
 variable "device_id" {
@@ -194,4 +194,22 @@ variable "external_relay_client_id" {
   description = "The Client ID to route through on the Shared Relay Server"
   type        = string
   default     = "client1"
+}
+
+variable "nhs_relay_base_path" {
+  description = "The base path for the NHS GP Connect API over HSCN/Relay"
+  type        = string
+  default     = ""
+}
+
+variable "nhs_over_internet_path" {
+  description = "The base path for the NHS GP Connect API over the internet"
+  type        = string
+  default     = ""
+}
+
+variable "dmd_base_url" {
+  description = "The FHIR Terminology base URL for DMD"
+  type        = string
+  default     = "https://ontology.nhs.uk/production1/fhir"
 }

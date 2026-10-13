@@ -11,6 +11,7 @@ org_asid                 = "200000000000"
 device_id                = "1"
 xhuma_ods_code           = "Z6G1Z"
 env                      = "int" # Non-production
+app_version              = "0.9.2"
 ccda_expiry_hours        = "4"
 allowed_hosts            = "*"
 cors_origins             = "*"

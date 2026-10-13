@@ -13,7 +13,7 @@ org_asid       = "200000002574"
 device_id      = "1"
 xhuma_ods_code = "Z6G1Z"
 env            = "int"
-app_version    = "0.9"
+app_version    = "0.9.2"
 
 allowed_hosts = "*"
 cors_origins  = "*"
