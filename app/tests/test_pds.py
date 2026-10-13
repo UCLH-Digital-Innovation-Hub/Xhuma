@@ -260,8 +260,12 @@ async def test_lookup_self_device_missing_ods_code_raises(monkeypatch):
     from app.pds.pds import lookup_self_device
 
     monkeypatch.delenv("XHUMA_ODS_CODE", raising=False)
+    monkeypatch.setenv("ORG_CODE", "RRV00")
     monkeypatch.setenv("ORG_ASID", "123")
-    with pytest.raises(ValueError, match="XHUMA_ODS_CODE and ORG_ASID are required for the SDS self lookup"):
+    with pytest.raises(
+        ValueError,
+        match="XHUMA_ODS_CODE, ORG_CODE and ORG_ASID are required for the SDS self lookup",
+    ):
         await lookup_self_device()
 
 
@@ -270,8 +274,12 @@ async def test_lookup_self_device_missing_org_asid_raises(monkeypatch):
     from app.pds.pds import lookup_self_device
 
     monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    monkeypatch.setenv("ORG_CODE", "RRV00")
     monkeypatch.delenv("ORG_ASID", raising=False)
-    with pytest.raises(ValueError, match="XHUMA_ODS_CODE and ORG_ASID are required for the SDS self lookup"):
+    with pytest.raises(
+        ValueError,
+        match="XHUMA_ODS_CODE, ORG_CODE and ORG_ASID are required for the SDS self lookup",
+    ):
         await lookup_self_device()
 
 
@@ -280,6 +288,7 @@ async def test_lookup_self_device_success(monkeypatch):
     from app.pds.pds import lookup_self_device
 
     monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    monkeypatch.setenv("ORG_CODE", "RRV00")
     monkeypatch.setenv("ORG_ASID", "200000002574")
     monkeypatch.delenv("XHUMA_MHS_PARTY_KEY", raising=False)
 
@@ -301,7 +310,7 @@ async def test_lookup_self_device_success(monkeypatch):
         mock_sds.return_value = fake_bundle
         device = await lookup_self_device()
         assert device == fake_device_entry
-        mock_sds.assert_awaited_once_with("Z6G1Z", mhsparty=None)
+        mock_sds.assert_awaited_once_with("RRV00", manufacturer_ods="Z6G1Z")
 
 
 def test_terraform_app_service_sds_self_identity_configured():
@@ -342,16 +351,17 @@ def test_terraform_app_service_sds_self_identity_configured():
 async def test_lookup_self_device_with_party_key_success(monkeypatch):
     from app.pds.pds import lookup_self_device
 
-    monkeypatch.setenv("XHUMA_ODS_CODE", "RRV00")
-    monkeypatch.setenv("ORG_ASID", "200000002574")
-    monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "RRV00-824607")
+    monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    monkeypatch.setenv("ORG_CODE", "RRV00")
+    monkeypatch.setenv("ORG_ASID", "200000087786")
+    monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "Z6G1Z-838808")
 
     matching_device = {
         "resource": {
             "resourceType": "Device",
             "identifier": [
-                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000002574"},
-                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "RRV00-824607"},
+                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000087786"},
+                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "Z6G1Z-838808"},
             ],
         }
     }
@@ -373,24 +383,25 @@ async def test_lookup_self_device_with_party_key_success(monkeypatch):
         mock_sds.return_value = bundle
         device = await lookup_self_device()
         assert device == matching_device
-        mock_sds.assert_awaited_once_with("RRV00", mhsparty="RRV00-824607")
+        mock_sds.assert_awaited_once_with("RRV00", manufacturer_ods="Z6G1Z")
 
 
 @pytest.mark.asyncio
 async def test_lookup_self_device_with_party_key_mismatch_rejected(monkeypatch):
     from app.pds.pds import lookup_self_device
 
-    monkeypatch.setenv("XHUMA_ODS_CODE", "RRV00")
-    monkeypatch.setenv("ORG_ASID", "200000002574")
-    monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "RRV00-824607")
+    monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    monkeypatch.setenv("ORG_CODE", "RRV00")
+    monkeypatch.setenv("ORG_ASID", "200000087786")
+    monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "Z6G1Z-838808")
 
     # Device has matching ASID but different party key
     wrong_party_device = {
         "resource": {
             "resourceType": "Device",
             "identifier": [
-                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000002574"},
-                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "RRV00-WRONG"},
+                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000087786"},
+                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "Z6G1Z-WRONG"},
             ],
         }
     }
@@ -412,6 +423,7 @@ async def test_lookup_self_device_with_asid_mismatch_rejected(monkeypatch):
     from app.pds.pds import lookup_self_device
 
     monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    monkeypatch.setenv("ORG_CODE", "RRV00")
     monkeypatch.setenv("ORG_ASID", "200000087786")
     monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "Z6G1Z-838808")
 
@@ -742,3 +754,32 @@ def test_api_key_remains_usable_for_xhuma_local_purposes(monkeypatch):
     monkeypatch.setenv("NHS_API_KEY", "some-unrelated-nhs-key")
     key2_again = pds_cache_key(9690937278)
     assert key2 == key2_again
+
+
+@pytest.mark.asyncio
+async def test_sds_trace_supports_manufacturing_organization(monkeypatch):
+    """Consumer Device lookup must distinguish care org from supplier/manufacturer."""
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+    ):
+        cache.get.return_value = None
+
+        client = AsyncMock()
+        client.get.return_value = httpx.Response(
+            200,
+            json={"resourceType": "Bundle", "total": 1},
+        )
+        factory.return_value.__aenter__.return_value = client
+
+        await sds_trace("RRV00", manufacturer_ods="Z6G1Z")
+
+        call = client.get.await_args
+        assert call.kwargs["params"]["organization"] == ("https://fhir.nhs.uk/Id/ods-organization-code|RRV00")
+        assert call.kwargs["params"]["manufacturing-organization"] == (
+            "https://fhir.nhs.uk/Id/ods-organization-code|Z6G1Z"
+        )
+        assert any(
+            value.endswith("|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1")
+            for value in call.kwargs["params"]["identifier"]
+        )
