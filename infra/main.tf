@@ -312,7 +312,8 @@ resource "azurerm_linux_web_app" "app" {
 
     # App Config (Key Vault References)
     "API_KEY"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=api-key)"
-    "JWTKEY"            = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=jwtkey)"
+    "NHS_API_KEY"       = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=nhs-api-key)"
+    "KEY_VAULT_URL"     = data.azurerm_key_vault.shared_kv.vault_uri
     "DMD_CLIENT_ID"     = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-id)"
     "DMD_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=dmd-client-secret)"
     "DMD_BASE_URL"      = var.dmd_base_url
@@ -325,8 +326,8 @@ resource "azurerm_linux_web_app" "app" {
 
     # New Security Mitigations
     "MTLS_TRUSTED_THUMBPRINTS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=mtls-trusted-thumbprints)"
-    "SAML_TRUSTED_ISSUER"      = "urn:nhs:names:services:spine"
-    "ALLOWED_REPLY_TO_DOMAINS" = ".nhs.uk"
+    "SAML_TRUSTED_ISSUER"      = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=saml-trusted-issuer)"
+    "ALLOWED_REPLY_TO_DOMAINS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=allowed-reply-to-domains)"
 
     "REGISTRY_ID"    = var.registry_id
     "REDIS_HOST"     = azurerm_redis_cache.redis.hostname
@@ -367,7 +368,7 @@ resource "azurerm_linux_web_app" "app" {
     "VERSION"           = var.app_version
     "DEVICE_ID"         = var.device_id
     "ORG_ASID"          = var.org_asid
-    "NHS_API_KEY"       = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=nhs-api-key)"
+    "XHUMA_ODS_CODE"    = var.xhuma_ods_code
 
     "GP_CONNECT_INCLUDE_ALLERGIES"      = var.gp_connect_include_allergies
     "GP_CONNECT_INCLUDE_MEDICATION"     = var.gp_connect_include_medication

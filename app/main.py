@@ -10,27 +10,24 @@ profiles for healthcare interoperability.
 """
 
 import asyncio
+import logging
 import os
+import traceback
+import uuid
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 from uuid import uuid4
-
-from fastapi import FastAPI, Form, Request
 
 # Configure Azure Monitor OpenTelemetry if connection string is present
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     from azure.monitor.opentelemetry import configure_azure_monitor
 
     configure_azure_monitor()
-import logging
-import traceback
-import uuid
 
-from fastapi import Depends
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fhirclient.models.operationoutcome import OperationOutcome, OperationOutcomeIssue
-from jwcrypto import jwk
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.metrics import MeterProvider
@@ -45,7 +42,7 @@ from .middleware.mtls import MTLSMiddleware
 from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
-from .security import verify_api_key
+from .security import get_jwk_keyset, verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 from .telemetry import monitor_event_loop
@@ -61,12 +58,23 @@ async def lifespan(app: FastAPI):
     """
     # --- Startup logic ---
     # Validate required configuration
-    for var in ["API_KEY", "ORG_ASID", "ORG_CODE"]:
+    for var in ["API_KEY", "NHS_API_KEY", "ORG_ASID", "ORG_CODE"]:
         val = os.getenv(var)
         if not val or not val.strip():
             raise RuntimeError(f"Missing required configuration: {var}")
         if val.strip().startswith("@Microsoft.KeyVault("):
             raise RuntimeError(f"Unresolved KeyVault reference for required configuration: {var}")
+
+    # Check configuration separation
+    api_key = os.getenv("API_KEY")
+    nhs_api_key = os.getenv("NHS_API_KEY")
+    is_prod = os.getenv("ENV", "prod").lower() == "prod"
+
+    if api_key and nhs_api_key and api_key == nhs_api_key:
+        if is_prod:
+            raise RuntimeError("CRITICAL: API_KEY and NHS_API_KEY must not be identical in production. Failing closed.")
+        else:
+            print("Warning: API_KEY and NHS_API_KEY are identical. This is allowed in dev/int but forbidden in prod.")
 
     import datetime
     import math
@@ -140,34 +148,18 @@ async def lifespan(app: FastAPI):
                 )
 
         # Handle JWK generation/verification securely entirely in-memory
-        jwt_key = os.getenv("JWTKEY")
         app.state.jwk_json = {}
+        app.state.jwk_keys = []
 
-        if jwt_key:
-            try:
-                # Reformat env var newlines safely and convert to JWK
-                from app.security import fix_pem_formatting
-
-                private_pem = fix_pem_formatting(jwt_key).encode("utf-8")
-                public_jwk = jwk.JWK.from_pem(private_pem)
-                jwk_dict = public_jwk.export_public(as_dict=True)
-                jwk_dict["alg"] = "RS512"
-                jwk_dict["use"] = "sig"
-                app.state.jwk_json = jwk_dict
-            except Exception as e:
-                print(f"Warning: Failed to load JWTKEY from environment: {e}")
-        elif os.getenv("ENV", "prod").lower() in ("dev", "local") and os.path.isfile("keys/test-1.pem"):
-            # Local development fallback
-            print("Warning: Falling back to local keys/test-1.pem key. Not for use in production.")
-            with open("keys/test-1.pem", "rb") as pemfile:
-                private_pem = pemfile.read()
-                public_jwk = jwk.JWK.from_pem(data=private_pem)
-                jwk_dict = public_jwk.export_public(as_dict=True)
-                jwk_dict["alg"] = "RS512"
-                jwk_dict["use"] = "sig"
-                app.state.jwk_json = jwk_dict
-        else:
-            print("Warning: No JWTKEY provided and not in dev/local mode. /jwk endpoint will return an error.")
+        try:
+            keys = await asyncio.to_thread(get_jwk_keyset)
+            if keys:
+                app.state.jwk_keys = keys
+                app.state.jwk_json = keys[0]
+            else:
+                logging.warning("No JWT signing key configured; /jwk will return an error")
+        except Exception as e:
+            logging.warning(f"Failed to load JWT signing key during startup: {e}")
 
         # Set up OpenTelemetry metrics
         otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://otel-collector:4317")
@@ -200,7 +192,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Xhuma",
     description="A stateless middleware service for GP Connect to CCDA conversion",
-    version="1.0.0",
+    version="0.9.2",
     lifespan=lifespan,
 )
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
@@ -384,7 +376,7 @@ async def health_check():
 @app.get("/jwk")
 async def get_jwk(request: Request):
     """
-    Public endpoint that provides access to the service's JSON Web Key.
+    Public endpoint that provides the service's JSON Web Key Set.
 
     This endpoint is used by clients to verify JWT signatures and establish
     trust with the service.
@@ -392,9 +384,24 @@ async def get_jwk(request: Request):
     Returns:
         dict: JSON Web Key Set in dictionary format.
     """
-    if hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
-        return {"keys": [request.app.state.jwk_json]}
-    return {"error": "JWK not configured on this server"}
+    try:
+        keys = await asyncio.to_thread(get_jwk_keyset)
+        if keys:
+            if hasattr(request, "app") and hasattr(request.app, "state"):
+                request.app.state.jwk_keys = keys
+                request.app.state.jwk_json = keys[0]
+            return {"keys": keys}
+    except Exception as e:
+        logging.warning(f"Failed to load JWT signing key: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWKS unavailable",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="JWKS unavailable",
+    )
 
 
 # --- Dev-only audit viewer ---

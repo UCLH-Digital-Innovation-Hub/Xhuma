@@ -30,7 +30,7 @@ from ..models import (
     Slot,
     SoapEnvelope,
 )
-from .constants import REGISTRY_ID
+from .constants import COMMUNITY_ID, REGISTRY_ID
 
 
 async def iti_38_response(
@@ -45,7 +45,7 @@ async def iti_38_response(
             error=RegistryError(
                 error_code="XDSRegistryError",
                 code_context=code_context,
-                location="",
+                location=f"urn:oid:{COMMUNITY_ID}",
                 severity=XDS_ERROR_SEVERITY,
             ),
         )

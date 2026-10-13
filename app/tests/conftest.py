@@ -1,8 +1,19 @@
 import os
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
+
+@pytest.fixture
+def mock_self_issuer():
+    """Isolate the consumer SDS lookup in tests covering the rest of GP Connect."""
+    with patch("app.gpconnect.lookup_self_issuer", new_callable=AsyncMock) as lookup:
+        lookup.return_value = "https://consumer.test/spine"
+        yield lookup
+
+
 os.environ["API_KEY"] = "test-api-key"
+os.environ["NHS_API_KEY"] = "test-nhs-api-key"
 os.environ["ORG_CODE"] = "RRV00"
 os.environ["ORG_ASID"] = "123"
 os.environ["CCDA_EXPIRY_HOURS"] = "4"
@@ -44,7 +55,9 @@ def mock_settings(monkeypatch):
     Automatically mock environment variables for all tests.
     """
     monkeypatch.setenv("JWTKEY", TEST_PRIVATE_KEY)
+    monkeypatch.delenv("KEY_VAULT_URL", raising=False)
     monkeypatch.setenv("API_KEY", "test-api-key")
+    monkeypatch.setenv("NHS_API_KEY", "test-nhs-api-key")
     monkeypatch.setenv("REDIS_HOST", "localhost")
     monkeypatch.setenv("REDIS_PORT", "6379")
     monkeypatch.setenv("POSTGRES_HOST", "localhost")

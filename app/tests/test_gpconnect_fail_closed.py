@@ -11,7 +11,7 @@ def get_mock_request():
 
 
 @pytest.mark.asyncio
-async def test_gpconnect_env_prod_missing_relay_fails_closed(monkeypatch):
+async def test_gpconnect_env_prod_missing_relay_fails_closed(monkeypatch, mock_self_issuer):
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.setenv("USE_RELAY", "1")
     monkeypatch.delenv("NHS_RELAY_BASE_PATH", raising=False)
@@ -30,6 +30,7 @@ async def test_gpconnect_env_prod_missing_relay_fails_closed(monkeypatch):
     from app.gpconnect import gpconnect
 
     with (
+        patch("app.gpconnect.lookup_self_issuer", new_callable=AsyncMock, return_value="https://consumer.test/spine"),
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock) as mock_lookup,
         patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as mock_sds,
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock),

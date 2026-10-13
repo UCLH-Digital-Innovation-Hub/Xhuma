@@ -6,11 +6,12 @@ import logging
 import os
 import pprint
 import uuid
+from urllib.parse import urlsplit
 
 import fastapi
 import httpx
 
-from app.audit.audit import AuditFailureException, attempt_audit
+from app.audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
 from app.audit.models import AuditOutcome, SAMLAttributes
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
@@ -23,6 +24,26 @@ PROD_BASE_PATH = "https://api.service.nhs.uk/"
 API_KEY = os.getenv("API_KEY")
 PDS_CACHE_HOURS = int(os.getenv("PDS_CACHE_HOURS", 24))
 SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
+GP_CONNECT_INTERACTION_ID = "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
+
+
+def _sanitize_diagnostic(text: str) -> str:
+    """Safely bounds and sanitizes diagnostic strings from upstream responses."""
+    if not isinstance(text, str):
+        text = str(text)
+    import re
+
+    # Redact potential NHS numbers (10 consecutive digits)
+    text = re.sub(r"\b\d{10}\b", "[REDACTED_NHSNO]", text)
+    # Redact potential Bearer tokens and JWTs
+    text = re.sub(r"(?i)bearer\s+[A-Za-z0-9\-\._~+\/]+", "Bearer [REDACTED_TOKEN]", text)
+    # Redact UUID-like API keys
+    text = re.sub(
+        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", "[REDACTED_UUID]", text
+    )
+
+    return text.replace("\n", " ").replace("\r", "")[:200]
+
 
 # router = fastapi.APIRouter(prefix="/pds")
 
@@ -45,11 +66,17 @@ def pds_cache_key(nhsno: int, secret: str = None) -> str:
     return f"pds:patient:{digest}"
 
 
-def sds_cache_key(ods: str, endpoint: bool = False, partykey: str = None) -> str:
+def sds_cache_key(
+    ods: str, endpoint: bool = False, partykey: str = None, interaction_id: str | None = GP_CONNECT_INTERACTION_ID
+) -> str:
     """Return the deterministic Redis key for an SDS query."""
     resource = "endpoint" if endpoint else "device"
-    key = f"pds:sds:{resource}:{str(ods).upper()}"
-    return f"{key}:{partykey}" if endpoint else key
+    key = f"pds:sds:{environment}:{resource}:{str(ods).upper()}"
+    if partykey:
+        key = f"{key}:{partykey}"
+    if interaction_id != GP_CONNECT_INTERACTION_ID:
+        key = f"{key}:interaction:{interaction_id or 'all'}"
+    return key
 
 
 # @router.get("/lookup_patient/{nhsno}")
@@ -85,12 +112,12 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
     logging.info("Cache miss for PDS patient query. Fetching from PDS API.")
 
-    async def get_pds_token(kid: str):
+    async def get_pds_token():
         full_path = f"{BASE_PATH}oauth2/token"
-        nhs_api_key = os.getenv("NHS_API_KEY")
+        nhs_api_key = os.getenv("NHS_API_KEY", "").strip()
         if not nhs_api_key:
             raise ValueError("NHS_API_KEY is not configured")
-        jwt_token = pds_jwt(nhs_api_key, nhs_api_key, full_path, kid)
+        jwt_token = await asyncio.to_thread(pds_jwt, nhs_api_key, nhs_api_key, full_path)
         # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {
@@ -101,12 +128,34 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         async with httpx.AsyncClient() as client:
             r = await client.post(full_path, data=oauth_params)
 
-        response_dict = json.loads(r.text)
-        if "access_token" not in response_dict:
-            error_msg = f"Failed to retrieve PDS access token. NHS API Response: {r.text}"
-            logging.error(error_msg)
-            print(f"CRITICAL NHS AUTH ERROR: {error_msg}", flush=True)  # Print directly to Azure logs
-            raise fastapi.HTTPException(status_code=500, detail="NHS API Authentication Failed")
+        try:
+            response_dict = r.json()
+        except Exception:
+            response_dict = {}
+
+        if r.status_code != 200 or "access_token" not in response_dict:
+            err_code = (
+                response_dict.get("issue", [{}])[0].get("details", {}).get("coding", [{}])[0].get("code", "unknown")
+            )
+            err_desc = _sanitize_diagnostic(response_dict.get("issue", [{}])[0].get("diagnostics", "Unknown error"))
+
+            if "error" in response_dict:
+                err_code = str(response_dict.get("error"))[:50]
+                err_desc = _sanitize_diagnostic(response_dict.get("error_description", err_desc))
+
+            req_id = r.headers.get("x-request-id", "")
+            corr_id = r.headers.get("x-correlation-id", "")
+
+            safe_log = (
+                f"PDS OAuth Failure | Status: {r.status_code} | "
+                f"Code: {err_code} | Desc: {err_desc} | "
+                f"ReqID: {req_id} | CorrID: {corr_id}"
+            )
+            logging.error(safe_log)
+
+            if r.status_code in (401, 403):
+                raise fastapi.HTTPException(status_code=502, detail="NHS API Authentication or Entitlement Failed")
+            raise fastapi.HTTPException(status_code=502, detail="Upstream NHS API Availability Failure")
 
         nhs_token = response_dict["access_token"]
 
@@ -119,16 +168,22 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         cached_token = await redis_client.get("access_token")
         if not cached_token:
             logging.info("NHS token expired or not found, getting new one")
-            # Extract dynamically generated Key ID, fallback to 'test-1'
-            kid = "test-1"
-            if request and hasattr(request.app.state, "jwk_json") and request.app.state.jwk_json:
-                kid = request.app.state.jwk_json.get("kid", "test-1")
-
-            nhs_token = await get_pds_token(kid)
+            nhs_token = await get_pds_token()
         else:
             logging.info("NHS token found in cache")
             nhs_token = cached_token.decode("utf-8") if isinstance(cached_token, bytes) else cached_token
     except AuditFailureException:
+        raise
+    except fastapi.HTTPException as e:
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml,
+            action="pds_token_fetch",
+            outcome=AuditOutcome.fail,
+            detail={"exception": e.detail},
+            error_code=str(e.status_code),
+        )
         raise
     except Exception as e:
         await attempt_audit(
@@ -137,10 +192,10 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             saml=saml,
             action="pds_token_fetch",
             outcome=AuditOutcome.fail,
-            detail={"exception": str(e)},
+            detail={"exception": type(e).__name__},
             error_code="502",
         )
-        raise fastapi.HTTPException(status_code=502, detail=f"Failed to obtain PDS token: {e}")
+        raise fastapi.HTTPException(status_code=502, detail="Failed to obtain PDS token due to upstream error")
 
     # print(f"nhs_token: {nhs_token}")
     # set headers for pds request
@@ -156,9 +211,51 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
     try:
         async with httpx.AsyncClient(event_hooks={"request": [log_request], "response": [log_response]}) as client:
             r = await client.get(url, headers=headers)
-            r.raise_for_status()
-            patient_dict = json.loads(r.text)
+            if r.status_code != 200:
+                error_data = {}
+                try:
+                    error_data = r.json()
+                except Exception:
+                    pass
+
+                err_code = (
+                    error_data.get("issue", [{}])[0].get("details", {}).get("coding", [{}])[0].get("code", "unknown")
+                )
+                err_desc = _sanitize_diagnostic(error_data.get("issue", [{}])[0].get("diagnostics", "Unknown error"))
+
+                if "error" in error_data:
+                    err_code = str(error_data.get("error"))[:50]
+                    err_desc = _sanitize_diagnostic(error_data.get("error_description", err_desc))
+
+                req_id = r.headers.get("x-request-id", "")
+                corr_id = r.headers.get("x-correlation-id", "")
+
+                safe_log = (
+                    f"PDS API Failure | Status: {r.status_code} | "
+                    f"Code: {err_code} | Desc: {err_desc} | "
+                    f"ReqID: {req_id} | CorrID: {corr_id}"
+                )
+                logging.error(safe_log)
+
+                if r.status_code == 404:
+                    raise fastapi.HTTPException(status_code=404, detail="Patient not found on PDS")
+                if r.status_code in (401, 403):
+                    raise fastapi.HTTPException(status_code=502, detail="PDS Entitlement or Token Failure")
+                raise fastapi.HTTPException(status_code=502, detail="PDS lookup upstream failure")
+
+            patient_dict = r.json()
     except AuditFailureException:
+        raise
+    except fastapi.HTTPException as e:
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml,
+            action="pds_lookup",
+            outcome=AuditOutcome.fail,
+            detail={"cache_hit": False, "status_code": e.status_code, "detail": e.detail},
+            error_code=str(e.status_code),
+        )
         raise
     except Exception as e:
         await attempt_audit(
@@ -167,10 +264,10 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             saml=saml,
             action="pds_lookup",
             outcome=AuditOutcome.fail,
-            detail={"cache_hit": False, "exception": str(e)},
+            detail={"cache_hit": False, "exception": type(e).__name__},
             error_code="502",
         )
-        raise fastapi.HTTPException(status_code=502, detail=f"PDS lookup failed: {e}")
+        raise fastapi.HTTPException(status_code=502, detail="PDS lookup upstream failure")
 
     outcome = (
         AuditOutcome.fail
@@ -198,12 +295,17 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     args:
     ods: str - the ODS code to trace
     endpoint: bool - whether to make an endpoint SDS trace
+    mhsparty: str - optional MHS Party Key to narrow the Device or Endpoint search
+    interaction_id: str - defaults to getstructuredrecord; None allows an Endpoint search by ODS and Party Key only
 
     returns:
     fhir bundle of the SDS trace
     """
     partykey = kwargs.get("mhsparty")
-    cache_key = sds_cache_key(ods, endpoint, partykey)
+    interaction_id = kwargs.get("interaction_id", GP_CONNECT_INTERACTION_ID)
+    if not interaction_id and (not endpoint or not partykey):
+        raise ValueError("An SDS search without an interaction ID requires an Endpoint and MHS Party Key")
+    cache_key = sds_cache_key(ods, endpoint, partykey, interaction_id)
     with measure("sds.cache.read") as span:
         cached_trace = await redis_client.get(cache_key)
         span.set_attribute("cache.hit", bool(cached_trace))
@@ -216,27 +318,19 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
 
     logging.info("Cache miss for SDS query %s. Fetching from SDS API.", cache_key)
 
-    if endpoint:
-        suffix = "Endpoint"
-        identifier = [
-            "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
-            f"https://fhir.nhs.uk/Id/nhsMhsPartyKey|{partykey}",
-        ]
-
-    else:
-        suffix = "Device"
-        identifier = [
-            # "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:psis:REPC_IN150016UK05"
-            "https://fhir.nhs.uk/Id/nhsServiceInteractionId|urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
-        ]
+    suffix = "Endpoint" if endpoint else "Device"
+    identifier = []
+    if interaction_id:
+        identifier.append(f"https://fhir.nhs.uk/Id/nhsServiceInteractionId|{interaction_id}")
+    if partykey:
+        identifier.append(f"https://fhir.nhs.uk/Id/nhsMhsPartyKey|{partykey}")
 
     url = f"{BASE_PATH}spine-directory/FHIR/R4/{suffix}"
     organisation = f"https://fhir.nhs.uk/Id/ods-organization-code|{ods}"
 
-    api_key = os.environ.get("NHS_API_KEY")
-    # if no API key is set, raise an exception
-    if not api_key:
-        raise Exception("NHS_API_KEY environment variable is not set")
+    nhs_api_key = os.getenv("NHS_API_KEY", "").strip()
+    if not nhs_api_key:
+        raise ValueError("NHS_API_KEY environment variable is not set")
     parameters = {
         "organization": organisation,
         "identifier": identifier,
@@ -245,7 +339,7 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
         "accept": "application/fhir+json",
-        "apikey": api_key,
+        "apikey": nhs_api_key,
     }
     async with httpx.AsyncClient() as client:
         r = await client.get(url, headers=headers, params=parameters)
@@ -257,9 +351,114 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     return trace
 
 
+async def lookup_self_device() -> dict:
+    """Resolve Xhuma's SDS Device independently of the originating care organisation."""
+    ods = os.getenv("XHUMA_ODS_CODE", "").strip().upper()
+    partykey = os.getenv("XHUMA_MHS_PARTY_KEY", "").strip()
+    asid = os.getenv("ORG_ASID", "").strip()
+    if not ods or not asid:
+        raise ValueError("XHUMA_ODS_CODE and ORG_ASID are required for the SDS self lookup")
+
+    trace = await sds_trace(ods, mhsparty=partykey or None)
+    if trace.get("resourceType") != "Bundle":
+        raise ValueError("SDS self lookup did not return a Bundle")
+
+    matches = []
+    for entry in trace.get("entry", []):
+        resource = entry.get("resource", {})
+        if resource.get("resourceType") != "Device":
+            continue
+        identifiers = resource.get("identifier", [])
+        if any(
+            item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID" and item.get("value") == asid
+            for item in identifiers
+        ) and (
+            not partykey
+            or any(
+                item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey" and item.get("value") == partykey
+                for item in identifiers
+            )
+        ):
+            matches.append(entry)
+
+    if len(matches) != 1:
+        raise ValueError("SDS self lookup must return exactly one Device matching the configured Spine identity")
+    return matches[0]
+
+
+async def lookup_self_issuer() -> str:
+    """Return Xhuma's Spine Endpoint address for the GP Connect JWT iss claim."""
+    device_entry = await lookup_self_device()
+    partykeys = {
+        item["value"]
+        for item in device_entry["resource"].get("identifier", [])
+        if item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey" and item.get("value")
+    }
+    if len(partykeys) != 1:
+        raise ValueError("SDS self Device must contain exactly one MHS Party Key")
+    partykey = partykeys.pop()
+    # Consumer routing records need not advertise the provider's getstructuredrecord interaction.
+    trace = await sds_trace(
+        os.environ["XHUMA_ODS_CODE"].strip().upper(), endpoint=True, mhsparty=partykey, interaction_id=None
+    )
+    if trace.get("resourceType") != "Bundle":
+        raise ValueError("SDS self Endpoint lookup did not return a Bundle")
+
+    addresses = set()
+    for entry in trace.get("entry", []):
+        resource = entry.get("resource", {})
+        if resource.get("resourceType") != "Endpoint" or resource.get("status") != "active":
+            continue
+        if not any(
+            item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey" and item.get("value") == partykey
+            for item in resource.get("identifier", [])
+        ):
+            continue
+        address = resource.get("address", "")
+        parsed = urlsplit(address)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError("SDS self Endpoint must contain an absolute HTTP(S) address")
+        addresses.add(address)
+    if len(addresses) != 1:
+        raise ValueError("SDS self lookup must return exactly one consumer Spine Endpoint address")
+    return addresses.pop()
+
+
 if __name__ == "__main__":
-    patient = asyncio.run(lookup_patient(9658218873))
-    pprint.pprint(patient)
+    import xmltodict
+
+    from app.db import make_engine, make_sessionmaker
+
+    xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
+    saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
+
+    async def main():
+        engine = make_engine()
+        try:
+            app = fastapi.FastAPI()
+            app.state.SessionLocal = make_sessionmaker(engine)
+
+            request = fastapi.Request(
+                {
+                    "type": "http",
+                    "app": app,
+                    "headers": [],
+                }
+            )
+
+            issuer = await lookup_self_issuer()
+            print(f"GP Connect issuer: {issuer}")
+
+            return await lookup_patient(
+                9658218873,
+                request=request,
+                saml=saml,
+            )
+        finally:
+            await engine.dispose()
+            await redis_client.close()
+
+    pprint.pprint(asyncio.run(main()))
 
     # print(patient.gender)
     # print(patient.name[0].family)

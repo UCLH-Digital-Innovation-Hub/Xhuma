@@ -52,6 +52,7 @@
       "rollout_ring": 0,
       "github_environment": "rg-xhuma-uclh-prd",
       "github_infra_environment": "rg-xhuma-uclh-prd-infra",
+
       "resource_group": "rg-xhuma-uclh-prd",
       "location": "uksouth",
       "app_service_name": "xhuma-app-prd",

@@ -159,13 +159,14 @@ async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redi
         kwargs = mock_attempt_audit.call_args.kwargs
         assert kwargs["action"] == "pds_lookup"
         assert kwargs["outcome"] == AuditOutcome.fail
-        assert "Connection Refused" in kwargs["detail"]["exception"]
+        assert "Exception" in kwargs["detail"]["exception"]
 
 
 @pytest.mark.asyncio
 @patch("app.audit.build.build_audit_event", new_callable=AsyncMock)
 @patch("app.audit.store.insert_audit_event", new_callable=AsyncMock)
-async def test_audit_failure_exception_hides_sql(mock_insert, mock_build, caplog):
+async def test_audit_failure_exception_hides_sql(mock_insert, mock_build, caplog, monkeypatch):
+    monkeypatch.setenv("ENV", "prod")
     import logging
 
     from app.audit.audit import attempt_audit

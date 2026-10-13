@@ -71,7 +71,7 @@ variable "shared_key_vault_name" {
 
 variable "app_version" {
   type    = string
-  default = "0.9"
+  default = "0.9.2"
 }
 
 variable "device_id" {
@@ -143,6 +143,11 @@ variable "org_code" {
   default     = "RRV00"
 }
 
+variable "xhuma_ods_code" {
+  description = "ODS code identifying the Xhuma/supplier organisation in SDS"
+  type        = string
+}
+
 variable "env" {
   description = "Environment Name"
   type        = string
@@ -208,4 +213,3 @@ variable "dmd_base_url" {
   type        = string
   default     = "https://ontology.nhs.uk/production1/fhir"
 }
-
