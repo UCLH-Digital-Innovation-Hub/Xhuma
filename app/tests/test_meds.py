@@ -16,6 +16,7 @@ from fhirclient.models import list as fhirlist
 from app.ccda.entries import _cda_period_from_repeat, _event_timing_warning
 from app.ccda.entries import immunization_entry as immunization_entry_func
 from app.ccda.entries import medication as medication_entry
+from app.ccda.models.datatypes import CD
 from app.ccda.models.dmd import DMDConcept, VPIProperty
 
 med = medication.Medication(
@@ -517,6 +518,7 @@ async def test_new_structured_detail(mock_dmd_lookup):
         concept_id=212169831,
         valueString="Atenolol 100mg tablets",
         vpi=VPIProperty(unit="mg", value=100),
+        route=CD(code="26643006", codeSystem="2.16.840.1.113883.6.96", displayName="Oral"),
     )
     index_dict = {
         "Medication/C60BB8CF-14D7-46F7-83A7-34007026F45E": new_med,
@@ -524,8 +526,18 @@ async def test_new_structured_detail(mock_dmd_lookup):
         "MedicationRequest/A07283C9-A77A-4850-8092-9AB8486D2865": med_request,
     }
     substance_administration = await medication_entry(new_structured_statement, index_dict)
+    warning = (
+        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
+        "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
+    )
+    assert any(warning in note for note in substance_administration.row[6]["BR"])
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
+    assert substance_administration["routeCode"]["@displayName"] == "Oral"
+    assert any(
+        warning in relationship.get("act", {}).get("text", {}).get("xmlText", "")
+        for relationship in substance_administration["entryRelationship"]
+    )
 
     pprint.pprint(substance_administration)
     assert substance_administration["@classCode"] == "SBADM"

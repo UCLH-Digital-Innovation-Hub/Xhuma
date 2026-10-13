@@ -274,8 +274,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         "Medication",
                         "Instructions",
                         "Misc Notes",
-                        "Prescribing Agency",
-                        "Last Issued Date",
+                        "Prescription Information",
                     ],
                     "parser": parse_medications,
                 },
@@ -508,25 +507,16 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 # print(f"active medications: {len(active)}, past medications: {len(past)}")
                 active_section = await create_section(clone_list(list_obj, "Active Medications", active))
 
-                if active:
-                    # add warning about future medications
-                    if future_meds > 0:
-                        # append paragraph about future medications
-                        existing_text = active_section["section"]["text"]["paragraph"].get("#text", "")
-                        note_text = f"Note: There are {future_meds} medications marked as complete but considered active because of an end date in the future."
-                        active_section["section"]["text"]["paragraph"]["#text"] = (
-                            f"{existing_text}<br />{note_text}" if existing_text else note_text
-                        )
-
-                    # delete the third column for acute medications as we don't have status for active medications and it is always active
-                    for entry in active_section["section"]["text"]["table"]["tbody"]["tr"]:
-                        del entry["td"][2]
-                    # delete the third column from the header too
-                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
-                else:
-                    # active is empty, adjust the header and colspan of the empty row td
-                    del active_section["section"]["text"]["table"]["thead"]["tr"]["th"][2]
-                    active_section["section"]["text"]["table"]["tbody"]["tr"]["td"]["@colspan"] = 7
+                if future_meds > 0:
+                    existing_text = active_section["section"]["text"]["paragraph"].get("#text", "")
+                    note_text = f"Note: There are {future_meds} medications marked as complete but considered active because of an end date in the future."
+                    active_section["section"]["text"]["paragraph"]["#text"] = (
+                        f"{existing_text}<br />{note_text}" if existing_text else note_text
+                    )
+                    for row in active_section["section"]["text"]["table"]["tbody"]["tr"]:
+                        # Completed rows in Active have a future end date; flag the discrepancy.
+                        if row["td"][2] == "completed":
+                            row["td"][1] = {"content": {"@styleCode": "flagData", "#text": row["td"][1]}}
 
                 past_section = await create_section(clone_list(list_obj, "Past Medications", past))
                 bundle_components.append(active_section)

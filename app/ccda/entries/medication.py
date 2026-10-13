@@ -392,7 +392,10 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                             #     route_translation
                             # )
                             # add a warning note about the route being automatically mapped
-                            warning_text = f'Xhuma: Route automatically mapped to {dmd_data.route.displayName} from "Take" via dm+d lookup'
+                            warning_text = (
+                                f'Xhuma: Route inferred as {dmd_data.route.displayName} from dm+d because the GP source value was "Take"; '
+                                "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
+                            )
                             misc_notes.append(warning_text)
 
             except Exception as e:
