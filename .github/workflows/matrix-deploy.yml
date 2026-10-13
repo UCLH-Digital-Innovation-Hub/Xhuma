@@ -151,6 +151,24 @@ jobs:
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
 
+      - name: Preflight NHS API Key
+        env:
+          SHARED_KEY_VAULT_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
+        run: |
+          ENABLED=$(az keyvault secret show \
+            --vault-name "$SHARED_KEY_VAULT_NAME" \
+            --name "nhs-api-key" \
+            --query attributes.enabled \
+            -o tsv 2>/dev/null) || {
+              echo "::error::Required shared Key Vault secret 'nhs-api-key' was not found."
+              exit 1
+            }
+
+          if [ "$ENABLED" != "true" ]; then
+            echo "::error::Required shared Key Vault secret 'nhs-api-key' is disabled."
+            exit 1
+          fi
+
       - name: Existing State Preflight
         if: ${{ matrix.target.require_existing_state == true }}
         env:
@@ -400,6 +418,24 @@ jobs:
         uses: azure/login@v2
         with:
           creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+
+      - name: Preflight NHS API Key
+        env:
+          SHARED_KEY_VAULT_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
+        run: |
+          ENABLED=$(az keyvault secret show \
+            --vault-name "$SHARED_KEY_VAULT_NAME" \
+            --name "nhs-api-key" \
+            --query attributes.enabled \
+            -o tsv 2>/dev/null) || {
+              echo "::error::Required shared Key Vault secret 'nhs-api-key' was not found."
+              exit 1
+            }
+
+          if [ "$ENABLED" != "true" ]; then
+            echo "::error::Required shared Key Vault secret 'nhs-api-key' is disabled."
+            exit 1
+          fi
 
       - name: Download Manifest Artifact
         uses: actions/download-artifact@v4
