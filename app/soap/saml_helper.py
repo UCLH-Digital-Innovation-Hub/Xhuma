@@ -15,17 +15,20 @@ def extract_trusted_saml_assertion(envelope: dict) -> dict:
 
     if not assertions:
         logger.warning("SAML Validation Failed: Missing SAML assertion")
+        print("SAML Validation Failed: Missing SAML assertion", flush=True)
         raise InvalidSAMLContext("Missing SAML assertion")
 
     if isinstance(assertions, list):
         if len(assertions) != 1:
             logger.warning("SAML Validation Failed: Expected exactly one SAML assertion")
+            print("SAML Validation Failed: Expected exactly one SAML assertion", flush=True)
             raise InvalidSAMLContext("Expected exactly one SAML assertion")
         assertion = assertions[0]
     elif isinstance(assertions, dict):
         assertion = assertions
     else:
         logger.warning("SAML Validation Failed: Invalid SAML assertion structure")
+        print("SAML Validation Failed: Invalid SAML assertion structure", flush=True)
         raise InvalidSAMLContext("Invalid SAML assertion structure")
 
     raw_issuer = assertion.get("Issuer")
@@ -34,6 +37,7 @@ def extract_trusted_saml_assertion(envelope: dict) -> dict:
 
     if not isinstance(raw_issuer, str) or not raw_issuer.strip():
         logger.warning("SAML Validation Failed: Missing SAML issuer")
+        print("SAML Validation Failed: Missing SAML issuer", flush=True)
         raise InvalidSAMLContext("Missing SAML issuer")
 
     issuer = raw_issuer.strip()
@@ -46,6 +50,11 @@ def extract_trusted_saml_assertion(envelope: dict) -> dict:
 
     if not trusted or issuer not in trusted:
         logger.warning("SAML Validation Failed: Untrusted SAML issuer")
+        safe_issuer = issuer.replace("\r", "").replace("\n", "")[:512]
+        print(
+            f"SAML Validation Failed: Untrusted SAML issuer received={safe_issuer!r}",
+            flush=True,
+        )
         raise InvalidSAMLContext("Untrusted SAML issuer")
 
     return assertion
@@ -66,4 +75,5 @@ def validate_saml_attributes(saml_attrs):
     if missing:
         missing_str = ", ".join(missing)
         logger.warning(f"SAML Validation Failed: Incomplete SAML security context. Missing fields: {missing_str}")
+        print(f"SAML Validation Failed: Incomplete SAML security context. Missing fields: {missing_str}", flush=True)
         raise InvalidSAMLContext("Incomplete SAML security context")
