@@ -3,14 +3,14 @@ name = "Xhuma"
 version = "0.9.2"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.140",
-    "pyjwt>=2.13.0",
+    "fastapi>=0.143.0",
+    "pyjwt>=2.15.1",
     "httpx",
     "xmltodict",
     "uvicorn[standard]",
     "fhirclient~=3.0.0",
     "redis",
-    "cryptography>=48.0.1",
+    "cryptography>=50.0.2",
     "jwcrypto",
     "pydantic",
     "opentelemetry-api",
@@ -33,7 +33,7 @@ dependencies = [
     "azure-keyvault-secrets",
     "urllib3>=2.8.0",
     "defusedxml>=0.7.1",
-    "tzdata>=2026.4",
+    "tzdata>=2026.5",
 ]
 
 [tool.ruff]
@@ -57,11 +57,11 @@ dev = [
     "pytest-benchmark",
     "pre-commit",
     "coverage",
-    "ruff>=0.15.12",
+    "ruff>=0.17.0",
     "locust",
     "pytest-cov>=7.1.0",
-    "schemathesis>=4.25.2",
-    "hypothesis>=6.165.10",
+    "schemathesis>=4.30.1",
+    "hypothesis>=6.169.0",
     "pytest-sugar>=1.1.1",
 ]
 
