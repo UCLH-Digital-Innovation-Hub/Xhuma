@@ -1,9 +1,32 @@
 import asyncio
 import json
+import logging
 import uuid
 
 from fastapi import HTTPException
 from starlette.websockets import WebSocket
+
+logger = logging.getLogger("relay")
+
+# Server-side allow-list for the diagnostics a relay client attaches to a
+# response (`relay_logs`). Re-sanitise here rather than trust the client, so a
+# buggy/compromised client can't make Xhuma log anything unexpected — only these
+# known, non-PHI metadata fields are ever logged. Defence in depth.
+_RELAY_LOG_FIELDS = (
+    "ts", "level", "event", "request_id", "target_host", "method",
+    "http_status", "duration_ms", "outcome", "reason_code", "client_version",
+)
+
+
+def _log_relay_diagnostics(req_id, entries) -> None:
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        safe = {k: entry[k] for k in _RELAY_LOG_FIELDS if entry.get(k) is not None}
+        level = getattr(logging, str(safe.get("level", "INFO")).upper(), logging.INFO)
+        logger.log(level, "relay diagnostics request_id=%s %s", req_id, safe)
 
 
 class WebSocketHub:
@@ -29,8 +52,15 @@ class WebSocketHub:
 
     def fulfill(self, response: dict) -> None:
         req_id = response.get("request_id")
+        # Pull off the sanitised diagnostics and STRIP them before the response
+        # is handed to the GP Connect path (which only reads status_code + body).
+        relay_logs = response.pop("relay_logs", None)
+        if relay_logs:
+            _log_relay_diagnostics(req_id, relay_logs)
+
         status_code = response.get("status_code", "unknown")
-        print(f"Fulfilling request {req_id} with status {status_code}")
+        logger.info("relay response request_id=%s status=%s", req_id, status_code)
+
         fut = self.pending.pop(req_id, None)
         if fut and not fut.done():
             fut.set_result(response)
