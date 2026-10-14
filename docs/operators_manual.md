@@ -365,6 +365,28 @@ cat /tmp/xhuma-health.json
 ![Final Health State](./assets/final-health-state.png)
 *Figure 9 — Post-deployment liveness verification: the Play App Service returned HTTP 200 with `{"status":"ok"}`. This is a coarse liveness signal, and does not replace deep clinical/readiness testing.*
 
+### 7.8 HSCN Relay Observability & Diagnostics (0.9.3+)
+
+Starting in Xhuma 0.9.3, the WebSocket relay hub consumes and sanitises client-side diagnostics (`relay_logs`) attached by the HSCN relay client:
+
+1. **Telemetry Ingestion**: Diagnostics flow through Xhuma's standard Python logging path (`relay` logger) into Azure Monitor / Application Insights / Log Analytics (`traces` table). No additional Log Analytics workspace or telemetry service is introduced.
+2. **Sanitisation and Stripping**: `relay_logs` are metadata-only. In `fulfill()`, the hub validates entries against a strict server-side allow-list (`ts`, `level`, `event`, `request_id`, `target_host`, `method`, `http_status`, `duration_ms`, `outcome`, `reason_code`, `client_version`). Unknown fields, request/response bodies, HTTP headers, tokens, certificates, and patient identifiers are unconditionally dropped. `relay_logs` is popped from the response before GP Connect processing so downstream clinical handlers only receive standard response data (`status_code`, `headers`, `body`).
+3. **Correlation**: The outer response `request_id` is treated as authoritative; client-supplied inner IDs cannot override outer transaction identity.
+4. **Log Event Format**: Emitted with a stable prefix `relay_diag <json>` for deterministic KQL parsing:
+   ```kql
+   traces
+   | where message startswith "relay_diag "
+   | extend diag = parse_json(substring(message, 11))
+   | project timestamp, request_id = tostring(diag.request_id), outcome = tostring(diag.outcome),
+             http_status = toint(diag.http_status), duration_ms = todouble(diag.duration_ms),
+             target_host = tostring(diag.target_host), reason_code = tostring(diag.reason_code)
+   ```
+5. **Outcome Classification**:
+   - `outcome = "ok"` with HTTP 4xx/5xx: The relay successfully communicated with the upstream GP Connect endpoint; the status code represents the application or clinical response returned by the GP practice system (e.g., patient not found, invalid interaction).
+   - `outcome = "upstream_error"`: Communication between the relay and the upstream NHS Spine / GP system failed (network disconnection, DNS failure, TLS handshake failure, TCP timeout).
+   - `outcome = "blocked"`: The request was dropped or blocked before or at the relay boundary (firewall deny rule, proxy block, or mTLS authorization failure).
+6. **Operational Caveat**: Structured relay diagnostics provide visibility into network traversal and failure modes behind the NHS firewall, but *do not* prove end-to-end clinical acceptance or production readiness. Clinical verification of GP Connect workflows remains necessary.
+
 ---
 
 ## 8. Shared Infrastructure Adoption (Terraform)
