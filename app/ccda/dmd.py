@@ -87,8 +87,9 @@ async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
         logging.info("No cached DMD token found. Fetching new token.")
         token = await get_terminology_token()
 
+    dmd_base_url = os.getenv("DMD_BASE_URL", "https://ontology.nhs.uk/production1/fhir")
     async with httpx.AsyncClient() as client:
-        url = f"https://ontology.nhs.uk/production1/fhir/CodeSystem/$lookup?system=https://dmd.nhs.uk&code={concept_id}"
+        url = f"{dmd_base_url}/CodeSystem/$lookup?system=https://dmd.nhs.uk&code={concept_id}"
         if properties:
             for prop in properties:
                 url += f"&property={prop}"
