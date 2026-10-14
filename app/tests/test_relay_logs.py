@@ -30,7 +30,7 @@ def test_fulfill_strips_relay_logs_before_gpconnect():
                     {
                         "event": "request",
                         "outcome": "ok",
-                        "target_host": "proxy.national.ncrs.nhs.uk",
+                        "target_host": "relay.example.invalid",
                     }
                 ],
             }
@@ -51,7 +51,7 @@ def test_approved_metadata_is_logged(caplog):
         "level": "INFO",
         "event": "request",
         "request_id": "inner-id",
-        "target_host": "proxy.national.ncrs.nhs.uk",
+        "target_host": "relay.example.invalid",
         "method": "POST",
         "http_status": 200,
         "duration_ms": 142.5,
@@ -71,7 +71,7 @@ def test_approved_metadata_is_logged(caplog):
         assert field in parsed
 
     assert parsed["request_id"] == "auth-req-123"
-    assert parsed["target_host"] == "proxy.national.ncrs.nhs.uk"
+    assert parsed["target_host"] == "relay.example.invalid"
     assert parsed["http_status"] == 200
     assert parsed["duration_ms"] == 142.5
     assert parsed["outcome"] == "ok"
@@ -85,7 +85,7 @@ def test_log_diagnostics_drops_unknown_fields(caplog):
                 {
                     "event": "request",
                     "outcome": "ok",
-                    "target_host": "proxy.national.ncrs.nhs.uk",
+                    "target_host": "relay.example.invalid",
                     "body": "PHI-9999999999",  # unexpected -> must be dropped
                     "authorization": "Bearer SECRET-TOKEN",  # unexpected -> must be dropped
                     "headers": {"X-Custom": "val"},  # unexpected -> must be dropped
@@ -94,8 +94,13 @@ def test_log_diagnostics_drops_unknown_fields(caplog):
             ],
         )
 
+    diag_records = [r for r in caplog.records if r.getMessage().startswith("relay_diag ")]
+    assert len(diag_records) == 1
+    raw_json = diag_records[0].getMessage()[len("relay_diag ") :]
+    parsed = json.loads(raw_json)
+    assert parsed["target_host"] == "relay.example.invalid"
+
     text = " ".join(r.getMessage() for r in caplog.records)
-    assert "proxy.national.ncrs.nhs.uk" in text
     assert "PHI-9999999999" not in text
     assert "SECRET-TOKEN" not in text
     assert "X-Custom" not in text
