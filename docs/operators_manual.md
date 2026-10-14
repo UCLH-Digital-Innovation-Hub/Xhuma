@@ -20,8 +20,16 @@
 5. [Key Vault Population](#5-key-vault-population)
 6. [Deployment Orchestration](#6-deployment-orchestration)
 7. [Verification and Health Checks](#7-verification-and-health-checks)
+   - [7.8 GP Connect Commissioning Verification and Domain Readiness](#78-gp-connect-commissioning-verification-and-domain-readiness)
 8. [Shared Infrastructure Adoption (Terraform)](#8-shared-infrastructure-adoption-terraform)
 9. [Quick Operator Commands](#9-quick-operator-commands)
+   - [Azure Runtime Diagnostics and Audit Verification](#azure-runtime-diagnostics-and-audit-verification)
+   - [PDS to SDS to GP Connect Troubleshooting Flow](#pds-to-sds-to-gp-connect-troubleshooting-flow)
+   - [Cache-Aware Diagnosis and Selective Invalidation](#cache-aware-diagnosis-and-selective-invalidation)
+   - [SDS Bundle Resolution and Current Error Semantics](#sds-bundle-resolution-and-current-error-semantics)
+   - [Audit Trail Interpretation Caveats](#audit-trail-interpretation-caveats)
+   - [Log Analytics Telemetry Queries](#log-analytics-telemetry-queries)
+   - [Private PostgreSQL Audit Verification](#private-postgresql-audit-verification)
 10. [Assurance and Evidence Records](#10-assurance-and-evidence-records)
 
 ---
@@ -365,6 +373,49 @@ cat /tmp/xhuma-health.json
 ![Final Health State](./assets/final-health-state.png)
 *Figure 9 — Post-deployment liveness verification: the Play App Service returned HTTP 200 with `{"status":"ok"}`. This is a coarse liveness signal, and does not replace deep clinical/readiness testing.*
 
+### 7.8 GP Connect Commissioning Verification and Domain Readiness
+
+Production commissioning on 14 October 2026 confirmed that application process liveness (`/health`), Key Vault reference resolution, and external TLS handshake success are necessary prerequisites, but do not by themselves establish end-to-end clinical connectivity or standards readiness.
+
+#### 7.8.1 GP Connect Commissioning Diagnosis Checklist
+
+For a healthy, uncached transaction, the operator must verify each discrete link in the end-to-end routing and processing chain:
+
+1. **SOAP request received:** Inbound ITI-38 query reaches `/SOAP/DocumentRegistry_Service` over mTLS (`AppRequests`).
+2. **Fresh/correct PDS result:** Upstream PDS resolves the patient record and general practitioner identifier (`pds_lookup`).
+3. **Expected GP ODS:** The extracted GP practice ODS matches the expected practice under test.
+4. **SDS Device resolution:** Upstream Spine Directory Service query returns a FHIR Device Bundle matching the GP practice ODS (`sds_trace`).
+5. **ASID + MHS Party Key resolution:** Parser extracts valid Spine ASID and `nhsMhsPartyKey` identifiers from the Device resource.
+6. **SDS Endpoint resolution:** Secondary SDS query resolves the supplier's FHIR endpoint URL for `urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1` (`fhir_endpoint_trace`).
+7. **Downstream GP Connect request:** Outbound request is dispatched to the supplier via the designated route (HSCN Relay or direct internet path, recorded in `AppDependencies`).
+8. **Supplier response:** Upstream GP system returns HTTP 200 with the requested FHIR Parameters payload.
+9. **Document conversion and retrieval:** Xhuma converts FHIR resources into a valid CDA/CCD document, caches the document in Redis, and assigns a document identifier.
+10. **Corresponding PostgreSQL audit trail:** All pipeline stages persist structured audit events (`audit_event`) in strict chronological sequence.
+
+> [!IMPORTANT]
+> **Readiness Assertion Boundary:** Successful infrastructure health, PDS connectivity, or SDS connectivity alone does **not** establish end-to-end GP Connect readiness. Operators must verify that a request was successfully fulfilled by the supplier and audited before certifying an environment.
+
+#### 7.8.2 Clinical-Domain Configuration and DAPB4013 Scope
+
+GP Connect query domain inclusion is configuration-driven via target environment variables (`GP_CONNECT_INCLUDE_*`):
+- `GP_CONNECT_INCLUDE_MEDICATION`: Controls inclusion of medication summary and issues.
+- `GP_CONNECT_INCLUDE_ALLERGIES`: Controls inclusion of allergy and adverse reaction records.
+- `GP_CONNECT_INCLUDE_PROBLEMS`: Controls inclusion of active and resolved problem lists.
+- `GP_CONNECT_INCLUDE_INVESTIGATIONS`: Controls inclusion of investigation and test results.
+- `GP_CONNECT_INCLUDE_IMMUNISATIONS`: Controls inclusion of immunisation records.
+
+Operators must confirm that the intended clinical domains are enabled for the specific commissioned use case. For example, in the production configuration baseline (`prd.tfvars`), `GP_CONNECT_INCLUDE_MEDICATION` is enabled (`"true"`), whereas `GP_CONNECT_INCLUDE_ALLERGIES` is disabled (`"false"`).
+
+> [!NOTE]
+> **DAPB4013 Assurance Scope:** Enabling medicines alone does not establish that the complete medicines-and-allergies admission use case has been commissioned. Formal DAPB4013 conformance and clinical safety assurance belong in the dedicated assurance documentation and clinical safety case; standards compliance must never be inferred merely from successful technical connectivity or HTTP 200 responses.
+
+#### 7.8.3 Test-Patient Registration and Upstream Data Caveats
+
+When conducting commissioning tests with synthetic or test patients, operators must take account of upstream registration integrity:
+- Synthetic patients may have intentionally or accidentally inconsistent GP registrations between the supplier system (e.g. EMIS, TPP SystmOne) and NHS PDS.
+- Xhuma deterministically routes according to the GP ODS code returned by the PDS patient lookup. If PDS returns an ODS code different from the supplier's expected test practice, Xhuma will query SDS for the PDS-registered practice. Consequently, the supplier will observe zero incoming traffic.
+- Operators must obtain positive confirmation that the test patient's PDS GP registration matches the intended supplier practice before diagnosing the absence of supplier traffic as a relay, network, or GP Connect defect.
+
 ---
 
 ## 8. Shared Infrastructure Adoption (Terraform)
@@ -436,11 +487,12 @@ Use these safe generic commands to inspect environments. Replace placeholders (e
 
 ### Azure Runtime Diagnostics and Audit Verification
 
-- commands are read-only unless explicitly stated otherwise;
-- never print secret-valued application settings;
-- never print raw audit `detail`, `subject_ref`, patient identifiers, tokens, SOAP payloads or downstream response bodies;
-- prefer metadata/count/presence checks;
-- do not enable SSH, public PostgreSQL access or firewall exceptions merely for routine inspection.
+Operational monitoring and triage across Azure App Service, Application Insights (Log Analytics), and private PostgreSQL must adhere to strict security guardrails:
+- Commands and queries are read-only unless explicitly stated otherwise.
+- Never print or export secret-valued application settings or Key Vault secret contents.
+- Never print raw audit `detail`, `subject_ref`, patient identifiers, access tokens, SOAP payloads, or downstream FHIR response bodies into public channels or ticket trackers.
+- Prefer metadata, presence, and count checks over data dumping.
+- Never enable SSH, public PostgreSQL access, or temporary firewall exceptions merely for routine inspection.
 
 #### Live application logs
 
@@ -450,9 +502,115 @@ az webapp log tail \
   --resource-group <resource-group>
 ```
 
-Warn that operators must avoid capturing/publishing PHI or credentials from logs.
+> [!WARNING]
+> Operators must avoid capturing or publishing protected health information (PHI), bearer tokens, or credentials when streaming application logs.
 
-#### Resolve Log Analytics workspace ID
+#### PDS to SDS to GP Connect Troubleshooting Flow
+
+When diagnosing an ITI-38 (`DocumentRegistry_Service`) transaction, the complete end-to-end routing chain executes as follows:
+
+```
+ITI-38 SOAP Request
+  │
+  ▼
+PDS Patient Lookup (resolves patient record & generalPractitioner ODS)
+  │
+  ▼
+Extract generalPractitioner ODS
+  │
+  ▼
+SDS Device Lookup (queries Spine Directory Service for GP ODS)
+  │
+  ▼
+Extract ASID & MHS Party Key (from Device identifier list)
+  │
+  ▼
+SDS Endpoint Lookup (queries Spine Directory Service for endpoint URL)
+  │
+  ▼
+GP Connect Request (dispatched via HSCN Relay or direct internet route)
+```
+
+**Isolating Failure Boundaries:**
+If a GP system supplier reports that no request reached their practice system, operators must determine how far through this routing chain the transaction actually progressed before assuming a relay, network, or supplier outage:
+1. Did PDS return a valid patient record and practice ODS?
+2. Did SDS return a valid Device Bundle containing matching entries for that ODS?
+3. Were the ASID and MHS Party Key successfully parsed?
+4. Did SDS resolve the FHIR endpoint URL?
+5. Did Xhuma actually dispatch the downstream GP Connect request (creating an `AppDependencies` record)?
+
+If the chain stopped before the downstream GP Connect call, the supplier will naturally see zero incoming traffic. In that scenario, the root cause lies within upstream resolution (e.g. missing SDS Device registration or mismatched PDS GP practice), not downstream supplier or relay connectivity.
+
+> [!CAUTION]
+> **SOAP HTTP 200 False Assurance Caveat:**
+> An HTTP 200 response on `/SOAP/DocumentRegistry_Service` does **not** by itself prove clinical or XDS query success.
+> When downstream GP Connect fails or SDS resolution fails, Xhuma catches the failure, logs `gpconnect failed`, audits `iti38_document_query` as `fail` with `error_code="GP_CONNECT_FAILURE"`, and returns an XDS registry error (`RegistryErrorList` with status `Failure` and `XDSRegistryError`) enclosed within an HTTP 200 SOAP response envelope. Operators must never rely on `AppRequests | where ResultCode == 200` as proof of successful clinical data retrieval.
+
+#### Cache-Aware Diagnosis and Selective Invalidation
+
+Xhuma implements multi-tier caching in Redis. Diagnosing routing discrepancies requires understanding cache boundaries:
+
+- **PDS Patient Caching:**
+  - Patient records returned from PDS are cached in Redis using deterministic pseudonymous keys: `pds:patient:<sha256_digest>`.
+  - The digest is computed as an HMAC-SHA256 of the NHS number using `PDS_CACHE_HMAC_SECRET` (or `API_KEY`). Raw NHS numbers are never used as Redis keys.
+- **SDS Lookups Caching:**
+  - SDS Device and Endpoint lookups are cached separately from patient data under deterministic keys:
+    - Device queries: `pds:sds:<env>:device:<ODS>`
+    - Endpoint queries: `pds:sds:<env>:endpoint:<ODS>:<partykey>`
+- **Cache Hit vs Fresh Response:**
+  - A cache hit (`"Cache hit for PDS patient query"` or `"Cache hit for SDS query..."`) satisfies the request immediately from Redis. The upstream national NHS PDS or SDS API is **not** consulted during that transaction.
+  - Before escalating apparent routing discrepancies to suppliers or NHS England, verify whether the transaction operated on cached data or a fresh response.
+- **Selective Cache Invalidation Procedure:**
+  - If a test patient's registration has changed upstream (e.g. registered at a new GP practice in PDS or test environment), invalidate *only* the specific affected cache entries through an approved operational path (e.g. deleting the specific SDS device key: `DEL pds:sds:<env>:device:<ODS>`, or the patient's HMAC key if known), and repeat the test.
+- **Operational Rules:**
+  - **Never flush production Redis:** Never execute `FLUSHALL` or `FLUSHDB` across the production Redis instance simply to retest one patient. Flushing drops all active sessions, token caches, and CCDA document caches across the entire trust environment.
+  - **Never publish raw identifiers:** Never publish raw NHS numbers, cache secrets, tokens, or cached Patient JSON payloads as operational evidence in incident tickets or Git commits.
+
+#### SDS Bundle Resolution and Current Error Semantics
+
+During PRD commissioning on 14 October 2026, the diagnostic behaviour of an empty SDS Bundle response was confirmed against the live application:
+
+- **Current Implementation Behaviour (`app/gpconnect.py`):**
+  When SDS returns a valid FHIR Bundle response that contains no matching Device for the practice ODS (`"total": 0`, `"entry": []`), the parsing logic attempts:
+  ```python
+  asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
+  ```
+  Because `"entry"` exists as an empty list (`[]`), `asid_trace.get("entry", [{}])` evaluates to `[]`. Indexing `[0]` raises an unhandled `IndexError: list index out of range`. This is caught by the enclosing block and logged as:
+  ```
+  Unable to parse SDS trace response: list index out of range
+  ```
+  The endpoint then returns an HTTP 500 JSONResponse (`{"success": False, "error": "Unable to parse SDS trace response: list index out of range"}`).
+
+- **Operator Interpretation:**
+  This error indicates that the SDS API was reached successfully over the network and returned a valid HTTP 200 response, but the directory contained no usable matching Device resource for the practice ODS queried. It is **not** evidence of a network, firewall, or relay failure between Xhuma and SDS.
+
+- **Hardening Item Status:**
+  This is an operator troubleshooting note to assist triage. It is a known hardening item (replacing vulnerable `[0]` indexing with defensive `entry` length checks) rather than intended steady-state application behaviour.
+
+#### Audit Trail Interpretation Caveats
+
+Operators verifying audit events in PostgreSQL or Log Analytics must be aware of current audit event ordering in `app/gpconnect.py`:
+
+- **Premature `sds_trace = ok` Persistence:**
+  In the current implementation, `sds_trace` is audited with `outcome = AuditOutcome.ok` immediately after the `sds_trace()` network call returns, *before* the returned Bundle is parsed for a usable ASID or MHS Party Key.
+- **Resulting Audit Sequence:**
+  When SDS returns an empty Device Bundle and parsing subsequently fails with `IndexError`, the audit sequence in PostgreSQL legitimately appears as:
+  ```
+  action                outcome  error_code
+  --------------------  -------  --------------------
+  pds_lookup            ok       NULL
+  sds_trace             ok       NULL
+  iti38_document_query  fail     GP_CONNECT_FAILURE
+  ```
+  The downstream action `resolve_asid_partykey` is never reached because the handler exits early on the parsing error.
+- **Interpretation Caveat for Operators:**
+  Until the application is hardened, an audit record of `sds_trace = ok` proves only that the SDS query completed successfully over the network; it does **not** prove successful Device, ASID, or Party Key resolution. Operators must not draw a false assurance conclusion that SDS routing succeeded merely because `sds_trace = ok` is recorded.
+
+#### Log Analytics Telemetry Queries
+
+Use the following read-only Kusto Query Language (KQL) queries in Azure Monitor / Log Analytics to diagnose transactions without exposing clinical payloads.
+
+##### 1. Resolve Log Analytics Workspace ID
 
 ```bash
 LAW_ID=$(az monitor log-analytics workspace show \
@@ -462,7 +620,7 @@ LAW_ID=$(az monitor log-analytics workspace show \
   -o tsv)
 ```
 
-#### Recent SOAP requests
+##### 2. Recent Inbound SOAP Requests
 
 ```bash
 az monitor log-analytics query \
@@ -471,13 +629,138 @@ az monitor log-analytics query \
 AppRequests
 | where TimeGenerated > ago(60m)
 | where Url contains "/SOAP/"
-| project TimeGenerated, Name, ResultCode, Success, DurationMs, OperationId
+| project TimeGenerated, Name, Url, ResultCode, Success, DurationMs, OperationId
 | order by TimeGenerated desc
 ' \
   -o table
 ```
 
-#### Audit persistence telemetry
+*(Note: As documented above, `ResultCode == 200` confirms HTTP transport delivery, not clinical XDS query success).*
+
+##### 3. Recent PDS and SDS Cache Hit/Miss Events
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+AppTraces
+| where TimeGenerated > ago(60m)
+| where Message has_any ("Cache hit for PDS", "Cache miss for PDS", "Cache hit for SDS", "Cache miss for SDS")
+| project TimeGenerated, Message, SeverityLevel, OperationId
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+##### 4. Extract Practice ODS Code from SDS Cache Traces
+
+SDS Device cache keys follow the pattern `pds:sds:<env>:device:<ODS>`. Operators can extract the queried ODS code directly from trace logs:
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+AppTraces
+| where TimeGenerated > ago(60m)
+| where Message has "pds:sds:"
+| extend OdsCode = extract(@"pds:sds:[^:]+:device:([A-Za-z0-9]+)", 1, Message)
+| where isnotempty(OdsCode)
+| project TimeGenerated, OdsCode, Message, OperationId
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+##### 5. Correlate a Single Transaction by OperationId Across Telemetry Tables
+
+To follow a complete transaction across requests, dependencies, traces, and exceptions using its `OperationId`:
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+let opId = "<OPERATION_ID>";
+union
+    (AppRequests | where OperationId == opId | project TimeGenerated, Table="AppRequests", Name=Url, Success, ResultCode, Detail=strcat("Duration: ", tostring(DurationMs), "ms")),
+    (AppDependencies | where OperationId == opId | project TimeGenerated, Table="AppDependencies", Name, Success, ResultCode, Detail=tostring(Properties)),
+    (AppTraces | where OperationId == opId | project TimeGenerated, Table="AppTraces", Name=tostring(SeverityLevel), Success=bool(null), ResultCode="", Detail=Message),
+    (AppExceptions | where OperationId == opId | project TimeGenerated, Table="AppExceptions", Name=OuterType, Success=false, ResultCode="", Detail=OuterMessage)
+| order by TimeGenerated asc
+' \
+  -o table
+```
+
+Or query individual tables for targeted investigation:
+
+```bash
+# 1. AppDependencies: inspect external dependencies and instrumented pipeline stages
+AppDependencies
+| where OperationId == "<OPERATION_ID>"
+| project TimeGenerated, Name, Type, Target, Success, ResultCode, DurationMs, Properties
+| order by TimeGenerated asc
+
+# 2. AppTraces: inspect non-PHI diagnostic log lines
+AppTraces
+| where OperationId == "<OPERATION_ID>"
+| project TimeGenerated, Message, SeverityLevel
+| order by TimeGenerated asc
+
+# 3. AppExceptions: inspect recorded application failures
+AppExceptions
+| where OperationId == "<OPERATION_ID>"
+| project TimeGenerated, OuterType, OuterMessage, ProblemId
+```
+
+##### 6. Identify GP Connect Failures and Empty SDS Errors
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+AppTraces
+| where TimeGenerated > ago(60m)
+| where Message has "gpconnect failed" or Message has "Unable to parse SDS trace"
+| project TimeGenerated, Message, SeverityLevel, OperationId
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+Check recorded exceptions in `AppExceptions`:
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+AppExceptions
+| where TimeGenerated > ago(60m)
+| where OuterMessage has "list index out of range" or OuterMessage has "SDS trace"
+| project TimeGenerated, OuterType, OuterMessage, ProblemId, OperationId
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+##### 7. Check Downstream GP Connect Dependency Creation
+
+To verify whether Xhuma ever initiated an outbound call to the GP Connect supplier or relay:
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+AppDependencies
+| where OperationId == "<OPERATION_ID>"
+| where Name == "xhuma.gpconnect.http" or Target has "Patient/$gpc.getstructuredrecord" or Target has "proxy.national.ncrs.nhs.uk"
+| project TimeGenerated, Name, Target, Success, ResultCode, DurationMs
+' \
+  -o table
+```
+
+> [!TIP]
+> If SDS Device resolution fails or PDS lookup fails, `xhuma.gpconnect.http` is never dispatched. If this query returns zero rows for an `<OPERATION_ID>`, the transaction failed prior to downstream dispatch.
+
+##### 8. Audit Persistence Telemetry
 
 ```bash
 az monitor log-analytics query \
@@ -494,7 +777,7 @@ AppDependencies
 
 `Success=True`, `ResultCode=0`, and `stage.outcome=ok` demonstrate successful completion of the instrumented audit-persistence operation. They do not by themselves validate every stored row field.
 
-#### Pipeline trace
+##### 9. Pipeline Stage Duration and Outcome
 
 ```bash
 az monitor log-analytics query \
@@ -509,11 +792,41 @@ AppDependencies
   -o table
 ```
 
-`OperationId` can be used to correlate PDS, SDS, GP Connect and audit persistence without exposing clinical payloads.
+#### Private PostgreSQL Audit Verification
 
-#### Private PostgreSQL inspection
+PostgreSQL Flexible Server in Xhuma is deployed private-only (`public_network_access_enabled = "Disabled"`) inside an isolated Azure Virtual Network. Operators must never temporarily enable public access or add firewall exceptions merely to inspect audit records.
 
-Database-level assurance checks must be performed through an approved restricted administration path using read-only queries. Connection details and access procedures are intentionally not documented publicly.
+##### Approved Diagnostic Container Pattern
+
+To verify audit persistence directly against the database during commissioning or incident triage:
+
+1. **Authentication:** Authenticate using the existing scoped Azure deployment or administration identity (`az login` with appropriate RBAC).
+2. **Diagnostic Container:** Run a short-lived diagnostic container within an already-approved VNet/subnet capable of reaching the private PostgreSQL Flexible Server (e.g. an Azure Container Instance or App Service diagnostic task attached to the database integration subnet).
+3. **Client Image:** Use a standard, trusted PostgreSQL client image (e.g. `postgres:15-alpine`).
+4. **Read-Only Queries:** Execute `SELECT`-only queries. Never execute write or mutation commands during diagnosis.
+5. **Correlation by Trace ID:** Query records by `trace_id` or `OperationId` rather than patient identifier. Never search or filter by raw NHS numbers.
+6. **Scoped Field Retrieval:** Retrieve only the specific columns needed for diagnosis.
+7. **Immediate Teardown:** Terminate and destroy the temporary container immediately upon completion of the verification session.
+
+##### Generic Audit Verification SQL Query
+
+```sql
+SELECT
+    event_time,
+    sequence,
+    action,
+    outcome,
+    error_code,
+    request_id,
+    trace_id,
+    detail
+FROM audit_event
+WHERE trace_id = '<TRACE_ID>'
+ORDER BY sequence ASC;
+```
+
+> [!WARNING]
+> **Data Protection Rule:** Do not document real database credentials, service-principal credentials, subscription IDs, patient identifiers, or actual production trace IDs in public runbooks or incident tickets.
 
 ---
 
