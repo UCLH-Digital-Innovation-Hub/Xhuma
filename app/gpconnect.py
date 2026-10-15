@@ -232,7 +232,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"SDS trace failed: {e}"
+        msg = f"SDS Device resolution failed for ODS code {gp_ods}"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -240,10 +240,10 @@ async def _fetch_gpconnect_record(
             action="sds_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"stage": "sds_device", "exception_type": type(e).__name__},
         )
         record_application_failure(e)
-        logging.exception(msg)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -268,7 +268,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"SDS endpoint trace failed: {e}"
+        msg = f"SDS Endpoint resolution failed for ODS code {gp_ods}"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -276,10 +276,10 @@ async def _fetch_gpconnect_record(
             action="fhir_endpoint_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"stage": "sds_endpoint", "exception_type": type(e).__name__},
         )
         record_application_failure(e)
-        logging.exception(msg)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
