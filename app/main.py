@@ -637,8 +637,11 @@ if diag_compare_enabled():
         if bundle_text is None and xml_text is None:
             return _diag_message(
                 "Diagnostics expired or not captured",
-                "No diagnostic pair for doc_uuid <code>" + _html.escape(resolved) + "</code>. They expire "
-                + str(diag_ttl_minutes()) + " min after capture and are only written when the diagnostics "
+                "No diagnostic pair for doc_uuid <code>"
+                + _html.escape(resolved)
+                + "</code>. They expire "
+                + str(diag_ttl_minutes())
+                + " min after capture and are only written when the diagnostics "
                 "gate is enabled. Re-fetch the patient and retry.",
             )
 
@@ -657,7 +660,9 @@ if diag_compare_enabled():
             "<h2>FHIR &rarr; C-CDA comparison</h2>"
             "<p class='muted'>doc_uuid <code>" + _html.escape(resolved) + "</code></p>"
             "<nav><a href='/_diag/compare'>&larr; new</a> &nbsp;|&nbsp; View: "
-            + navlink("split", "Side-by-side") + navlink("tabs", "Two pages") + navlink("diff", "Diff")
+            + navlink("split", "Side-by-side")
+            + navlink("tabs", "Two pages")
+            + navlink("diff", "Diff")
             + "</nav>"
         )
 
@@ -692,6 +697,10 @@ if diag_compare_enabled():
             )
 
         return HTMLResponse(
-            "<html><head><title>Xhuma diagnostics: FHIR vs XML</title>" + _DIAG_STYLE
-            + "</head><body>" + header + body + "</body></html>"
+            "<html><head><title>Xhuma diagnostics: FHIR vs XML</title>"
+            + _DIAG_STYLE
+            + "</head><body>"
+            + header
+            + body
+            + "</body></html>"
         )
