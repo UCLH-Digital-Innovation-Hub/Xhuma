@@ -900,3 +900,74 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
         # Downstream request never attempted
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_fails", [False, True])
+async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_issuer, audit_fails):
+    from app.audit.audit import AuditFailureException
+    from app.audit.models import AuditOutcome
+
+    upstream_secret = "SECRET_UPSTREAM_BODY"
+    upstream_error = KeyError(f"Corrupt upstream PDS payload: {upstream_secret}")
+
+    class SensitivePds(dict):
+        def __getitem__(self, key):
+            if key == "generalPractitioner":
+                raise upstream_error
+            return super().__getitem__(key)
+
+    fake_pds = SensitivePds({"meta": {"security": [{"code": "U"}]}})
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=fake_pds),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure") as mock_record_failure,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        if audit_fails:
+
+            async def fail_resolve_audit(**kwargs):
+                if kwargs["action"] == "resolve_gp_ods" and kwargs["outcome"] == AuditOutcome.fail:
+                    raise AuditFailureException("Audit unavailable")
+
+            audit.side_effect = fail_resolve_audit
+            with pytest.raises(AuditFailureException):
+                await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+            mock_record_failure.assert_not_called()
+        else:
+            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+            assert response.status_code == 500
+            body = json.loads(response.body)
+            assert body == {
+                "success": False,
+                "error": "Unable to read GP ODS from PDS response",
+            }
+            assert upstream_secret not in response.body.decode()
+
+            mock_record_failure.assert_called_once()
+            recorded_exception = mock_record_failure.call_args[0][0]
+            assert isinstance(recorded_exception, RuntimeError)
+            assert upstream_secret not in str(recorded_exception)
+            assert upstream_secret not in repr(recorded_exception)
+            assert str(recorded_exception) == "Unable to read GP ODS from PDS response"
+            assert recorded_exception is not upstream_error
+
+        # Audit verification
+        resolve_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_gp_ods"]
+        assert len(resolve_audits) == 1
+        assert resolve_audits[0]["outcome"] == AuditOutcome.fail
+        assert resolve_audits[0]["error_code"] == "502"
+        assert resolve_audits[0]["detail"] == {
+            "stage": "resolve_gp_ods",
+            "exception_type": "KeyError",
+        }
+        for arg in resolve_audits[0].values():
+            assert upstream_secret not in str(arg)
+
+        # Downstream SDS never attempted
+        sds.assert_not_awaited()
+        mock_self_issuer.assert_not_awaited()
+        client.assert_not_called()
