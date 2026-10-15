@@ -1,10 +1,16 @@
 import json
+import logging
+from datetime import timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import jwt
 import pytest
 from httpx import Response
 
+from app.audit.audit import AuditFailureException
+from app.audit.models import AuditOutcome
 from app.gpconnect import _fetch_gpconnect_record, gpconnect
 from app.tests.configure_tests import get_nhs_ids, load_bundle, load_pds
 from app.tests.fixtures.saml_attributes import saml
@@ -114,6 +120,12 @@ async def test_gpconnect_with_nhs_data(
     assert sent_headers["Ssp-From"] == "123"
     mock_convert_bundle.assert_called_once()
     mock_base64_xml.assert_called_once()
+    document_key = f"document:{body['document_id']}"
+    pipeline.setex.assert_called_once_with(str(nhsno), timedelta(hours=4), body["document_id"])
+    pipeline.hset.assert_called_once_with(
+        document_key, mapping={"nhs_number": str(nhsno), "content": "mocked_base64_doc"}
+    )
+    pipeline.expire.assert_called_once_with(document_key, timedelta(hours=4))
     mock_redis_pipeline.return_value.execute.assert_awaited_once()
     mock_redis_pipeline.return_value.__aexit__.assert_awaited_once()
 
@@ -121,8 +133,6 @@ async def test_gpconnect_with_nhs_data(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audit_fails", [False, True])
 async def test_self_lookup_failure_is_audited_without_downstream_request(mock_self_issuer, audit_fails):
-    from app.audit.audit import AuditFailureException
-    from app.audit.models import AuditOutcome
 
     mock_self_issuer.side_effect = ValueError("SYNTHETIC_SENSITIVE_LOOKUP_ERROR")
     with (
@@ -295,7 +305,6 @@ async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path,
 async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
     mock_self_issuer, endpoint_trace, exception_type
 ):
-    from app.audit.models import AuditOutcome
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
@@ -355,8 +364,6 @@ async def test_endpoint_trace_uses_first_entry_address():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audit_fails", [False, True])
 async def test_endpoint_lookup_failure_is_audited_without_downstream_request(mock_self_issuer, audit_fails):
-    from app.audit.audit import AuditFailureException
-    from app.audit.models import AuditOutcome
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
@@ -406,7 +413,6 @@ async def test_gpconnect_readerror_audits_failure(
     mock_record_application_failure,
     mock_attempt_audit,
 ):
-    import httpx
 
     fake_pds = load_pds(9690937278)
     mock_lookup_patient.return_value = fake_pds
@@ -440,10 +446,6 @@ async def test_gpconnect_readerror_audits_failure(
 )
 @pytest.mark.parametrize("audit_fails", [False, True])
 async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
-    from pathlib import Path
-
-    from app.audit.audit import AuditFailureException
-    from app.audit.models import AuditOutcome
 
     if payload == "bob":
         payload = Path("app/tests/fixtures/bundles/investigations/9465699896.json").read_text()
@@ -497,7 +499,6 @@ async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
 async def test_gpconnect_non200_data_minimisation(
     mock_lookup_patient, mock_sds_trace, mock_create_nhs_ssl_context, mock_async_client, mock_attempt_audit
 ):
-    from app.audit.models import AuditOutcome
 
     fake_pds = load_pds(9690937278)
     mock_lookup_patient.return_value = fake_pds
@@ -536,7 +537,6 @@ async def test_gpconnect_non200_data_minimisation(
 async def test_gpconnect_transport_exception_data_minimisation(
     mock_lookup_patient, mock_sds_trace, mock_create_nhs_ssl_context, mock_async_client, mock_attempt_audit
 ):
-    from app.audit.models import AuditOutcome
 
     fake_pds = load_pds(9690937278)
     mock_lookup_patient.return_value = fake_pds
@@ -582,7 +582,6 @@ async def test_validate_fhir_bundle_data_minimisation(
     mock_record_application_failure,
     mock_attempt_audit,
 ):
-    from app.audit.models import AuditOutcome
 
     fake_pds = load_pds(9690937278)
     mock_lookup_patient.return_value = fake_pds
@@ -617,8 +616,6 @@ async def test_validate_fhir_bundle_data_minimisation(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audit_fails", [False, True])
 async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issuer, audit_fails):
-    from app.audit.audit import AuditFailureException
-    from app.audit.models import AuditOutcome
 
     upstream_secret = "SECRET_UPSTREAM_BODY"
     upstream_error = RuntimeError(f"Upstream HTTP 500: {upstream_secret}")
@@ -683,8 +680,6 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audit_fails", [False, True])
 async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_issuer, audit_fails):
-    from app.audit.audit import AuditFailureException
-    from app.audit.models import AuditOutcome
 
     upstream_secret = "SECRET_UPSTREAM_BODY"
     upstream_error = RuntimeError(f"Upstream HTTP 500: {upstream_secret}")
@@ -749,8 +744,6 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audit_fails", [False, True])
 async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_issuer, audit_fails):
-    from app.audit.audit import AuditFailureException
-    from app.audit.models import AuditOutcome
 
     upstream_secret = "SECRET_UPSTREAM_BODY"
     upstream_error = KeyError(f"Corrupt upstream PDS payload: {upstream_secret}")
@@ -783,7 +776,7 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
             mock_record_failure.assert_not_called()
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-            assert response.status_code == 500
+            assert response.status_code == 502
             body = json.loads(response.body)
             assert body == {
                 "success": False,
@@ -820,8 +813,6 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audit_fails", [False, True])
 async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(mock_self_issuer, audit_fails):
-    from app.audit.audit import AuditFailureException
-    from app.audit.models import AuditOutcome
 
     upstream_secret = "SECRET_UPSTREAM_BODY"
     safe_message = "Unable to find ASID or nhsMhsPartyKey for ODS code E82665"
@@ -926,7 +917,6 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
 )
 async def test_raw_nhs_number_absent_from_application_logging(mock_self_issuer, failure_stage, sds_mock, caplog):
     """Raw NHS numbers must never appear in application logs during failure paths."""
-    import logging
 
     pds = load_pds(9690937278)
     if failure_stage == "resolve_gp_ods":

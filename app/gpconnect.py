@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import ssl
+import time
 from datetime import timedelta
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ import xmltodict
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
+from opentelemetry.propagate import inject
 
 from .audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
 from .audit.models import AuditOutcome, SAMLAttributes
@@ -135,6 +137,17 @@ async def _fetch_gpconnect_record(
             pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
     except AuditFailureException:
         raise
+    except HTTPException as e:
+        if e.status_code == 404:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "error": "Patient not found on PDS",
+                    "xds_error_code": "XDSUnknownPatientId",
+                },
+            )
+        return JSONResponse(status_code=502, content={"success": False, "error": "PDS lookup upstream failure"})
     except Exception as e:
         msg = f"PDS lookup failed: {e}"
         record_application_failure(e)
@@ -188,7 +201,7 @@ async def _fetch_gpconnect_record(
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
     try:
         with measure("sds.trace"):
@@ -331,12 +344,7 @@ async def _fetch_gpconnect_record(
     }
 
     # Inject OpenTelemetry traceparent context into headers for Relay propagation
-    try:
-        from opentelemetry.propagate import inject
-
-        inject(headers)
-    except ImportError:
-        pass
+    inject(headers)
     body = {
         "resourceType": "Parameters",
         "parameter": [
@@ -565,8 +573,6 @@ async def _fetch_gpconnect_record(
             except Exception:
                 pass
 
-    import time
-
     start_time = time.perf_counter()
     try:
         with measure("ccda.convert", span_name="FHIR2CCDA.convert_bundle", resource_count=len(fhir_bundle.entry or [])):
@@ -614,8 +620,9 @@ async def _fetch_gpconnect_record(
     # Use a pipeline to write all keys atomically with a consistent TTL
     async with redis_client.pipeline() as pipe:
         pipe.setex(str(nhsno), cache_ttl, doc_uuid)
-        pipe.setex(doc_uuid, cache_ttl, xop)
-        pipe.setex(f"doc_patient:{doc_uuid}", cache_ttl, str(nhsno))
+        document_key = f"document:{doc_uuid}"
+        pipe.hset(document_key, mapping={"nhs_number": str(nhsno), "content": xop})
+        pipe.expire(document_key, cache_ttl)
         with measure("ccda.cache.write", document_bytes=len(xop)):
             await pipe.execute()
 
@@ -628,8 +635,6 @@ async def _fetch_gpconnect_record(
 
 
 if __name__ == "__main__":
-    import asyncio
-
     xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
     saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 

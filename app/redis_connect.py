@@ -112,6 +112,11 @@ class RedisClient:
         return await self._client.get(key)
 
     @retry_on_connection_error()
+    async def hmget(self, key: str, *fields: str) -> list[bytes | None]:
+        """Get hash fields together, preserving field order and missing values."""
+        return await self._client.hmget(key, fields)
+
+    @retry_on_connection_error()
     async def setex(self, key: str, time: int | timedelta, value: str | bytes) -> bool:
         """Set key-value pair with expiry time."""
         return bool(await self._client.setex(key, time, value))
