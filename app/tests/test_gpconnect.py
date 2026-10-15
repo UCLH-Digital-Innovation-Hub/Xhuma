@@ -222,6 +222,243 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "device_trace",
+    [
+        pytest.param(None, id="null-response"),
+        pytest.param({}, id="missing-entry"),
+        pytest.param({"entry": None}, id="null-entry"),
+        pytest.param({"entry": []}, id="empty-entry"),
+        pytest.param({"entry": [None]}, id="null-first-entry"),
+        pytest.param({"entry": [{}]}, id="missing-resource"),
+        pytest.param({"entry": [{"resource": None}]}, id="null-resource"),
+        pytest.param({"entry": [{"resource": {}}]}, id="missing-identifier"),
+        pytest.param({"entry": [{"resource": {"identifier": None}}]}, id="null-identifier"),
+        pytest.param({"entry": [{"resource": {"identifier": []}}]}, id="empty-identifier"),
+        pytest.param(
+            {
+                "entry": [
+                    {
+                        "resource": {
+                            "identifier": [
+                                {
+                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
+                                    "value": "200000000000",
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            id="missing-mhspartykey",
+        ),
+        pytest.param(
+            {
+                "entry": [
+                    {
+                        "resource": {
+                            "identifier": [
+                                {
+                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                                    "value": "FAKE-PARTY-KEY",
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            id="missing-asid",
+        ),
+        pytest.param(
+            {
+                "entry": [
+                    {
+                        "resource": {
+                            "identifier": [
+                                {
+                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
+                                    "value": "",
+                                },
+                                {
+                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                                    "value": "FAKE-PARTY-KEY",
+                                },
+                            ]
+                        }
+                    }
+                ]
+            },
+            id="empty-asid",
+        ),
+        pytest.param(
+            {
+                "entry": [
+                    {
+                        "resource": {
+                            "identifier": [
+                                {
+                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
+                                    "value": "200000000000",
+                                },
+                                {
+                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                                    "value": " \t\n",
+                                },
+                            ]
+                        }
+                    }
+                ]
+            },
+            id="blank-mhspartykey",
+        ),
+        pytest.param(
+            {
+                "entry": [
+                    {
+                        "resource": {
+                            "identifier": [
+                                {
+                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
+                                    "value": 12345,
+                                },
+                                {
+                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                                    "value": "FAKE-PARTY-KEY",
+                                },
+                            ]
+                        }
+                    }
+                ]
+            },
+            id="nonstring-asid",
+        ),
+    ],
+)
+async def test_invalid_device_trace_is_audited_without_endpoint_lookup(mock_self_issuer, device_trace):
+    from app.audit.models import AuditOutcome
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [device_trace, fake_sds_endpoint_trace()]
+
+        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+        assert response.status_code == 502
+        body = json.loads(response.body)
+        assert body["success"] is False
+        assert "SDS trace failed" in body["error"]
+        assert "list index out of range" not in body["error"]
+        assert "IndexError" not in body["error"]
+        assert "Unable to resolve GP Connect Device for ODS code" in body["error"]
+
+        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
+        assert len(device_audits) == 1
+        assert device_audits[0]["outcome"] == AuditOutcome.fail
+        assert device_audits[0]["error_code"] == "502"
+
+        # Prove no sds_trace success audit was emitted
+        assert not any(
+            call.kwargs["action"] == "sds_trace" and call.kwargs["outcome"] == AuditOutcome.ok
+            for call in audit.await_args_list
+        )
+
+        # Prove Endpoint lookup was never attempted (sds called only once)
+        assert sds.call_count == 1
+        assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
+
+        mock_self_issuer.assert_not_awaited()
+        client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_fails", [False, True])
+async def test_device_lookup_failure_is_audited_without_endpoint_lookup(mock_self_issuer, audit_fails):
+    from app.audit.audit import AuditFailureException
+    from app.audit.models import AuditOutcome
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [RuntimeError("SDS unavailable")]
+        if audit_fails:
+
+            async def fail_device_audit(**kwargs):
+                if kwargs["action"] == "sds_trace" and kwargs["outcome"] == AuditOutcome.fail:
+                    raise AuditFailureException("Audit unavailable")
+
+            audit.side_effect = fail_device_audit
+            with pytest.raises(AuditFailureException):
+                await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+        else:
+            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+            assert response.status_code == 502
+            assert json.loads(response.body)["error"] == "SDS trace failed: SDS unavailable"
+
+        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
+        assert len(device_audits) == 1
+        assert device_audits[0]["outcome"] == AuditOutcome.fail
+        assert device_audits[0]["error_code"] == "502"
+        assert sds.call_count == 1
+        mock_self_issuer.assert_not_awaited()
+        client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_valid_device_trace_resolves_and_proceeds_to_endpoint(mock_self_issuer):
+    from app.audit.models import AuditOutcome
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.create_nhs_ssl_context"),
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+
+        mock_response = MagicMock(status_code=200, text='{"resourceType": "Bundle", "type": "searchset", "entry": []}')
+        mock_client_instance = AsyncMock()
+        mock_client_instance.post.return_value = mock_response
+        client.return_value.__aenter__.return_value = mock_client_instance
+
+        with (
+            patch("app.gpconnect.convert_bundle", new_callable=AsyncMock) as mock_convert,
+            patch("app.gpconnect.base64_xml") as mock_b64,
+            patch("app.gpconnect.redis_client.pipeline") as mock_pipeline,
+        ):
+            mock_convert.return_value = {"ClinicalDocument": {}}
+            mock_b64.return_value = "b64"
+            mock_pipe = mock_pipeline.return_value
+            mock_pipe.__aenter__.return_value = mock_pipe
+            mock_pipe.execute = AsyncMock()
+
+            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+            assert response.status_code == 200
+            assert json.loads(response.body)["success"] is True
+
+        # Exactly one sds_trace success audit
+        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
+        assert len(device_audits) == 1
+        assert device_audits[0]["outcome"] == AuditOutcome.ok
+
+        # Both Device and Endpoint lookups executed
+        assert sds.call_count == 2
+        endpoint_audits = [
+            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
+        ]
+        assert len(endpoint_audits) == 1
+        assert endpoint_audits[0]["outcome"] == AuditOutcome.ok
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "endpoint_trace",
     [
         pytest.param(None, id="null-response"),
