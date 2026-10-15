@@ -242,7 +242,8 @@ async def _fetch_gpconnect_record(
             error_code="502",
             detail={"stage": "sds_device", "exception_type": type(e).__name__},
         )
-        record_application_failure(e)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
         logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -278,7 +279,8 @@ async def _fetch_gpconnect_record(
             error_code="502",
             detail={"stage": "sds_endpoint", "exception_type": type(e).__name__},
         )
-        record_application_failure(e)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
         logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
