@@ -30,6 +30,26 @@ from .telemetry import measure
 
 router = APIRouter()
 
+# Safe diagnostic reason codes for PDS/SDS resolution
+PDS_GP_ODS_INVALID = "PDS_GP_ODS_INVALID"
+
+SDS_DEVICE_UPSTREAM_FAILURE = "SDS_DEVICE_UPSTREAM_FAILURE"
+SDS_DEVICE_EMPTY_BUNDLE = "SDS_DEVICE_EMPTY_BUNDLE"
+SDS_DEVICE_INVALID_RESOURCE = "SDS_DEVICE_INVALID_RESOURCE"
+
+SDS_IDENTITY_INVALID = "SDS_IDENTITY_INVALID"
+SDS_ASID_MISSING = "SDS_ASID_MISSING"
+SDS_PARTYKEY_MISSING = "SDS_PARTYKEY_MISSING"
+
+SDS_ENDPOINT_UPSTREAM_FAILURE = "SDS_ENDPOINT_UPSTREAM_FAILURE"
+SDS_ENDPOINT_EMPTY_BUNDLE = "SDS_ENDPOINT_EMPTY_BUNDLE"
+SDS_ENDPOINT_INVALID_RESOURCE = "SDS_ENDPOINT_INVALID_RESOURCE"
+SDS_ENDPOINT_ADDRESS_MISSING = "SDS_ENDPOINT_ADDRESS_MISSING"
+
+# Backward compatibility aliases
+SDS_DEVICE_ASID_MISSING = SDS_ASID_MISSING
+SDS_DEVICE_PARTYKEY_MISSING = SDS_PARTYKEY_MISSING
+
 # client = httpx.AsyncClient(
 #     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
 #     verify="keys/nhs_certs/nhs_bundle.pem",
@@ -142,12 +162,28 @@ async def _fetch_gpconnect_record(
         return JSONResponse(status_code=403, content={"success": False, "error": msg})
 
     # 4) Resolve ODS → ASID + PartyKey
+    gp_ods = None
+    reason = None
+    exc_type = None
     try:
-        gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
+        gp_ods_raw = pds_search["generalPractitioner"][0]["identifier"]["value"]
+        if not isinstance(gp_ods_raw, str) or not gp_ods_raw.strip():
+            reason = PDS_GP_ODS_INVALID
+            raise ValueError(reason)
+        gp_ods = gp_ods_raw.strip()
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = "Unable to read GP ODS from PDS response"
+        reason = PDS_GP_ODS_INVALID
+        if type(e) is not ValueError or str(e) != PDS_GP_ODS_INVALID:
+            exc_type = type(e).__name__
+        msg = f"Unable to read GP ODS from PDS response [{reason}]"
+        detail = {
+            "stage": "resolve_gp_ods",
+            "reason": reason,
+        }
+        if exc_type:
+            detail["exception_type"] = exc_type
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -155,14 +191,11 @@ async def _fetch_gpconnect_record(
             action="resolve_gp_ods",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={
-                "stage": "resolve_gp_ods",
-                "exception_type": type(e).__name__,
-            },
+            detail=detail,
         )
         safe_error = RuntimeError(msg)
         record_application_failure(safe_error)
-        logging.error(f"{msg} (exception_type: {type(e).__name__})")
+        logging.error(f"{reason} | NHS={nhsno}")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -171,38 +204,33 @@ async def _fetch_gpconnect_record(
             content={"success": False, "error": msg},
         )
 
-    # 4) Resolve ODS → ASID + PartyKey
-    asid = None
-    nhsmhsparty = None
+    # 4) SDS Device lookup
+    asid_trace = None
+    reason = None
+    exc_type = None
     try:
         with measure("sds.device"):
-            asid_trace = await sds_trace(gp_ods)
-            # A successful SDS HTTP response is not sufficient: an empty Bundle means
-            # no GP Connect Device was resolved. Validate the Device identity before
-            # recording sds_trace as successful.
+            try:
+                asid_trace = await sds_trace(gp_ods)
+            except Exception as e:
+                reason = SDS_DEVICE_UPSTREAM_FAILURE
+                exc_type = type(e).__name__
+                raise
+
             entries = asid_trace.get("entry") if isinstance(asid_trace, dict) else None
-            if not isinstance(entries, list) or len(entries) == 0:
-                raise ValueError(f"Unable to resolve GP Connect Device for ODS code {gp_ods}")
+            if entries is None or not isinstance(entries, list):
+                reason = SDS_DEVICE_INVALID_RESOURCE
+                raise ValueError(reason)
+
+            if len(entries) == 0:
+                reason = SDS_DEVICE_EMPTY_BUNDLE
+                raise ValueError(reason)
 
             first_entry = entries[0]
             resource = first_entry.get("resource") if isinstance(first_entry, dict) else None
-            identifiers = resource.get("identifier") if isinstance(resource, dict) else None
-            if not isinstance(identifiers, list):
-                raise ValueError(f"Unable to resolve GP Connect Device for ODS code {gp_ods}")
-
-            for item in identifiers:
-                if isinstance(item, dict):
-                    if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
-                        val = item.get("value")
-                        if isinstance(val, str) and val.strip():
-                            asid = val.strip()
-                    elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
-                        val = item.get("value")
-                        if isinstance(val, str) and val.strip():
-                            nhsmhsparty = val.strip()
-
-            if not asid or not nhsmhsparty:
-                raise ValueError(f"Unable to resolve GP Connect Device for ODS code {gp_ods}")
+            if not isinstance(resource, dict):
+                reason = SDS_DEVICE_INVALID_RESOURCE
+                raise ValueError(reason)
 
         await attempt_audit(
             request=request,
@@ -214,7 +242,17 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"SDS Device resolution failed for ODS code {gp_ods}"
+        if not exc_type and type(e) is not ValueError:
+            exc_type = type(e).__name__
+        if not reason:
+            reason = SDS_DEVICE_UPSTREAM_FAILURE if exc_type else SDS_DEVICE_INVALID_RESOURCE
+        msg = f"SDS Device resolution failed [{reason}]"
+        detail = {
+            "stage": "sds_device",
+            "reason": reason,
+        }
+        if exc_type:
+            detail["exception_type"] = exc_type
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -222,25 +260,132 @@ async def _fetch_gpconnect_record(
             action="sds_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"stage": "sds_device", "exception_type": type(e).__name__},
+            detail=detail,
         )
         safe_error = RuntimeError(msg)
         record_application_failure(safe_error)
-        logging.error(f"{msg} (exception_type: {type(e).__name__})")
+        logging.error(f"{reason} | ODS={gp_ods}")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    # 5) Endpoint lookup
+    # 5) Resolve ASID & MHS Party Key from Device resource
+    asid = None
+    nhsmhsparty = None
+    reason = None
+    exc_type = None
+    try:
+        entries = asid_trace.get("entry") if isinstance(asid_trace, dict) else None
+        first_entry = entries[0] if isinstance(entries, list) and len(entries) > 0 else {}
+        resource = first_entry.get("resource") if isinstance(first_entry, dict) else {}
+        identifiers = resource.get("identifier") if isinstance(resource, dict) else None
+        if not isinstance(identifiers, list) or len(identifiers) == 0:
+            reason = SDS_IDENTITY_INVALID
+            raise ValueError(reason)
+
+        for item in identifiers:
+            if not isinstance(item, dict):
+                reason = SDS_IDENTITY_INVALID
+                raise ValueError(reason)
+            system = item.get("system")
+            val = item.get("value")
+            if system == "https://fhir.nhs.uk/Id/nhsSpineASID":
+                if val is not None and not isinstance(val, str):
+                    reason = SDS_IDENTITY_INVALID
+                    raise ValueError(reason)
+                if isinstance(val, str) and val.strip():
+                    asid = val.strip()
+            elif system == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+                if val is not None and not isinstance(val, str):
+                    reason = SDS_IDENTITY_INVALID
+                    raise ValueError(reason)
+                if isinstance(val, str) and val.strip():
+                    nhsmhsparty = val.strip()
+
+        if not asid:
+            reason = SDS_ASID_MISSING
+            raise ValueError(reason)
+
+        if not nhsmhsparty:
+            reason = SDS_PARTYKEY_MISSING
+            raise ValueError(reason)
+
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="resolve_asid_partykey",
+            outcome=AuditOutcome.ok,
+        )
+    except AuditFailureException:
+        raise
+    except Exception as e:
+        if not exc_type and type(e) is not ValueError:
+            exc_type = type(e).__name__
+        if not reason:
+            reason = SDS_IDENTITY_INVALID
+        msg = f"Resolve ASID/PartyKey failed [{reason}]"
+        detail = {
+            "stage": "resolve_asid_partykey",
+            "reason": reason,
+        }
+        if exc_type:
+            detail["exception_type"] = exc_type
+        await attempt_audit(
+            request=request,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="resolve_asid_partykey",
+            outcome=AuditOutcome.fail,
+            error_code="502",
+            detail=detail,
+        )
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{reason} | ODS={gp_ods}")
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
+
+    # 6) Endpoint lookup
     # As above, only audit Endpoint resolution as successful once a usable
     # endpoint address has actually been extracted.
+    fhir_endpoint_url = None
+    reason = None
+    exc_type = None
     try:
         with measure("sds.endpoint"):
-            endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
-            fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
-            if not isinstance(fhir_endpoint_url, str) or not fhir_endpoint_url.strip():
-                raise ValueError(f"Unable to find FHIR endpoint for ODS code {gp_ods}")
+            try:
+                endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+            except Exception as e:
+                reason = SDS_ENDPOINT_UPSTREAM_FAILURE
+                exc_type = type(e).__name__
+                raise
+
+            entries = endpoint_trace.get("entry") if isinstance(endpoint_trace, dict) else None
+            if entries is None or not isinstance(entries, list):
+                reason = SDS_ENDPOINT_INVALID_RESOURCE
+                raise ValueError(reason)
+
+            if len(entries) == 0:
+                reason = SDS_ENDPOINT_EMPTY_BUNDLE
+                raise ValueError(reason)
+
+            first_entry = entries[0]
+            resource = first_entry.get("resource") if isinstance(first_entry, dict) else None
+            if not isinstance(resource, dict):
+                reason = SDS_ENDPOINT_INVALID_RESOURCE
+                raise ValueError(reason)
+
+            addr = resource.get("address")
+            if not isinstance(addr, str) or not addr.strip():
+                reason = SDS_ENDPOINT_ADDRESS_MISSING
+                raise ValueError(reason)
+
+            fhir_endpoint_url = addr.strip()
+
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -251,7 +396,17 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"SDS Endpoint resolution failed for ODS code {gp_ods}"
+        if not exc_type and type(e) is not ValueError:
+            exc_type = type(e).__name__
+        if not reason:
+            reason = SDS_ENDPOINT_UPSTREAM_FAILURE if exc_type else SDS_ENDPOINT_INVALID_RESOURCE
+        msg = f"SDS Endpoint resolution failed [{reason}]"
+        detail = {
+            "stage": "sds_endpoint",
+            "reason": reason,
+        }
+        if exc_type:
+            detail["exception_type"] = exc_type
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -259,11 +414,11 @@ async def _fetch_gpconnect_record(
             action="fhir_endpoint_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"stage": "sds_endpoint", "exception_type": type(e).__name__},
+            detail=detail,
         )
         safe_error = RuntimeError(msg)
         record_application_failure(safe_error)
-        logging.error(f"{msg} (exception_type: {type(e).__name__})")
+        logging.error(f"{reason} | ODS={gp_ods}")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
