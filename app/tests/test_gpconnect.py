@@ -217,7 +217,8 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 
     assert result.status_code == 502
     assert body["success"] is False
-    assert "SDS trace failed" in body["error"]
+    assert body["error"] == "SDS Device resolution failed for ODS code E82665"
+    assert "SDS unavailable" not in body["error"]
 
 
 @pytest.mark.asyncio
@@ -349,15 +350,16 @@ async def test_invalid_device_trace_is_audited_without_endpoint_lookup(mock_self
         assert response.status_code == 502
         body = json.loads(response.body)
         assert body["success"] is False
-        assert "SDS trace failed" in body["error"]
+        assert body["error"] == "SDS Device resolution failed for ODS code E82665"
         assert "list index out of range" not in body["error"]
         assert "IndexError" not in body["error"]
-        assert "Unable to resolve GP Connect Device for ODS code" in body["error"]
 
         device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
         assert len(device_audits) == 1
         assert device_audits[0]["outcome"] == AuditOutcome.fail
         assert device_audits[0]["error_code"] == "502"
+        assert device_audits[0]["detail"]["stage"] == "sds_device"
+        assert isinstance(device_audits[0]["detail"]["exception_type"], str)
 
         # Prove no sds_trace success audit was emitted
         assert not any(
@@ -398,12 +400,14 @@ async def test_device_lookup_failure_is_audited_without_endpoint_lookup(mock_sel
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
-            assert json.loads(response.body)["error"] == "SDS trace failed: SDS unavailable"
+            assert json.loads(response.body)["error"] == "SDS Device resolution failed for ODS code E82665"
+            assert "SDS unavailable" not in json.loads(response.body)["error"]
 
         device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
         assert len(device_audits) == 1
         assert device_audits[0]["outcome"] == AuditOutcome.fail
         assert device_audits[0]["error_code"] == "502"
+        assert device_audits[0]["detail"] == {"stage": "sds_device", "exception_type": "RuntimeError"}
         assert sds.call_count == 1
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
@@ -491,13 +495,15 @@ async def test_invalid_endpoint_trace_is_audited_without_downstream_request(mock
         assert response.status_code == 502
         body = json.loads(response.body)
         assert body["success"] is False
-        assert "SDS endpoint trace failed" in body["error"]
+        assert body["error"] == "SDS Endpoint resolution failed for ODS code E82665"
         endpoint_audits = [
             call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
         ]
         assert len(endpoint_audits) == 1
         assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
         assert endpoint_audits[0]["error_code"] == "502"
+        assert endpoint_audits[0]["detail"]["stage"] == "sds_endpoint"
+        assert isinstance(endpoint_audits[0]["detail"]["exception_type"], str)
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
 
@@ -527,7 +533,8 @@ async def test_endpoint_lookup_failure_is_audited_without_downstream_request(moc
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
-            assert json.loads(response.body)["error"] == "SDS endpoint trace failed: SDS unavailable"
+            assert json.loads(response.body)["error"] == "SDS Endpoint resolution failed for ODS code E82665"
+            assert "SDS unavailable" not in json.loads(response.body)["error"]
 
         endpoint_audits = [
             call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
@@ -535,6 +542,7 @@ async def test_endpoint_lookup_failure_is_audited_without_downstream_request(moc
         assert len(endpoint_audits) == 1
         assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
         assert endpoint_audits[0]["error_code"] == "502"
+        assert endpoint_audits[0]["detail"] == {"stage": "sds_endpoint", "exception_type": "RuntimeError"}
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
 
@@ -760,3 +768,111 @@ async def test_validate_fhir_bundle_data_minimisation(
 
     for arg in audit_args.values():
         assert synthetic_body not in str(arg)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_fails", [False, True])
+async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issuer, audit_fails):
+    from app.audit.audit import AuditFailureException
+    from app.audit.models import AuditOutcome
+
+    upstream_secret = "SECRET_UPSTREAM_BODY"
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [RuntimeError(f"Upstream HTTP 500: {upstream_secret}")]
+
+        if audit_fails:
+
+            async def fail_device_audit(**kwargs):
+                if kwargs["action"] == "sds_trace" and kwargs["outcome"] == AuditOutcome.fail:
+                    raise AuditFailureException("Audit unavailable")
+
+            audit.side_effect = fail_device_audit
+            with pytest.raises(AuditFailureException):
+                await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+        else:
+            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+            assert response.status_code == 502
+            body = json.loads(response.body)
+            assert body == {
+                "success": False,
+                "error": "SDS Device resolution failed for ODS code E82665",
+            }
+            assert upstream_secret not in response.body.decode()
+
+        # Audit verification
+        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
+        assert len(device_audits) == 1
+        assert device_audits[0]["outcome"] == AuditOutcome.fail
+        assert device_audits[0]["error_code"] == "502"
+        assert device_audits[0]["detail"] == {
+            "stage": "sds_device",
+            "exception_type": "RuntimeError",
+        }
+        for arg in device_audits[0].values():
+            assert upstream_secret not in str(arg)
+
+        # Device failure prevents Endpoint lookup
+        assert sds.call_count == 1
+        assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
+        mock_self_issuer.assert_not_awaited()
+        client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_fails", [False, True])
+async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_issuer, audit_fails):
+    from app.audit.audit import AuditFailureException
+    from app.audit.models import AuditOutcome
+
+    upstream_secret = "SECRET_UPSTREAM_BODY"
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [fake_sds_device_trace(), RuntimeError(f"Upstream HTTP 500: {upstream_secret}")]
+
+        if audit_fails:
+
+            async def fail_endpoint_audit(**kwargs):
+                if kwargs["action"] == "fhir_endpoint_trace" and kwargs["outcome"] == AuditOutcome.fail:
+                    raise AuditFailureException("Audit unavailable")
+
+            audit.side_effect = fail_endpoint_audit
+            with pytest.raises(AuditFailureException):
+                await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+        else:
+            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+            assert response.status_code == 502
+            body = json.loads(response.body)
+            assert body == {
+                "success": False,
+                "error": "SDS Endpoint resolution failed for ODS code E82665",
+            }
+            assert upstream_secret not in response.body.decode()
+
+        # Audit verification
+        endpoint_audits = [
+            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
+        ]
+        assert len(endpoint_audits) == 1
+        assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
+        assert endpoint_audits[0]["error_code"] == "502"
+        assert endpoint_audits[0]["detail"] == {
+            "stage": "sds_endpoint",
+            "exception_type": "RuntimeError",
+        }
+        for arg in endpoint_audits[0].values():
+            assert upstream_secret not in str(arg)
+
+        # Downstream request never attempted
+        mock_self_issuer.assert_not_awaited()
+        client.assert_not_called()
