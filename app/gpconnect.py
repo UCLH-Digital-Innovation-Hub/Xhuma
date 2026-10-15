@@ -172,7 +172,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"Unable to read GP ODS from PDS response: {e}"
+        msg = "Unable to read GP ODS from PDS response"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -180,14 +180,21 @@ async def _fetch_gpconnect_record(
             action="resolve_gp_ods",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={
+                "stage": "resolve_gp_ods",
+                "exception_type": type(e).__name__,
+            },
         )
-        record_application_failure(e)
-        logging.exception(msg)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": msg},
+        )
 
     # 4) Resolve ODS → ASID + PartyKey
     asid = None
