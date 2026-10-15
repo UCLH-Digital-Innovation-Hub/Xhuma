@@ -93,7 +93,7 @@ jobs:
         if: always()
         uses: coverallsapp/github-action@v2
         with:
-          github-token: ${{ secrets.COVERALLS_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           format: cobertura
           file: coverage.xml
           parallel: true
@@ -148,7 +148,7 @@ jobs:
         if: always()
         uses: coverallsapp/github-action@v2
         with:
-          github-token: ${{ secrets.COVERALLS_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           format: cobertura
           file: coverage.xml
           parallel: true
@@ -165,7 +165,7 @@ jobs:
       - name: Coveralls Finished
         uses: coverallsapp/github-action@v2
         with:
-          github-token: ${{ secrets.COVERALLS_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           parallel-finished: true
 
   security:
