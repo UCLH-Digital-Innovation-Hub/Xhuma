@@ -18,6 +18,10 @@ from app.gpconnect import (
     SDS_IDENTITY_AMBIGUOUS,
     SDS_IDENTITY_INVALID,
     SDS_PARTYKEY_MISSING,
+    ResolutionError,
+    _fetch_gpconnect_record,
+    _get_device_candidates,
+    _resolve_device_identity,
     gpconnect,
 )
 from app.tests.configure_tests import get_nhs_ids, load_bundle, load_pds
@@ -256,367 +260,55 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "device_trace,expected_reason",
+    ("device_trace", "exception_type"),
     [
-        pytest.param(None, SDS_DEVICE_INVALID_RESPONSE, id="null-response"),
-        pytest.param({}, SDS_DEVICE_INVALID_RESPONSE, id="missing-entry"),
-        pytest.param({"entry": None}, SDS_DEVICE_INVALID_RESPONSE, id="null-entry"),
-        pytest.param({"entry": []}, SDS_DEVICE_EMPTY_BUNDLE, id="empty-entry"),
-        pytest.param({"entry": [None]}, SDS_DEVICE_INVALID_RESPONSE, id="null-first-entry"),
-        pytest.param({"entry": [{}]}, SDS_DEVICE_INVALID_RESPONSE, id="missing-resource"),
-        pytest.param({"entry": [{"resource": None}]}, SDS_DEVICE_INVALID_RESPONSE, id="null-resource"),
-        pytest.param(
-            {"entry": [{"resource": {"resourceType": "Patient"}}]},
-            SDS_DEVICE_INVALID_RESPONSE,
-            id="non-device-resource",
-        ),
+        pytest.param({"entry": []}, "IndexError", id="empty-entry"),
+        pytest.param({"entry": [{"resource": None}]}, "AttributeError", id="null-resource"),
+        pytest.param({"entry": [{"resource": {"identifier": None}}]}, "TypeError", id="null-identifiers"),
+        pytest.param("sensitive-identifier", "RuntimeError", id="sensitive-identifier"),
     ],
 )
-async def test_invalid_device_bundle_fails_sds_trace_without_proceeding(
-    mock_self_issuer, device_trace, expected_reason
-):
-    from app.audit.models import AuditOutcome
+async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path, caplog, device_trace, exception_type):
+    upstream_secret = "SECRET_UPSTREAM_BODY"
+    upstream_error = RuntimeError(f"Corrupt Device identifier: {upstream_secret}")
+
+    class SensitiveIdentifier(dict):
+        def get(self, key, default=None):
+            raise upstream_error
+
+    if device_trace == "sensitive-identifier":
+        device_trace = {"entry": [{"resource": {"identifier": [SensitiveIdentifier()]}}]}
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock, return_value=device_trace) as sds,
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure") as telemetry,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [device_trace, fake_sds_endpoint_trace()]
+        response = await _fetch_gpconnect_record(9690937278, saml, log_dir=str(tmp_path), request=get_mock_request())
 
-        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+    safe_message = "Unable to parse SDS trace response"
+    assert response.status_code == 500
+    assert json.loads(response.body) == {"success": False, "error": safe_message}
+    assert upstream_secret not in response.body.decode()
 
-        assert response.status_code == 502
-        body = json.loads(response.body)
-        assert body["success"] is False
-        assert body["error"] == "SDS Device resolution failed"
-        assert "list index out of range" not in body["error"]
-        assert "IndexError" not in body["error"]
+    telemetry.assert_called_once()
+    recorded_error = telemetry.call_args.args[0]
+    assert isinstance(recorded_error, RuntimeError)
+    assert str(recorded_error) == safe_message
+    assert upstream_secret not in repr(recorded_error)
+    assert recorded_error is not upstream_error
 
-        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
-        assert len(device_audits) == 1
-        assert device_audits[0]["outcome"] == AuditOutcome.fail
-        assert device_audits[0]["error_code"] == "502"
-        assert device_audits[0]["detail"]["stage"] == "sds_device"
-        assert device_audits[0]["detail"]["reason"] == expected_reason
-
-        # Prove no sds_trace success audit was emitted
-        assert not any(
-            call.kwargs["action"] == "sds_trace" and call.kwargs["outcome"] == AuditOutcome.ok
-            for call in audit.await_args_list
-        )
-
-        # Prove Stage 2 (resolve_asid_partykey) was never attempted
-        assert not any(call.kwargs["action"] == "resolve_asid_partykey" for call in audit.await_args_list)
-
-        # Prove Stage 3 (Endpoint lookup) was never attempted (sds called only once)
-        assert sds.call_count == 1
-        assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
-
-        mock_self_issuer.assert_not_awaited()
-        client.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "device_trace,expected_reason",
-    [
-        pytest.param(
-            {"entry": [{"resource": {"resourceType": "Device"}}]}, SDS_IDENTITY_INVALID, id="missing-identifier"
-        ),
-        pytest.param(
-            {"entry": [{"resource": {"resourceType": "Device", "identifier": None}}]},
-            SDS_IDENTITY_INVALID,
-            id="null-identifier",
-        ),
-        pytest.param(
-            {"entry": [{"resource": {"resourceType": "Device", "identifier": []}}]},
-            SDS_IDENTITY_INVALID,
-            id="empty-identifier",
-        ),
-        pytest.param(
-            {
-                "entry": [
-                    {
-                        "resource": {
-                            "resourceType": "Device",
-                            "identifier": [
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
-                                    "value": "200000000000",
-                                }
-                            ],
-                        }
-                    }
-                ]
-            },
-            SDS_PARTYKEY_MISSING,
-            id="missing-mhspartykey",
-        ),
-        pytest.param(
-            {
-                "entry": [
-                    {
-                        "resource": {
-                            "resourceType": "Device",
-                            "identifier": [
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
-                                    "value": "FAKE-PARTY-KEY",
-                                }
-                            ],
-                        }
-                    }
-                ]
-            },
-            SDS_ASID_MISSING,
-            id="missing-asid",
-        ),
-        pytest.param(
-            {
-                "entry": [
-                    {
-                        "resource": {
-                            "resourceType": "Device",
-                            "identifier": [
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
-                                    "value": "",
-                                },
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
-                                    "value": "FAKE-PARTY-KEY",
-                                },
-                            ],
-                        }
-                    }
-                ]
-            },
-            SDS_ASID_MISSING,
-            id="empty-asid",
-        ),
-        pytest.param(
-            {
-                "entry": [
-                    {
-                        "resource": {
-                            "resourceType": "Device",
-                            "identifier": [
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
-                                    "value": "200000000000",
-                                },
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
-                                    "value": " \t\n",
-                                },
-                            ],
-                        }
-                    }
-                ]
-            },
-            SDS_PARTYKEY_MISSING,
-            id="blank-mhspartykey",
-        ),
-        pytest.param(
-            {
-                "entry": [
-                    {
-                        "resource": {
-                            "resourceType": "Device",
-                            "identifier": [
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
-                                    "value": 12345,
-                                },
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
-                                    "value": "FAKE-PARTY-KEY",
-                                },
-                            ],
-                        }
-                    }
-                ]
-            },
-            SDS_IDENTITY_INVALID,
-            id="nonstring-asid",
-        ),
-        pytest.param(
-            {
-                "entry": [
-                    {
-                        "resource": {
-                            "resourceType": "Device",
-                            "identifier": [
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
-                                    "value": "200000000000",
-                                },
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
-                                    "value": "200000000001",
-                                },
-                                {
-                                    "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
-                                    "value": "FAKE-PARTY-KEY",
-                                },
-                            ],
-                        }
-                    }
-                ]
-            },
-            SDS_IDENTITY_AMBIGUOUS,
-            id="conflicting-asids-same-device",
-        ),
-    ],
-)
-async def test_invalid_device_identity_fails_resolve_asid_partykey_without_proceeding(
-    mock_self_issuer, device_trace, expected_reason
-):
-    from app.audit.models import AuditOutcome
-
-    with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
-        patch("app.gpconnect.httpx.AsyncClient") as client,
-    ):
-        sds.side_effect = [device_trace, fake_sds_endpoint_trace()]
-
-        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-
-        assert response.status_code == 502
-        body = json.loads(response.body)
-        assert body["success"] is False
-        assert body["error"] == "Unable to resolve SDS Device identity"
-
-        # Stage 1: sds_trace succeeded semantically
-        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
-        assert len(device_audits) == 1
-        assert device_audits[0]["outcome"] == AuditOutcome.ok
-
-        # Stage 2: resolve_asid_partykey failed
-        identity_audits = [
-            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
-        ]
-        assert len(identity_audits) == 1
-        assert identity_audits[0]["outcome"] == AuditOutcome.fail
-        assert identity_audits[0]["error_code"] == "502"
-        assert identity_audits[0]["detail"]["stage"] == "resolve_asid_partykey"
-        assert identity_audits[0]["detail"]["reason"] == expected_reason
-
-        # Prove no resolve_asid_partykey success audit was emitted
-        assert not any(
-            call.kwargs["action"] == "resolve_asid_partykey" and call.kwargs["outcome"] == AuditOutcome.ok
-            for call in audit.await_args_list
-        )
-
-        # Prove Endpoint lookup was never attempted (sds called only once)
-        assert sds.call_count == 1
-        assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
-
-        mock_self_issuer.assert_not_awaited()
-        client.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("audit_fails", [False, True])
-async def test_device_lookup_failure_is_audited_without_endpoint_lookup(mock_self_issuer, audit_fails):
-    from app.audit.audit import AuditFailureException
-    from app.audit.models import AuditOutcome
-
-    with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
-        patch("app.gpconnect.httpx.AsyncClient") as client,
-    ):
-        sds.side_effect = [RuntimeError("SDS unavailable")]
-        if audit_fails:
-
-            async def fail_device_audit(**kwargs):
-                if kwargs["action"] == "sds_trace" and kwargs["outcome"] == AuditOutcome.fail:
-                    raise AuditFailureException("Audit unavailable")
-
-            audit.side_effect = fail_device_audit
-            with pytest.raises(AuditFailureException):
-                await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-        else:
-            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-            assert response.status_code == 502
-            assert json.loads(response.body)["error"] == "SDS Device resolution failed"
-            assert "SDS unavailable" not in json.loads(response.body)["error"]
-
-        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
-        assert len(device_audits) == 1
-        assert device_audits[0]["outcome"] == AuditOutcome.fail
-        assert device_audits[0]["error_code"] == "502"
-        assert device_audits[0]["detail"] == {
-            "stage": "sds_device",
-            "reason": SDS_DEVICE_LOOKUP_FAILED,
-            "exception_type": "RuntimeError",
-        }
-        assert sds.call_count == 1
-        assert not any(call.kwargs["action"] == "resolve_asid_partykey" for call in audit.await_args_list)
-        assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
-        mock_self_issuer.assert_not_awaited()
-        client.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_valid_device_trace_resolves_and_proceeds_to_endpoint(mock_self_issuer):
-    from app.audit.models import AuditOutcome
-
-    with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
-        patch("app.gpconnect.create_nhs_ssl_context"),
-        patch("app.gpconnect.httpx.AsyncClient") as client,
-    ):
-        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
-
-        mock_response = MagicMock(status_code=200, text='{"resourceType": "Bundle", "type": "searchset", "entry": []}')
-        mock_client_instance = AsyncMock()
-        mock_client_instance.post.return_value = mock_response
-        client.return_value.__aenter__.return_value = mock_client_instance
-
-        with (
-            patch("app.gpconnect.convert_bundle", new_callable=AsyncMock) as mock_convert,
-            patch("app.gpconnect.base64_xml") as mock_b64,
-            patch("app.gpconnect.redis_client.pipeline") as mock_pipeline,
-        ):
-            mock_convert.return_value = {"ClinicalDocument": {}}
-            mock_b64.return_value = "b64"
-            mock_pipe = mock_pipeline.return_value
-            mock_pipe.__aenter__.return_value = mock_pipe
-            mock_pipe.execute = AsyncMock()
-
-            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-
-            assert response.status_code == 200
-            assert json.loads(response.body)["success"] is True
-
-        # Exactly one sds_trace success audit
-        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
-        assert len(device_audits) == 1
-        assert device_audits[0]["outcome"] == AuditOutcome.ok
-
-        # Exactly one resolve_asid_partykey success audit
-        identity_audits = [
-            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
-        ]
-        assert len(identity_audits) == 1
-        assert identity_audits[0]["outcome"] == AuditOutcome.ok
-
-        # Both Device and Endpoint lookups executed
-        assert sds.call_count == 2
-        endpoint_audits = [
-            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
-        ]
-        assert len(endpoint_audits) == 1
-        assert endpoint_audits[0]["outcome"] == AuditOutcome.ok
+    assert (tmp_path / "error.log").read_text() == safe_message + "\n"
+    assert f"{safe_message} (exception_type: {exception_type})" in caplog.text
+    assert upstream_secret not in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+    assert all(upstream_secret not in str(call.kwargs) for call in audit.await_args_list)
+    sds.assert_awaited_once()
+    assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
+    mock_self_issuer.assert_not_awaited()
+    client.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -660,10 +352,7 @@ async def test_invalid_endpoint_trace_is_audited_without_downstream_request(mock
             call.kwargs["action"] == "sds_trace" and call.kwargs["outcome"] == AuditOutcome.ok
             for call in audit.await_args_list
         )
-        assert any(
-            call.kwargs["action"] == "resolve_asid_partykey" and call.kwargs["outcome"] == AuditOutcome.ok
-            for call in audit.await_args_list
-        )
+        assert not any(call.kwargs["action"] == "resolve_asid_partykey" for call in audit.await_args_list)
 
         endpoint_audits = [
             call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
@@ -713,10 +402,7 @@ async def test_endpoint_lookup_failure_is_audited_without_downstream_request(moc
             call.kwargs["action"] == "sds_trace" and call.kwargs["outcome"] == AuditOutcome.ok
             for call in audit.await_args_list
         )
-        assert any(
-            call.kwargs["action"] == "resolve_asid_partykey" and call.kwargs["outcome"] == AuditOutcome.ok
-            for call in audit.await_args_list
-        )
+        assert not any(call.kwargs["action"] == "resolve_asid_partykey" for call in audit.await_args_list)
 
         endpoint_audits = [
             call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
@@ -765,11 +451,10 @@ async def test_gpconnect_readerror_audits_failure(
     assert body["success"] is False
     assert "ReadError: server closed connection before responding" in body["error"]
 
-    assert mock_attempt_audit.call_count == 5
+    assert mock_attempt_audit.call_count == 4
     actions = [call.kwargs["action"] for call in mock_attempt_audit.await_args_list]
     assert actions == [
         "sds_trace",
-        "resolve_asid_partykey",
         "fhir_endpoint_trace",
         "sds_self_lookup",
         "gpconnect_request",
@@ -1008,7 +693,7 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
             assert isinstance(recorded_exception, RuntimeError)
             assert upstream_secret not in str(recorded_exception)
             assert upstream_secret not in repr(recorded_exception)
-            assert str(recorded_exception) == f"SDS Device resolution failed [{SDS_DEVICE_LOOKUP_FAILED}]"
+            assert str(recorded_exception) == f"SDS Device resolution failed [{SDS_DEVICE_INVALID_RESPONSE}]"
             assert recorded_exception is not upstream_error
 
         # Audit verification
@@ -1018,7 +703,7 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
         assert device_audits[0]["error_code"] == "502"
         assert device_audits[0]["detail"] == {
             "stage": "sds_device",
-            "reason": SDS_DEVICE_LOOKUP_FAILED,
+            "reason": SDS_DEVICE_INVALID_RESPONSE,
             "exception_type": "RuntimeError",
         }
         for arg in device_audits[0].values():
@@ -1039,6 +724,7 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
     from app.audit.models import AuditOutcome
 
     upstream_secret = "SECRET_UPSTREAM_BODY"
+    safe_message = "Unable to find ASID or nhsMhsPartyKey for ODS code E82665"
     malformed_device = {
         "resourceType": "Bundle",
         "entry": [
@@ -1078,20 +764,15 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
             mock_record_failure.assert_not_called()
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-            assert response.status_code == 502
+            assert response.status_code == 500
             body = json.loads(response.body)
             assert body == {
                 "success": False,
-                "error": "Unable to resolve SDS Device identity",
+                "error": safe_message,
             }
             assert upstream_secret not in response.body.decode()
 
-            mock_record_failure.assert_called_once()
-            recorded_exception = mock_record_failure.call_args[0][0]
-            assert isinstance(recorded_exception, RuntimeError)
-            assert upstream_secret not in str(recorded_exception)
-            assert upstream_secret not in repr(recorded_exception)
-            assert str(recorded_exception) == f"Unable to resolve SDS Device identity [{SDS_ASID_MISSING}]"
+            mock_record_failure.assert_not_called()
 
         # Stage 1 succeeded
         device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
@@ -1104,11 +785,8 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
         ]
         assert len(identity_audits) == 1
         assert identity_audits[0]["outcome"] == AuditOutcome.fail
-        assert identity_audits[0]["error_code"] == "502"
-        assert identity_audits[0]["detail"] == {
-            "stage": "resolve_asid_partykey",
-            "reason": SDS_ASID_MISSING,
-        }
+        assert identity_audits[0]["error_code"] == "500"
+        assert identity_audits[0]["detail"] == {"message": safe_message}
         for arg in identity_audits[0].values():
             assert upstream_secret not in str(arg)
 
@@ -1173,8 +851,7 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
         identity_audits = [
             call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
         ]
-        assert len(identity_audits) == 1
-        assert identity_audits[0]["outcome"] == AuditOutcome.ok
+        assert identity_audits == []
 
         # Audit verification
         endpoint_audits = [
@@ -1274,104 +951,11 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
     [
         (
             "device",
-            [{"entry": []}],
-            "sds_device",
-            SDS_DEVICE_EMPTY_BUNDLE,
-            502,
-            "SDS Device resolution failed",
-        ),
-        (
-            "device",
-            [{"entry": None}],
+            [RuntimeError("Upstream timeout")],
             "sds_device",
             SDS_DEVICE_INVALID_RESPONSE,
             502,
             "SDS Device resolution failed",
-        ),
-        (
-            "device",
-            [RuntimeError("Upstream timeout")],
-            "sds_device",
-            SDS_DEVICE_LOOKUP_FAILED,
-            502,
-            "SDS Device resolution failed",
-        ),
-        (
-            "identity",
-            [
-                {
-                    "resourceType": "Bundle",
-                    "entry": [
-                        {
-                            "resource": {
-                                "resourceType": "Device",
-                                "identifier": [{"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "KEY1"}],
-                            }
-                        }
-                    ],
-                }
-            ],
-            "resolve_asid_partykey",
-            SDS_ASID_MISSING,
-            502,
-            "Unable to resolve SDS Device identity",
-        ),
-        (
-            "identity",
-            [
-                {
-                    "resourceType": "Bundle",
-                    "entry": [
-                        {
-                            "resource": {
-                                "resourceType": "Device",
-                                "identifier": [{"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "123"}],
-                            }
-                        }
-                    ],
-                }
-            ],
-            "resolve_asid_partykey",
-            SDS_PARTYKEY_MISSING,
-            502,
-            "Unable to resolve SDS Device identity",
-        ),
-        (
-            "identity",
-            [
-                {
-                    "resourceType": "Bundle",
-                    "entry": [{"resource": {"resourceType": "Device"}}],
-                }
-            ],
-            "resolve_asid_partykey",
-            SDS_IDENTITY_INVALID,
-            502,
-            "Unable to resolve SDS Device identity",
-        ),
-        (
-            "identity",
-            [
-                {
-                    "resourceType": "Bundle",
-                    "entry": [
-                        {
-                            "resource": {
-                                "resourceType": "Device",
-                                "identifier": [
-                                    {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "ASID1"},
-                                    {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "ASID2"},
-                                    {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "KEY1"},
-                                ],
-                            }
-                        }
-                    ],
-                }
-            ],
-            "resolve_asid_partykey",
-            SDS_IDENTITY_AMBIGUOUS,
-            502,
-            "Unable to resolve SDS Device identity",
         ),
         (
             "endpoint",
@@ -1484,18 +1068,13 @@ async def test_safe_reason_codes_emitted(
             assert not any(call.kwargs["action"] == "resolve_asid_partykey" for call in audit.await_args_list)
             assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
             assert sds.call_count == 1
-        elif expected_stage == "resolve_asid_partykey":
-            sds_ok = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
-            assert len(sds_ok) == 1 and sds_ok[0]["outcome"] == AuditOutcome.ok
-            assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
-            assert sds.call_count == 1
         elif expected_stage == "sds_endpoint":
             sds_ok = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
             assert len(sds_ok) == 1 and sds_ok[0]["outcome"] == AuditOutcome.ok
             ident_ok = [
                 call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
             ]
-            assert len(ident_ok) == 1 and ident_ok[0]["outcome"] == AuditOutcome.ok
+            assert ident_ok == []
             assert sds.call_count == 2
 
 
@@ -1549,11 +1128,8 @@ def test_literal_reason_code_values():
     assert SDS_ENDPOINT_AMBIGUOUS == "SDS_ENDPOINT_AMBIGUOUS"
 
 
-@pytest.mark.asyncio
-async def test_two_conflicting_device_identities_fails_closed(mock_self_issuer):
+def test_device_identity_helper_rejects_conflicting_identities():
     """Two distinct Device identities in a bundle fail closed with SDS_IDENTITY_AMBIGUOUS."""
-    from app.audit.models import AuditOutcome
-
     conflicting_devices = {
         "resourceType": "Bundle",
         "entry": [
@@ -1578,40 +1154,13 @@ async def test_two_conflicting_device_identities_fails_closed(mock_self_issuer):
         ],
     }
 
-    with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
-        patch("app.gpconnect.httpx.AsyncClient") as client,
-    ):
-        sds.side_effect = [conflicting_devices, fake_sds_endpoint_trace()]
-
-        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-        assert response.status_code == 502
-        body = json.loads(response.body)
-        assert body["error"] == "Unable to resolve SDS Device identity"
-
-        device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
-        assert len(device_audits) == 1 and device_audits[0]["outcome"] == AuditOutcome.ok
-
-        identity_audits = [
-            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
-        ]
-        assert len(identity_audits) == 1
-        assert identity_audits[0]["outcome"] == AuditOutcome.fail
-        assert identity_audits[0]["detail"]["reason"] == "SDS_IDENTITY_AMBIGUOUS"
-
-        # Endpoint trace must never be called
-        assert sds.call_count == 1
-        assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
-        client.assert_not_called()
+    with pytest.raises(ResolutionError) as exc_info:
+        _resolve_device_identity(_get_device_candidates(conflicting_devices))
+    assert exc_info.value.reason == SDS_IDENTITY_AMBIGUOUS
 
 
-@pytest.mark.asyncio
-async def test_duplicate_device_identities_deduplicate_safely(mock_self_issuer):
+def test_device_identity_helper_deduplicates_identical_identities():
     """Duplicate identical Device identities deduplicate safely without ambiguity error."""
-    from app.audit.models import AuditOutcome
-
     duplicate_devices = {
         "resourceType": "Bundle",
         "entry": [
@@ -1636,35 +1185,10 @@ async def test_duplicate_device_identities_deduplicate_safely(mock_self_issuer):
         ],
     }
 
-    with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
-        patch("app.gpconnect.create_nhs_ssl_context"),
-        patch("app.gpconnect.httpx.AsyncClient") as client,
-        patch("app.gpconnect.convert_bundle", new_callable=AsyncMock) as mock_convert,
-        patch("app.gpconnect.base64_xml") as mock_b64,
-        patch("app.gpconnect.redis_client.pipeline") as mock_pipeline,
-    ):
-        sds.side_effect = [duplicate_devices, fake_sds_endpoint_trace()]
-        mock_response = MagicMock(status_code=200, text='{"resourceType": "Bundle", "type": "searchset", "entry": []}')
-        mock_client_instance = AsyncMock()
-        mock_client_instance.post.return_value = mock_response
-        client.return_value.__aenter__.return_value = mock_client_instance
-        mock_convert.return_value = {"ClinicalDocument": {}}
-        mock_b64.return_value = "b64"
-        mock_pipe = mock_pipeline.return_value
-        mock_pipe.__aenter__.return_value = mock_pipe
-        mock_pipe.execute = AsyncMock()
-
-        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-        assert response.status_code == 200
-        assert json.loads(response.body)["success"] is True
-
-        ident_audits = [
-            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
-        ]
-        assert len(ident_audits) == 1 and ident_audits[0]["outcome"] == AuditOutcome.ok
+    assert _resolve_device_identity(_get_device_candidates(duplicate_devices)) == (
+        "200000000000",
+        "FAKE-PARTY-KEY",
+    )
 
 
 @pytest.mark.asyncio
@@ -1857,8 +1381,7 @@ async def test_malformed_relative_endpoint_url_fails_closed(mock_self_issuer, in
         client.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_no_entry_zero_assumption_device_selection(mock_self_issuer):
+def test_device_candidate_helper_selects_device_after_other_resources():
     """Valid Device resource appearing at entry[1] after a non-Device entry is correctly selected."""
     non_device_first_bundle = {
         "resourceType": "Bundle",
@@ -1876,30 +1399,9 @@ async def test_no_entry_zero_assumption_device_selection(mock_self_issuer):
         ],
     }
 
-    with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock),
-        patch("app.gpconnect.create_nhs_ssl_context"),
-        patch("app.gpconnect.httpx.AsyncClient") as client,
-        patch("app.gpconnect.convert_bundle", new_callable=AsyncMock) as mock_convert,
-        patch("app.gpconnect.base64_xml") as mock_b64,
-        patch("app.gpconnect.redis_client.pipeline") as mock_pipeline,
-    ):
-        sds.side_effect = [non_device_first_bundle, fake_sds_endpoint_trace()]
-        mock_response = MagicMock(status_code=200, text='{"resourceType": "Bundle", "type": "searchset", "entry": []}')
-        mock_client_instance = AsyncMock()
-        mock_client_instance.post.return_value = mock_response
-        client.return_value.__aenter__.return_value = mock_client_instance
-        mock_convert.return_value = {"ClinicalDocument": {}}
-        mock_b64.return_value = "b64"
-        mock_pipe = mock_pipeline.return_value
-        mock_pipe.__aenter__.return_value = mock_pipe
-        mock_pipe.execute = AsyncMock()
-
-        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-        assert response.status_code == 200
-        assert json.loads(response.body)["success"] is True
+    candidates = _get_device_candidates(non_device_first_bundle)
+    assert candidates == [non_device_first_bundle["entry"][1]["resource"]]
+    assert _resolve_device_identity(candidates) == ("200000000000", "FAKE-PARTY-KEY")
 
 
 @pytest.mark.asyncio

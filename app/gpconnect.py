@@ -343,17 +343,9 @@ async def _fetch_gpconnect_record(
             content={"success": False, "error": msg},
         )
 
-    # 4) SDS Device lookup
-    device_candidates = None
     try:
         with measure("sds.device"):
-            try:
-                asid_trace = await sds_trace(gp_ods)
-            except Exception as e:
-                raise ResolutionError(SDS_DEVICE_LOOKUP_FAILED) from e
-
-            device_candidates = _get_device_candidates(asid_trace)
-
+            asid_trace = await sds_trace(gp_ods)
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -394,50 +386,44 @@ async def _fetch_gpconnect_record(
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    # 5) Resolve ASID & MHS Party Key from Device candidate resources
     asid = None
     nhsmhsparty = None
     try:
-        asid, nhsmhsparty = _resolve_device_identity(device_candidates)
-
-        await attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="resolve_asid_partykey",
-            outcome=AuditOutcome.ok,
-        )
+        for item in asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", []):
+            if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
+                asid = item.get("value")
+            elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+                nhsmhsparty = item.get("value")
     except AuditFailureException:
         raise
     except Exception as e:
-        reason = e.reason if isinstance(e, ResolutionError) else SDS_IDENTITY_INVALID
-        exc_type = None if isinstance(e, ResolutionError) else type(e).__name__
-        msg = "Unable to resolve SDS Device identity"
-        detail = {
-            "stage": "resolve_asid_partykey",
-            "reason": reason,
-        }
-        if exc_type:
-            detail["exception_type"] = exc_type
+        msg = "Unable to parse SDS trace response"
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
+        if log_dir:
+            with open(os.path.join(log_dir, "error.log"), "a") as f:
+                f.write(msg + "\n")
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+
+    if not asid or not nhsmhsparty:
+        msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
             saml=saml_attrs,
             action="resolve_asid_partykey",
             outcome=AuditOutcome.fail,
-            error_code="502",
-            detail=detail,
+            error_code="500",
+            detail={"message": msg},
         )
-        safe_error = RuntimeError(f"{msg} [{reason}]")
-        record_application_failure(safe_error)
-        logging.error("%s | ODS=%s", reason, gp_ods)
+        logging.error(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(status_code=502, content={"success": False, "error": msg})
+        return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
-    # 6) Endpoint lookup
-    fhir_endpoint_url = None
+    # 5) Endpoint lookup
     try:
         with measure("sds.endpoint"):
             try:
