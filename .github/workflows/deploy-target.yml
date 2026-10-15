@@ -1,0 +1,567 @@
+name: Deploy one target
+'on':
+  workflow_call:
+    inputs:
+      target:
+        required: true
+        type: string
+      digest:
+        required: true
+        type: string
+      force_infra:
+        type: boolean
+        default: false
+      bootstrap_state:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+  TARGET_ID: ${{ fromJSON(inputs.target).id }}
+jobs:
+  infra-plan:
+    name: Infra Plan - ${{ fromJSON(inputs.target).id }}
+    runs-on: ${{ fromJSON(inputs.target).runner_label }}
+    environment: ${{ fromJSON(inputs.target).id }}-plan
+    steps:
+    - uses: actions/checkout@v4
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+    - name: Bootstrap State Storage
+      env:
+        AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        XHUMA_BACKEND_FILE: ${{ fromJSON(inputs.target).backend_file }}
+      run: bash infra/bootstrap/setup-target.sh
+      if: inputs.bootstrap_state
+    - name: Detect target infrastructure changes
+      id: detect
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        FORCE_INFRA: ${{ inputs.force_infra }}
+      run: |
+        ARGS=()
+        if [ "$FORCE_INFRA" = "true" ]; then ARGS+=(--force); fi
+        python scripts/deploy/deployment_state.py detect --target "$TARGET_ID" "${ARGS[@]}"
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_wrapper: false
+        terraform_version: 1.5.7
+      if: steps.detect.outputs.infra_needed == 'true'
+    - name: Verify Required Secrets
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_PASSWORD }}
+        TF_VAR_shared_resource_group_name: ${{ secrets.SHARED_RESOURCE_GROUP_NAME }}
+        TF_VAR_shared_subscription_id: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+        TF_VAR_shared_key_vault_name: ${{ secrets.SHARED_KEY_VAULT_NAME }}
+        TF_VAR_registry_id: ${{ secrets.REGISTRY_ID }}
+        TF_VAR_docker_registry_password: ${{ secrets.CR_PAT }}
+        TF_VAR_docker_registry_username: ${{ vars.GHCR_USERNAME }}
+      run: |
+        MISSING=""
+        [ -z "$ARM_CLIENT_ID" ] && MISSING="$MISSING AZURE_CLIENT_ID"
+        [ -z "$ARM_CLIENT_SECRET" ] && MISSING="$MISSING AZURE_CLIENT_SECRET"
+        [ -z "$ARM_TENANT_ID" ] && MISSING="$MISSING AZURE_TENANT_ID"
+        [ -z "$ARM_SUBSCRIPTION_ID" ] && MISSING="$MISSING AZURE_SUBSCRIPTION_ID"
+        [ -z "$TF_VAR_postgres_admin_password" ] && MISSING="$MISSING POSTGRES_PASSWORD"
+        [ -z "$TF_VAR_shared_resource_group_name" ] && MISSING="$MISSING SHARED_RESOURCE_GROUP_NAME"
+        [ -z "$TF_VAR_shared_subscription_id" ] && MISSING="$MISSING SHARED_SUBSCRIPTION_ID"
+        [ -z "$TF_VAR_shared_key_vault_name" ] && MISSING="$MISSING SHARED_KEY_VAULT_NAME"
+        [ -z "$TF_VAR_registry_id" ] && MISSING="$MISSING REGISTRY_ID"
+        [ -z "$TF_VAR_docker_registry_password" ] && MISSING="$MISSING CR_PAT"
+        [ -z "$TF_VAR_docker_registry_username" ] && MISSING="$MISSING GHCR_USERNAME"
+        if [ -n "$MISSING" ]; then
+          echo "::error::Missing required secrets/vars:$MISSING"
+          exit 1
+        fi
+      if: steps.detect.outputs.infra_needed == 'true'
+    - name: Existing State Preflight
+      if: steps.detect.outputs.infra_needed == 'true' && (fromJSON(inputs.target).require_existing_state == true)
+      env:
+        AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        echo "Preflighting existing state for target ${{ fromJSON(inputs.target).id }}"
+        RG_NAME=$(grep 'resource_group_name' "${{ fromJSON(inputs.target).backend_file }}" | awk -F'"' '{print $2}' | xargs)
+        SA_NAME=$(grep 'storage_account_name' "${{ fromJSON(inputs.target).backend_file }}" | awk -F'"' '{print $2}' | xargs)
+        CONTAINER_NAME=$(grep 'container_name' "${{ fromJSON(inputs.target).backend_file }}" | awk -F'"' '{print $2}' | xargs)
+        STATE_KEY=$(grep 'key' "${{ fromJSON(inputs.target).backend_file }}" | awk -F'"' '{print $2}' | xargs)
+
+        MISSING=0
+        if ! az group show -n "$RG_NAME" &>/dev/null; then
+          echo "::error::Resource group $RG_NAME not found."
+          MISSING=1
+        fi
+
+        if ! az storage account show -n "$SA_NAME" -g "$RG_NAME" &>/dev/null; then
+          echo "::error::Storage account $SA_NAME not found in $RG_NAME."
+          MISSING=1
+        fi
+
+        if [ $MISSING -eq 0 ]; then
+          ACCOUNT_KEY=$(az storage account keys list -g "$RG_NAME" -n "$SA_NAME" --query "[0].value" -o tsv)
+          echo "::add-mask::$ACCOUNT_KEY"
+          if ! az storage container show -n "$CONTAINER_NAME" --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" &>/dev/null; then
+            echo "::error::Container $CONTAINER_NAME not found in storage account $SA_NAME."
+            MISSING=1
+          else
+            if ! az storage blob show -c "$CONTAINER_NAME" -n "$STATE_KEY" --account-name "$SA_NAME" --account-key "$ACCOUNT_KEY" &>/dev/null; then
+              echo "::error::State blob $STATE_KEY not found in container $CONTAINER_NAME."
+              MISSING=1
+            fi
+          fi
+        fi
+
+        if [ $MISSING -eq 1 ]; then
+          echo "::error::Target requires existing state, but preflight failed. Aborting to prevent empty state initialization."
+          exit 1
+        fi
+        echo "Existing state verified successfully."
+    - name: Configure Terraform provider cache
+      run: |
+        mkdir -p "$RUNNER_TEMP/terraform-plugin-cache"
+        echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/terraform-plugin-cache" >> "$GITHUB_ENV"
+      if: steps.detect.outputs.infra_needed == 'true'
+    - name: Restore Terraform providers
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/terraform-plugin-cache
+        key: terraform-providers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/.terraform.lock.hcl', 'infra/shared/.terraform.lock.hcl') }}
+      if: steps.detect.outputs.infra_needed == 'true'
+    - name: Terraform Init
+      working-directory: ./infra
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        terraform init \
+          -backend-config="../${{ fromJSON(inputs.target).backend_file }}"
+      if: steps.detect.outputs.infra_needed == 'true'
+    - name: Verify Existing State Anchors
+      if: steps.detect.outputs.infra_needed == 'true' && (fromJSON(inputs.target).require_existing_state == true)
+      working-directory: ./infra
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        echo "Verifying existing state contains expected workload anchors..."
+        STATE_LIST=$(terraform state list)
+
+        ANCHORS=("azurerm_linux_web_app.app" "azurerm_postgresql_flexible_server.postgres" "azurerm_redis_cache.redis")
+
+        MISSING=0
+        for ANCHOR in "${ANCHORS[@]}"; do
+          if ! echo "$STATE_LIST" | grep -q "^${ANCHOR}$"; then
+            echo "::error::Migration Guard: Required state anchor '${ANCHOR}' is missing from the remote state. Aborting to prevent recreation of brownfield environment."
+            MISSING=1
+          fi
+        done
+
+        if [ $MISSING -eq 1 ]; then
+          exit 1
+        fi
+        echo "State anchors verified successfully."
+    - name: Terraform Plan
+      id: plan
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        TF_VAR_resource_group_name: ${{ fromJSON(inputs.target).resource_group }}
+        TF_VAR_registry_id: ${{ secrets.REGISTRY_ID }}
+        TF_VAR_docker_registry_password: ${{ secrets.CR_PAT }}
+        TF_VAR_docker_registry_username: ${{ vars.GHCR_USERNAME }}
+        TF_VAR_docker_image: ${{ env.IMAGE_NAME }}@${{ inputs.digest }}
+        TF_VAR_postgres_admin_password: ${{ secrets.POSTGRES_PASSWORD }}
+        TF_VAR_shared_resource_group_name: ${{ secrets.SHARED_RESOURCE_GROUP_NAME }}
+        TF_VAR_shared_subscription_id: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+        TF_VAR_shared_key_vault_name: ${{ secrets.SHARED_KEY_VAULT_NAME }}
+        IMAGE_DIGEST: ${{ inputs.digest }}
+      run: |
+        python scripts/deploy/saved_plan.py plan --target "$TARGET_ID"
+      if: steps.detect.outputs.infra_needed == 'true'
+    outputs:
+      infra_needed: ${{ steps.detect.outputs.infra_needed }}
+  infra-apply:
+    name: Infra Apply - ${{ fromJSON(inputs.target).id }}
+    needs:
+    - infra-plan
+    runs-on: ${{ fromJSON(inputs.target).runner_label }}
+    environment: ${{ fromJSON(inputs.target).github_infra_environment }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_wrapper: false
+        terraform_version: 1.5.7
+    - name: Verify Required Secrets
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        SHARED_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+        SHARED_RESOURCE_GROUP_NAME: ${{ secrets.SHARED_RESOURCE_GROUP_NAME }}
+        SHARED_KEY_VAULT_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
+      run: |
+        MISSING=""
+        [ -z "$ARM_CLIENT_ID" ] && MISSING="$MISSING AZURE_CLIENT_ID"
+        [ -z "$ARM_CLIENT_SECRET" ] && MISSING="$MISSING AZURE_CLIENT_SECRET"
+        [ -z "$ARM_TENANT_ID" ] && MISSING="$MISSING AZURE_TENANT_ID"
+        [ -z "$ARM_SUBSCRIPTION_ID" ] && MISSING="$MISSING AZURE_SUBSCRIPTION_ID"
+        [ -z "$SHARED_SUBSCRIPTION_ID" ] && MISSING="$MISSING SHARED_SUBSCRIPTION_ID"
+        [ -z "$SHARED_RESOURCE_GROUP_NAME" ] && MISSING="$MISSING SHARED_RESOURCE_GROUP_NAME"
+        [ -z "$SHARED_KEY_VAULT_NAME" ] && MISSING="$MISSING SHARED_KEY_VAULT_NAME"
+        if [ -n "$MISSING" ]; then
+          echo "::error::Missing required secrets:$MISSING"
+          exit 1
+        fi
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+    - name: Configure Terraform provider cache
+      run: |
+        mkdir -p "$RUNNER_TEMP/terraform-plugin-cache"
+        echo "TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/terraform-plugin-cache" >> "$GITHUB_ENV"
+    - name: Restore Terraform providers
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/terraform-plugin-cache
+        key: terraform-providers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/.terraform.lock.hcl', 'infra/shared/.terraform.lock.hcl') }}
+    - name: Terraform Init
+      working-directory: ./infra
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        terraform init \
+          -backend-config="../${{ fromJSON(inputs.target).backend_file }}"
+    - name: Download and Verify Plan
+      run: |
+        python scripts/deploy/saved_plan.py download --target "$TARGET_ID"
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        IMAGE_DIGEST: ${{ inputs.digest }}
+        TF_VAR_docker_image: ${{ env.IMAGE_NAME }}@${{ inputs.digest }}
+    - name: Check workload apply checkpoint
+      id: workload
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        python scripts/deploy/deployment_state.py workload-status --target "$TARGET_ID"
+    - name: Terraform Apply
+      working-directory: ./infra
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        terraform apply -input=false -lock-timeout=120s "$PLAN_FILE"
+      if: steps.workload.outputs.already_applied != 'true'
+    - name: Record workload apply checkpoint
+      if: steps.workload.outputs.already_applied != 'true'
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        python scripts/deploy/deployment_state.py record-workload --target "$TARGET_ID"
+    - name: Reconcile Shared Infrastructure - Plan
+      working-directory: ./infra/shared
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+        TARGET_SUBNET_ID: /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ fromJSON(inputs.target).resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ fromJSON(inputs.target).app_service_name }}-vnet/subnets/app-subnet
+      run: |
+        LIVE_NETWORK_ACLS=$(az keyvault show --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" --query "properties.networkAcls" -o json)
+
+        # Generate ephemeral tfvars
+        jq -n \
+          --arg rg "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
+          --arg kv "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
+          --arg tenant "${{ secrets.AZURE_TENANT_ID }}" \
+          --arg target_subnet "$TARGET_SUBNET_ID" \
+          --argjson acls "$LIVE_NETWORK_ACLS" \
+          '{
+            shared_resource_group_name: $rg,
+            shared_key_vault_name: $kv,
+            tenant_id: $tenant,
+            approved_ip_rules: [($acls.ipRules[]?.value // empty)],
+            approved_subnet_ids: ([($acls.virtualNetworkRules[]?.id // empty), $target_subnet] | map(ascii_downcase) | unique)
+          }' > /tmp/shared-reconcile.tfvars.json
+        chmod 600 /tmp/shared-reconcile.tfvars.json
+
+        terraform init -reconfigure -backend-config="${{ fromJSON(inputs.target).shared_backend_file }}"
+        set +e
+        terraform plan -input=false -var-file="/tmp/shared-reconcile.tfvars.json" -out="shared.tfplan" -json > shared_plan_output.json 2>&1
+        TF_EXIT=$?
+        set -e
+        if [ $TF_EXIT -ne 0 ]; then
+          echo "::error::Shared plan failed"
+          python ../../scripts/deploy/filter_tf_error.py $TF_EXIT shared_plan_output.json
+          exit $TF_EXIT
+        fi
+
+        # Output raw plan JSON for the guard
+        terraform show -json shared.tfplan > shared_plan.json
+    - name: Guard Shared Infrastructure Plan
+      working-directory: ./infra/shared
+      env:
+        TARGET_SUBNET_ID: /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ fromJSON(inputs.target).resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ fromJSON(inputs.target).app_service_name }}-vnet/subnets/app-subnet
+      run: |
+        python ../../scripts/deploy/guard_shared_plan.py shared_plan.json "$TARGET_SUBNET_ID" "${{ fromJSON(inputs.target).id }}" "${{ fromJSON(inputs.target).shared_backend_file }}"
+        if [ $? -ne 0 ]; then
+          echo "::error::Shared infrastructure guard rejected the plan."
+          exit 1
+        fi
+    - name: Reconcile Shared Infrastructure - Apply
+      working-directory: ./infra/shared
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+      run: |
+        terraform apply -input=false -auto-approve "shared.tfplan"
+    - name: Verify Shared Key Vault Configuration
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
+        TARGET_SUBNET_ID: /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ fromJSON(inputs.target).resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ fromJSON(inputs.target).app_service_name }}-vnet/subnets/app-subnet
+      run: |
+        az keyvault network-rule list \
+          --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
+          --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
+          --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" \
+          -o json > subnet_rules.json
+
+        TARGET_LOWER=$(echo "$TARGET_SUBNET_ID" | tr '[:upper:]' '[:lower:]')
+        FOUND=$(jq -r --arg tgt "$TARGET_LOWER" '.virtualNetworkRules[]?.id | ascii_downcase | select(. == $tgt)' subnet_rules.json)
+        if [ -z "$FOUND" ]; then
+           echo "::error::Post-apply verification failed: Target subnet $TARGET_SUBNET_ID is missing from the shared Key Vault network rules."
+           exit 1
+        fi
+        echo "Target subnet successfully verified in shared Key Vault."
+    - name: Refresh and Verify App Service Key Vault References
+      env:
+        APP_RESOURCE_ID: /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ fromJSON(inputs.target).resource_group }}/providers/Microsoft.Web/sites/${{ fromJSON(inputs.target).app_service_name }}
+        SHARED_KV_NAME: ${{ secrets.SHARED_KEY_VAULT_NAME }}
+      run: |
+        echo "Forcing App Service to refresh Key Vault references..."
+        MAX_RETRIES=6
+        ATTEMPT=1
+        BACKOFFS=(10 15 20 30 45 60)
+        RETRYABLE_PATTERN="Conflict|GatewayTimeout|Gateway[[:space:]]+Timeout|ServiceUnavailable|Service[[:space:]]+Unavailable|RequestTimeout|Request[[:space:]]+Timeout|TooManyRequests|Too[[:space:]]+Many[[:space:]]+Requests|InternalServerError|Internal[[:space:]]+Server[[:space:]]+Error|Bad[[:space:]]+Gateway|HTTP[[:space:]]*(429|500|502|503|504)|\((429|500|502|503|504)\)"
+
+        while [ $ATTEMPT -le $MAX_RETRIES ]; do
+          set +e
+          ERROR_OUTPUT=$(az rest --method post --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings/refresh?api-version=2022-03-01" 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "Refresh triggered successfully."
+            break
+          fi
+
+          if echo "$ERROR_OUTPUT" | grep -E -qi "$RETRYABLE_PATTERN"; then
+            if [ $ATTEMPT -eq $MAX_RETRIES ]; then
+              echo "::error::Refresh failed after $MAX_RETRIES attempts due to transient error."
+              echo "$ERROR_OUTPUT" | head -n 3
+              exit 1
+            fi
+            WAIT_TIME=${BACKOFFS[$((ATTEMPT-1))]}
+            echo "Transient Azure control-plane error detected. Retrying in ${WAIT_TIME}s (Attempt $ATTEMPT of $MAX_RETRIES)..."
+            echo "$ERROR_OUTPUT" | head -n 2
+            sleep $WAIT_TIME
+            ATTEMPT=$((ATTEMPT+1))
+          else
+            echo "::error::Non-transient error during refresh."
+            # Safe diagnostic
+            echo "$ERROR_OUTPUT" | head -n 3
+            exit 1
+          fi
+        done
+
+        echo "Querying updated Key Vault reference statuses..."
+        az rest --method get --uri "https://management.azure.com$APP_RESOURCE_ID/config/configreferences/appsettings?api-version=2022-03-01" > kv_refs.json
+
+        echo "Validating SHARED Key Vault references..."
+
+        FAILED_REFS=$(jq -r \
+          --arg shared "$SHARED_KV_NAME" \
+          '
+          .value[]
+          | select((.properties.vaultName // "" | ascii_downcase) == ($shared | ascii_downcase))
+          | select(.properties.status != "Resolved")
+          | .name
+          ' kv_refs.json)
+
+        if [ -n "$FAILED_REFS" ]; then
+           # Format newlines for GitHub actions warning
+           FORMATTED=$(echo "$FAILED_REFS" | tr '\n' ',' | sed 's/,$//')
+           echo "::error::The following shared Key Vault references failed to resolve: $FORMATTED"
+           exit 1
+        fi
+
+        echo "All required shared Key Vault references are Resolved."
+    - name: Cleanup Ephemeral Shared Config
+      if: always()
+      run: rm -f /tmp/shared-reconcile.tfvars.json
+    - name: Record successful infrastructure revision
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        python scripts/deploy/deployment_state.py record-infra --target "$TARGET_ID"
+    if: needs.infra-plan.outputs.infra_needed == 'true'
+    concurrency:
+      group: xhuma-shared-${{ fromJSON(inputs.target).shared_backend_file }}
+      cancel-in-progress: false
+  deploy:
+    name: Deploy - ${{ fromJSON(inputs.target).id }}
+    needs:
+    - infra-plan
+    - infra-apply
+    runs-on: ${{ fromJSON(inputs.target).runner_label }}
+    environment: ${{ fromJSON(inputs.target).github_environment }}
+    steps:
+    - name: Verify Required Secrets
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      run: |
+        MISSING=""
+        [ -z "$ARM_CLIENT_ID" ] && MISSING="$MISSING AZURE_CLIENT_ID"
+        [ -z "$ARM_CLIENT_SECRET" ] && MISSING="$MISSING AZURE_CLIENT_SECRET"
+        [ -z "$ARM_TENANT_ID" ] && MISSING="$MISSING AZURE_TENANT_ID"
+        [ -z "$ARM_SUBSCRIPTION_ID" ] && MISSING="$MISSING AZURE_SUBSCRIPTION_ID"
+        if [ -n "$MISSING" ]; then
+          echo "::error::Missing required secrets:$MISSING"
+          exit 1
+        fi
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+    - name: Capture Previous Digest
+      id: prev_digest
+      run: |
+        PREV_DIGEST=$(az webapp config container show --name "${{ fromJSON(inputs.target).app_service_name }}" --resource-group "${{ fromJSON(inputs.target).resource_group }}" --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" -o tsv || echo "none")
+        if [ -z "$PREV_DIGEST" ]; then PREV_DIGEST="none"; fi
+        # Normalize Azure prefix
+        PREV_DIGEST="${PREV_DIGEST#DOCKER|}"
+        echo "PREV_DIGEST=$PREV_DIGEST" >> $GITHUB_ENV
+        echo "digest=$PREV_DIGEST" >> "$GITHUB_OUTPUT"
+    - name: Deploy Container to Azure Web App
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ fromJSON(inputs.target).app_service_name }}
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ inputs.digest }}
+      if: steps.prev_digest.outputs.digest != format('{0}/{1}@{2}', env.REGISTRY, env.IMAGE_NAME, inputs.digest)
+    - name: Verify New Digest
+      run: |
+        NEW_DIGEST=$(az webapp config container show --name "${{ fromJSON(inputs.target).app_service_name }}" --resource-group "${{ fromJSON(inputs.target).resource_group }}" --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" -o tsv || echo "none")
+        if [[ -z "$NEW_DIGEST" || "$NEW_DIGEST" == "none" ]]; then
+           echo "::error::Failed to retrieve new digest from Azure"
+           exit 1
+        fi
+
+        NEW_DIGEST="${NEW_DIGEST#DOCKER|}"
+        EXPECTED_DIGEST="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ inputs.digest }}"
+        if [[ "$NEW_DIGEST" != "$EXPECTED_DIGEST" ]]; then
+           echo "::error::Deployed digest $NEW_DIGEST does not match expected $EXPECTED_DIGEST"
+           exit 1
+        fi
+
+        echo "### Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Previous Image:** \`$PREV_DIGEST\`" >> $GITHUB_STEP_SUMMARY
+        echo "**New Image:** \`$NEW_DIGEST\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Target:** ${{ fromJSON(inputs.target).id }}" >> $GITHUB_STEP_SUMMARY
+    - name: Application Health Check
+      run: |
+        echo "Waiting for application to start..."
+        APP_URL="https://${{ fromJSON(inputs.target).app_service_name }}.azurewebsites.net/health"
+        TIMEOUT=120
+        INTERVAL=5
+        SUCCESS=0
+        START_TIME=$(date +%s)
+        DEADLINE=$((START_TIME + TIMEOUT))
+
+        while [ $(date +%s) -lt $DEADLINE ]; do
+          set +e
+          RESPONSE_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "$APP_URL")
+          CURL_EXIT_CODE=$?
+          set -e
+
+          if [ $CURL_EXIT_CODE -ne 0 ]; then
+            echo "Health check blocked by network, WAF, or unreachable (Exit code: $CURL_EXIT_CODE)."
+            echo "::warning::Automated health check BLOCKED/NOT RUN. Operator must verify."
+            SUCCESS=2
+            break
+          elif [ "$RESPONSE_CODE" == "200" ]; then
+            SUCCESS=1
+            break
+          elif [ "$RESPONSE_CODE" == "403" ] || [ "$RESPONSE_CODE" == "000" ]; then
+            echo "Health check blocked by network, WAF, or unreachable (Status: $RESPONSE_CODE)."
+            echo "::warning::Automated health check BLOCKED/NOT RUN. Operator must verify."
+            SUCCESS=2
+            break
+          fi
+
+          sleep $INTERVAL
+          echo "Waiting... (elapsed $(( $(date +%s) - START_TIME ))s)"
+        done
+
+        if [ $SUCCESS -eq 0 ]; then
+          echo "::error::Health check timed out or failed (last response: $RESPONSE_CODE)"
+          exit 1
+        fi
+
+        echo "### Acceptance Status" >> $GITHUB_STEP_SUMMARY
+        echo "- **Container Image Configured**: Verified" >> $GITHUB_STEP_SUMMARY
+        if [ $SUCCESS -eq 1 ]; then
+          echo "- **Automated Liveness**: Verified" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Automated Liveness**: BLOCKED/UNAVAILABLE (Operator intervention required)" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "- **Manual Functional Acceptance (SOAP/mTLS)**: OUTSTANDING" >> $GITHUB_STEP_SUMMARY
+
+        echo "Application check finished. Manual clinical check required before marking deployment complete."
+    if: ${{ !cancelled() && needs.infra-plan.result == 'success' && (needs.infra-apply.result == 'success' || needs.infra-apply.result == 'skipped') }}
