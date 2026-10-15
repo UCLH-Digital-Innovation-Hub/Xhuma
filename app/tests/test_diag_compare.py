@@ -194,3 +194,36 @@ def test_form_when_no_params(monkeypatch):
     resp = client.get("/_diag/compare", headers={"X-API-Key": "TEST_KEY"})
     assert resp.status_code == 200
     assert "<form" in resp.text
+
+
+def test_unknown_view_falls_back_to_split(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    main = _reload_main(monkeypatch, "int")
+    store = {
+        "diag:bundle:doc-5": b'{"resourceType": "Bundle"}',
+        "diag:xml:doc-5": b"<ClinicalDocument/>",
+    }
+    monkeypatch.setattr(main, "redis_client", _FakeRedis(store))
+    client = TestClient(main.app)
+    resp = client.get(
+        "/_diag/compare",
+        params={"doc_uuid": "doc-5", "view": "bogus"},
+        headers={"X-API-Key": "TEST_KEY"},
+    )
+    assert resp.status_code == 200
+    assert "Side-by-side" in resp.text
+
+
+def test_one_sided_capture_shows_fallback(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    main = _reload_main(monkeypatch, "int")
+    # Only the XML survived (e.g. the bundle key expired first); the page still renders.
+    store = {"diag:xml:doc-7": b"<ClinicalDocument/>"}
+    monkeypatch.setattr(main, "redis_client", _FakeRedis(store))
+    client = TestClient(main.app)
+    resp = client.get("/_diag/compare", params={"doc_uuid": "doc-7"}, headers={"X-API-Key": "TEST_KEY"})
+    assert resp.status_code == 200
+    assert "FHIR bundle not captured" in resp.text
+    assert "ClinicalDocument" in resp.text
