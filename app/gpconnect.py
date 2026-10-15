@@ -234,6 +234,9 @@ async def _fetch_gpconnect_record(
     try:
         with measure("sds.endpoint"):
             endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+            fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
+            if not isinstance(fhir_endpoint_url, str) or not fhir_endpoint_url.strip():
+                raise ValueError(f"Unable to find FHIR endpoint for ODS code {gp_ods}")
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -260,25 +263,6 @@ async def _fetch_gpconnect_record(
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
-
-    if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
-        msg = f"Unable to find FHIR endpoint for ODS code {gp_ods}"
-        await attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="fhir_endpoint_trace",
-            outcome=AuditOutcome.fail,
-            error_code="500",
-            detail={"message": msg},
-        )
-        logging.error(msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
-
-    fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
 
     # 6) Build request
     try:

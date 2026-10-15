@@ -221,6 +221,88 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "endpoint_trace",
+    [
+        pytest.param(None, id="null-response"),
+        pytest.param({}, id="missing-entry"),
+        pytest.param({"entry": None}, id="null-entry"),
+        pytest.param({"entry": []}, id="empty-entry"),
+        pytest.param({"entry": [None]}, id="null-first-entry"),
+        pytest.param({"entry": [{}]}, id="missing-resource"),
+        pytest.param({"entry": [{"resource": None}]}, id="null-resource"),
+        pytest.param({"entry": [{"resource": {}}]}, id="missing-address"),
+        pytest.param({"entry": [{"resource": {"address": None}}]}, id="null-address"),
+        pytest.param({"entry": [{"resource": {"address": ""}}]}, id="empty-address"),
+        pytest.param({"entry": [{"resource": {"address": " \t\n"}}]}, id="blank-address"),
+        pytest.param({"entry": [{"resource": {"address": 123}}]}, id="nonstring-address"),
+    ],
+)
+async def test_invalid_endpoint_trace_is_audited_without_downstream_request(mock_self_issuer, endpoint_trace):
+    from app.audit.models import AuditOutcome
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [fake_sds_device_trace(), endpoint_trace]
+
+        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+        assert response.status_code == 502
+        body = json.loads(response.body)
+        assert body["success"] is False
+        assert "SDS endpoint trace failed" in body["error"]
+        endpoint_audits = [
+            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
+        ]
+        assert len(endpoint_audits) == 1
+        assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
+        assert endpoint_audits[0]["error_code"] == "502"
+        mock_self_issuer.assert_not_awaited()
+        client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("audit_fails", [False, True])
+async def test_endpoint_lookup_failure_is_audited_without_downstream_request(mock_self_issuer, audit_fails):
+    from app.audit.audit import AuditFailureException
+    from app.audit.models import AuditOutcome
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [fake_sds_device_trace(), RuntimeError("SDS unavailable")]
+        if audit_fails:
+
+            async def fail_endpoint_audit(**kwargs):
+                if kwargs["action"] == "fhir_endpoint_trace" and kwargs["outcome"] == AuditOutcome.fail:
+                    raise AuditFailureException("Audit unavailable")
+
+            audit.side_effect = fail_endpoint_audit
+            with pytest.raises(AuditFailureException):
+                await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+        else:
+            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+            assert response.status_code == 502
+            assert json.loads(response.body)["error"] == "SDS endpoint trace failed: SDS unavailable"
+
+        endpoint_audits = [
+            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
+        ]
+        assert len(endpoint_audits) == 1
+        assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
+        assert endpoint_audits[0]["error_code"] == "502"
+        mock_self_issuer.assert_not_awaited()
+        client.assert_not_called()
+
+
+@pytest.mark.asyncio
 @patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.record_application_failure")
 @patch("app.gpconnect.httpx.AsyncClient")
