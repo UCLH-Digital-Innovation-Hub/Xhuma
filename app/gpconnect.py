@@ -189,9 +189,39 @@ async def _fetch_gpconnect_record(
                 f.write(msg + "\n")
         return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
+    # 4) Resolve ODS → ASID + PartyKey
+    asid = None
+    nhsmhsparty = None
     try:
         with measure("sds.device"):
             asid_trace = await sds_trace(gp_ods)
+            # A successful SDS HTTP response is not sufficient: an empty Bundle means
+            # no GP Connect Device was resolved. Validate the Device identity before
+            # recording sds_trace as successful.
+            entries = asid_trace.get("entry") if isinstance(asid_trace, dict) else None
+            if not isinstance(entries, list) or len(entries) == 0:
+                raise ValueError(f"Unable to resolve GP Connect Device for ODS code {gp_ods}")
+
+            first_entry = entries[0]
+            resource = first_entry.get("resource") if isinstance(first_entry, dict) else None
+            identifiers = resource.get("identifier") if isinstance(resource, dict) else None
+            if not isinstance(identifiers, list):
+                raise ValueError(f"Unable to resolve GP Connect Device for ODS code {gp_ods}")
+
+            for item in identifiers:
+                if isinstance(item, dict):
+                    if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
+                        val = item.get("value")
+                        if isinstance(val, str) and val.strip():
+                            asid = val.strip()
+                    elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+                        val = item.get("value")
+                        if isinstance(val, str) and val.strip():
+                            nhsmhsparty = val.strip()
+
+            if not asid or not nhsmhsparty:
+                raise ValueError(f"Unable to resolve GP Connect Device for ODS code {gp_ods}")
+
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -219,43 +249,9 @@ async def _fetch_gpconnect_record(
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
-    asid = None
-    nhsmhsparty = None
-    try:
-        for item in asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", []):
-            if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID":
-                asid = item.get("value")
-            elif item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
-                nhsmhsparty = item.get("value")
-    except AuditFailureException:
-        raise
-    except Exception as e:
-        msg = f"Unable to parse SDS trace response: {e}"
-        record_application_failure(e)
-        logging.exception(msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
-
-    if not asid or not nhsmhsparty:
-        msg = f"Unable to find ASID or nhsMhsPartyKey for ODS code {gp_ods}"
-        await attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="resolve_asid_partykey",
-            outcome=AuditOutcome.fail,
-            error_code="500",
-            detail={"message": msg},
-        )
-        logging.error(msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
-
     # 5) Endpoint lookup
+    # As above, only audit Endpoint resolution as successful once a usable
+    # endpoint address has actually been extracted.
     try:
         with measure("sds.endpoint"):
             endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
