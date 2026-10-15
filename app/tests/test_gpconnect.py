@@ -777,14 +777,16 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
     from app.audit.models import AuditOutcome
 
     upstream_secret = "SECRET_UPSTREAM_BODY"
+    upstream_error = RuntimeError(f"Upstream HTTP 500: {upstream_secret}")
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
         patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure") as mock_record_failure,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [RuntimeError(f"Upstream HTTP 500: {upstream_secret}")]
+        sds.side_effect = [upstream_error]
 
         if audit_fails:
 
@@ -795,6 +797,8 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
             audit.side_effect = fail_device_audit
             with pytest.raises(AuditFailureException):
                 await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+            mock_record_failure.assert_not_called()
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
@@ -804,6 +808,14 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
                 "error": "SDS Device resolution failed for ODS code E82665",
             }
             assert upstream_secret not in response.body.decode()
+
+            mock_record_failure.assert_called_once()
+            recorded_exception = mock_record_failure.call_args[0][0]
+            assert isinstance(recorded_exception, RuntimeError)
+            assert upstream_secret not in str(recorded_exception)
+            assert upstream_secret not in repr(recorded_exception)
+            assert str(recorded_exception) == "SDS Device resolution failed for ODS code E82665"
+            assert recorded_exception is not upstream_error
 
         # Audit verification
         device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
@@ -831,14 +843,16 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
     from app.audit.models import AuditOutcome
 
     upstream_secret = "SECRET_UPSTREAM_BODY"
+    upstream_error = RuntimeError(f"Upstream HTTP 500: {upstream_secret}")
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
         patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure") as mock_record_failure,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [fake_sds_device_trace(), RuntimeError(f"Upstream HTTP 500: {upstream_secret}")]
+        sds.side_effect = [fake_sds_device_trace(), upstream_error]
 
         if audit_fails:
 
@@ -849,6 +863,8 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
             audit.side_effect = fail_endpoint_audit
             with pytest.raises(AuditFailureException):
                 await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+            mock_record_failure.assert_not_called()
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
@@ -858,6 +874,14 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
                 "error": "SDS Endpoint resolution failed for ODS code E82665",
             }
             assert upstream_secret not in response.body.decode()
+
+            mock_record_failure.assert_called_once()
+            recorded_exception = mock_record_failure.call_args[0][0]
+            assert isinstance(recorded_exception, RuntimeError)
+            assert upstream_secret not in str(recorded_exception)
+            assert upstream_secret not in repr(recorded_exception)
+            assert str(recorded_exception) == "SDS Endpoint resolution failed for ODS code E82665"
+            assert recorded_exception is not upstream_error
 
         # Audit verification
         endpoint_audits = [
