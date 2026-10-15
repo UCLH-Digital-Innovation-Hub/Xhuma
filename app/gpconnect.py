@@ -172,7 +172,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"Unable to read GP ODS from PDS response: {e}"
+        msg = "Unable to read GP ODS from PDS response"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -180,17 +180,18 @@ async def _fetch_gpconnect_record(
             action="resolve_gp_ods",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"stage": "resolve_gp_ods", "exception_type": type(e).__name__},
         )
-        record_application_failure(e)
-        logging.exception(msg)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
         return JSONResponse(status_code=500, content={"success": False, "error": msg})
 
     try:
-        with measure("sds.device"):
+        with measure("sds.trace"):
             asid_trace = await sds_trace(gp_ods)
         await attempt_audit(
             request=request,
@@ -202,7 +203,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"SDS trace failed: {e}"
+        msg = f"SDS Trace failed for ODS code {gp_ods}"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -210,10 +211,11 @@ async def _fetch_gpconnect_record(
             action="sds_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"stage": "sds_trace", "exception_type": type(e).__name__},
         )
-        record_application_failure(e)
-        logging.exception(msg)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -230,9 +232,10 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"Unable to parse SDS trace response: {e}"
-        record_application_failure(e)
-        logging.exception(msg)
+        msg = "Unable to parse SDS trace response"
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -259,6 +262,9 @@ async def _fetch_gpconnect_record(
     try:
         with measure("sds.endpoint"):
             endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+            fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
+            if not isinstance(fhir_endpoint_url, str) or not fhir_endpoint_url.strip():
+                raise ValueError(f"Unable to find FHIR endpoint for ODS code {gp_ods}")
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -269,7 +275,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"SDS endpoint trace failed: {e}"
+        msg = f"SDS Endpoint resolution failed for ODS code {gp_ods}"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -277,33 +283,15 @@ async def _fetch_gpconnect_record(
             action="fhir_endpoint_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"stage": "sds_endpoint", "exception_type": type(e).__name__},
         )
-        record_application_failure(e)
-        logging.exception(msg)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
-
-    if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
-        msg = f"Unable to find FHIR endpoint for ODS code {gp_ods}"
-        await attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="fhir_endpoint_trace",
-            outcome=AuditOutcome.fail,
-            error_code="500",
-            detail={"message": msg},
-        )
-        logging.error(msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
-
-    fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
 
     # 6) Build request
     try:
