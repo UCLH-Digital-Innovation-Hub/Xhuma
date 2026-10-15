@@ -387,6 +387,39 @@ Starting in Xhuma 0.9.3, the WebSocket relay hub consumes and sanitises client-s
    - `outcome = "blocked"`: The request was dropped or blocked before or at the relay boundary (firewall deny rule, proxy block, or mTLS authorization failure).
 6. **Operational Caveat**: Structured relay diagnostics provide visibility into network traversal and failure modes behind the NHS firewall, but *do not* prove end-to-end clinical acceptance or production readiness. Clinical verification of GP Connect workflows remains necessary.
 
+### 7.9 FHIR ↔ C-CDA Comparison Viewer (`/_diag/compare`)
+
+A gated diagnostic page that shows the **FHIR bundle as received** from GP Connect next to the
+**C-CDA XML as sent to Epic**, for side-by-side smoke-test comparison. See
+[`fhir_xml_compare_proposal.md`](fhir_xml_compare_proposal.md) for the full design.
+
+1. **Availability**: Always on in `dev`, `local` and `int` (`ENV` value). In `prd` it is **off by
+   default** and must be deliberately enabled with `DIAG_COMPARE_ENABLED=true` for an exceptional,
+   time-boxed smoke test, then disabled again.
+2. **Authentication**: Protected by the same `X-API-Key` dependency as `/_dev/audit`.
+3. **Data capture**: During conversion, the received bundle and serialised C-CDA are written to
+   short-lived Redis keys `diag:bundle:{doc_uuid}` and `diag:xml:{doc_uuid}`. These are **PHI** and
+   expire after `DIAG_TTL_MIN` minutes (default 30), independently of the 4h document cache.
+4. **Usage**:
+   - By NHS number: `GET /_diag/compare?nhsno=9690937278` (must have been fetched via ITI-38
+     within the diagnostics window).
+   - By document id: `GET /_diag/compare?doc_uuid=<id>`.
+   - Layout: append `&view=split` (side-by-side, default), `&view=tabs` (two toggleable pages) or
+     `&view=diff` (unified diff).
+   ```bash
+   curl -s -H "X-API-Key: $API_KEY" "https://<host>/_diag/compare?nhsno=9690937278&view=split"
+   ```
+5. **Configuration**:
+
+   | Variable | Default | Purpose |
+   | --- | --- | --- |
+   | `DIAG_COMPARE_ENABLED` | `false` | Opt-in switch to enable the viewer in `prd` only (ignored in non-prod, where it is always on). |
+   | `DIAG_TTL_MIN` | `30` | Minutes before the captured bundle/XML pair expires from Redis. |
+
+6. **Operational Caveat**: Both payloads contain full patient clinical data. Keep the viewer
+   disabled in `prd` outside a controlled smoke test, keep the TTL short, and remember the capture
+   adds two Redis writes per record while enabled.
+
 ---
 
 ## 8. Shared Infrastructure Adoption (Terraform)
