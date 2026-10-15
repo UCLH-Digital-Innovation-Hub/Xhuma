@@ -344,7 +344,7 @@ async def _fetch_gpconnect_record(
         )
 
     try:
-        with measure("sds.device"):
+        with measure("sds.trace"):
             asid_trace = await sds_trace(gp_ods)
         await attempt_audit(
             request=request,
@@ -356,19 +356,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        reason = e.reason if isinstance(e, ResolutionError) else SDS_DEVICE_INVALID_RESPONSE
-        exc_type = (
-            type(e.__cause__).__name__
-            if getattr(e, "__cause__", None)
-            else (None if isinstance(e, ResolutionError) else type(e).__name__)
-        )
-        msg = "SDS Device resolution failed"
-        detail = {
-            "stage": "sds_device",
-            "reason": reason,
-        }
-        if exc_type:
-            detail["exception_type"] = exc_type
+        msg = f"SDS Trace failed for ODS code {gp_ods}"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -376,7 +364,7 @@ async def _fetch_gpconnect_record(
             action="sds_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail=detail,
+            detail={"stage": "sds_trace", "exception_type": type(e).__name__},
         )
         safe_error = RuntimeError(f"{msg} [{reason}]")
         record_application_failure(safe_error)
