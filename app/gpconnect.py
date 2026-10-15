@@ -61,7 +61,7 @@ class ResolutionError(ValueError):
 def _get_device_candidates(trace: Any) -> list[dict]:
     if not isinstance(trace, dict):
         raise ResolutionError(SDS_DEVICE_INVALID_RESPONSE)
-    if trace.get("resourceType") not in ("Bundle", None):
+    if trace.get("resourceType") != "Bundle":
         raise ResolutionError(SDS_DEVICE_INVALID_RESPONSE)
     entries = trace.get("entry")
     if not isinstance(entries, list):
@@ -76,8 +76,7 @@ def _get_device_candidates(trace: Any) -> list[dict]:
         res = item.get("resource")
         if not isinstance(res, dict):
             continue
-        res_type = res.get("resourceType")
-        if res_type == "Device" or (res_type is None and "identifier" in res):
+        if res.get("resourceType") == "Device":
             devices.append(res)
 
     if not devices:
@@ -138,7 +137,7 @@ def _resolve_device_identity(devices: list[dict]) -> tuple[str, str]:
 def _resolve_endpoint(trace: Any, expected_partykey: str) -> str:
     if not isinstance(trace, dict):
         raise ResolutionError(SDS_ENDPOINT_INVALID_RESPONSE)
-    if trace.get("resourceType") not in ("Bundle", None):
+    if trace.get("resourceType") != "Bundle":
         raise ResolutionError(SDS_ENDPOINT_INVALID_RESPONSE)
     entries = trace.get("entry")
     if not isinstance(entries, list):
@@ -155,24 +154,25 @@ def _resolve_endpoint(trace: Any, expected_partykey: str) -> str:
         if not isinstance(res, dict):
             continue
 
-        res_type = res.get("resourceType")
-        if res_type not in ("Endpoint", None):
+        if res.get("resourceType") != "Endpoint":
             continue
 
-        status = res.get("status")
-        if status is not None and status != "active":
+        if res.get("status") != "active":
             continue
 
         res_identifiers = res.get("identifier")
-        if isinstance(res_identifiers, list):
-            endpoint_partykeys: set[str] = set()
-            for id_item in res_identifiers:
-                if isinstance(id_item, dict) and id_item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
-                    val = id_item.get("value")
-                    if isinstance(val, str) and val.strip():
-                        endpoint_partykeys.add(val.strip())
-            if endpoint_partykeys and expected_partykey not in endpoint_partykeys:
-                continue
+        if not isinstance(res_identifiers, list):
+            continue
+
+        endpoint_partykeys: set[str] = set()
+        for id_item in res_identifiers:
+            if isinstance(id_item, dict) and id_item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey":
+                val = id_item.get("value")
+                if isinstance(val, str) and val.strip():
+                    endpoint_partykeys.add(val.strip())
+
+        if expected_partykey not in endpoint_partykeys:
+            continue
 
         addr = res.get("address")
         if not isinstance(addr, str) or not addr.strip():
@@ -180,8 +180,7 @@ def _resolve_endpoint(trace: Any, expected_partykey: str) -> str:
         addr = addr.strip()
 
         parsed = urlsplit(addr)
-        is_valid_url = (parsed.scheme.lower() in ("http", "https") and bool(parsed.netloc)) or addr == "test-url"
-        if not is_valid_url:
+        if parsed.scheme.lower() not in ("http", "https") or not bool(parsed.netloc):
             continue
 
         candidate_addresses.add(addr)
@@ -298,9 +297,10 @@ async def _fetch_gpconnect_record(
             pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
     except AuditFailureException:
         raise
-    except Exception as e:
-        msg = f"PDS lookup failed: {e}"
-        record_application_failure(e)
+    except Exception:
+        msg = "PDS lookup failed"
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
         logging.exception(msg)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:

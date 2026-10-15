@@ -260,15 +260,35 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
     [
         pytest.param(None, SDS_DEVICE_INVALID_RESPONSE, id="null-response"),
         pytest.param({}, SDS_DEVICE_INVALID_RESPONSE, id="missing-entry"),
-        pytest.param({"entry": None}, SDS_DEVICE_INVALID_RESPONSE, id="null-entry"),
-        pytest.param({"entry": []}, SDS_DEVICE_EMPTY_BUNDLE, id="empty-entry"),
-        pytest.param({"entry": [None]}, SDS_DEVICE_INVALID_RESPONSE, id="null-first-entry"),
-        pytest.param({"entry": [{}]}, SDS_DEVICE_INVALID_RESPONSE, id="missing-resource"),
-        pytest.param({"entry": [{"resource": None}]}, SDS_DEVICE_INVALID_RESPONSE, id="null-resource"),
+        pytest.param({"resourceType": "Bundle", "entry": None}, SDS_DEVICE_INVALID_RESPONSE, id="null-entry"),
+        pytest.param({"resourceType": "Bundle", "entry": []}, SDS_DEVICE_EMPTY_BUNDLE, id="empty-entry"),
+        pytest.param({"entry": []}, SDS_DEVICE_INVALID_RESPONSE, id="missing-bundle-resourcetype"),
+        pytest.param({"resourceType": "Bundle", "entry": [None]}, SDS_DEVICE_INVALID_RESPONSE, id="null-first-entry"),
+        pytest.param({"resourceType": "Bundle", "entry": [{}]}, SDS_DEVICE_INVALID_RESPONSE, id="missing-resource"),
         pytest.param(
-            {"entry": [{"resource": {"resourceType": "Patient"}}]},
+            {"resourceType": "Bundle", "entry": [{"resource": None}]}, SDS_DEVICE_INVALID_RESPONSE, id="null-resource"
+        ),
+        pytest.param(
+            {"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Patient"}}]},
             SDS_DEVICE_INVALID_RESPONSE,
             id="non-device-resource",
+        ),
+        pytest.param(
+            {
+                "resourceType": "Bundle",
+                "entry": [
+                    {
+                        "resource": {
+                            "identifier": [
+                                {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000000000"},
+                                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "FAKE-PARTY-KEY"},
+                            ]
+                        }
+                    }
+                ],
+            },
+            SDS_DEVICE_INVALID_RESPONSE,
+            id="missing-device-resourcetype",
         ),
     ],
 )
@@ -323,20 +343,23 @@ async def test_invalid_device_bundle_fails_sds_trace_without_proceeding(
     "device_trace,expected_reason",
     [
         pytest.param(
-            {"entry": [{"resource": {"resourceType": "Device"}}]}, SDS_IDENTITY_INVALID, id="missing-identifier"
+            {"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Device"}}]},
+            SDS_IDENTITY_INVALID,
+            id="missing-identifier",
         ),
         pytest.param(
-            {"entry": [{"resource": {"resourceType": "Device", "identifier": None}}]},
+            {"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Device", "identifier": None}}]},
             SDS_IDENTITY_INVALID,
             id="null-identifier",
         ),
         pytest.param(
-            {"entry": [{"resource": {"resourceType": "Device", "identifier": []}}]},
+            {"resourceType": "Bundle", "entry": [{"resource": {"resourceType": "Device", "identifier": []}}]},
             SDS_IDENTITY_INVALID,
             id="empty-identifier",
         ),
         pytest.param(
             {
+                "resourceType": "Bundle",
                 "entry": [
                     {
                         "resource": {
@@ -349,13 +372,14 @@ async def test_invalid_device_bundle_fails_sds_trace_without_proceeding(
                             ],
                         }
                     }
-                ]
+                ],
             },
             SDS_PARTYKEY_MISSING,
             id="missing-mhspartykey",
         ),
         pytest.param(
             {
+                "resourceType": "Bundle",
                 "entry": [
                     {
                         "resource": {
@@ -368,13 +392,14 @@ async def test_invalid_device_bundle_fails_sds_trace_without_proceeding(
                             ],
                         }
                     }
-                ]
+                ],
             },
             SDS_ASID_MISSING,
             id="missing-asid",
         ),
         pytest.param(
             {
+                "resourceType": "Bundle",
                 "entry": [
                     {
                         "resource": {
@@ -391,13 +416,14 @@ async def test_invalid_device_bundle_fails_sds_trace_without_proceeding(
                             ],
                         }
                     }
-                ]
+                ],
             },
             SDS_ASID_MISSING,
             id="empty-asid",
         ),
         pytest.param(
             {
+                "resourceType": "Bundle",
                 "entry": [
                     {
                         "resource": {
@@ -414,13 +440,14 @@ async def test_invalid_device_bundle_fails_sds_trace_without_proceeding(
                             ],
                         }
                     }
-                ]
+                ],
             },
             SDS_PARTYKEY_MISSING,
             id="blank-mhspartykey",
         ),
         pytest.param(
             {
+                "resourceType": "Bundle",
                 "entry": [
                     {
                         "resource": {
@@ -437,13 +464,14 @@ async def test_invalid_device_bundle_fails_sds_trace_without_proceeding(
                             ],
                         }
                     }
-                ]
+                ],
             },
             SDS_IDENTITY_INVALID,
             id="nonstring-asid",
         ),
         pytest.param(
             {
+                "resourceType": "Bundle",
                 "entry": [
                     {
                         "resource": {
@@ -464,7 +492,7 @@ async def test_invalid_device_bundle_fails_sds_trace_without_proceeding(
                             ],
                         }
                     }
-                ]
+                ],
             },
             SDS_IDENTITY_AMBIGUOUS,
             id="conflicting-asids-same-device",
@@ -626,11 +654,82 @@ async def test_valid_device_trace_resolves_and_proceeds_to_endpoint(mock_self_is
         pytest.param(None, id="null-response"),
         pytest.param({}, id="missing-entry"),
         pytest.param({"entry": None}, id="null-entry"),
-        pytest.param({"entry": []}, id="empty-entry"),
-        pytest.param({"entry": [None]}, id="null-first-entry"),
-        pytest.param({"entry": [{}]}, id="missing-resource"),
-        pytest.param({"entry": [{"resource": None}]}, id="null-resource"),
-        pytest.param({"entry": [{"resource": {}}]}, id="missing-address"),
+        pytest.param({"entry": []}, id="missing-bundle-resourcetype"),
+        pytest.param({"resourceType": "Bundle", "entry": []}, id="empty-bundle"),
+        pytest.param({"resourceType": "Bundle", "entry": [None]}, id="null-first-entry"),
+        pytest.param({"resourceType": "Bundle", "entry": [{}]}, id="missing-resource"),
+        pytest.param({"resourceType": "Bundle", "entry": [{"resource": None}]}, id="null-resource"),
+        pytest.param(
+            {"resourceType": "Bundle", "entry": [{"resource": {"status": "active", "address": "https://fake"}}]},
+            id="missing-endpoint-resourcetype",
+        ),
+        pytest.param(
+            {
+                "resourceType": "Bundle",
+                "entry": [
+                    {
+                        "resource": {
+                            "resourceType": "Endpoint",
+                            "status": "suspended",
+                            "address": "https://fake",
+                            "identifier": [
+                                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "FAKE-PARTY-KEY"}
+                            ],
+                        }
+                    }
+                ],
+            },
+            id="inactive-endpoint",
+        ),
+        pytest.param(
+            {
+                "resourceType": "Bundle",
+                "entry": [
+                    {
+                        "resource": {
+                            "resourceType": "Endpoint",
+                            "status": "active",
+                            "address": "https://fake",
+                        }
+                    }
+                ],
+            },
+            id="absent-partykey",
+        ),
+        pytest.param(
+            {
+                "resourceType": "Bundle",
+                "entry": [
+                    {
+                        "resource": {
+                            "resourceType": "Endpoint",
+                            "status": "active",
+                            "address": "https://fake",
+                            "identifier": [{"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "WRONG-KEY"}],
+                        }
+                    }
+                ],
+            },
+            id="wrong-partykey",
+        ),
+        pytest.param(
+            {
+                "resourceType": "Bundle",
+                "entry": [
+                    {
+                        "resource": {
+                            "resourceType": "Endpoint",
+                            "status": "active",
+                            "address": "test-url",
+                            "identifier": [
+                                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "FAKE-PARTY-KEY"}
+                            ],
+                        }
+                    }
+                ],
+            },
+            id="test-url-endpoint",
+        ),
         pytest.param({"entry": [{"resource": {"address": None}}]}, id="null-address"),
         pytest.param({"entry": [{"resource": {"address": ""}}]}, id="empty-address"),
         pytest.param({"entry": [{"resource": {"address": " \t\n"}}]}, id="blank-address"),
@@ -1274,7 +1373,7 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
     [
         (
             "device",
-            [{"entry": []}],
+            [{"resourceType": "Bundle", "entry": []}],
             "sds_device",
             SDS_DEVICE_EMPTY_BUNDLE,
             502,
@@ -1375,7 +1474,7 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
         ),
         (
             "endpoint",
-            [fake_sds_device_trace(), {"entry": []}],
+            [fake_sds_device_trace(), {"resourceType": "Bundle", "entry": []}],
             "sds_endpoint",
             SDS_ENDPOINT_EMPTY_BUNDLE,
             502,
@@ -1417,6 +1516,9 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
                                 "resourceType": "Endpoint",
                                 "status": "active",
                                 "address": "https://endpoint1.nhs.uk",
+                                "identifier": [
+                                    {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "FAKE-PARTY-KEY"}
+                                ],
                             }
                         },
                         {
@@ -1424,6 +1526,9 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
                                 "resourceType": "Endpoint",
                                 "status": "active",
                                 "address": "https://endpoint2.nhs.uk",
+                                "identifier": [
+                                    {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "FAKE-PARTY-KEY"}
+                                ],
                             }
                         },
                     ],
@@ -1816,7 +1921,7 @@ async def test_inactive_endpoint_fails_closed(mock_self_issuer):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("invalid_addr", ["/relative/endpoint", "ftp://endpoint.nhs.uk", "invalid-url", ""])
+@pytest.mark.parametrize("invalid_addr", ["/relative/endpoint", "ftp://endpoint.nhs.uk", "invalid-url", "", "test-url"])
 async def test_malformed_relative_endpoint_url_fails_closed(mock_self_issuer, invalid_addr):
     """Non-HTTP(S) or relative Endpoint addresses fail closed."""
     from app.audit.models import AuditOutcome
