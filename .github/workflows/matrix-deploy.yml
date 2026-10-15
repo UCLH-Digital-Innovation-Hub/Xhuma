@@ -2,24 +2,30 @@ name: Matrix Deployment
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
+# Serialize releases per source branch without canceling an active deployment.
 concurrency:
   group: xhuma-matrix-${{ github.ref_name }}
   cancel-in-progress: false
 'on':
+  # Manual runs expose overrides for changes outside the tracked input hashes.
   workflow_dispatch:
     inputs:
+      # Reconcile drift or changed environment secrets even when git inputs match.
       force_infra:
         description: Reconcile infrastructure even when tracked inputs are unchanged
         type: boolean
         default: false
+      # Bypass input-tag reuse; retries still retain this run's original image.
       force_rebuild:
         description: Build a new image even when application inputs match a previous build
         type: boolean
         default: false
+      # Backend storage maintenance also forces infrastructure work during rollout.
       bootstrap_state:
         description: Explicitly provision/update backend storage before detection
         type: boolean
         default: false
+  # Target selection maps these branches to play, int and prd respectively.
   push:
     branches:
     - dev
@@ -28,6 +34,8 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  # CI, image preparation and target selection start independently. Rollout waits
+  # for all three, so a published image can never bypass a failed release gate.
   ci:
     name: CI & Tests
     runs-on: ubuntu-latest
@@ -47,6 +55,7 @@ jobs:
       run: uv run --locked ruff format --check .
     - name: Run Tests
       run: uv run coverage run -m pytest
+  # Resolve one application digest for the release, then scan it before rollout.
   build:
     name: Build & Push
     runs-on: ubuntu-latest
@@ -58,6 +67,8 @@ jobs:
       digest: ${{ steps.release.outputs.digest }}
     steps:
     - uses: actions/checkout@v4
+    # Preserve the original digest when rerunning this workflow run. The helper
+    # verifies the saved record's repository, commit, run, image and input hash.
     - name: Restore original release image record
       id: previous
       run: |
@@ -68,6 +79,9 @@ jobs:
         else
           echo "found=false" >> "$GITHUB_OUTPUT"
         fi
+    # Prefer the saved record, then the run tag, then an input tag unless forced.
+    # The fingerprint covers tracked application/build files, this workflow and
+    # the image helper, plus the linux/amd64 platform; commit ancestry is excluded.
     - name: Resolve shared application image
       id: resolve
       run: |
@@ -78,9 +92,12 @@ jobs:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+    # An empty resolved digest requires a build; reused images skip both steps.
     - name: Set up Buildx
       if: steps.resolve.outputs.digest == ''
       uses: docker/setup-buildx-action@v4
+    # Publish tags for both input reuse and run identity. Actual builds pull base
+    # images afresh and disable layer caching, even when a previous build exists.
     - name: Build and push
       id: build
       if: steps.resolve.outputs.digest == ''
@@ -94,12 +111,15 @@ jobs:
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:run-${{ github.run_id }}
         pull: true
         no-cache: true
+    # Record either the reused digest or the newly built digest as the one release
+    # output; every selected target receives this exact immutable image reference.
     - name: Record immutable release image
       id: release
       env:
         IMAGE_DIGEST: ${{ steps.resolve.outputs.digest || steps.build.outputs.digest }}
       run: |
         python scripts/deploy/release_image.py record
+    # Upload the record once per run so later attempts restore the same selection.
     - name: Save release image record
       if: steps.previous.outputs.found != 'true'
       uses: actions/upload-artifact@v4
@@ -107,6 +127,7 @@ jobs:
         name: release-image
         path: release-image.json
         if-no-files-found: error
+    # Reused images are scanned again, using the digest that rollout will receive.
     - name: Run Trivy scanner
       uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
       with:
@@ -118,6 +139,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       FORCE_REBUILD: ${{ inputs.force_rebuild || false }}
+  # Validate the inventory, then select enabled targets that are not on hold and
+  # match both the invoking branch and its permitted deployment stage.
   prepare-targets:
     name: Prepare Targets
     runs-on: ubuntu-latest
@@ -142,6 +165,8 @@ jobs:
           exit 1
         fi
         echo "matrix={\"target\":$TARGETS}" >> $GITHUB_OUTPUT
+  # Dispatch an independent reusable workflow for each target only after every
+  # release gate passes. Target jobs retain their configured environment gates.
   rollout:
     name: Rollout - ${{ matrix.target.id }}
     needs:
@@ -149,12 +174,14 @@ jobs:
     - build
     - prepare-targets
     strategy:
+      # A failed target does not cancel the remaining targets' deployment chains.
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare-targets.outputs.matrix) }}
     uses: ./.github/workflows/deploy-target.yml
     with:
       target: ${{ toJSON(matrix.target) }}
       digest: ${{ needs.build.outputs.digest }}
+      # Explicit backend bootstrap must also reconcile the target infrastructure.
       force_infra: ${{ inputs.force_infra || inputs.bootstrap_state || false }}
       bootstrap_state: ${{ inputs.bootstrap_state || false }}
     secrets: inherit

@@ -1,16 +1,22 @@
+# Reusable workflow called by matrix-deploy.yml for one target and one release image.
+# Stages: detect/plan infrastructure, apply and verify it, then deploy the container.
 name: Deploy one target
 'on':
   workflow_call:
     inputs:
+      # Serialized target entry from infra/targets.json, including resource and backend paths.
       target:
         required: true
         type: string
+      # Immutable image digest shared by all targets in the caller's release run.
       digest:
         required: true
         type: string
+      # Request reconciliation even when infrastructure inputs match the last success.
       force_infra:
         type: boolean
         default: false
+      # Explicit opt-in to create/update backend storage before change detection.
       bootstrap_state:
         type: boolean
         default: false
@@ -21,9 +27,12 @@ env:
   IMAGE_NAME: uclh-digital-innovation-hub/xhuma
   TARGET_ID: ${{ fromJSON(inputs.target).id }}
 jobs:
+  # 1. Detect whether infrastructure work is needed and save a plan for review.
+  # Application-only releases can skip Terraform while still reaching deployment.
   infra-plan:
     name: Infra Plan - ${{ fromJSON(inputs.target).id }}
     runs-on: ${{ fromJSON(inputs.target).runner_label }}
+    # Supplies plan credentials and runs any configured environment approval checks.
     environment: ${{ fromJSON(inputs.target).id }}-plan
     steps:
     - uses: actions/checkout@v4
@@ -31,6 +40,7 @@ jobs:
       uses: azure/login@v2
       with:
         creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+    # Ordinary releases reuse backend storage; provisioning runs only when requested.
     - name: Bootstrap State Storage
       env:
         AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -38,6 +48,9 @@ jobs:
         XHUMA_BACKEND_FILE: ${{ fromJSON(inputs.target).backend_file }}
       run: bash infra/bootstrap/setup-target.sh
       if: inputs.bootstrap_state
+    # Compare tracked infrastructure/config/deployment inputs with the last fully
+    # verified success record in Blob Storage. Missing records or force request work;
+    # failed reads and runs older than the recorded success are rejected.
     - name: Detect target infrastructure changes
       id: detect
       env:
@@ -56,6 +69,7 @@ jobs:
         terraform_wrapper: false
         terraform_version: 1.5.7
       if: steps.detect.outputs.infra_needed == 'true'
+    # Validate Terraform inputs before planning without printing credential values.
     - name: Verify Required Secrets
       env:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -87,6 +101,8 @@ jobs:
           exit 1
         fi
       if: steps.detect.outputs.infra_needed == 'true'
+    # For adopted targets, require the existing backend and state blob before init
+    # so a missing or incorrect backend cannot silently become an empty deployment.
     - name: Existing State Preflight
       if: steps.detect.outputs.infra_needed == 'true' && (fromJSON(inputs.target).require_existing_state == true)
       env:
@@ -128,6 +144,8 @@ jobs:
           exit 1
         fi
         echo "Existing state verified successfully."
+    # Reuse provider downloads by runner platform and both roots' lockfiles.
+    # Each job still initializes its own backend and working directory.
     - name: Configure Terraform provider cache
       run: |
         mkdir -p "$RUNNER_TEMP/terraform-plugin-cache"
@@ -150,6 +168,8 @@ jobs:
         terraform init \
           -backend-config="../${{ fromJSON(inputs.target).backend_file }}"
       if: steps.detect.outputs.infra_needed == 'true'
+    # Confirm the loaded state owns the existing app, database and cache, rather
+    # than merely checking that a blob with the expected name exists.
     - name: Verify Existing State Anchors
       if: steps.detect.outputs.infra_needed == 'true' && (fromJSON(inputs.target).require_existing_state == true)
       working-directory: ./infra
@@ -176,6 +196,9 @@ jobs:
           exit 1
         fi
         echo "State anchors verified successfully."
+    # Create or reuse this run's original plan plus immutable manifest in tfplans.
+    # The helper binds it to the target, backend, inputs and image; adopted targets
+    # reject delete/replacement actions. The checksum and changes appear in the summary.
     - name: Terraform Plan
       id: plan
       env:
@@ -197,12 +220,16 @@ jobs:
         python scripts/deploy/saved_plan.py plan --target "$TARGET_ID"
       if: steps.detect.outputs.infra_needed == 'true'
     outputs:
+      # Passed to apply and deploy so a skipped infrastructure phase is intentional.
       infra_needed: ${{ steps.detect.outputs.infra_needed }}
+  # 2. Apply the reviewed workload plan, reconcile shared-vault networking and
+  # verify secret access before recording the infrastructure revision as successful.
   infra-apply:
     name: Infra Apply - ${{ fromJSON(inputs.target).id }}
     needs:
     - infra-plan
     runs-on: ${{ fromJSON(inputs.target).runner_label }}
+    # Any configured infrastructure approval occurs before this job's steps run.
     environment: ${{ fromJSON(inputs.target).github_infra_environment }}
     steps:
     - uses: actions/checkout@v4
@@ -256,6 +283,8 @@ jobs:
       run: |
         terraform init \
           -backend-config="../${{ fromJSON(inputs.target).backend_file }}"
+    # Restore the exact reviewed plan and verify its original manifest/checksum.
+    # Missing or mismatched plans fail here; apply never generates a replacement.
     - name: Download and Verify Plan
       run: |
         python scripts/deploy/saved_plan.py download --target "$TARGET_ID"
@@ -266,6 +295,8 @@ jobs:
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         IMAGE_DIGEST: ${{ inputs.digest }}
         TF_VAR_docker_image: ${{ env.IMAGE_NAME }}@${{ inputs.digest }}
+    # A receipt binds this run's successful workload apply to its plan and image.
+    # On retry, skip that apply while continuing unfinished shared-vault work.
     - name: Check workload apply checkpoint
       id: workload
       env:
@@ -285,6 +316,7 @@ jobs:
       run: |
         terraform apply -input=false -lock-timeout=120s "$PLAN_FILE"
       if: steps.workload.outputs.already_applied != 'true'
+    # Write the receipt only after Terraform apply has succeeded.
     - name: Record workload apply checkpoint
       if: steps.workload.outputs.already_applied != 'true'
       env:
@@ -294,6 +326,8 @@ jobs:
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       run: |
         python scripts/deploy/deployment_state.py record-workload --target "$TARGET_ID"
+    # The shared root owns the vault firewall in separate state/subscription.
+    # Preserve live IP/subnet rules and merge this target's app integration subnet.
     - name: Reconcile Shared Infrastructure - Plan
       working-directory: ./infra/shared
       env:
@@ -334,6 +368,8 @@ jobs:
 
         # Output raw plan JSON for the guard
         terraform show -json shared.tfplan > shared_plan.json
+    # Allow no change or only this target subnet's addition; reject removals,
+    # other vault changes and a backend that crosses production/nonproduction ownership.
     - name: Guard Shared Infrastructure Plan
       working-directory: ./infra/shared
       env:
@@ -353,6 +389,7 @@ jobs:
         ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
       run: |
         terraform apply -input=false -auto-approve "shared.tfplan"
+    # Verify Azure actually contains the target subnet rule after shared apply.
     - name: Verify Shared Key Vault Configuration
       env:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -374,6 +411,9 @@ jobs:
            exit 1
         fi
         echo "Target subnet successfully verified in shared Key Vault."
+    # Refresh App Service's cached secret references after permissions/network changes.
+    # Retry transient Azure errors, then require every shared-vault reference to resolve.
+    # Target-local Epic CA population remains a separate operator onboarding step.
     - name: Refresh and Verify App Service Key Vault References
       env:
         APP_RESOURCE_ID: /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ fromJSON(inputs.target).resource_group }}/providers/Microsoft.Web/sites/${{ fromJSON(inputs.target).app_service_name }}
@@ -437,9 +477,12 @@ jobs:
         fi
 
         echo "All required shared Key Vault references are Resolved."
+    # Remove generated configuration even when shared planning or verification fails.
     - name: Cleanup Ephemeral Shared Config
       if: always()
       run: rm -f /tmp/shared-reconcile.tfvars.json
+    # Mark the input fingerprint successful only after all infrastructure checks pass.
+    # A later application failure can then be retried without repeating infrastructure.
     - name: Record successful infrastructure revision
       env:
         ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -448,10 +491,15 @@ jobs:
         ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       run: |
         python scripts/deploy/deployment_state.py record-infra --target "$TARGET_ID"
+    # Run this job only when detection requests infrastructure reconciliation.
     if: needs.infra-plan.outputs.infra_needed == 'true'
+    # Serialize the whole apply job for targets sharing a vault backend so their
+    # read/merge/apply firewall operations cannot overwrite one another's subnet rules.
     concurrency:
       group: xhuma-shared-${{ fromJSON(inputs.target).shared_backend_file }}
       cancel-in-progress: false
+  # 3. Deploy the selected digest and report configuration/liveness checks.
+  # This has its own target environment and any configured deployment approvals.
   deploy:
     name: Deploy - ${{ fromJSON(inputs.target).id }}
     needs:
@@ -480,6 +528,8 @@ jobs:
       uses: azure/login@v2
       with:
         creds: '{"clientId":"${{ secrets.AZURE_CLIENT_ID }}","clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}","subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}","tenantId":"${{ secrets.AZURE_TENANT_ID }}"}'
+    # Capture the configured image for the summary and to avoid redeploying the same
+    # digest on retries. The previous image is recorded; rollback is an operator action.
     - name: Capture Previous Digest
       id: prev_digest
       run: |
@@ -489,12 +539,14 @@ jobs:
         PREV_DIGEST="${PREV_DIGEST#DOCKER|}"
         echo "PREV_DIGEST=$PREV_DIGEST" >> $GITHUB_ENV
         echo "digest=$PREV_DIGEST" >> "$GITHUB_OUTPUT"
+    # Deploy by immutable digest only when App Service is configured differently.
     - name: Deploy Container to Azure Web App
       uses: azure/webapps-deploy@v2
       with:
         app-name: ${{ fromJSON(inputs.target).app_service_name }}
         images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ inputs.digest }}
       if: steps.prev_digest.outputs.digest != format('{0}/{1}@{2}', env.REGISTRY, env.IMAGE_NAME, inputs.digest)
+    # Read the image configuration back from Azure and require an exact match.
     - name: Verify New Digest
       run: |
         NEW_DIGEST=$(az webapp config container show --name "${{ fromJSON(inputs.target).app_service_name }}" --resource-group "${{ fromJSON(inputs.target).resource_group }}" --query "[?name=='DOCKER_CUSTOM_IMAGE_NAME'].value | [0]" -o tsv || echo "none")
@@ -514,6 +566,9 @@ jobs:
         echo "**Previous Image:** \`$PREV_DIGEST\`" >> $GITHUB_STEP_SUMMARY
         echo "**New Image:** \`$NEW_DIGEST\`" >> $GITHUB_STEP_SUMMARY
         echo "**Target:** ${{ fromJSON(inputs.target).id }}" >> $GITHUB_STEP_SUMMARY
+    # Poll /health for up to two minutes. Network/403 blocks produce an operator
+    # warning; other unsuccessful responses fail after the timeout. SOAP/mTLS and
+    # clinical functional acceptance remain manual even when automated liveness passes.
     - name: Application Health Check
       run: |
         echo "Waiting for application to start..."
@@ -564,4 +619,6 @@ jobs:
         echo "- **Manual Functional Acceptance (SOAP/mTLS)**: OUTSTANDING" >> $GITHUB_STEP_SUMMARY
 
         echo "Application check finished. Manual clinical check required before marking deployment complete."
+    # Permit an intentionally skipped apply, but stop on cancellation, plan failure
+    # or failed infrastructure verification.
     if: ${{ !cancelled() && needs.infra-plan.result == 'success' && (needs.infra-apply.result == 'success' || needs.infra-apply.result == 'skipped') }}

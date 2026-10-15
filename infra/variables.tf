@@ -1,8 +1,12 @@
+# The deployment workflow loads the target's infra/env/*.tfvars file and supplies
+# shared-service settings, credentials and the release image through TF_VAR_*.
+# The workload resource group already exists and is looked up in main.tf.
 variable "resource_group_name" {
   description = "The name of the resource group"
   type        = string
 }
 
+# Currently unused by main.tf: resources inherit the existing resource group's location.
 variable "location" {
   description = "The Azure location for resources"
   type        = string
@@ -14,6 +18,7 @@ variable "app_service_name" {
   type        = string
 }
 
+# Target-specific Redis name and sizing for the private application cache.
 variable "redis_name" {
   description = "Name of the Redis Cache instance"
   type        = string
@@ -37,6 +42,7 @@ variable "redis_capacity" {
   default     = 1
 }
 
+# Target-specific PostgreSQL server and administrator used by the application.
 variable "postgres_server_name" {
   description = "Name of the Postgres Flexible Server"
   type        = string
@@ -48,12 +54,16 @@ variable "postgres_admin_username" {
   default     = "xhumaadmin"
 }
 
+# CI supplies POSTGRES_PASSWORD; keep this credential out of committed tfvars.
 variable "postgres_admin_password" {
   description = "Postgres admin password"
   type        = string
   sensitive   = true
 }
 
+# Locate the existing shared Key Vault through the azurerm.shared provider.
+# CI supplies these values from SHARED_RESOURCE_GROUP_NAME, SHARED_SUBSCRIPTION_ID
+# and SHARED_KEY_VAULT_NAME; the vault itself is managed by the separate shared root.
 variable "shared_resource_group_name" {
   description = "The name of the shared resource group"
   type        = string
@@ -69,11 +79,13 @@ variable "shared_key_vault_name" {
   type        = string
 }
 
+# Application VERSION metadata; the container release is selected separately by digest.
 variable "app_version" {
   type    = string
   default = "0.9.2"
 }
 
+# Application device metadata and registered Spine system ASID.
 variable "device_id" {
   type    = string
   default = "1"
@@ -84,6 +96,8 @@ variable "org_asid" {
   default = ""
 }
 
+# Select which clinical sections the application requests from GP Connect.
+# These are strings because they are passed directly to App Service settings.
 variable "gp_connect_include_allergies" {
   type    = string
   default = "true"
@@ -109,11 +123,14 @@ variable "gp_connect_include_immunisations" {
   default = "true"
 }
 
+# Stable document registry identity, supplied by CI's REGISTRY_ID secret.
 variable "registry_id" {
   description = "Registry ID"
   type        = string
 }
 
+# CI supplies the release image pinned by digest. The deployment workflow manages
+# subsequent image rollouts, which main.tf excludes from Terraform drift checks.
 variable "docker_image" {
   description = "Docker image to deploy"
   type        = string
@@ -126,6 +143,7 @@ variable "docker_registry_url" {
   default     = "https://ghcr.io"
 }
 
+# CI supplies GHCR_USERNAME and CR_PAT to let App Service pull the private image.
 variable "docker_registry_username" {
   description = "Docker registry username"
   type        = string
@@ -137,6 +155,7 @@ variable "docker_registry_password" {
   sensitive   = true
 }
 
+# Organisation and supplier identities used in NHS requests and SDS self lookup.
 variable "org_code" {
   description = "Organization Code"
   type        = string
@@ -154,24 +173,28 @@ variable "xhuma_mhs_party_key" {
   default     = ""
 }
 
+# Application runtime mode (int/prod), distinct from deployment target IDs (play/int/prd).
 variable "env" {
   description = "Environment Name"
   type        = string
   default     = "prod"
 }
 
+# Lifetime of generated CCDA documents cached in Redis.
 variable "ccda_expiry_hours" {
   description = "Number of hours to cache CCDA documents"
   type        = string
   default     = "4"
 }
 
+# Application telemetry export cadence, passed to the OpenTelemetry configuration.
 variable "otel_metric_export_interval_ms" {
   description = "OpenTelemetry Metric Export Interval (ms)"
   type        = string
   default     = "5000"
 }
 
+# HTTP origin and host checks enforced by the application middleware.
 variable "cors_origins" {
   description = "Comma separated list of allowed CORS origins"
   type        = string
@@ -184,12 +207,15 @@ variable "allowed_hosts" {
   default     = "*" # Default to * for dev, override in prod
 }
 
+# Application-level certificate enforcement; App Service forwards certificates in Optional mode.
 variable "require_mtls" {
   description = "Whether to enforce mTLS globally in the FastAPI app"
   type        = string
   default     = "true"
 }
 
+# A non-empty URL routes GP Connect through an external relay and enables its
+# shared-vault token reference; an empty URL uses the application's WebSocket relay.
 variable "external_relay_url" {
   description = "The URL of the external Shared Relay Server"
   type        = string
@@ -202,18 +228,21 @@ variable "external_relay_client_id" {
   default     = "client1"
 }
 
+# Upstream proxy bases used in prod; dev/int use built-in integration endpoints.
 variable "nhs_relay_base_path" {
   description = "The base path for the NHS GP Connect API over HSCN/Relay"
   type        = string
   default     = ""
 }
 
+# A non-empty internet path also enables the shared-vault NHS client TLS references.
 variable "nhs_over_internet_path" {
   description = "The base path for the NHS GP Connect API over the internet"
   type        = string
   default     = ""
 }
 
+# Terminology endpoint used when translating medication codes through dm+d.
 variable "dmd_base_url" {
   description = "The FHIR Terminology base URL for DMD"
   type        = string
