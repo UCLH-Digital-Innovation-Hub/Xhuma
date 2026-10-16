@@ -1,0 +1,95 @@
+# Deliberately separate from the development/test stacks: no app mounts,
+# command override, dev dependencies, .env, cloud credentials or cached data.
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: xhuma
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: smoke-postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d xhuma"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7.2
+    command: ["redis-server", "--requirepass", "smoke-redis"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "smoke-redis", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  nhs-mock:
+    image: python:3.13-slim
+    command: ["python", "/smoke/nhs_mock.py"]
+    volumes:
+      - ./scripts/container_smoke:/smoke:ro
+      - ./app/tests/fixtures:/fixtures:ro
+      - ${SMOKE_STATE_DIR:?Run scripts/container_smoke/run.sh}:/state:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    networks:
+      default:
+        aliases:
+          - api.service.nhs.uk
+          - ontology.nhs.uk
+
+  xhuma:
+    build: .
+    env_file:
+      - ${SMOKE_STATE_DIR:?Run scripts/container_smoke/run.sh}/app.env
+    environment:
+      ENV: prod
+      API_KEY: smoke-app-key
+      NHS_API_KEY: smoke-nhs-key
+      ORG_CODE: RRV00
+      ORG_ASID: "123"
+      XHUMA_ODS_CODE: X26
+      DATABASE_URL: postgresql+asyncpg://postgres:smoke-postgres@postgres:5432/xhuma
+      REDIS_HOST: redis
+      REDIS_PASSWORD: smoke-redis
+      REQUIRE_MTLS: "false"
+      USE_RELAY: "1"
+      NHS_RELAY_BASE_PATH: https://proxy.smoke.invalid
+      EXTERNAL_RELAY_URL: http://nhs-mock:8080
+      DMD_CLIENT_ID: smoke-dmd
+      DMD_CLIENT_SECRET: smoke-dmd-secret
+      SSL_CERT_FILE: /smoke-certs/cert.pem
+      OTEL_METRIC_EXPORT_INTERVAL_MS: "3600000"
+    volumes:
+      - ${SMOKE_STATE_DIR:?Run scripts/container_smoke/run.sh}/cert.pem:/smoke-certs/cert.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nhs-mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost/health', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  driver:
+    build:
+      context: .
+      dockerfile: scripts/container_smoke/Dockerfile
+    profiles: ["driver"]
+    environment:
+      # Reuse Locust's payloads/validators with the synchronous HTTP driver.
+      LOCUST_SKIP_MONKEY_PATCH: "1"
+      LOCUST_SKIP_URLLIB3_PATCH: "1"
+    command: ["python", "scripts/container_smoke/check.py", "http://xhuma", "http://nhs-mock:8080"]
+
+networks:
+  default:
+    # The NHS hostnames above resolve locally; containers cannot reach real APIs.
+    internal: true
