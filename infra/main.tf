@@ -622,8 +622,8 @@ resource "azurerm_container_app_job" "dmd_warm" {
 
   lifecycle {
     precondition {
-      condition     = !var.dmd_cache_warm_enabled || var.dmd_cache_job_image != null
-      error_message = "dmd_cache_job_image is required when dmd_cache_warm_enabled is true."
+      condition     = var.dmd_cache_job_image != null && can(regex("^ghcr\\.io/uclh-digital-innovation-hub/xhuma@sha256:[0-9a-f]{64}$", var.dmd_cache_job_image))
+      error_message = "dmd_cache_job_image is required and must be an immutable sha256 digest (ghcr.io/uclh-digital-innovation-hub/xhuma@sha256:<64 hex chars>) when dmd_cache_warm_enabled is true."
     }
     postcondition {
       condition     = self.replica_timeout_in_seconds < 2100 && 2100 < 2700
@@ -660,20 +660,25 @@ resource "azurerm_logic_app_workflow" "dmd_warm" {
   }
 }
 
-resource "azurerm_logic_app_trigger_recurrence" "dmd_warm" {
+resource "azurerm_logic_app_trigger_custom" "dmd_warm" {
   count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
   name         = "weekly-dmd-warm-recurrence"
   logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
-  frequency    = "Week"
-  interval     = 1
-  time_zone    = "GMT Standard Time"
-  start_time   = var.dmd_cache_schedule_start_time
 
-  schedule {
-    on_these_days    = ["Monday"]
-    at_these_hours   = [5]
-    at_these_minutes = [var.dmd_cache_warm_minute]
-  }
+  body = jsonencode({
+    type = "Recurrence"
+    recurrence = {
+      frequency = "Week"
+      interval  = 1
+      timeZone  = "GMT Standard Time"
+      startTime = var.dmd_cache_schedule_start_time
+      schedule = {
+        hours    = [5]
+        minutes  = [var.dmd_cache_warm_minute]
+        weekDays = ["Monday"]
+      }
+    }
+  })
 }
 
 resource "azurerm_logic_app_action_custom" "start_job" {
@@ -853,8 +858,8 @@ resource "azurerm_logic_app_action_custom" "check_status" {
 resource "azurerm_role_definition" "dmd_job_operator" {
   count       = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
   name        = "${var.app_service_name}-dmd-job-operator"
-  scope       = azurerm_container_app_job.dmd_warm[0].id
-  description = "Allows starting and polling the dm+d cache warmer job"
+  scope       = data.azurerm_resource_group.rg.id
+  description = "Allows starting and polling the dm+d cache warmer job and its async operations"
 
   permissions {
     actions = [
@@ -862,19 +867,21 @@ resource "azurerm_role_definition" "dmd_job_operator" {
       "Microsoft.App/jobs/start/action",
       "Microsoft.App/jobs/executions/read",
       "Microsoft.App/jobs/execution/read",
+      "Microsoft.App/locations/containerappsjoboperationstatuses/read",
+      "Microsoft.App/locations/containerappsjoboperationresults/read",
       "Microsoft.App/managedEnvironments/read",
     ]
     not_actions = []
   }
 
   assignable_scopes = [
-    azurerm_container_app_job.dmd_warm[0].id
+    data.azurerm_resource_group.rg.id
   ]
 }
 
 resource "azurerm_role_assignment" "logic_app_job_operator" {
   count              = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
-  scope              = azurerm_container_app_job.dmd_warm[0].id
+  scope              = data.azurerm_resource_group.rg.id
   role_definition_id = azurerm_role_definition.dmd_job_operator[0].role_definition_resource_id
   principal_id       = azurerm_logic_app_workflow.dmd_warm[0].identity[0].principal_id
 }

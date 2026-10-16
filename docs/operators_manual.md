@@ -590,39 +590,63 @@ ContainerAppConsoleLogs_CL
   -o table
 ```
 
-#### Check Cache Status via CLI
+#### Dry-Run Capacity Planning & Status via CLI
 
-From within the application environment or maintenance shell:
+From within the application environment, Container App shell, or maintenance container:
 
 ```bash
+# Execute read-only capacity planning estimate (no lock, no Redis writes)
+/code/.venv/bin/python -m app.ops.dmd_cache plan
+
+# Plan mode with machine-readable JSON output
+/code/.venv/bin/python -m app.ops.dmd_cache plan --json
+
+# Inspect operational cache status
 /code/.venv/bin/python -m app.ops.dmd_cache status
 ```
 
 Reports:
-- Active dm+d release
-- Active release pointer TTL
-- Warmer lock state
-- Last successful manifest (counts for ROUTE, UOM, VMP, AMP, duration, and memory delta)
-- Redis memory usage, peak, and eviction metrics
+- Discovered dm+d release and category concept counts (ROUTE, UOM, VMP, AMP)
+- Empirical payload sizes (mean, p50, p95, max for raw Parameters and resolved DMDConcept)
+- Key metadata and allocator fragmentation overhead (1.25x)
+- Configurable safety multiplier (default 1.5x)
+- Projected Redis memory delta and total memory including prior release coexistence
+- Projected duration under configured concurrency against the 1800s Container Apps timeout
+- Active release pointer TTL and warmer lock state
 
 #### Operational Scenarios & Troubleshooting
 
 1. **What a failed Monday warm means:**
    - The warmer acquires a distributed Redis lock (`dmd:warm:v1:lock`) with a 45-minute TTL and releases it safely using a token-matched Lua script on exit.
-   - If a failure occurs (network timeout, upstream Terminology Server downtime, memory ceiling breach), the active release pointer (`dmd:active-release`) remains untouched pointing to the prior release.
+   - If a failure occurs (monotonic 120s HTTP retry budget exhausted, upstream Terminology Server downtime, memory ceiling breach), the active release pointer (`dmd:active-release`) remains untouched pointing to the prior release.
    - The prior release data is valid for 9 days, while the active pointer has an 8-day TTL. This ensures a 24-hour grace window across weekly runs.
-   - If the active release pointer expires or is absent, the application safely degrades to on-demand terminology lookup. Prescription conversion is never interrupted.
+   - If the active release pointer expires or is absent, the application safely degrades to unversioned on-demand terminology lookup (`snomed:<concept_id>`). Prescription conversion is never interrupted.
 
-2. **Redis Memory Safety & Evictions:**
-   - The warmer enforces a memory ceiling (`DMD_WARM_MAX_REDIS_MEMORY_PERCENT`, default 80%) before every Redis pipeline write batch.
-   - If `evicted_keys` increases during warm, the process aborts immediately and refuses activation.
-   - Redis DB 2 shares memory with DB 0/1; the warmer guarantees headroom for patient, SDS, and PDS caches.
+2. **Redis Memory Safety & Instance-Wide Evictions:**
+   - **Critical Architecture Fact**: Redis `maxmemory` and eviction policies (such as `allkeys-lru`) are **instance-wide across all logical databases (DB 0, DB 1, DB 2)**. Redis does NOT partition memory limits per database.
+   - If memory is exhausted during warming, Redis could evict active DB 0 application session keys or DB 1 PDS cache keys.
+   - To prevent this, the warmer enforces:
+     - A full-run memory preflight before any concept is written (aborting if current used + projected delta with 1.5x multiplier exceeds 80% ceiling).
+     - Per-batch memory and eviction checks.
+     - An eviction delta check at completion: if `evicted_keys` increases by even 1 key during warming, the run aborts immediately and refuses activation.
 
-3. **PRD Acceptance Prerequisites:**
+3. **Platform Retries and Distributed Locks:**
+   - Container Apps Job `replica_retry_limit` is strictly set to `0`. A platform retry would spawn a separate process with a new random lock token, colliding with the still-held distributed lock.
+   - All network retries and 401 token refreshes are handled within the single application process under a monotonic 120s deadline.
+
+4. **Heartbeat Telemetry & Alerting Constraints:**
+   - Upon successful activation, the warmer logs a structured completion event:
+     ```json
+     dmd_cache_event {"event": "warm_succeeded", "release": "...", "duration_seconds": ..., "concept_count": ..., "memory_delta_bytes": ..., "evictions": 0}
+     ```
+   - Azure Monitor Scheduled Query Rules enforce an API hard cap on query lookback windows of 48 hours (`P2D` / 2880 mins). A 7.5-day scheduled query alert cannot be created directly via `azurerm_monitor_scheduled_query_rules_alert_v2`.
+   - Therefore, `dmd_cache_schedule_enabled` is blocked by a Terraform precondition until a 48h-compatible post-warm check or external watchdog is implemented. Both `dmd_cache_warm_enabled` and `dmd_cache_schedule_enabled` remain `false` across all environments.
+
+5. **PRD Acceptance Prerequisites:**
    Before enabling `dmd_cache_schedule_enabled = true` in production tfvars, operators must verify a complete, successful non-PRD execution demonstrating:
    - Successful image digest pull via dedicated job variable (`var.dmd_cache_job_image`)
    - Key Vault secret resolution via user-assigned managed identity across firewalled `ca_subnet`
-   - TLS Redis DB 2 connectivity and Terminology Server HTTPS access with pooled retries and jitter
+   - TLS Redis DB 2 connectivity and Terminology Server HTTPS access under monotonic retry budgets
    - Zero key evictions and recorded memory delta within limits
    - Atomic pointer activation and resolved cache hits during medication translation
    - Valid schedule start time (`dmd_cache_schedule_start_time` set to Monday 05:xx at least 7 days in future)

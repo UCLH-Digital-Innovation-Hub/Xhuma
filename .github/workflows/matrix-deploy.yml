@@ -484,6 +484,31 @@ jobs:
         run: |
           terraform apply -input=false -auto-approve "$PLAN_FILE"
 
+      - name: Extract Target Terraform Outputs
+        working-directory: ./infra
+        run: |
+          TF_OUTPUTS_JSON=$(terraform output -json)
+          WARM_ENABLED=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_warm_enabled.value // false')
+          CA_SUBNET_ID=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_ca_subnet_id.value // empty')
+          JOB_NAME=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_job_name.value // empty')
+          JOB_IMAGE=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_job_image.value // empty')
+
+          if [ "$WARM_ENABLED" == "true" ]; then
+            if [ -z "$CA_SUBNET_ID" ]; then
+              echo "::error::Target has dmd_cache_warm_enabled=true but dmd_cache_ca_subnet_id output is null/missing!"
+              exit 1
+            fi
+            if [ -z "$JOB_NAME" ]; then
+              echo "::error::Target has dmd_cache_warm_enabled=true but dmd_cache_job_name output is null/missing!"
+              exit 1
+            fi
+          fi
+
+          echo "WARM_ENABLED=$WARM_ENABLED" >> $GITHUB_ENV
+          echo "CA_SUBNET_ID=$CA_SUBNET_ID" >> $GITHUB_ENV
+          echo "JOB_NAME=$JOB_NAME" >> $GITHUB_ENV
+          echo "JOB_IMAGE=$JOB_IMAGE" >> $GITHUB_ENV
+
       - name: Reconcile Shared Infrastructure - Plan
         working-directory: ./infra/shared
         env:
@@ -492,12 +517,11 @@ jobs:
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
           APP_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
-          CA_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/ca-subnet"
         run: |
           LIVE_NETWORK_ACLS=$(az keyvault show --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" --query "properties.networkAcls" -o json)
 
           TARGET_SUBNETS=("$APP_SUBNET_ID")
-          if grep -E -q '^[[:space:]]*dmd_cache_warm_enabled[[:space:]]*=[[:space:]]*true' "../${{ matrix.target.tfvars_file }}"; then
+          if [ -n "$CA_SUBNET_ID" ]; then
             TARGET_SUBNETS+=("$CA_SUBNET_ID")
           fi
           TARGET_SUBNETS_JSON=$(printf '%s\n' "${TARGET_SUBNETS[@]}" | jq -R . | jq -s .)
@@ -527,7 +551,7 @@ jobs:
           set -e
           if [ $TF_EXIT -ne 0 ]; then
             echo "::error::Shared plan failed"
-            python ../../scripts/deploy/filter_tf_error.py $TF_EXIT shared_plan_output.json
+            python "$GITHUB_WORKSPACE/scripts/deploy/filter_tf_error.py" $TF_EXIT shared_plan_output.json
             exit $TF_EXIT
           fi
 
@@ -537,7 +561,7 @@ jobs:
       - name: Guard Shared Infrastructure Plan
         working-directory: ./infra/shared
         run: |
-          python ../../scripts/deploy/guard_shared_plan.py shared_plan.json "$TARGET_SUBNET_IDS" "${{ matrix.target.id }}" "${{ matrix.target.shared_backend_file }}"
+          python "$GITHUB_WORKSPACE/scripts/deploy/guard_shared_plan.py" shared_plan.json "$TARGET_SUBNET_IDS" "${{ matrix.target.id }}" "${{ matrix.target.shared_backend_file }}"
           if [ $? -ne 0 ]; then
             echo "::error::Shared infrastructure guard rejected the plan."
             exit 1
@@ -581,21 +605,24 @@ jobs:
         env:
           EXPECTED_JOB_IMAGE: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
         run: |
-          if grep -E -q '^[[:space:]]*dmd_cache_warm_enabled[[:space:]]*=[[:space:]]*true' "../${{ matrix.target.tfvars_file }}"; then
-            echo "Verifying Container Apps Job image configuration..."
-            JOB_NAME="${{ matrix.target.app_service_name }}-dmd-warm"
+          if [ -n "$JOB_NAME" ]; then
+            echo "Verifying Container Apps Job image configuration for $JOB_NAME..."
             CURRENT_IMAGE=$(az containerapp job show \
               --name "$JOB_NAME" \
               --resource-group "${{ matrix.target.resource_group }}" \
               --query "properties.template.containers[0].image" \
               -o tsv)
+            if [ -z "$CURRENT_IMAGE" ]; then
+              echo "::error::Failed to read live Container Apps Job image for $JOB_NAME"
+              exit 1
+            fi
             if [ "$CURRENT_IMAGE" != "$EXPECTED_JOB_IMAGE" ]; then
               echo "::error::Container Apps Job image mismatch! Expected $EXPECTED_JOB_IMAGE, got $CURRENT_IMAGE"
               exit 1
             fi
             echo "Container Apps Job image verified: $CURRENT_IMAGE"
           else
-            echo "dmd_cache_warm_enabled is false for ${{ matrix.target.id }}; skipping job image verification."
+            echo "dmd_cache_job_name is empty/null for ${{ matrix.target.id }}; skipping job image verification."
           fi
 
       - name: Refresh and Verify App Service Key Vault References

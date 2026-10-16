@@ -925,3 +925,465 @@ async def test_newer_upstream_release_cannot_be_written_under_older_active_relea
 
     # Verify no write occurred
     assert mock_snomed.setex.await_count == 0
+
+
+# ==============================================================================
+# PHASE 3: RAW CACHE KEY CANONICAL PROPERTY SIGNATURE & NAMESPACE TESTS
+# ==============================================================================
+
+
+def test_raw_key_canonical_property_order_and_duplicates():
+    """Verify property ordering and duplicate property names yield identical canonical raw keys."""
+    from app.ccda.dmd import canonicalize_properties, dmd_raw_key
+
+    rel = "202610.1.0"
+    cid = 42010411000001105
+
+    # 1. Same release + same concept + same properties in different order
+    k1 = dmd_raw_key(cid, rel, ["VPI", "ROUTECD", "parent"])
+    k2 = dmd_raw_key(cid, rel, ["parent", "VPI", "ROUTECD"])
+    k3 = dmd_raw_key(cid, rel, ["ROUTECD", "parent", "VPI"])
+    assert k1 == k2 == k3
+    assert k1 == f"dmd:raw:v1:{rel}:{cid}:properties:ROUTECD,VPI,parent"
+
+    # 2. Duplicate properties yield same canonical key
+    k_dup = dmd_raw_key(cid, rel, ["VPI", "ROUTECD", "VPI", "ROUTECD", "parent"])
+    assert k_dup == k1
+
+    # 3. None and [] map to canonical 'none'
+    assert canonicalize_properties(None) == "none"
+    assert canonicalize_properties([]) == "none"
+    assert canonicalize_properties(()) == "none"
+    assert dmd_raw_key(cid, rel, None) == f"dmd:raw:v1:{rel}:{cid}:properties:none"
+    assert dmd_raw_key(cid, rel, []) == f"dmd:raw:v1:{rel}:{cid}:properties:none"
+
+    # 4. Whitespace trimming
+    k_ws = dmd_raw_key(cid, rel, ["  VPI  ", " ROUTECD "])
+    k_clean = dmd_raw_key(cid, rel, ["VPI", "ROUTECD"])
+    assert k_ws == k_clean
+
+
+def test_raw_key_different_properties_distinct():
+    """Verify different property sets produce different keys and cannot collide."""
+    from app.ccda.dmd import dmd_raw_key
+
+    rel = "202610.1.0"
+    cid = 42010411000001105
+
+    k_none = dmd_raw_key(cid, rel, None)
+    k_route = dmd_raw_key(cid, rel, ["ROUTECD"])
+    k_vpi = dmd_raw_key(cid, rel, ["VPI"])
+    k_both = dmd_raw_key(cid, rel, ["ROUTECD", "VPI"])
+
+    keys = {k_none, k_route, k_vpi, k_both}
+    assert len(keys) == 4
+    assert k_none != k_route
+    assert k_none != k_vpi
+    assert k_none != k_both
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_raw_cache_deserializes_to_parameters_and_resolved_to_dmdconcept(mock_snomed):
+    """Verify raw cache deserializes to FHIR Parameters dict, and resolved deserializes to DMDConcept."""
+    import json
+
+    from app.ccda.dmd import dmd_raw_key, dmd_resolved_key, get_dmd_concept
+    from app.ccda.models.dmd import DMDConcept
+
+    rel = "202610.1.0"
+    cid = 42010411000001105
+
+    raw_payload = {
+        "resourceType": "Parameters",
+        "parameter": [
+            {"name": "code", "valueCode": str(cid)},
+            {"name": "display", "valueString": "Test Drug 10mg"},
+            {"name": "version", "valueString": rel},
+        ],
+    }
+    resolved_model = DMDConcept(concept_id=cid, valueString="Test Drug 10mg")
+
+    # Raw cache hit returns dict
+    mock_snomed.get.return_value = json.dumps(raw_payload).encode("utf-8")
+    raw_result = await get_dmd_concept(cid, properties=["ROUTECD"], release=rel)
+    assert isinstance(raw_result, dict)
+    assert raw_result["resourceType"] == "Parameters"
+    assert raw_result["parameter"][0]["valueCode"] == str(cid)
+
+    # Resolved cache hit returns DMDConcept
+    mock_snomed.get.return_value = resolved_model.model_dump_json().encode("utf-8")
+
+    # Verify namespaces are strictly disjoint
+    k_raw = dmd_raw_key(cid, rel, ["ROUTECD"])
+    k_res = dmd_resolved_key(cid, rel)
+    assert k_raw.startswith("dmd:raw:v1:")
+    assert k_res.startswith("dmd:resolved:v1:")
+    assert not k_raw.startswith(k_res)
+    assert not k_res.startswith(k_raw)
+
+
+# ==============================================================================
+# PHASE 4: MONOTONIC HTTP RETRY DEADLINE TESTS
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_retry_budget_clamps_attempt_timeout_to_remaining():
+    """Verify that an attempt's timeout is clamped to the remaining monotonic retry budget."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    resp_success = httpx.Response(200, json={"ok": True}, request=req)
+
+    captured_timeouts = []
+
+    async def mock_post(url, json=None, headers=None, timeout=None):
+        captured_timeouts.append(timeout)
+        return resp_success
+
+    mock_http_client.post.side_effect = mock_post
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123", retry_budget_s=5.0)
+
+    # With remaining budget = 5.0, read timeout (default 300.0) should be clamped to <= 5.0
+    await client.post_fhir("ValueSet/$expand", {})
+
+    assert len(captured_timeouts) == 1
+    t = captured_timeouts[0]
+    assert t.read <= 5.0
+    assert t.connect <= 5.0
+    assert t.write <= 5.0
+    assert t.pool <= 5.0
+
+
+@pytest.mark.asyncio
+async def test_retry_budget_exhaustion_before_attempt_raises():
+    """Verify that if remaining budget <= 0 before an attempt, TimeoutError is raised immediately."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123", retry_budget_s=10.0)
+
+    # Mock time.monotonic such that deadline expires immediately
+    with patch("time.monotonic", side_effect=[100.0, 115.0]):
+        with pytest.raises(TimeoutError, match="Overall retry budget of 10.0s exhausted"):
+            await client.post_fhir("ValueSet/$expand", {})
+
+    assert mock_http_client.post.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_retry_after_exceeding_budget_aborts():
+    """Verify that Retry-After header exceeding the remaining budget aborts without sleeping."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    resp_429 = httpx.Response(429, headers={"Retry-After": "60"}, request=req)
+
+    mock_http_client.post.return_value = resp_429
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123", retry_budget_s=10.0)
+
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.post_fhir("ValueSet/$expand", {})
+
+        # Should NOT sleep 60s
+        assert mock_sleep.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_backoff_exceeding_budget_aborts_on_network_error():
+    """Verify that backoff calculation exceeding remaining budget aborts on network error without sleeping."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    mock_http_client.post.side_effect = httpx.ConnectTimeout("Connection timed out", request=req)
+
+    # Budget of 0.5s is smaller than minimum backoff (~1.1s)
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123", retry_budget_s=0.5)
+
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        with pytest.raises(httpx.ConnectTimeout):
+            await client.post_fhir("ValueSet/$expand", {})
+
+        assert mock_sleep.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_network_timeout_retry_success_within_budget():
+    """Verify transient network timeout followed by successful attempt within budget."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    resp_success = httpx.Response(200, json={"ok": True}, request=req)
+
+    mock_http_client.post.side_effect = [
+        httpx.ReadTimeout("Read timed out", request=req),
+        resp_success,
+    ]
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123", retry_budget_s=30.0)
+
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        resp = await client.post_fhir("ValueSet/$expand", {})
+        assert resp.status_code == 200
+        assert mock_http_client.post.await_count == 2
+        assert mock_sleep.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_terminology_client_close():
+    """Verify TerminologyClient.close() closes the underlying AsyncClient."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123")
+    await client.close()
+    mock_http_client.aclose.assert_awaited_once()
+
+
+# ==============================================================================
+# PHASE 5: READ-ONLY PLAN / CAPACITY PLANNING TESTS
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+@patch("app.ops.dmd_cache.snomed_client", autospec=True)
+async def test_plan_mode_does_not_mutate_redis_or_acquire_lock(mock_snomed):
+    """Verify plan mode performs zero Redis writes, sets no keys, and acquires no lock."""
+    from app.ops.dmd_cache import plan
+
+    mock_snomed.info = AsyncMock(
+        return_value={
+            "used_memory": 50 * 1024 * 1024,
+            "maxmemory": 256 * 1024 * 1024,
+            "evicted_keys": 0,
+        }
+    )
+
+    with patch("app.ops.dmd_cache.acquire_lock", new_callable=AsyncMock) as mock_acquire:
+        report = await plan(
+            category_counts={"ROUTE": 100, "UOM": 200, "VMP": 1000, "AMP": 2000},
+            raw_samples=[{"code": "1", "display": "Sample"}],
+            resolved_samples=[],
+            request_latencies=[0.1, 0.2],
+            release="202610.1.0",
+        )
+
+        assert mock_acquire.await_count == 0
+        assert mock_snomed.set.await_count == 0
+        assert mock_snomed.setex.await_count == 0
+        assert mock_snomed.delete.await_count == 0
+        assert mock_snomed.pipeline.call_count == 0
+
+        assert report["release"] == "202610.1.0"
+        assert report["unique_concept_count"] == 3300
+        assert report["fail_closed"] is False
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_includes_raw_resolved_and_coexistence_memory():
+    """Verify plan estimates include both raw and resolved caches, overhead, and existing memory."""
+    from app.ops.dmd_cache import plan
+
+    mem_state = {
+        "used_memory": 80 * 1024 * 1024,  # 80 MB existing (e.g. coexisting prior release)
+        "maxmemory": 256 * 1024 * 1024,  # 256 MB max
+        "evicted_keys": 0,
+    }
+
+    report = await plan(
+        mem_state=mem_state,
+        category_counts={"ROUTE": 150, "UOM": 250, "VMP": 25000, "AMP": 35000},
+        raw_samples=[{"k": "v" * 100}],
+        resolved_samples=[],
+        request_latencies=[0.2],
+        release="202610.1.0",
+        safety_multiplier=1.5,
+    )
+
+    assert report["projected_raw_bytes"] > 0
+    assert report["projected_resolved_bytes"] > 0
+    assert report["projected_redis_key_metadata_overhead_bytes"] > 0
+    assert report["projected_total_redis_delta_bytes"] > 0
+    # Coexistence memory: current used + projected delta
+    assert (
+        report["projected_total_memory_bytes"] == mem_state["used_memory"] + report["projected_total_redis_delta_bytes"]
+    )
+    assert report["current_redis_used_memory_bytes"] == mem_state["used_memory"]
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_insufficient_memory_fails_closed():
+    """Verify plan mode reports fail-closed when projected total memory exceeds threshold."""
+    from app.ops.dmd_cache import plan
+
+    # 200 MB used out of 256 MB (already > 78%)
+    mem_state = {
+        "used_memory": 200 * 1024 * 1024,
+        "maxmemory": 256 * 1024 * 1024,
+        "evicted_keys": 0,
+    }
+
+    report = await plan(
+        mem_state=mem_state,
+        category_counts={"ROUTE": 150, "UOM": 250, "VMP": 25000, "AMP": 35000},
+        raw_samples=[{"k": "v" * 500}],
+        release="202610.1.0",
+    )
+
+    assert report["fail_closed"] is True
+    assert any("exceeds guard limit" in r for r in report["fail_reasons"])
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_duration_exceeding_job_timeout_fails_closed():
+    """Verify plan mode reports fail-closed when projected duration exceeds Container Apps timeout."""
+    from app.ops.dmd_cache import plan
+
+    mem_state = {
+        "used_memory": 10 * 1024 * 1024,
+        "maxmemory": 512 * 1024 * 1024,
+        "evicted_keys": 0,
+    }
+
+    # Extremely high latency (e.g. 50s per request)
+    report = await plan(
+        mem_state=mem_state,
+        category_counts={"ROUTE": 150, "UOM": 250, "VMP": 25000, "AMP": 35000},
+        request_latencies=[50.0, 60.0],
+        container_app_timeout_s=1800,
+        concurrency=1,
+    )
+
+    assert report["fits_timeout"] is False
+    assert report["fail_closed"] is True
+    assert any("exceeds Container Apps Job timeout" in r for r in report["fail_reasons"])
+
+
+def test_plan_mode_json_output_contains_no_credentials_or_phi():
+    """Verify machine-readable plan output contains no credentials, tokens, or patient identifiers."""
+    import asyncio
+    import json
+
+    from app.ops.dmd_cache import plan
+
+    report = asyncio.run(
+        plan(
+            mem_state={"used_memory": 20 * 1024 * 1024, "maxmemory": 256 * 1024 * 1024, "evicted_keys": 0},
+            category_counts={"ROUTE": 10, "UOM": 10, "VMP": 10, "AMP": 10},
+        )
+    )
+
+    dumped = json.dumps(report)
+    lower_dumped = dumped.lower()
+    for sensitive in ("bearer", "password", "client_secret", "patient", "nhs_number"):
+        assert sensitive not in lower_dumped, f"Sensitive term '{sensitive}' found in plan JSON"
+
+
+# ==============================================================================
+# PHASE 6 & 7: TERRAFORM, LOGIC APP & HEARTBEAT TELEMETRY TESTS
+# ==============================================================================
+
+
+def test_terraform_logic_app_custom_recurrence_and_role_actions():
+    """Verify infra/main.tf uses custom recurrence without trailing Z and scoped operation status RBAC actions."""
+    import pathlib
+
+    main_tf = pathlib.Path("infra/main.tf").read_text()
+
+    # Logic App custom recurrence trigger
+    assert 'resource "azurerm_logic_app_trigger_custom" "dmd_warm"' in main_tf
+    assert 'timeZone  = "GMT Standard Time"' in main_tf
+    assert "startTime = var.dmd_cache_schedule_start_time" in main_tf
+
+    # Container Apps Job retry limit
+    import re
+
+    assert re.search(r"replica_retry_limit\s*=\s*0", main_tf)
+
+    # Custom role definition for Logic App operator
+    assert "Microsoft.App/locations/containerappsjoboperationstatuses/read" in main_tf
+    assert "Microsoft.App/locations/containerappsjoboperationresults/read" in main_tf
+    assert "Microsoft.App/jobs/start/action" in main_tf
+    assert "Microsoft.App/jobs/executions/read" in main_tf
+
+    # Invariants asserting no wildcards in custom role
+    operator_role_def = main_tf.partition('resource "azurerm_role_definition" "dmd_job_operator"')[2].partition("}")[0]
+    assert '"*"' not in operator_role_def
+
+
+@pytest.mark.asyncio
+@patch("app.ops.dmd_cache.snomed_client", autospec=True)
+@patch("app.ops.dmd_cache.acquire_lock", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.renew_lock", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.discover_release", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache._expand_amp_concepts", new_callable=AsyncMock)
+async def test_warm_success_emits_structured_dmd_cache_event(
+    mock_amp,
+    mock_vmp,
+    mock_lookups,
+    mock_discover,
+    mock_token,
+    mock_renew,
+    mock_rel,
+    mock_acq,
+    mock_snomed,
+):
+    """Verify successful warm emits structured dmd_cache_event telemetry with zero evictions."""
+    import json
+
+    from app.ops.dmd_cache import warm
+
+    mock_acq.return_value = True
+    mock_renew.return_value = True
+    mock_token.return_value = "token123"
+    mock_discover.return_value = ("202610.1.0", 50000)
+    mock_lookups.return_value = 100
+    mock_vmp.return_value = 1000
+    mock_amp.return_value = 2000
+
+    mock_snomed.info.return_value = {
+        "used_memory": 30 * 1024 * 1024,
+        "maxmemory": 256 * 1024 * 1024,
+        "evicted_keys": 0,
+    }
+    mock_snomed.setex.return_value = True
+
+    with patch("app.ops.dmd_cache.logger.info") as mock_log:
+        exit_code = await warm()
+        assert exit_code == 0
+
+        # Verify dmd_cache_event was emitted
+        event_calls = [c for c in mock_log.call_args_list if len(c.args) >= 2 and c.args[0] == "dmd_cache_event %s"]
+        assert len(event_calls) == 1
+        event_json = event_calls[0].args[1]
+        event_dict = json.loads(event_json)
+
+        assert event_dict["event"] == "warm_succeeded"
+        assert event_dict["release"] == "202610.1.0"
+        assert event_dict["concept_count"] == 3200
+        assert event_dict["evictions"] == 0
+        assert "duration_seconds" in event_dict

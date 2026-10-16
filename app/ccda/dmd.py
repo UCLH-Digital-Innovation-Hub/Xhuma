@@ -62,20 +62,40 @@ DMD_RESOLVED_TTL = int(os.getenv("DMD_RESOLVED_TTL", 9 * 24 * 3600))  # 9 days
 DMD_ACTIVE_RELEASE_TTL = int(os.getenv("DMD_ACTIVE_RELEASE_TTL", 8 * 24 * 3600))  # 8 days
 
 
-def dmd_cache_key(concept_id: int | str, properties: list = None) -> str:
-    """Generate a legacy cache key for a DMD concept based on its ID and requested properties."""
-    if properties:
-        properties_key = ",".join(sorted(properties))
-        return f"snomed:{concept_id}:properties:{properties_key}"
-    return f"snomed:{concept_id}"
+def canonicalize_properties(properties: list[str] | set[str] | tuple[str, ...] | None) -> str:
+    """Canonicalize a collection of property names into a deterministic key segment.
+
+    Semantics:
+    - None or empty collection indicates no property filters were requested -> 'none'.
+    - Surrounding whitespace is stripped from each property name. Empty strings are discarded.
+    - Property names are deduplicated and sorted lexicographically, then joined with commas.
+    """
+    if not properties:
+        return "none"
+    cleaned = set()
+    for p in properties:
+        if p is None:
+            continue
+        p_str = str(p).strip()
+        if p_str:
+            cleaned.add(p_str)
+    if not cleaned:
+        return "none"
+    return ",".join(sorted(cleaned))
 
 
-def dmd_raw_key(concept_id: int | str, release: str, properties: list = None) -> str:
-    """Generate a versioned raw cache key for a DMD concept."""
-    if properties:
-        properties_key = ",".join(sorted(properties))
-        return f"dmd:raw:v1:{release}:{concept_id}:properties:{properties_key}"
-    return f"dmd:raw:v1:{release}:{concept_id}"
+def dmd_cache_key(concept_id: int | str, properties: list | None = None) -> str:
+    """Generate a legacy cache key for a DMD concept based on its ID and canonical requested properties."""
+    prop_sig = canonicalize_properties(properties)
+    if prop_sig == "none":
+        return f"snomed:{concept_id}"
+    return f"snomed:{concept_id}:properties:{prop_sig}"
+
+
+def dmd_raw_key(concept_id: int | str, release: str, properties: list | None = None) -> str:
+    """Generate a versioned raw cache key for a DMD concept with a canonical property signature."""
+    prop_sig = canonicalize_properties(properties)
+    return f"dmd:raw:v1:{release}:{concept_id}:properties:{prop_sig}"
 
 
 def dmd_resolved_key(concept_id: int | str, release: str) -> str:

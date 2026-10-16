@@ -181,37 +181,66 @@ flowchart TD
 ### Key Principles
 1. **Target-Local / Shared-Nothing**: Each target environment has its own Container Apps Job and warms its own target-local Redis DB 2. There is no shared terminology microservice and no public/HTTP control endpoint.
 2. **Dedicated Digest-Pinned Job Image**: The Container Apps Job image is managed via `var.dmd_cache_job_image` (`${REGISTRY}/${IMAGE_NAME}@${build digest}`). App Service deployment ownership remains with `azure/webapps-deploy` and ignores image-name drift; only the Container Apps Job image is updated in Terraform (`0 to add, 1 to change, 0 to destroy`).
-3. **Guarded Shared Key Vault Network Admission**: The `ca_subnet` has `Microsoft.KeyVault` service endpoints enabled. Shared Key Vault receives one guarded in-place ACL update during shared reconciliation: `app-subnet` always, `ca-subnet` only when `dmd_cache_warm_enabled = true`. Plan guarding (`guard_shared_plan.py`) rejects subnet removals, unknown subnet additions, and any other shared resource modification.
-4. **Logic App Scheduling & Invariants**:
+3. **Guarded Shared Key Vault Network Admission via Terraform Outputs**:
+   - Post-apply workflow reads applied Terraform outputs from the initialized target state (`dmd_cache_ca_subnet_id`, `dmd_cache_job_name`, `dmd_cache_job_image`).
+   - App Service subnet is expected unconditionally.
+   - Container Apps Job subnet (`ca_subnet`) is added to the shared Key Vault allowed subnet set *only* when `dmd_cache_ca_subnet_id` is non-null.
+   - Job image verification runs only when `dmd_cache_job_name` is non-null, comparing the live image against the expected immutable GHCR digest.
+   - Plan guarding (`guard_shared_plan.py`) rejects subnet removals, unknown subnet additions, and any other shared resource modification.
+4. **Logic App Scheduling, Invariants & RBAC**:
    - Time zone: `GMT Standard Time` (Monday 05:xx UK local time, DST-aware).
-   - Target-configurable start time: `dmd_cache_schedule_start_time` (local `YYYY-MM-DDTHH:MM:SS` format without Z).
+   - Target-configurable start time: `dmd_cache_schedule_start_time` (local `YYYY-MM-DDTHH:MM:SS` format without Z) emitted via `azurerm_logic_app_trigger_custom`.
    - Invariants: `schedule_enabled => warm_enabled`, start time required when schedule enabled, alert action group required when schedule enabled.
    - Start action handles both HTTP 200 (`body.name`/`body.id`) and HTTP 202 (`Location` header polling).
+   - Scoped RBAC actions: `Microsoft.App/jobs/read`, `Microsoft.App/jobs/start/action`, `Microsoft.App/jobs/executions/read`, `Microsoft.App/locations/containerappsjoboperationstatuses/read`, `Microsoft.App/locations/containerappsjoboperationresults/read`, `Microsoft.App/managedEnvironments/read`. No wildcards and no `listSecrets`.
    - Timing invariant: `replica timeout (1800s) < poll timeout (2100s) < lock TTL (2700s)`.
-5. **Warm -> Verify -> Activate Invariant**: Data is pre-warmed into versioned keys (`dmd:resolved:v1:<release>:<concept_id>`). The active pointer (`dmd:active-release`) is updated *only* after all categories complete successfully, totals are verified, and no Redis key evictions occurred.
-6. **Natural TTL Retirement (No Purge)**:
+5. **Platform Retries and Distributed Lock Safety**:
+   - `replica_retry_limit = 0`: Platform retries are disabled because a new replica process generates a distinct random lock token while the prior token is still held. Application-level retries for transient HTTP errors occur inside the single running job execution.
+   - Distributed lock renewal and release use atomic, token-verified Lua scripts.
+6. **Real Monotonic HTTP Retry Budget**:
+   - Upstream Terminology queries are governed by an overall 120-second monotonic deadline (`time.monotonic() + budget`).
+   - Per-attempt connect, read, write, and pool timeouts are strictly clamped to the remaining deadline: `min(default, remaining)`.
+   - `Retry-After` headers and exponential backoffs that would cross the deadline abort immediately without sleeping.
+   - Upstream 401 Unauthorized responses trigger at most one in-memory OAuth token refresh per client run without touching Redis.
+7. **Disjoint Namespaces & Canonical Raw Cache Keys**:
+   - Resolved concepts (`dmd:resolved:v1:<release>:<concept_id>`): Only serialized `DMDConcept` instances.
+   - Raw lookups (`dmd:raw:v1:<release>:<concept_id>:properties:<canonical_sig>`): Raw FHIR Parameters dictionaries returned by `get_dmd_concept`.
+   - Canonical property signature: `properties=None` and `properties=[]` canonicalize to `none`. Non-empty property lists are whitespace-trimmed, deduplicated, and sorted lexicographically (e.g. `ROUTECD,VPI,parent`), preventing property set collisions.
+   - Upstream lookups on cache misses are explicitly pinned to the active release; responses with mismatched releases are rejected before caching.
+8. **Warm -> Verify -> Activate Invariant**: Data is pre-warmed into versioned keys. The active pointer (`dmd:active-release`) is updated *only* after all categories complete successfully, totals are verified, and zero Redis key evictions occurred.
+9. **Natural TTL Retirement (No Purge)**:
    - Resolved concepts (`dmd:resolved:v1:...`): **9 days** TTL
    - Active release pointer (`dmd:active-release`): **8 days** TTL
    - Success manifest (`dmd:warm:v1:...:manifest`): **9 days** TTL
    The active pointer expires before underlying data expires, ensuring a 24-hour grace window for schedule failures while preventing orphaned pointers. Old release data ages out naturally without requiring destructive Redis operations (`DEL`, `KEYS`, `FLUSHDB`).
-7. **Redis Memory Safety & Preflight**: The warmer enforces a full-run memory preflight before the first write (projected usage with 1.5x multiplier must remain below 80% ceiling) and checks memory guard and `evicted_keys` on each batch. If `evicted_keys` increases at any point during warming, the run aborts immediately and refuses activation.
-8. **Disjoint Namespace & Cache Type Separation**:
-   - `dmd:resolved:v1:<release>:<concept_id>`: Only serialized `DMDConcept` instances.
-   - `dmd:raw:v1:<release>:<concept_id>` / `snomed:...`: Raw FHIR Parameters dictionaries returned by `get_dmd_concept`.
-   - Upstream lookups on cache misses are explicitly pinned to the active release; responses with mismatched releases are rejected before caching.
+10. **Redis Memory Safety & Coexistence Overhead**:
+    - Redis memory limits and eviction policies are **instance-wide across all logical databases (DB 0, DB 1, DB 2)**.
+    - Sizing models account for raw concepts, resolved concepts, Redis key/dictEntry overhead (~128 bytes per key), allocator fragmentation (1.25x), and old-release coexistence during the warm.
+    - Preflight check verifies that current memory + projected delta with safety multiplier (1.5x) does not exceed 80% of `maxmemory`.
+    - If `evicted_keys` increases during warm, the run aborts immediately and refuses activation.
+11. **Heartbeat Telemetry & Alerting Constraints**:
+    - Upon warm success, the job emits a structured JSON event: `dmd_cache_event {"event": "warm_succeeded", "release": "...", "duration_seconds": ..., "concept_count": ..., "memory_delta_bytes": ..., "evictions": 0}`.
+    - Scheduled Query Rules in Azure Monitor strictly cap query lookback windows to 48 hours (`P2D` / 2880 mins). Therefore, a direct 7.5-day heartbeat alert is not safely implementable directly via AzureRM scheduled query alerts. Schedule enablement is blocked by a Terraform precondition until a 48h-compatible watchdog or intermediate verification is provisioned.
 
 ### Runtime Fallback Behaviour
 When `dmd_lookup(concept_id)` executes during prescription conversion:
 1. It queries `dmd:active-release`.
 2. **Hit with Active Release**: Checks `dmd:resolved:v1:<release>:<concept_id>`. On hit, returns the resolved `DMDConcept` immediately with zero external network calls.
 3. **Miss with Active Release**: Resolves the concept on-demand via the Terminology Server pinned to that active release, writes the resolved `DMDConcept` to `dmd:resolved:v1:<release>:<concept_id>`, and returns it.
-4. **No Active Release**: Falls back transparently to unversioned on-demand resolution (`dmd:concept:<concept_id>`). A failed Monday warmer never breaks medication processing.
+4. **No Active Release**: Falls back transparently to unversioned on-demand resolution (`snomed:<concept_id>`). A failed Monday warmer never breaks medication processing.
 
 ### Operational CLI Commands
 The CLI is built directly into the core Xhuma container under `app.ops.dmd_cache`:
 ```bash
-# Execute manual warm
+# Execute prewarm and atomic activation
 /code/.venv/bin/python -m app.ops.dmd_cache warm
+
+# Dry-run / capacity planning mode (strictly read-only: no lock, no Redis writes)
+/code/.venv/bin/python -m app.ops.dmd_cache plan
+/code/.venv/bin/python -m app.ops.dmd_cache warm --dry-run
+
+# Output stable machine-readable capacity plan JSON
+/code/.venv/bin/python -m app.ops.dmd_cache plan --json
 
 # Inspect operational cache status
 /code/.venv/bin/python -m app.ops.dmd_cache status
