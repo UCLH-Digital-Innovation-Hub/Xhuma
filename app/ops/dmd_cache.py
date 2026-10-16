@@ -349,6 +349,81 @@ def _extract_concept_properties(concept: dict) -> dict[str, Any]:
     return result
 
 
+def _resolve_expansion_concept(
+    concept: dict,
+    category: str,
+    route_map: dict[str, str],
+    uom_map: dict[str, str],
+    vmp_lookup: dict[str, tuple[VPI | None, CD | None]],
+    fallback_surrogate: bool = False,
+) -> tuple[DMDConcept, VPI | None, CD | None]:
+    """Pure transformation of an expansion concept into a DMDConcept instance.
+
+    Returns (resolved_concept, vpi, route).
+    Used consistently by warm() (with full lookup maps) and sample_payload_metrics()
+    (with sampled maps / conservative surrogates).
+    """
+    code = str(concept.get("code", "")).strip()
+    display = concept.get("display", "")
+    if not code or not display:
+        raise ValueError(f"Concept in {category} page has missing code or display: {concept}")
+
+    try:
+        concept_id = int(code)
+    except ValueError:
+        raise ValueError(f"{category} concept code is not an integer: {code}")
+
+    props = _extract_concept_properties(concept)
+
+    vpi = None
+    route = None
+
+    if category == "AMP":
+        parent_vmp_code = next((p for p in props["parents"] if p != "AMP" and p.isdigit()), None)
+        if parent_vmp_code and parent_vmp_code in vmp_lookup:
+            vpi, route = vmp_lookup[parent_vmp_code]
+        else:
+            if props["vpi_val"] is not None:
+                unit_disp = uom_map.get(props["vpi_uom"]) if props["vpi_uom"] else None
+                if not unit_disp and fallback_surrogate and props["vpi_uom"]:
+                    unit_disp = f"unit-{props['vpi_uom']}"
+                vpi = VPI(value=float(props["vpi_val"]), unit=unit_disp or "")
+            if props["route_code"]:
+                route_code = str(props["route_code"])
+                route_disp = route_map.get(route_code)
+                if not route_disp and fallback_surrogate:
+                    route_disp = f"route-{route_code}"
+                route = CD(
+                    code=route_code,
+                    displayName=route_disp,
+                    codeSystemName="https://dmd.nhs.uk",
+                )
+    else:  # VMP or others
+        if props["vpi_val"] is not None:
+            unit_disp = uom_map.get(props["vpi_uom"]) if props["vpi_uom"] else None
+            if not unit_disp and fallback_surrogate and props["vpi_uom"]:
+                unit_disp = f"unit-{props['vpi_uom']}"
+            vpi = VPI(value=float(props["vpi_val"]), unit=unit_disp or "")
+        if props["route_code"]:
+            route_code = str(props["route_code"])
+            route_disp = route_map.get(route_code)
+            if not route_disp and fallback_surrogate:
+                route_disp = f"route-{route_code}"
+            route = CD(
+                code=route_code,
+                displayName=route_disp,
+                codeSystemName="https://dmd.nhs.uk",
+            )
+
+    resolved_concept = DMDConcept(
+        concept_id=concept_id,
+        valueString=display,
+        vpi=vpi,
+        route=route,
+    )
+    return resolved_concept, vpi, route
+
+
 async def acquire_lock(owner_token: str, ttl: int = DMD_LOCK_TTL) -> bool:
     """Acquire the Redis warmer lock using SET NX with explicit TTL."""
     return await snomed_client.set(WARM_LOCK_KEY, owner_token, nx=True, ex=ttl)
@@ -523,6 +598,10 @@ async def sample_payload_metrics(
     resolved_sizes: list[int] = []
     latencies: list[float] = []
 
+    sampled_route_map: dict[str, str] = {}
+    sampled_uom_map: dict[str, str] = {}
+    sampled_vmp_lookup: dict[str, tuple[VPI | None, CD | None]] = {}
+
     for cat in ("ROUTE", "UOM"):
         body = {
             "resourceType": "Parameters",
@@ -554,7 +633,13 @@ async def sample_payload_metrics(
         if not contains:
             raise ValueError(f"Terminology server returned empty concepts when sampling {cat}")
         for concept in contains:
+            code = str(concept.get("code", "")).strip()
             display = concept.get("display", "")
+            if code and display:
+                if cat == "ROUTE":
+                    sampled_route_map[code] = display
+                else:
+                    sampled_uom_map[code] = display
             raw_payload = json.dumps(
                 {
                     "parameter": [
@@ -599,13 +684,19 @@ async def sample_payload_metrics(
         if not contains:
             raise ValueError(f"Terminology server returned empty concepts when sampling {cat}")
         for concept in contains:
-            code = str(concept.get("code", "0")).strip()
-            cid = int(code) if code.isdigit() else 0
-            resolved = DMDConcept(
-                concept_id=cid,
-                valueString=concept.get("display") or "Sample Concept",
+            resolved_concept, vpi, route = _resolve_expansion_concept(
+                concept=concept,
+                category=cat,
+                route_map=sampled_route_map,
+                uom_map=sampled_uom_map,
+                vmp_lookup=sampled_vmp_lookup,
+                fallback_surrogate=True,
             )
-            resolved_sizes.append(len(resolved.model_dump_json().encode("utf-8")))
+            code = str(concept.get("code", "")).strip()
+            if cat == "VMP" and code:
+                sampled_vmp_lookup[code] = (vpi, route)
+
+            resolved_sizes.append(len(resolved_concept.model_dump_json().encode("utf-8")))
 
     return raw_sizes, resolved_sizes, latencies
 
@@ -652,8 +743,9 @@ def build_capacity_plan(
     resolved_stats = _calculate_stats(resolved_payload_bytes)
     latency_stats = _calculate_stats(latencies)
 
-    raw_unit_bytes = raw_stats["p95"]
-    resolved_unit_bytes = resolved_stats["p95"]
+    # Conservative capacity admission: use observed maximum sampled unit bytes
+    raw_unit_bytes = raw_stats["max"]
+    resolved_unit_bytes = resolved_stats["max"]
 
     projected_raw_bytes = int(total_raw_keys * raw_unit_bytes)
     projected_resolved_bytes = int(total_resolved_keys * resolved_unit_bytes)
@@ -1104,41 +1196,15 @@ async def _expand_vmp_concepts(
         batch_bytes = 0
 
         for concept in contains:
-            code = str(concept.get("code", "")).strip()
-            display = concept.get("display", "")
-            if not code or not display:
-                raise ValueError(f"Concept in VMP page has missing code or display: {concept}")
-
-            props = _extract_concept_properties(concept)
-
-            vpi = None
-            if props["vpi_val"] is not None:
-                unit_display = uom_map.get(props["vpi_uom"]) if props["vpi_uom"] else None
-                vpi = VPI(value=float(props["vpi_val"]), unit=unit_display or "")
-
-            route = None
-            if props["route_code"]:
-                route_code = str(props["route_code"])
-                route_display = route_map.get(route_code)
-                route = CD(
-                    code=route_code,
-                    displayName=route_display,
-                    codeSystemName="https://dmd.nhs.uk",
-                )
-
-            vmp_lookup[code] = (vpi, route)
-
-            try:
-                concept_id = int(code)
-            except ValueError:
-                raise ValueError(f"VMP concept code is not an integer: {code}")
-
-            resolved_concept = DMDConcept(
-                concept_id=concept_id,
-                valueString=display,
-                vpi=vpi,
-                route=route,
+            resolved_concept, vpi, route = _resolve_expansion_concept(
+                concept=concept,
+                category="VMP",
+                route_map=route_map,
+                uom_map=uom_map,
+                vmp_lookup=vmp_lookup,
             )
+            code = str(concept.get("code", "")).strip()
+            vmp_lookup[code] = (vpi, route)
 
             payload = resolved_concept.model_dump_json()
             k = resolved_key(expected_release, code)
@@ -1231,44 +1297,14 @@ async def _expand_amp_concepts(
         batch_bytes = 0
 
         for concept in contains:
-            code = str(concept.get("code", "")).strip()
-            display = concept.get("display", "")
-            if not code or not display:
-                raise ValueError(f"Concept in AMP page has missing code or display: {concept}")
-
-            props = _extract_concept_properties(concept)
-
-            vpi = None
-            route = None
-
-            # Look for parent VMP to inherit VPI and ROUTECD
-            parent_vmp_code = next((p for p in props["parents"] if p != "AMP" and p.isdigit()), None)
-            if parent_vmp_code and parent_vmp_code in vmp_lookup:
-                vpi, route = vmp_lookup[parent_vmp_code]
-            else:
-                if props["vpi_val"] is not None:
-                    unit_display = uom_map.get(props["vpi_uom"]) if props["vpi_uom"] else None
-                    vpi = VPI(value=float(props["vpi_val"]), unit=unit_display or "")
-                if props["route_code"]:
-                    route_code = str(props["route_code"])
-                    route = CD(
-                        code=route_code,
-                        displayName=route_map.get(route_code),
-                        codeSystemName="https://dmd.nhs.uk",
-                    )
-
-            try:
-                concept_id = int(code)
-            except ValueError:
-                raise ValueError(f"AMP concept code is not an integer: {code}")
-
-            resolved_concept = DMDConcept(
-                concept_id=concept_id,
-                valueString=display,
-                vpi=vpi,
-                route=route,
+            resolved_concept, _, _ = _resolve_expansion_concept(
+                concept=concept,
+                category="AMP",
+                route_map=route_map,
+                uom_map=uom_map,
+                vmp_lookup=vmp_lookup,
             )
-
+            code = str(concept.get("code", "")).strip()
             payload = resolved_concept.model_dump_json()
             k = resolved_key(expected_release, code)
             batch_bytes += len(k.encode("utf-8")) + len(payload.encode("utf-8"))

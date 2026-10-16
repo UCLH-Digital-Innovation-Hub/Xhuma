@@ -113,12 +113,20 @@ def _lookup_version(data: dict) -> str | None:
                 _, _, ver = val.partition("|")
                 if ver:
                     return ver
+            if "/version/" in val:
+                _, _, ver = val.partition("/version/")
+                if ver:
+                    return ver
             if val:
                 return val
         elif name == "system":
             val = p.get("valueUri") or p.get("valueString") or ""
             if "|" in val:
                 _, _, ver = val.partition("|")
+                if ver:
+                    return ver
+            if "/version/" in val:
+                _, _, ver = val.partition("/version/")
                 if ver:
                     return ver
     return None
@@ -176,12 +184,13 @@ async def get_dmd_concept(concept_id: int | str, properties: list = None, releas
         response.raise_for_status()
         concept_data = response.json()
 
-        # Reject if response release mismatches requested release
+        # Reject if response release mismatches requested release or is missing
         if release:
             resp_version = _lookup_version(concept_data)
-            if resp_version and resp_version != release:
+            if resp_version != release:
+                version_repr = resp_version if resp_version is not None else "missing"
                 raise ValueError(
-                    f"DMD lookup returned release {resp_version} which does not match requested release {release}"
+                    f"DMD lookup returned release {version_repr} which does not match requested release {release}"
                 )
             # cache for configured resolved TTL
             await snomed_client.setex(cache_key, DMD_RESOLVED_TTL, json.dumps(concept_data))

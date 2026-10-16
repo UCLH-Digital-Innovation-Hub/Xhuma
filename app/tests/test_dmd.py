@@ -1533,6 +1533,40 @@ async def test_runtime_no_active_release_uses_on_demand_lookup(mock_snomed):
 
 @pytest.mark.asyncio
 @patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_runtime_release_matching_is_accepted_and_cached(mock_snomed):
+    """Verify upstream response with matching release is accepted and written to cache."""
+    import json
+
+    import httpx
+
+    from app.ccda.dmd import DMD_RESOLVED_TTL, get_dmd_concept
+
+    mock_snomed.get = AsyncMock(return_value=None)
+    mock_snomed.setex = AsyncMock(return_value=True)
+
+    matching_response = {
+        "parameter": [
+            {"name": "version", "valueString": "http://snomed.info/sct/83821000000107/version/202610.1.0"},
+            {"name": "display", "valueString": "Matching Release Product"},
+        ]
+    }
+
+    with patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock, return_value="token123"):
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_http_get:
+            req = httpx.Request("GET", "https://ontology.nhs.uk/fhir/CodeSystem/$lookup")
+            mock_http_get.return_value = httpx.Response(200, json=matching_response, request=req)
+            result = await get_dmd_concept(77777000, release="202610.1.0")
+
+            assert result == matching_response
+            mock_snomed.setex.assert_awaited_once_with(
+                "dmd:raw:v1:202610.1.0:77777000:properties:none",
+                DMD_RESOLVED_TTL,
+                json.dumps(matching_response),
+            )
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
 async def test_runtime_release_mismatch_prevents_cache_write(mock_snomed):
     """Verify upstream response with mismatched release raises ValueError and writes nothing to cache."""
     import httpx
@@ -1558,6 +1592,70 @@ async def test_runtime_release_mismatch_prevents_cache_write(mock_snomed):
 
             # Cache was NOT written
             mock_snomed.setex.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_runtime_release_missing_metadata_prevents_cache_write(mock_snomed):
+    """Verify upstream response without release metadata raises ValueError and writes nothing to cache."""
+    import httpx
+
+    from app.ccda.dmd import get_dmd_concept
+
+    mock_snomed.get = AsyncMock(return_value=None)
+    mock_snomed.setex = AsyncMock()
+
+    missing_version_response = {
+        "parameter": [
+            {"name": "display", "valueString": "Missing Version Product"},
+        ]
+    }
+
+    with patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock, return_value="token123"):
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_http_get:
+            req = httpx.Request("GET", "https://ontology.nhs.uk/fhir/CodeSystem/$lookup")
+            mock_http_get.return_value = httpx.Response(200, json=missing_version_response, request=req)
+            with pytest.raises(
+                ValueError,
+                match="DMD lookup returned release missing which does not match requested release 202610.1.0",
+            ):
+                await get_dmd_concept(77777000, release="202610.1.0")
+
+            # Zero cache writes
+            mock_snomed.setex.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_runtime_unversioned_fallback_caches_with_7day_ttl(mock_snomed):
+    """Verify unpinned on-demand lookup caches under unversioned key for 7 days even without version metadata."""
+    import json
+
+    import httpx
+
+    from app.ccda.dmd import get_dmd_concept
+
+    mock_snomed.get = AsyncMock(return_value=None)
+    mock_snomed.setex = AsyncMock(return_value=True)
+
+    unversioned_response = {
+        "parameter": [
+            {"name": "display", "valueString": "Unversioned On Demand Product"},
+        ]
+    }
+
+    with patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock, return_value="token123"):
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_http_get:
+            req = httpx.Request("GET", "https://ontology.nhs.uk/fhir/CodeSystem/$lookup")
+            mock_http_get.return_value = httpx.Response(200, json=unversioned_response, request=req)
+            result = await get_dmd_concept(77777000, release=None)
+
+            assert result == unversioned_response
+            mock_snomed.setex.assert_awaited_once_with(
+                "snomed:77777000",
+                7 * 24 * 3600,
+                json.dumps(unversioned_response),
+            )
 
 
 # ==============================================================================
@@ -1641,6 +1739,175 @@ async def test_discover_release_capacity_fails_on_inconsistent_releases():
 
     with pytest.raises(ValueError, match="Release mismatch across categories"):
         await discover_release_capacity(client)
+
+
+def test_sample_concept_with_vpi_serializes_resolved_vpi():
+    """Verify sampling pure concept resolution serializes DMDConcept containing nested VPI."""
+    from app.ops.dmd_cache import _resolve_expansion_concept
+
+    vmp_concept = {
+        "code": "1001",
+        "display": "Paracetamol 500mg tablets",
+        "property": [
+            {
+                "code": "VPI",
+                "subproperty": [
+                    {"code": "STRNT_NMRTR_VAL", "valueDecimal": 500.0},
+                    {"code": "STRNT_NMRTR_UOMCD", "valueCode": "258684004"},
+                ],
+            }
+        ],
+    }
+
+    # Test with uom map entry
+    resolved_concept, vpi, route = _resolve_expansion_concept(
+        concept=vmp_concept,
+        category="VMP",
+        route_map={},
+        uom_map={"258684004": "mg"},
+        vmp_lookup={},
+    )
+    assert resolved_concept.vpi is not None
+    assert resolved_concept.vpi.value == 500.0
+    assert resolved_concept.vpi.unit == "mg"
+    serialized = resolved_concept.model_dump_json()
+    assert '"vpi":' in serialized
+    assert '"unit":"mg"' in serialized
+
+    # Test with fallback surrogate when uom_map is missing entry
+    resolved_surrogate, _, _ = _resolve_expansion_concept(
+        concept=vmp_concept,
+        category="VMP",
+        route_map={},
+        uom_map={},
+        vmp_lookup={},
+        fallback_surrogate=True,
+    )
+    assert resolved_surrogate.vpi is not None
+    assert resolved_surrogate.vpi.unit == "unit-258684004"
+
+
+def test_sample_concept_with_route_serializes_resolved_route():
+    """Verify sampling pure concept resolution serializes DMDConcept containing nested route."""
+    from app.ops.dmd_cache import _resolve_expansion_concept
+
+    vmp_concept = {
+        "code": "1001",
+        "display": "Paracetamol 500mg tablets",
+        "property": [{"code": "ROUTECD", "valueCode": "260548002"}],
+    }
+
+    # Test with route map entry
+    resolved_concept, vpi, route = _resolve_expansion_concept(
+        concept=vmp_concept,
+        category="VMP",
+        route_map={"260548002": "Oral"},
+        uom_map={},
+        vmp_lookup={},
+    )
+    assert resolved_concept.route is not None
+    assert resolved_concept.route.code == "260548002"
+    assert resolved_concept.route.displayName == "Oral"
+    serialized = resolved_concept.model_dump_json()
+    assert '"route":' in serialized
+    assert '"code":"260548002"' in serialized
+    assert '"displayName":"Oral"' in serialized
+
+    # Test with fallback surrogate when route_map is missing entry
+    resolved_surrogate, _, _ = _resolve_expansion_concept(
+        concept=vmp_concept,
+        category="VMP",
+        route_map={},
+        uom_map={},
+        vmp_lookup={},
+        fallback_surrogate=True,
+    )
+    assert resolved_surrogate.route is not None
+    assert resolved_surrogate.route.displayName == "route-260548002"
+
+
+def test_capacity_admission_uses_max_sampled_resolved_and_raw_sizes():
+    """Verify build_capacity_plan uses observed maximum sampled bytes for capacity projection."""
+    from app.ops.dmd_cache import build_capacity_plan
+
+    plan_res = build_capacity_plan(
+        release="202610.1.0",
+        category_counts={"ROUTE": 100, "UOM": 100, "VMP": 1000, "AMP": 2000},
+        raw_payload_bytes=[100] * 99 + [800],  # max = 800, p95 = 100
+        resolved_payload_bytes=[300] * 99 + [1500],  # max = 1500, p95 = 300
+        latencies=[0.1, 0.2],
+        mem_state={"used_memory": 10 * 1024 * 1024, "maxmemory": 256 * 1024 * 1024, "evicted_keys": 0},
+    )
+
+    # Key counts: raw = 200, resolved = 3000
+    assert plan_res["key_counts_by_type"]["raw"] == 200
+    assert plan_res["key_counts_by_type"]["resolved"] == 3000
+
+    # Projection MUST use max (800 and 1500), not p95 or mean
+    assert plan_res["projected_raw_bytes"] == 200 * 800
+    assert plan_res["projected_resolved_bytes"] == 3000 * 1500
+
+    # Reported stats still include mean, p50, p95, max for visibility
+    assert plan_res["sampled_raw_fhir_parameters"]["max_bytes"] == 800
+    assert plan_res["sampled_resolved_dmd_concept"]["max_bytes"] == 1500
+    assert plan_res["sampled_resolved_dmd_concept"]["p95_bytes"] == 300
+    assert plan_res["sampled_resolved_dmd_concept"]["p95_bytes"] < 1500
+
+
+@pytest.mark.asyncio
+@patch("app.ops.dmd_cache.snomed_client", autospec=True)
+async def test_sample_payload_metrics_makes_zero_redis_writes(mock_snomed):
+    """Verify sample_payload_metrics executes sampling and never mutates Redis."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient, sample_payload_metrics
+
+    mock_client = AsyncMock(spec=TerminologyClient)
+
+    def side_effect(url, body=None, **kwargs):
+        json_body = body or kwargs.get("json", {})
+        params = json_body.get("parameter", [])
+        val_set = next((p["resource"] for p in params if p.get("name") == "valueSet"), {})
+        cat = val_set.get("compose", {}).get("include", [{}])[0].get("filter", [{}])[0].get("value", "")
+
+        req = httpx.Request("POST", f"https://ontology.nhs.uk/fhir/{url}")
+        if cat in ("ROUTE", "UOM"):
+            concept_data = [{"code": "101", "display": f"Sample {cat} display"}]
+        else:
+            concept_data = [
+                {
+                    "code": "201",
+                    "display": f"Sample {cat} display",
+                    "property": [
+                        {"code": "ROUTECD", "valueCode": "101"},
+                    ],
+                }
+            ]
+
+        resp = {
+            "resourceType": "ValueSet",
+            "expansion": {
+                "total": 1,
+                "contains": concept_data,
+            },
+        }
+        return httpx.Response(200, json=resp, request=req)
+
+    mock_client.post_fhir.side_effect = side_effect
+
+    raw_sizes, resolved_sizes, latencies = await sample_payload_metrics(
+        mock_client, release="202610.1.0", sample_size=1
+    )
+
+    assert len(raw_sizes) == 2  # ROUTE and UOM
+    assert len(resolved_sizes) == 2  # VMP and AMP
+    assert len(latencies) == 4
+
+    # Redis must NOT be mutated in any way
+    assert mock_snomed.set.await_count == 0
+    assert mock_snomed.setex.await_count == 0
+    assert mock_snomed.delete.await_count == 0
+    assert mock_snomed.pipeline.call_count == 0
 
 
 # ==============================================================================
@@ -1874,24 +2141,54 @@ async def test_concept_with_missing_code_or_display_fails_closed(mock_snomed):
 # ==============================================================================
 
 
-def test_terraform_schedule_enabled_is_blocked_and_all_targets_disabled():
-    """Verify infra/main.tf asserts !var.dmd_cache_schedule_enabled and all target files keep flags false."""
-    import json
+def test_terraform_schedule_enabled_is_blocked_and_safeguards_active():
+    """Verify infra/main.tf asserts !var.dmd_cache_schedule_enabled and variables default to false."""
     import pathlib
 
     main_tf = pathlib.Path("infra/main.tf").read_text()
-    assert "!var.dmd_cache_schedule_enabled" in main_tf
+    assert main_tf.count("condition     = !var.dmd_cache_schedule_enabled") >= 2
     assert "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog" in main_tf
 
     variables_tf = pathlib.Path("infra/variables.tf").read_text()
     assert 'variable "dmd_cache_warm_enabled"' in variables_tf
     assert "default     = false" in variables_tf
+    assert 'variable "dmd_cache_schedule_enabled"' in variables_tf
 
-    # Inspect targets.json and verify all targets have dmd_cache flags disabled
-    targets_data = json.loads(pathlib.Path("infra/targets.json").read_text())
-    for target in targets_data.get("targets", []):
-        tfvars_path = target.get("tfvars_file")
-        if tfvars_path and pathlib.Path(tfvars_path).exists():
-            tfvars_text = pathlib.Path(tfvars_path).read_text()
-            assert "dmd_cache_warm_enabled = true" not in tfvars_text
-            assert "dmd_cache_schedule_enabled = true" not in tfvars_text
+
+def test_terraform_play_warm_enabled_and_schedule_disabled():
+    """Verify Play environment explicitly enables manual cache warmer and keeps schedule false."""
+    import pathlib
+    import re
+
+    play_tfvars = pathlib.Path("infra/env/play.tfvars").read_text()
+    assert re.search(r"dmd_cache_warm_enabled\s*=\s*true", play_tfvars), "Play must have dmd_cache_warm_enabled = true"
+    assert re.search(r"dmd_cache_schedule_enabled\s*=\s*false", play_tfvars), (
+        "Play must have dmd_cache_schedule_enabled = false"
+    )
+
+
+def test_terraform_int_and_prd_remain_warmer_disabled():
+    """Verify INT and PRD environments remain warmer-disabled."""
+    import pathlib
+    import re
+
+    for env_name in ("int", "prd"):
+        tfvars_path = pathlib.Path(f"infra/env/{env_name}.tfvars")
+        if tfvars_path.exists():
+            tfvars_text = tfvars_path.read_text()
+            assert not re.search(r"dmd_cache_warm_enabled\s*=\s*true", tfvars_text), f"{env_name} must not enable warm"
+            assert not re.search(r"dmd_cache_schedule_enabled\s*=\s*true", tfvars_text), (
+                f"{env_name} must not enable schedule"
+            )
+
+
+def test_terraform_container_app_job_is_manual_only():
+    """Verify Container Apps Job is configured for manual trigger only with zero automatic retries."""
+    import pathlib
+
+    main_tf = pathlib.Path("infra/main.tf").read_text()
+    assert "manual_trigger_config {" in main_tf
+    assert "replica_retry_limit          = 0" in main_tf
+    assert 'args    = ["-m", "app.ops.dmd_cache", "warm"]' in main_tf
+    assert "event_trigger_config" not in main_tf
+    assert "schedule_trigger_config" not in main_tf
