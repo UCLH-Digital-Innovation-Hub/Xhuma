@@ -284,3 +284,644 @@ async def test_dmd_base_url_configurable(monkeypatch):
         # Verify the requested URL used production2
         call_args = client.get.call_args[0]
         assert call_args[0].startswith("https://ontology.nhs.uk/production2/fhir/CodeSystem/$lookup")
+
+
+@pytest.mark.asyncio
+async def test_active_release_resolved_hit_skips_network():
+    """Verify that an active-release resolved cache hit returns immediately without network calls."""
+    from app.ccda.dmd import ACTIVE_RELEASE_KEY, dmd_lookup, dmd_resolved_key
+    from app.ccda.models.dmd import DMDConcept
+
+    expected = DMDConcept(concept_id=42010411000001105, valueString="Codeine 30mg tablets")
+    release = "202610.1.0"
+
+    with patch("app.ccda.dmd.snomed_client", autospec=True) as cache, patch("app.ccda.dmd.httpx.AsyncClient") as http:
+
+        async def mock_get(key):
+            if key == ACTIVE_RELEASE_KEY:
+                return release.encode("utf-8")
+            if key == dmd_resolved_key(42010411000001105, release):
+                return expected.model_dump_json().encode("utf-8")
+            return None
+
+        cache.get.side_effect = mock_get
+        result = await dmd_lookup(42010411000001105)
+
+        assert result.concept_id == 42010411000001105
+        assert result.valueString == "Codeine 30mg tablets"
+        http.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_release_change_does_not_reuse_old_resolved_entry():
+    """Verify that changing dmd:active-release queries the new release namespace and does not reuse old entry."""
+    from app.ccda.dmd import ACTIVE_RELEASE_KEY, dmd_lookup, dmd_resolved_key
+    from app.ccda.models.dmd import DMDConcept
+
+    old_concept = DMDConcept(concept_id=123, valueString="Old Release Med")
+    new_concept_json = {
+        "parameter": [
+            {"name": "code", "valueCode": "123"},
+            {"name": "display", "valueString": "New Release Med"},
+            {"name": "version", "valueString": "202610.2.0"},
+        ]
+    }
+
+    with (
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
+        patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock) as token_mock,
+        patch("app.ccda.dmd.httpx.AsyncClient") as factory,
+    ):
+        token_mock.return_value = "fake-token"
+
+        async def mock_get(key):
+            if key == ACTIVE_RELEASE_KEY:
+                return b"202610.2.0"  # Active release moved to new version
+            if key == dmd_resolved_key(123, "202610.1.0"):
+                return old_concept.model_dump_json().encode("utf-8")
+            return None
+
+        cache.get.side_effect = mock_get
+        cache.setex.return_value = True
+
+        client = AsyncMock()
+        import httpx
+
+        client.get.return_value = httpx.Response(
+            200, json=new_concept_json, request=httpx.Request("GET", "https://example.test")
+        )
+        factory.return_value.__aenter__.return_value = client
+
+        res = await dmd_lookup(123)
+        assert res.valueString == "New Release Med"
+        # Assert cached under new release
+        new_key = dmd_resolved_key(123, "202610.2.0")
+        cache.setex.assert_any_await(new_key, pytest.approx(9 * 24 * 3600, rel=100), res.model_dump_json())
+
+
+@pytest.mark.asyncio
+async def test_on_demand_miss_stays_pinned_to_active_release():
+    """Verify that an on-demand miss queries upstream with version=release and pins all lookups."""
+    import httpx
+
+    from app.ccda.dmd import ACTIVE_RELEASE_KEY, dmd_lookup
+
+    with (
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
+        patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock) as token_mock,
+        patch("app.ccda.dmd.httpx.AsyncClient") as factory,
+    ):
+        token_mock.return_value = "fake-token"
+
+        async def mock_get(key):
+            if key == ACTIVE_RELEASE_KEY:
+                return b"202610.1.0"
+            return None
+
+        cache.get.side_effect = mock_get
+        cache.setex.return_value = True
+
+        client = AsyncMock()
+        resp_data = {
+            "parameter": [
+                {"name": "code", "valueCode": "999"},
+                {"name": "display", "valueString": "Pinned Med"},
+                {"name": "version", "valueString": "202610.1.0"},
+            ]
+        }
+        client.get.return_value = httpx.Response(
+            200, json=resp_data, request=httpx.Request("GET", "https://example.test")
+        )
+        factory.return_value.__aenter__.return_value = client
+
+        await dmd_lookup(999)
+
+        call_url = client.get.call_args[0][0]
+        assert "version=202610.1.0" in call_url
+
+
+@pytest.mark.asyncio
+async def test_version_mismatch_raises_error_when_pinned():
+    """Verify that if upstream returns a release different from pinned release, an error is raised."""
+    import httpx
+
+    from app.ccda.dmd import get_dmd_concept
+
+    with (
+        patch("app.ccda.dmd.snomed_client", autospec=True) as cache,
+        patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock) as token_mock,
+        patch("app.ccda.dmd.httpx.AsyncClient") as factory,
+    ):
+        token_mock.return_value = "fake-token"
+        cache.get.return_value = None
+
+        client = AsyncMock()
+        resp_data = {
+            "parameter": [
+                {"name": "code", "valueCode": "999"},
+                {"name": "display", "valueString": "Mismatched Med"},
+                {"name": "version", "valueString": "202609.1.0"},  # Mismatched!
+            ]
+        }
+        client.get.return_value = httpx.Response(
+            200, json=resp_data, request=httpx.Request("GET", "https://example.test")
+        )
+        factory.return_value.__aenter__.return_value = client
+
+        with pytest.raises(ValueError, match="does not match requested release"):
+            await get_dmd_concept(999, release="202610.1.0")
+
+
+def test_ttl_hierarchy_contract():
+    """Verify TTL hierarchy: data TTL > active pointer TTL."""
+    from app.ops.dmd_cache import DMD_ACTIVE_RELEASE_TTL, DMD_MANIFEST_TTL, DMD_RESOLVED_TTL
+
+    assert DMD_RESOLVED_TTL > DMD_ACTIVE_RELEASE_TTL
+    assert DMD_MANIFEST_TTL >= DMD_RESOLVED_TTL
+    assert DMD_ACTIVE_RELEASE_TTL >= 7 * 24 * 3600  # More than 7 days
+
+
+@pytest.mark.asyncio
+async def test_warmer_lock_prevents_concurrent_execution():
+    """Verify that concurrent warmer fails cleanly when lock is already held."""
+    from app.ops.dmd_cache import warm
+
+    with patch("app.ops.dmd_cache.acquire_lock", new_callable=AsyncMock) as lock_mock:
+        lock_mock.return_value = False  # Lock held by someone else
+        exit_code = await warm()
+        assert exit_code == 1
+
+
+@pytest.mark.asyncio
+async def test_warmer_lock_ownership_safe_release():
+    """Verify that release_lock uses Lua script with owner token."""
+    from app.ops.dmd_cache import LUA_RELEASE_LOCK, release_lock
+
+    with patch("app.ops.dmd_cache.snomed_client", autospec=True) as cache:
+        cache.eval.return_value = 1
+        res = await release_lock("owner-123")
+        assert res is True
+        cache.eval.assert_awaited_once_with(LUA_RELEASE_LOCK, 1, "dmd:warm:v1:lock", "owner-123")
+
+
+@pytest.mark.asyncio
+async def test_warmer_aborts_and_does_not_activate_on_eviction():
+    """Verify that if evicted_keys increases during warm, release activation is aborted."""
+    from app.ops.dmd_cache import ACTIVE_RELEASE_KEY, warm
+
+    with (
+        patch("app.ops.dmd_cache.acquire_lock", new_callable=AsyncMock) as lock_mock,
+        patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock),
+        patch("app.ops.dmd_cache.get_redis_memory_state", new_callable=AsyncMock) as mem_mock,
+        patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock) as token_mock,
+        patch("app.ops.dmd_cache.discover_release", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock) as exp1_mock,
+        patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock) as exp2_mock,
+        patch("app.ops.dmd_cache._expand_amp_concepts", new_callable=AsyncMock) as exp3_mock,
+        patch("app.ops.dmd_cache.snomed_client", autospec=True) as cache,
+    ):
+        lock_mock.return_value = True
+        token_mock.return_value = "token"
+        rel_mock.return_value = ("202610.1.0", 50000)
+        exp1_mock.return_value = 100
+        exp2_mock.return_value = 500
+        exp3_mock.return_value = 500
+
+        # Simulate eviction detected:
+        mem_mock.side_effect = [
+            {"used_memory": 1000, "maxmemory": 10000, "evicted_keys": 0},  # start
+            {"used_memory": 5000, "maxmemory": 10000, "evicted_keys": 5},  # end (evicted 5 keys!)
+        ]
+
+        exit_code = await warm()
+        assert exit_code == 1
+
+        # Verify active release was NOT set
+        for call in cache.setex.await_args_list:
+            assert call[0][0] != ACTIVE_RELEASE_KEY
+
+
+def test_memory_guard_ceiling_exceeded():
+    """Verify that memory guard raises when projected usage exceeds ceiling."""
+    from app.ops.dmd_cache import check_memory_guard
+
+    state = {"used_memory": 850, "maxmemory": 1000, "evicted_keys": 0}
+    with pytest.raises(RuntimeError, match="Redis memory guard exceeded"):
+        check_memory_guard(state, additional_bytes=0)
+
+
+@pytest.mark.asyncio
+async def test_successful_complete_warm_activates_at_end():
+    """Verify that a successful complete warm writes manifest and activates release at the very end."""
+    from app.ops.dmd_cache import ACTIVE_RELEASE_KEY, manifest_key, warm
+
+    with (
+        patch("app.ops.dmd_cache.acquire_lock", new_callable=AsyncMock) as lock_mock,
+        patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock),
+        patch("app.ops.dmd_cache.get_redis_memory_state", new_callable=AsyncMock) as mem_mock,
+        patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock) as token_mock,
+        patch("app.ops.dmd_cache.discover_release", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock) as exp1_mock,
+        patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock) as exp2_mock,
+        patch("app.ops.dmd_cache._expand_amp_concepts", new_callable=AsyncMock) as exp3_mock,
+        patch("app.ops.dmd_cache.snomed_client", autospec=True) as cache,
+    ):
+        lock_mock.return_value = True
+        token_mock.return_value = "token"
+        rel_mock.return_value = ("202610.1.0", 50000)
+        exp1_mock.side_effect = [50, 60]  # route, uom
+        exp2_mock.return_value = 1000  # vmp
+        exp3_mock.return_value = 2000  # amp
+
+        mem_mock.side_effect = [
+            {"used_memory": 1000, "maxmemory": 200000000, "evicted_keys": 0},
+            {"used_memory": 2000, "maxmemory": 200000000, "evicted_keys": 0},
+        ]
+
+        exit_code = await warm()
+        assert exit_code == 0
+
+        from unittest.mock import ANY
+
+        # Verify manifest write
+        cache.setex.assert_any_await(
+            manifest_key("202610.1.0"),
+            pytest.approx(9 * 24 * 3600, rel=100),
+            ANY,
+        )
+
+        # Verify active release activation
+        cache.setex.assert_any_await(
+            ACTIVE_RELEASE_KEY,
+            pytest.approx(8 * 24 * 3600, rel=100),
+            "202610.1.0",
+        )
+
+
+@pytest.mark.asyncio
+async def test_partial_vmp_failure_does_not_activate():
+    """Verify that if VMP expansion fails, warm returns 1 and active release is untouched."""
+    from app.ops.dmd_cache import ACTIVE_RELEASE_KEY, warm
+
+    with (
+        patch("app.ops.dmd_cache.acquire_lock", new_callable=AsyncMock) as lock_mock,
+        patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock),
+        patch("app.ops.dmd_cache.get_redis_memory_state", new_callable=AsyncMock) as mem_mock,
+        patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock) as token_mock,
+        patch("app.ops.dmd_cache.discover_release", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock) as exp1_mock,
+        patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock) as exp2_mock,
+        patch("app.ops.dmd_cache.snomed_client", autospec=True) as cache,
+    ):
+        lock_mock.return_value = True
+        token_mock.return_value = "token"
+        rel_mock.return_value = ("202610.1.0", 50000)
+        exp1_mock.side_effect = [50, 60]
+        exp2_mock.side_effect = RuntimeError("VMP expansion HTTP timeout")
+
+        mem_mock.return_value = {"used_memory": 1000, "maxmemory": 200000000, "evicted_keys": 0}
+
+        exit_code = await warm()
+        assert exit_code == 1
+
+        for call in cache.setex.await_args_list:
+            assert call[0][0] != ACTIVE_RELEASE_KEY
+
+
+@pytest.mark.asyncio
+async def test_status_reporting_output():
+    """Verify status command returns active release and operational statistics."""
+    import json
+
+    from app.ops.dmd_cache import ACTIVE_RELEASE_KEY, manifest_key, status
+
+    manifest_content = {
+        "release": "202610.1.0",
+        "completed_at": "2026-10-15T05:01:00Z",
+        "counts": {"ROUTE": 100, "UOM": 120, "VMP": 15000, "AMP": 30000},
+    }
+
+    with patch("app.ops.dmd_cache.snomed_client", autospec=True) as cache:
+
+        async def mock_get(key):
+            if key == ACTIVE_RELEASE_KEY:
+                return b"202610.1.0"
+            if key == manifest_key("202610.1.0"):
+                return json.dumps(manifest_content).encode("utf-8")
+            if key == "dmd:warm:v1:lock":
+                return None
+            return None
+
+        cache.get.side_effect = mock_get
+        cache.ttl.return_value = 650000
+        cache.info.return_value = {"used_memory": 50000000, "maxmemory": 200000000, "evicted_keys": 0}
+
+        report = await status()
+
+        assert report["active_release"] == "202610.1.0"
+        assert report["active_release_ttl_seconds"] == 650000
+        assert report["is_locked"] is False
+        assert report["manifest"]["counts"]["VMP"] == 15000
+
+
+# ---------------------------------------------------------------------------
+# HTTP Bounds and Retries Tests (Phase 2 Section D)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_terminology_client_timeout_retries_and_succeeds():
+    """Verify TerminologyClient retries upon TimeoutException and returns successful response."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    success_resp = httpx.Response(200, json={"expansion": {"contains": []}}, request=req)
+
+    mock_http_client.post.side_effect = [
+        httpx.ReadTimeout("Read timed out", request=req),
+        success_resp,
+    ]
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123")
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        resp = await client.post_fhir("ValueSet/$expand", {})
+        assert resp.status_code == 200
+        assert mock_http_client.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_terminology_client_429_retry_after():
+    """Verify TerminologyClient honors 429 Retry-After header."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    rate_limited_resp = httpx.Response(
+        429,
+        headers={"Retry-After": "0.01"},
+        request=req,
+    )
+    success_resp = httpx.Response(200, json={"expansion": {"contains": []}}, request=req)
+
+    mock_http_client.post.side_effect = [rate_limited_resp, success_resp]
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123")
+    with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        resp = await client.post_fhir("ValueSet/$expand", {})
+        assert resp.status_code == 200
+        assert mock_http_client.post.await_count == 2
+        mock_sleep.assert_awaited_once()
+        assert mock_sleep.await_args[0][0] <= 0.05
+
+
+@pytest.mark.asyncio
+async def test_terminology_client_transient_5xx():
+    """Verify TerminologyClient retries transient 503 response and succeeds."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    server_err = httpx.Response(503, headers={"Retry-After": "0.01"}, request=req)
+    success_resp = httpx.Response(200, json={"expansion": {"contains": []}}, request=req)
+
+    mock_http_client.post.side_effect = [server_err, success_resp]
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123")
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        resp = await client.post_fhir("ValueSet/$expand", {})
+        assert resp.status_code == 200
+        assert mock_http_client.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_terminology_client_retry_exhaustion():
+    """Verify TerminologyClient raises HTTPStatusError when retries are exhausted."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    server_err = httpx.Response(500, request=req)
+
+    mock_http_client.post.return_value = server_err
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123", max_attempts=3)
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.post_fhir("ValueSet/$expand", {})
+    assert mock_http_client.post.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_terminology_client_non_retryable_4xx():
+    """Verify non-retryable 4xx (e.g. 404, 400) raises immediately without retry."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    not_found = httpx.Response(404, request=req)
+
+    mock_http_client.post.return_value = not_found
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123")
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.post_fhir("ValueSet/$expand", {})
+    assert mock_http_client.post.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_terminology_client_401_token_refresh():
+    """Verify single 401 token refresh path and rejection on second consecutive 401."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    unauth = httpx.Response(401, request=req)
+    success = httpx.Response(200, json={"ok": True}, request=req)
+
+    # First call: 401 -> refresh -> 200
+    mock_http_client.post.side_effect = [unauth, success]
+
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "old_token")
+    with patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = "new_token"
+        resp = await client.post_fhir("ValueSet/$expand", {})
+        assert resp.status_code == 200
+        assert mock_http_client.post.await_count == 2
+        assert client.token == "new_token"
+        assert client.token_refreshed is True
+
+    # If second consecutive 401 occurs after refresh, it must abort immediately without loop
+    mock_http_client.post.side_effect = [unauth, unauth]
+    client2 = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "old_token")
+    with patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock) as mock_fetch:
+        mock_fetch.return_value = "new_token"
+        with pytest.raises(httpx.HTTPStatusError):
+            await client2.post_fhir("ValueSet/$expand", {})
+
+
+# ---------------------------------------------------------------------------
+# Redis Safety & Memory Preflight Tests (Phase 2 Section E)
+# ---------------------------------------------------------------------------
+
+
+def test_preflight_memory_sufficient():
+    """Verify memory preflight passes when projected usage is within ceiling."""
+    from app.ops.dmd_cache import check_preflight_memory
+
+    mem_state = {"used_memory": 10_000_000, "maxmemory": 200_000_000, "evicted_keys": 0}
+    check_preflight_memory(mem_state, estimated_concepts=50000)
+
+
+def test_preflight_memory_insufficient_aborts():
+    """Verify memory preflight raises RuntimeError before writing anything when projected usage exceeds ceiling."""
+    from app.ops.dmd_cache import check_preflight_memory
+
+    mem_state = {"used_memory": 150_000_000, "maxmemory": 200_000_000, "evicted_keys": 0}
+    with pytest.raises(RuntimeError, match="Redis memory preflight failed"):
+        check_preflight_memory(mem_state, estimated_concepts=50000)
+
+
+# ---------------------------------------------------------------------------
+# Cache Type Separation Tests (Phase 2 Section F)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_raw_cache_reads_return_dict(mock_snomed):
+    """Verify raw cache reads return raw FHIR Parameters dictionaries, not DMDConcept."""
+    import json
+
+    from app.ccda.dmd import dmd_raw_key, get_dmd_concept
+
+    raw_payload = json.dumps(example_return).encode("utf-8")
+    mock_snomed.get.return_value = raw_payload
+
+    result = await get_dmd_concept(42010411000001105, properties=["VPI"], release="202610.1.0")
+    assert isinstance(result, dict)
+    assert result["resourceType"] == "Parameters"
+    mock_snomed.get.assert_awaited_once_with(dmd_raw_key(42010411000001105, "202610.1.0", ["VPI"]))
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_resolved_cache_reads_return_dmdconcept(mock_snomed):
+    """Verify resolved cache reads return DMDConcept model objects."""
+    from app.ccda.dmd import ACTIVE_RELEASE_KEY, dmd_lookup, dmd_resolved_key
+    from app.ccda.models.dmd import DMDConcept
+
+    resolved_obj = DMDConcept(concept_id=42010411000001105, valueString="Codeine 30mg tablets")
+    resolved_json = resolved_obj.model_dump_json().encode("utf-8")
+
+    async def mock_get(key):
+        if key == ACTIVE_RELEASE_KEY:
+            return b"202610.1.0"
+        if key == dmd_resolved_key(42010411000001105, "202610.1.0"):
+            return resolved_json
+        return None
+
+    mock_snomed.get.side_effect = mock_get
+
+    result = await dmd_lookup(42010411000001105)
+    assert isinstance(result, DMDConcept)
+    assert result.concept_id == 42010411000001105
+    assert result.valueString == "Codeine 30mg tablets"
+
+
+def test_no_key_interpreted_as_both_types():
+    """Verify raw and resolved keys have completely disjoint namespaces."""
+    from app.ccda.dmd import dmd_raw_key, dmd_resolved_key
+
+    concept_id = 42010411000001105
+    rel = "202610.1.0"
+    k_raw = dmd_raw_key(concept_id, rel)
+    k_raw_props = dmd_raw_key(concept_id, rel, ["VPI", "ROUTECD"])
+    k_resolved = dmd_resolved_key(concept_id, rel)
+
+    assert k_raw.startswith("dmd:raw:v1:")
+    assert k_raw_props.startswith("dmd:raw:v1:")
+    assert k_resolved.startswith("dmd:resolved:v1:")
+    assert k_raw != k_resolved
+    assert not k_raw.startswith(k_resolved)
+    assert not k_resolved.startswith(k_raw)
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+@patch("app.ccda.dmd.get_dmd_concept", new_callable=AsyncMock)
+async def test_active_release_cache_miss_performs_pinned_lookup(mock_get_dmd, mock_snomed):
+    """Verify active-release cache miss performs upstream lookup explicitly pinned to that release."""
+    from app.ccda.dmd import ACTIVE_RELEASE_KEY, dmd_lookup, dmd_resolved_key
+    from app.ccda.models.dmd import DMDConcept
+
+    async def mock_get(key):
+        if key == ACTIVE_RELEASE_KEY:
+            return b"202610.1.0"
+        return None  # miss for resolved key
+
+    mock_snomed.get.side_effect = mock_get
+    mock_snomed.setex.return_value = True
+    mock_get_dmd.return_value = example_return
+
+    result = await dmd_lookup(42010411000001105)
+    assert isinstance(result, DMDConcept)
+
+    # Verify that get_dmd_concept was called with release="202610.1.0"
+    for call in mock_get_dmd.await_args_list:
+        assert call.kwargs.get("release") == "202610.1.0"
+
+    # Verify written under resolved namespace with active release
+    mock_snomed.setex.assert_any_await(
+        dmd_resolved_key(42010411000001105, "202610.1.0"),
+        pytest.approx(9 * 24 * 3600, rel=100),
+        result.model_dump_json(),
+    )
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+@patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock)
+@patch("app.ccda.dmd.httpx.AsyncClient")
+async def test_newer_upstream_release_cannot_be_written_under_older_active_release_key(
+    mock_http_client, mock_token, mock_snomed
+):
+    """Verify get_dmd_concept rejects and does not write if upstream returns a release newer/different than requested."""
+    from app.ccda.dmd import get_dmd_concept
+
+    mock_snomed.get.return_value = None  # cache miss
+    mock_token.return_value = "token123"
+
+    mismatched_response = {
+        "resourceType": "Parameters",
+        "parameter": [
+            {"name": "version", "valueString": "202610.2.0"},
+            {"name": "display", "valueString": "Mismatched concept"},
+        ],
+    }
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = mismatched_response
+    mock_resp.raise_for_status = MagicMock()
+
+    client_instance = AsyncMock()
+    client_instance.get.return_value = mock_resp
+    mock_http_client.return_value.__aenter__.return_value = client_instance
+
+    with pytest.raises(ValueError, match="does not match requested release"):
+        await get_dmd_concept(42010411000001105, release="202610.1.0")
+
+    # Verify no write occurred
+    assert mock_snomed.setex.await_count == 0

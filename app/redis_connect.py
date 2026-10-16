@@ -117,6 +117,27 @@ class RedisClient:
         return await self._client.hmget(key, fields)
 
     @retry_on_connection_error()
+    async def set(
+        self,
+        key: str,
+        value: str | bytes,
+        nx: bool = False,
+        ex: int | timedelta | None = None,
+    ) -> bool:
+        """Set key-value with optional nx and ex."""
+        return bool(await self._client.set(key, value, nx=nx, ex=ex))
+
+    @retry_on_connection_error()
+    async def ttl(self, key: str) -> int:
+        """Get remaining TTL for key in seconds."""
+        return await self._client.ttl(key)
+
+    @retry_on_connection_error()
+    async def eval(self, script: str, numkeys: int, *keys_and_args: Any) -> Any:
+        """Execute Lua script on Redis."""
+        return await self._client.eval(script, numkeys, *keys_and_args)
+
+    @retry_on_connection_error()
     async def setex(self, key: str, time: int | timedelta, value: str | bytes) -> bool:
         """Set key-value pair with expiry time."""
         return bool(await self._client.setex(key, time, value))

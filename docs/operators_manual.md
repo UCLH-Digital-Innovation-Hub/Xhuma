@@ -539,6 +539,98 @@ Database-level assurance checks must be performed through an approved restricted
 
 ---
 
+### 9.4 dm+d Cache Warmer Operations and Diagnostics
+
+The dm+d cache warmer operates as a target-local manual Azure Container Apps Job triggered weekly on Monday at 05:00 UK local time (DST-aware `GMT Standard Time`) via an Azure Consumption Logic App. It pre-populates target-local Redis DB 2 with resolved `DMDConcept` representations.
+
+#### Trigger Manual Job Execution
+
+Operators can trigger a manual run of the warmer job (e.g. for acceptance testing or recovery):
+
+```bash
+az containerapp job start \
+  --name <app-service-name>-dmd-warm \
+  --resource-group <resource-group>
+```
+
+The output returns an execution ID, e.g. `<app-service-name>-dmd-warm-<execution-id>`.
+
+#### Check Job Execution Status
+
+```bash
+az containerapp job execution list \
+  --name <app-service-name>-dmd-warm \
+  --resource-group <resource-group> \
+  -o table
+```
+
+To view details for a specific run:
+```bash
+az containerapp job execution show \
+  --name <app-service-name>-dmd-warm \
+  --resource-group <resource-group> \
+  --job-execution-name <execution-name> \
+  -o json
+```
+
+#### Query Warmer Logs in Log Analytics
+
+Warmer logs contain only structured metadata (release, counts, memory, timings) and strictly omit secrets or PHI:
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+ContainerAppConsoleLogs_CL
+| where ContainerJobName_s == "<app-service-name>-dmd-warm"
+| where TimeGenerated > ago(2h)
+| project TimeGenerated, Log_s
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+#### Check Cache Status via CLI
+
+From within the application environment or maintenance shell:
+
+```bash
+/code/.venv/bin/python -m app.ops.dmd_cache status
+```
+
+Reports:
+- Active dm+d release
+- Active release pointer TTL
+- Warmer lock state
+- Last successful manifest (counts for ROUTE, UOM, VMP, AMP, duration, and memory delta)
+- Redis memory usage, peak, and eviction metrics
+
+#### Operational Scenarios & Troubleshooting
+
+1. **What a failed Monday warm means:**
+   - The warmer acquires a distributed Redis lock (`dmd:warm:v1:lock`) with a 45-minute TTL and releases it safely using a token-matched Lua script on exit.
+   - If a failure occurs (network timeout, upstream Terminology Server downtime, memory ceiling breach), the active release pointer (`dmd:active-release`) remains untouched pointing to the prior release.
+   - The prior release data is valid for 9 days, while the active pointer has an 8-day TTL. This ensures a 24-hour grace window across weekly runs.
+   - If the active release pointer expires or is absent, the application safely degrades to on-demand terminology lookup. Prescription conversion is never interrupted.
+
+2. **Redis Memory Safety & Evictions:**
+   - The warmer enforces a memory ceiling (`DMD_WARM_MAX_REDIS_MEMORY_PERCENT`, default 80%) before every Redis pipeline write batch.
+   - If `evicted_keys` increases during warm, the process aborts immediately and refuses activation.
+   - Redis DB 2 shares memory with DB 0/1; the warmer guarantees headroom for patient, SDS, and PDS caches.
+
+3. **PRD Acceptance Prerequisites:**
+   Before enabling `dmd_cache_schedule_enabled = true` in production tfvars, operators must verify a complete, successful non-PRD execution demonstrating:
+   - Successful image digest pull via dedicated job variable (`var.dmd_cache_job_image`)
+   - Key Vault secret resolution via user-assigned managed identity across firewalled `ca_subnet`
+   - TLS Redis DB 2 connectivity and Terminology Server HTTPS access with pooled retries and jitter
+   - Zero key evictions and recorded memory delta within limits
+   - Atomic pointer activation and resolved cache hits during medication translation
+   - Valid schedule start time (`dmd_cache_schedule_start_time` set to Monday 05:xx at least 7 days in future)
+   - Configured Azure Monitor alert action group IDs (`dmd_cache_alert_action_group_ids`)
+
+
+---
+
 ## 10. Assurance and Evidence Records
 
 Specific deployment rehearsals and assurance events are captured as immutable evidence records. These records are retained separately from this living operational runbook to preserve point-in-time factual observations.

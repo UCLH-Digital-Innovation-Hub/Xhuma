@@ -219,3 +219,54 @@ variable "dmd_base_url" {
   type        = string
   default     = "https://ontology.nhs.uk/production1/fhir"
 }
+
+variable "dmd_cache_warm_enabled" {
+  description = "Enable target-local dm+d cache warmer infrastructure (Container Apps Environment, Job, Managed Identity)"
+  type        = bool
+  default     = false
+}
+
+variable "dmd_cache_schedule_enabled" {
+  description = "Enable scheduled dm+d cache warmer Logic App workflow (Monday 05:00 UK time recurrence)"
+  type        = bool
+  default     = false
+}
+
+variable "dmd_cache_warm_minute" {
+  description = "Minute of the 05:00 hour for scheduled dm+d warming recurrence (0-59)"
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.dmd_cache_warm_minute >= 0 && var.dmd_cache_warm_minute <= 59
+    error_message = "dmd_cache_warm_minute must be between 0 and 59 inclusive."
+  }
+}
+
+variable "dmd_cache_job_image" {
+  description = "Fully-qualified digest-pinned container image for dm+d cache warmer job (e.g. ghcr.io/uclh-digital-innovation-hub/xhuma@sha256:<64 hex chars>)"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dmd_cache_job_image == null || can(regex("^ghcr\\.io/uclh-digital-innovation-hub/xhuma@sha256:[0-9a-f]{64}$", var.dmd_cache_job_image))
+    error_message = "dmd_cache_job_image must be fully qualified and pinned to an immutable sha256 digest: ghcr.io/uclh-digital-innovation-hub/xhuma@sha256:<64 hex chars>"
+  }
+}
+
+variable "dmd_cache_schedule_start_time" {
+  description = "Target-specific future start time for weekly recurrence in local format without Z: YYYY-MM-DDTHH:MM:SS"
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.dmd_cache_schedule_start_time == null || can(regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$", var.dmd_cache_schedule_start_time))
+    error_message = "dmd_cache_schedule_start_time must be in local format without Z: YYYY-MM-DDTHH:MM:SS"
+  }
+}
+
+variable "dmd_cache_alert_action_group_ids" {
+  description = "List of Azure Monitor Action Group resource IDs for dm+d cache warmer alerting. Required when dmd_cache_schedule_enabled is true."
+  type        = list(string)
+  default     = []
+}

@@ -148,3 +148,71 @@ end
 ```
 
 The workflow is robust to edge cases whilst allowing for more informative mapping for the majority of oral medications that otherwise are difficult to easily consolidate into secondary care systems.
+
+---
+
+## dm+d Cache Architecture & Lifecycle
+
+### Publication & Warm Schedule
+- **NHS dm+d Publication**: Weekly on Monday at 04:00 UK time via TRUD / NHS Terminology Server.
+- **Xhuma Target Pre-warm**: Weekly on Monday at 05:00 UK local time (DST-aware across GMT/BST), with optional per-target minute offset (`dmd_cache_warm_minute`) to prevent simultaneous upstream thundering herds across trusts.
+
+> [!NOTE]
+> Terminology freshness is not guaranteed to be instantaneous; upstream publishing schedules or network delays can occur. Xhuma is architected to safely fall back to runtime on-demand resolution or retain the prior active release within its grace window.
+
+### Architecture Flow
+```mermaid
+flowchart TD
+    LA[Azure Consumption Logic App\nRecurrence: Mon 05:xx UK local] -->|Managed Identity\nARM start action 200/202| CAJ[Manual Container Apps Job\n<app_name>-dmd-warm]
+    CAJ -->|Digest-pinned image\nvar.dmd_cache_job_image| PY["/code/.venv/bin/python\n-m app.ops.dmd_cache warm"]
+    PY -->|1. Acquire lock| LCK[(dmd:warm:v1:lock\nTTL 45m)]
+    PY -->|2. Query Terminology Server| TS[NHS Terminology Server]
+    TS -->|ValueSet expansion metadata| REL[Discovered Release ID]
+    PY -->|3. Preflight memory check| MEM[Redis memory preflight]
+    PY -->|4. Page ROUTE & UOM| MAP[Build Route & UOM Maps]
+    PY -->|5. Page VMP & AMP| PIP[Batch Redis Pipeline Writes]
+    PIP -->|dmd:resolved:v1:release:id| RDB[(Target-local Redis DB 2\nTTL 9 days)]
+    PY -->|6. Verify totals & memory| MAN[(dmd:warm:v1:release:manifest\nTTL 9 days)]
+    PY -->|7. Atomic activation| ACT[(dmd:active-release\nTTL 8 days)]
+    PY -->|8. Safe Lua lock release| LCK
+    LA -->|Poll job execution until terminal| RES[Succeeded / Failed]
+```
+
+### Key Principles
+1. **Target-Local / Shared-Nothing**: Each target environment has its own Container Apps Job and warms its own target-local Redis DB 2. There is no shared terminology microservice and no public/HTTP control endpoint.
+2. **Dedicated Digest-Pinned Job Image**: The Container Apps Job image is managed via `var.dmd_cache_job_image` (`${REGISTRY}/${IMAGE_NAME}@${build digest}`). App Service deployment ownership remains with `azure/webapps-deploy` and ignores image-name drift; only the Container Apps Job image is updated in Terraform (`0 to add, 1 to change, 0 to destroy`).
+3. **Guarded Shared Key Vault Network Admission**: The `ca_subnet` has `Microsoft.KeyVault` service endpoints enabled. Shared Key Vault receives one guarded in-place ACL update during shared reconciliation: `app-subnet` always, `ca-subnet` only when `dmd_cache_warm_enabled = true`. Plan guarding (`guard_shared_plan.py`) rejects subnet removals, unknown subnet additions, and any other shared resource modification.
+4. **Logic App Scheduling & Invariants**:
+   - Time zone: `GMT Standard Time` (Monday 05:xx UK local time, DST-aware).
+   - Target-configurable start time: `dmd_cache_schedule_start_time` (local `YYYY-MM-DDTHH:MM:SS` format without Z).
+   - Invariants: `schedule_enabled => warm_enabled`, start time required when schedule enabled, alert action group required when schedule enabled.
+   - Start action handles both HTTP 200 (`body.name`/`body.id`) and HTTP 202 (`Location` header polling).
+   - Timing invariant: `replica timeout (1800s) < poll timeout (2100s) < lock TTL (2700s)`.
+5. **Warm -> Verify -> Activate Invariant**: Data is pre-warmed into versioned keys (`dmd:resolved:v1:<release>:<concept_id>`). The active pointer (`dmd:active-release`) is updated *only* after all categories complete successfully, totals are verified, and no Redis key evictions occurred.
+6. **Natural TTL Retirement (No Purge)**:
+   - Resolved concepts (`dmd:resolved:v1:...`): **9 days** TTL
+   - Active release pointer (`dmd:active-release`): **8 days** TTL
+   - Success manifest (`dmd:warm:v1:...:manifest`): **9 days** TTL
+   The active pointer expires before underlying data expires, ensuring a 24-hour grace window for schedule failures while preventing orphaned pointers. Old release data ages out naturally without requiring destructive Redis operations (`DEL`, `KEYS`, `FLUSHDB`).
+7. **Redis Memory Safety & Preflight**: The warmer enforces a full-run memory preflight before the first write (projected usage with 1.5x multiplier must remain below 80% ceiling) and checks memory guard and `evicted_keys` on each batch. If `evicted_keys` increases at any point during warming, the run aborts immediately and refuses activation.
+8. **Disjoint Namespace & Cache Type Separation**:
+   - `dmd:resolved:v1:<release>:<concept_id>`: Only serialized `DMDConcept` instances.
+   - `dmd:raw:v1:<release>:<concept_id>` / `snomed:...`: Raw FHIR Parameters dictionaries returned by `get_dmd_concept`.
+   - Upstream lookups on cache misses are explicitly pinned to the active release; responses with mismatched releases are rejected before caching.
+
+### Runtime Fallback Behaviour
+When `dmd_lookup(concept_id)` executes during prescription conversion:
+1. It queries `dmd:active-release`.
+2. **Hit with Active Release**: Checks `dmd:resolved:v1:<release>:<concept_id>`. On hit, returns the resolved `DMDConcept` immediately with zero external network calls.
+3. **Miss with Active Release**: Resolves the concept on-demand via the Terminology Server pinned to that active release, writes the resolved `DMDConcept` to `dmd:resolved:v1:<release>:<concept_id>`, and returns it.
+4. **No Active Release**: Falls back transparently to unversioned on-demand resolution (`dmd:concept:<concept_id>`). A failed Monday warmer never breaks medication processing.
+
+### Operational CLI Commands
+The CLI is built directly into the core Xhuma container under `app.ops.dmd_cache`:
+```bash
+# Execute manual warm
+/code/.venv/bin/python -m app.ops.dmd_cache warm
+
+# Inspect operational cache status
+/code/.venv/bin/python -m app.ops.dmd_cache status
+```
