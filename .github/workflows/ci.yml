@@ -89,14 +89,14 @@ jobs:
           uv run coverage xml
         continue-on-error: true
 
+      # Report the same unit-test suite on every push and pull request.
       - name: Upload coverage to Coveralls
         if: always()
         uses: coverallsapp/github-action@v2
         with:
-          github-token: ${{ secrets.COVERALLS_TOKEN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           format: cobertura
           file: coverage.xml
-          parallel: true
 
       - name: Fail if tests failed
         if: steps.tests.outputs.exit_code != 0
@@ -135,38 +135,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev
 
-      - name: Run fuzzing tests with coverage
-        id: fuzzing
-        run: |
-          uv run coverage run -m pytest app/tests/test_api_fuzzing.py app/tests/test_fuzzing.py || exit_code=$?
-          if [ -z "$exit_code" ]; then exit_code=0; fi
-          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
-          uv run coverage xml
-        continue-on-error: true
-
-      - name: Upload coverage to Coveralls
-        if: always()
-        uses: coverallsapp/github-action@v2
-        with:
-          github-token: ${{ secrets.COVERALLS_TOKEN }}
-          format: cobertura
-          file: coverage.xml
-          parallel: true
-
-      - name: Fail if fuzzing failed
-        if: steps.fuzzing.outputs.exit_code != 0
-        run: exit 1
-
-  coveralls-finish:
-    needs: [test, fuzzing]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Coveralls Finished
-        uses: coverallsapp/github-action@v2
-        with:
-          github-token: ${{ secrets.COVERALLS_TOKEN }}
-          parallel-finished: true
+      # Keep fuzzing as a separate pass/fail gate, outside unit-test coverage.
+      - name: Run fuzzing tests
+        run: uv run --locked pytest app/tests/test_api_fuzzing.py app/tests/test_fuzzing.py
 
   security:
     name: Security scan

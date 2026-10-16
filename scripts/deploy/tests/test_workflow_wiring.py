@@ -32,7 +32,7 @@ def test_matrix_deploy_listens_to_main():
 
 
 def test_matrix_deploy_backend_path_exists():
-    workflow = load_workflow("matrix-deploy.yml")
+    workflow = load_workflow("deploy-target.yml")
     infra_plan_job = workflow["jobs"]["infra-plan"]
 
     bootstrap_step = None
@@ -43,26 +43,17 @@ def test_matrix_deploy_backend_path_exists():
 
     assert bootstrap_step is not None
     # We check that the step does not use infra/${{ matrix.target.backend_file }}
-    assert bootstrap_step["env"].get("XHUMA_BACKEND_FILE") == "${{ matrix.target.backend_file }}"
+    assert bootstrap_step["env"].get("XHUMA_BACKEND_FILE") == "${{ fromJSON(inputs.target).backend_file }}"
 
 
 def test_consumed_job_outputs_have_needs():
     workflow = load_workflow("matrix-deploy.yml")
-    infra_apply_job = workflow["jobs"]["infra-apply"]
-
-    # It consumes digest from build
-    # Check that 'build' is in the needs list
-    assert "build" in infra_apply_job.get("needs", [])
-
-    # Check that digest is used
-    deploy_step = None
-    for step in infra_apply_job["steps"]:
-        if step.get("name") == "Download and Verify Plan":
-            deploy_step = step
-            break
-
-    assert deploy_step is not None
-    assert "${{ needs.build.outputs.digest }}" in deploy_step.get("run", "")
+    rollout = workflow["jobs"]["rollout"]
+    assert "build" in rollout["needs"]
+    assert rollout["with"]["digest"] == "${{ needs.build.outputs.digest }}"
+    target = load_workflow("deploy-target.yml")
+    inputs = (target.get(True) or target["on"])["workflow_call"]["inputs"]
+    assert inputs["digest"]["required"] is True
 
 
 def get_selected_targets(branch):
