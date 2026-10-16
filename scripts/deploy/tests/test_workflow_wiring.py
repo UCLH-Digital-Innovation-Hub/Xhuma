@@ -118,6 +118,10 @@ def test_warmer_wiring_in_workflow():
 
     assert "Extract Target Terraform Outputs" in steps
     extract_step = steps["Extract Target Terraform Outputs"]
+    assert extract_step.get("env", {}).get("ARM_CLIENT_ID") == "${{ secrets.AZURE_CLIENT_ID }}"
+    assert extract_step.get("env", {}).get("ARM_CLIENT_SECRET") == "${{ secrets.AZURE_CLIENT_SECRET }}"
+    assert extract_step.get("env", {}).get("ARM_TENANT_ID") == "${{ secrets.AZURE_TENANT_ID }}"
+    assert extract_step.get("env", {}).get("ARM_SUBSCRIPTION_ID") == "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
     run_script = extract_step["run"]
     assert "dmd_cache_warm_enabled" in run_script
     assert "dmd_cache_ca_subnet_id" in run_script

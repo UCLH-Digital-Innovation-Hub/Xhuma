@@ -510,6 +510,11 @@ jobs:
 
       - name: Extract Target Terraform Outputs
         working-directory: ./infra
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: |
           TF_OUTPUTS_JSON=$(terraform output -json)
           WARM_ENABLED=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_warm_enabled.value // false')
