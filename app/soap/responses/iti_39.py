@@ -73,7 +73,8 @@ async def iti_39_error(
                     error=RegistryError(
                         error_code=error_code,
                         code_context=error_text or f"Document with Id {document_id} not found",
-                        location=f"urn:oid:{COMMUNITY_ID}",
+                        # Temporarily omit location to check the client's retry behaviour.
+                        # location=f"urn:oid:{COMMUNITY_ID}",
                         severity=XDS_ERROR_SEVERITY,
                     ),
                 ),
