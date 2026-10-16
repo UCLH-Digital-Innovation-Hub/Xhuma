@@ -2192,3 +2192,31 @@ def test_terraform_container_app_job_is_manual_only():
     assert 'args    = ["-m", "app.ops.dmd_cache", "warm"]' in main_tf
     assert "event_trigger_config" not in main_tf
     assert "schedule_trigger_config" not in main_tf
+
+
+def test_terraform_container_app_job_registry_and_timeout_invariants():
+    """Verify Container Apps Job registry uses pure hostname from image, timeout invariant avoids self, and lock TTL env is passed."""
+    import pathlib
+
+    main_tf = pathlib.Path("infra/main.tf").read_text()
+
+    # Registry server derives purely from image hostname and does NOT use var.docker_registry_url
+    assert 'server               = split("/", coalesce(var.dmd_cache_job_image, var.docker_image))[0]' in main_tf
+    assert (
+        "docker_registry_url"
+        not in main_tf.split('resource "azurerm_container_app_job" "dmd_warm"')[1].split("template {")[0]
+    )
+
+    # App service still uses var.docker_registry_url
+    app_service_section = main_tf.split('resource "azurerm_linux_web_app"')[1].split(
+        'resource "azurerm_container_app_environment"'
+    )[0]
+    assert "docker_registry_url      = var.docker_registry_url" in app_service_section
+
+    # Timeout invariant does NOT use self
+    assert "self.replica_timeout_in_seconds" not in main_tf
+    assert "local.dmd_job_replica_timeout_seconds < local.dmd_logic_poll_timeout_seconds" in main_tf
+
+    # Lock TTL env var is passed with 2700s local
+    assert 'name  = "DMD_LOCK_TTL"' in main_tf
+    assert "value = tostring(local.dmd_lock_ttl_seconds)" in main_tf

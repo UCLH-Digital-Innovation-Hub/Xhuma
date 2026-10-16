@@ -492,6 +492,12 @@ resource "azurerm_postgresql_flexible_server_configuration" "log_min_duration_st
 
 # --- Target-Local dm+d Cache Warmer Infrastructure ---
 
+locals {
+  dmd_job_replica_timeout_seconds = 1800
+  dmd_logic_poll_timeout_seconds  = 2100
+  dmd_lock_ttl_seconds            = 2700
+}
+
 resource "azurerm_container_app_environment" "cae" {
   count                          = var.dmd_cache_warm_enabled ? 1 : 0
   name                           = "${var.app_service_name}-cae"
@@ -538,7 +544,7 @@ resource "azurerm_container_app_job" "dmd_warm" {
   location                     = data.azurerm_resource_group.rg.location
   resource_group_name          = data.azurerm_resource_group.rg.name
   container_app_environment_id = azurerm_container_app_environment.cae[0].id
-  replica_timeout_in_seconds   = 1800
+  replica_timeout_in_seconds   = local.dmd_job_replica_timeout_seconds
   replica_retry_limit          = 0
 
   manual_trigger_config {
@@ -574,7 +580,7 @@ resource "azurerm_container_app_job" "dmd_warm" {
   }
 
   registry {
-    server               = var.docker_registry_url != "" ? var.docker_registry_url : split("/", var.dmd_cache_job_image != null ? var.dmd_cache_job_image : var.docker_image)[0]
+    server               = split("/", coalesce(var.dmd_cache_job_image, var.docker_image))[0]
     username             = var.docker_registry_username
     password_secret_name = "registry-password"
   }
@@ -617,6 +623,10 @@ resource "azurerm_container_app_job" "dmd_warm" {
         name        = "REDIS_PASSWORD"
         secret_name = "redis-password"
       }
+      env {
+        name  = "DMD_LOCK_TTL"
+        value = tostring(local.dmd_lock_ttl_seconds)
+      }
     }
   }
 
@@ -625,8 +635,8 @@ resource "azurerm_container_app_job" "dmd_warm" {
       condition     = var.dmd_cache_job_image != null && can(regex("^ghcr\\.io/uclh-digital-innovation-hub/xhuma@sha256:[0-9a-f]{64}$", var.dmd_cache_job_image))
       error_message = "dmd_cache_job_image is required and must be an immutable sha256 digest (ghcr.io/uclh-digital-innovation-hub/xhuma@sha256:<64 hex chars>) when dmd_cache_warm_enabled is true."
     }
-    postcondition {
-      condition     = self.replica_timeout_in_seconds < 2100 && 2100 < 2700
+    precondition {
+      condition     = local.dmd_job_replica_timeout_seconds < local.dmd_logic_poll_timeout_seconds && local.dmd_logic_poll_timeout_seconds < local.dmd_lock_ttl_seconds
       error_message = "Timeout invariant violated: replica timeout (1800s) must be < poll timeout (2100s) < lock TTL (2700s)."
     }
     ignore_changes = [tags["CostCenter"]]
@@ -974,5 +984,10 @@ check "dmd_cache_invariants" {
   assert {
     condition     = !var.dmd_cache_warm_enabled || var.dmd_cache_job_image != null
     error_message = "dmd_cache_job_image is required when dmd_cache_warm_enabled is true."
+  }
+
+  assert {
+    condition     = local.dmd_job_replica_timeout_seconds < local.dmd_logic_poll_timeout_seconds && local.dmd_logic_poll_timeout_seconds < local.dmd_lock_ttl_seconds
+    error_message = "Timeout invariant violated: replica timeout (1800s) must be < poll timeout (2100s) < lock TTL (2700s)."
   }
 }
