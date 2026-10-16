@@ -2220,3 +2220,49 @@ def test_terraform_container_app_job_registry_and_timeout_invariants():
     # Lock TTL env var is passed with 2700s local
     assert 'name  = "DMD_LOCK_TTL"' in main_tf
     assert "value = tostring(local.dmd_lock_ttl_seconds)" in main_tf
+
+
+def test_terraform_cae_lifecycle_and_authoritative_attributes():
+    """Verify Container Apps Environment preserves Consumption configuration and only ignores normalised drift fields."""
+    import pathlib
+    import re
+
+    main_tf = pathlib.Path("infra/main.tf").read_text()
+    assert 'resource "azurerm_container_app_environment" "cae"' in main_tf
+
+    cae_section = main_tf.split('resource "azurerm_container_app_environment" "cae"')[1].split(
+        'resource "azurerm_user_assigned_identity" "dmd_job_mi"'
+    )[0]
+
+    # Explicit Consumption workload profile must be declared
+    assert 'name                  = "Consumption"' in cae_section
+    assert 'workload_profile_type = "Consumption"' in cae_section
+
+    # Parse lifecycle ignore_changes
+    match = re.search(r"lifecycle\s*\{\s*ignore_changes\s*=\s*\[(.*?)\]\s*\}", cae_section, re.DOTALL)
+    assert match is not None, "CAE must have an ignore_changes block"
+    ignored_raw = match.group(1)
+    ignored_items = [
+        item.strip() for item in ignored_raw.split(",") if item.strip() and not item.strip().startswith("#")
+    ]
+
+    # Exact ignored items
+    assert "workload_profile" in ignored_items
+    assert "infrastructure_resource_group_name" in ignored_items
+    assert 'tags["CostCenter"]' in ignored_items or 'tags["CostCenter"]' in ignored_items
+
+    # Must NOT ignore all
+    assert "all" not in ignored_items
+
+    # Critical authoritative networking and identity attributes MUST NOT be ignored
+    for authoritative_attr in [
+        "infrastructure_subnet_id",
+        "log_analytics_workspace_id",
+        "internal_load_balancer_enabled",
+        "location",
+        "resource_group_name",
+        "name",
+    ]:
+        assert authoritative_attr not in ignored_items, (
+            f"{authoritative_attr} must remain authoritative and not be ignored"
+        )

@@ -512,8 +512,17 @@ resource "azurerm_container_app_environment" "cae" {
     workload_profile_type = "Consumption"
   }
 
+  # AzureRM/Azure normalise the Consumption profile after creation, and Azure
+  # generates the infrastructure resource-group name behind the scenes. Neither
+  # value is an operator-controlled configuration input; ignoring them prevents
+  # false destroy/recreate plans on subsequent runs while first creation still
+  # uses the declared Consumption profile.
   lifecycle {
-    ignore_changes = [tags["CostCenter"]]
+    ignore_changes = [
+      workload_profile,
+      infrastructure_resource_group_name,
+      tags["CostCenter"],
+    ]
   }
 }
 

@@ -333,11 +333,35 @@ jobs:
           if [ -n "$DESTRUCTIVE" ]; then
             # Convert newlines to commas for the message
             WARN_MSG=$(echo "$DESTRUCTIVE" | tr '\n' ',' | sed 's/,$//')
+            DESTRUCTIVE_DETAILS=$(terraform show -json "$PLAN_FILE" | jq -r '
+              [
+                .resource_changes[]?
+                | select(.change.actions | index("delete") or index("replace"))
+                | "\(.address)\nactions: \(.change.actions | tojson)\nreplace_paths:\(
+                    if ((.change.replace_paths // []) | length > 0) then
+                      "\n" + ([.change.replace_paths[] | "  - \(tojson)"] | join("\n"))
+                    else
+                      "\n  - []"
+                    end
+                  )"
+              ] | join("\n\n")
+            ')
+            echo "::group::Destructive Plan Diagnostics"
+            echo "$DESTRUCTIVE_DETAILS"
+            echo "::endgroup::"
             if [ "${{ matrix.target.require_existing_state }}" == "true" ]; then
               echo "::error::Migration Guard: The plan contains destructive actions (delete/replace) for an environment requiring existing state adoption. Affected resources: $WARN_MSG"
+              echo "### Migration Guard Failure: Destructive Plan Detected" >> $GITHUB_STEP_SUMMARY
+              echo '```text' >> $GITHUB_STEP_SUMMARY
+              echo "$DESTRUCTIVE_DETAILS" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
               exit 1
             else
               echo "::warning::The plan contains destructive actions (delete/replace) for the following resources: $WARN_MSG"
+              echo "### Destructive Plan Warning" >> $GITHUB_STEP_SUMMARY
+              echo '```text' >> $GITHUB_STEP_SUMMARY
+              echo "$DESTRUCTIVE_DETAILS" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
             fi
           fi
 

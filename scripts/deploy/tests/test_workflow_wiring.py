@@ -198,3 +198,102 @@ def test_warmer_enabled_missing_output_fails_closed():
 
     with pytest.raises(ValueError, match="dmd_cache_ca_subnet_id is null/missing"):
         validate_outputs()
+
+
+def test_migration_guard_workflow_syntax_and_fail_closed():
+    """Verify matrix-deploy.yml Migration Guard extracts replace_paths and fails closed."""
+    workflow = load_workflow("matrix-deploy.yml")
+    infra_plan_job = workflow["jobs"]["infra-plan"]
+    plan_step = None
+    for step in infra_plan_job["steps"]:
+        if step.get("name") == "Terraform Plan":
+            plan_step = step
+            break
+
+    assert plan_step is not None
+    run_script = plan_step["run"]
+
+    # Must check for delete or replace actions
+    assert 'select(.change.actions | index("delete") or index("replace"))' in run_script
+    # Must extract replace_paths
+    assert ".change.replace_paths" in run_script
+    # Must fail closed if require_existing_state is true
+    assert 'if [ "${{ matrix.target.require_existing_state }}" == "true" ]; then' in run_script
+    assert "exit 1" in run_script
+    # Must NOT access before or after values in the diagnostic extraction
+    assert ".change.before" not in run_script
+    assert ".change.after" not in run_script
+
+
+def test_migration_guard_jq_replace_paths_diagnostics(tmp_path):
+    """Verify the Migration Guard jq diagnostic accurately outputs replace_paths without leaking values."""
+    mock_plan = {
+        "resource_changes": [
+            {
+                "address": "azurerm_container_app_environment.cae[0]",
+                "change": {
+                    "actions": ["delete", "create"],
+                    "before": {"secret_token": "SENSITIVE_OLD_VALUE"},
+                    "after": {"secret_token": "SENSITIVE_NEW_VALUE"},
+                    "replace_paths": [["workload_profile"], ["infrastructure_resource_group_name"]],
+                },
+            },
+            {
+                "address": "azurerm_container_app_job.dmd_warm[0]",
+                "change": {
+                    "actions": ["delete"],
+                    "before": {"password": "SECRET_PASSWORD"},
+                    "after": None,
+                    "replace_paths": None,
+                },
+            },
+            {
+                "address": "azurerm_subnet.ca_subnet[0]",
+                "change": {
+                    "actions": ["no-op"],
+                },
+            },
+        ]
+    }
+
+    plan_file = tmp_path / "test_plan.json"
+    plan_file.write_text(json.dumps(mock_plan))
+
+    jq_script = """
+    [
+      .resource_changes[]?
+      | select(.change.actions | index("delete") or index("replace"))
+      | "\\(.address)\\nactions: \\(.change.actions | tojson)\\nreplace_paths:\\(
+          if ((.change.replace_paths // []) | length > 0) then
+            "\\n" + ([.change.replace_paths[] | "  - \\(tojson)"] | join("\\n"))
+          else
+            "\\n  - []"
+          end
+        )"
+    ] | join("\\n\\n")
+    """
+
+    res = subprocess.run(
+        ["jq", "-r", jq_script, str(plan_file)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    output = res.stdout.strip()
+
+    # Address, actions, and replace_paths are formatted properly
+    assert "azurerm_container_app_environment.cae[0]" in output
+    assert 'actions: ["delete","create"]' in output
+    assert 'replace_paths:\n  - ["workload_profile"]\n  - ["infrastructure_resource_group_name"]' in output
+
+    assert "azurerm_container_app_job.dmd_warm[0]" in output
+    assert 'actions: ["delete"]' in output
+    assert "replace_paths:\n  - []" in output
+
+    # Non-destructive resources are not present
+    assert "azurerm_subnet.ca_subnet[0]" not in output
+
+    # Secrets and values from before/after are strictly absent
+    assert "SENSITIVE_OLD_VALUE" not in output
+    assert "SENSITIVE_NEW_VALUE" not in output
+    assert "SECRET_PASSWORD" not in output
