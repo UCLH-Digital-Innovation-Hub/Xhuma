@@ -378,33 +378,41 @@ async def get_redis_memory_state() -> dict[str, int]:
 
 def check_preflight_memory(
     mem_state: dict[str, int],
-    estimated_concepts: int,
+    estimated_concepts: int = 0,
     bytes_per_concept: int = BYTES_PER_CONCEPT_ESTIMATE,
     safety_multiplier: float = DMD_WARM_MEMORY_SAFETY_MULTIPLIER,
     max_percent: float = DMD_WARM_MAX_REDIS_MEMORY_PERCENT,
+    projected_bytes: int | None = None,
 ) -> None:
     """Perform full-run memory preflight before the first concept write."""
-    maxmemory = mem_state["maxmemory"]
+    maxmemory = mem_state.get("maxmemory", 0)
     if maxmemory <= 0:
-        return
-    projected_bytes = int(estimated_concepts * bytes_per_concept * safety_multiplier)
-    projected_total = mem_state["used_memory"] + projected_bytes
+        raise RuntimeError(
+            f"Redis maxmemory must be configured and positive (got {maxmemory}). "
+            "Failing closed to protect Redis DB 0/1 from unconstrained memory usage."
+        )
+    if projected_bytes is None:
+        projected_bytes = int(estimated_concepts * bytes_per_concept * safety_multiplier)
+    projected_total = mem_state.get("used_memory", 0) + projected_bytes
     percent = (projected_total / maxmemory) * 100.0
     if percent > max_percent:
         raise RuntimeError(
             f"Redis memory preflight failed: projected usage {percent:.1f}% "
             f"exceeds ceiling {max_percent:.1f}% before warm start "
-            f"(used={mem_state['used_memory']}, projected_add={projected_bytes}, "
+            f"(used={mem_state.get('used_memory', 0)}, projected_add={projected_bytes}, "
             f"estimated_concepts={estimated_concepts}, max={maxmemory})"
         )
 
 
 def check_memory_guard(mem_state: dict[str, int], additional_bytes: int = 0) -> None:
     """Refuse further caching if projected memory usage exceeds configured ceiling."""
-    maxmemory = mem_state["maxmemory"]
+    maxmemory = mem_state.get("maxmemory", 0)
     if maxmemory <= 0:
-        return
-    projected = mem_state["used_memory"] + additional_bytes
+        raise RuntimeError(
+            f"Redis maxmemory must be configured and positive (got {maxmemory}). "
+            "Failing closed to protect Redis DB 0/1 from unconstrained memory usage."
+        )
+    projected = mem_state.get("used_memory", 0) + additional_bytes
     percent = (projected / maxmemory) * 100.0
     if percent > DMD_WARM_MAX_REDIS_MEMORY_PERCENT:
         raise RuntimeError(
@@ -443,42 +451,316 @@ async def fetch_token() -> str:
     return await fetch_token_in_memory()
 
 
-async def discover_release(client: TerminologyClient) -> tuple[str, int]:
-    """Discover current dm+d release and estimated total concepts from upstream metadata."""
-    body = {
-        "resourceType": "Parameters",
-        "parameter": [
-            {
-                "name": "valueSet",
-                "resource": {
-                    "resourceType": "ValueSet",
-                    "compose": {
-                        "include": [
-                            {
-                                "system": "https://dmd.nhs.uk",
-                                "filter": [{"property": "parent", "op": "=", "value": "ROUTE"}],
-                            }
-                        ]
+async def discover_release_capacity(client: TerminologyClient) -> dict[str, Any]:
+    """Discover current dm+d release and authoritative category totals from upstream terminology expansion."""
+    categories = ("ROUTE", "UOM", "VMP", "AMP")
+    counts: dict[str, int] = {}
+    page_counts: dict[str, int] = {}
+    discovered_release: str | None = None
+
+    for cat in categories:
+        body = {
+            "resourceType": "Parameters",
+            "parameter": [
+                {
+                    "name": "valueSet",
+                    "resource": {
+                        "resourceType": "ValueSet",
+                        "compose": {
+                            "include": [
+                                {
+                                    "system": "https://dmd.nhs.uk",
+                                    "filter": [{"property": "parent", "op": "=", "value": cat}],
+                                }
+                            ]
+                        },
                     },
                 },
-            },
-            {"name": "count", "valueInteger": 1},
-        ],
+                {"name": "count", "valueInteger": 1},
+            ],
+        }
+        resp = await client.post_fhir("ValueSet/$expand", body)
+        resp.raise_for_status()
+        expansion = resp.json().get("expansion", {})
+        ver = _expansion_version(expansion)
+        if not ver:
+            raise ValueError(f"Could not discover dm+d release from upstream expansion for {cat}")
+        if discovered_release is None:
+            discovered_release = ver
+        elif ver != discovered_release:
+            raise ValueError(
+                f"Release mismatch across categories during count discovery: "
+                f"expected {discovered_release}, got {ver} for {cat}"
+            )
+        total = expansion.get("total")
+        if total is None or not isinstance(total, int) or total <= 0:
+            raise ValueError(f"Invalid or missing total count for category {cat}: {total}")
+        counts[cat] = total
+        page_counts[cat] = math.ceil(total / PAGE_SIZE)
+
+    total_concepts = sum(counts.values())
+    return {
+        "release": discovered_release,
+        "counts": counts,
+        "total_concepts": total_concepts,
+        "page_counts": page_counts,
     }
 
-    t0 = time.perf_counter()
-    resp = await client.post_fhir("ValueSet/$expand", body)
-    elapsed = time.perf_counter() - t0
-    logger.info("Discovered release endpoint POST status=%d elapsed=%.2fs", resp.status_code, elapsed)
 
-    expansion = resp.json().get("expansion", {})
-    release = _expansion_version(expansion)
-    if not release:
-        raise ValueError("Could not discover dm+d release from upstream terminology expansion")
+async def discover_release(client: TerminologyClient) -> tuple[str, int]:
+    """Discover current dm+d release and estimated total concepts from upstream metadata."""
+    cap = await discover_release_capacity(client)
+    return cap["release"], cap["total_concepts"]
 
-    # Discover estimated concept count: conservative baseline ~50,000 concepts across all categories
-    total_estimate = 50000
-    return release, total_estimate
+
+async def sample_payload_metrics(
+    client: TerminologyClient,
+    release: str,
+    sample_size: int = 10,
+) -> tuple[list[int], list[int], list[float]]:
+    """Sample small batches of concepts from upstream to measure real payload sizes and latencies."""
+    raw_sizes: list[int] = []
+    resolved_sizes: list[int] = []
+    latencies: list[float] = []
+
+    for cat in ("ROUTE", "UOM"):
+        body = {
+            "resourceType": "Parameters",
+            "parameter": [
+                {
+                    "name": "valueSet",
+                    "resource": {
+                        "resourceType": "ValueSet",
+                        "compose": {
+                            "include": [
+                                {
+                                    "system": "https://dmd.nhs.uk",
+                                    "filter": [{"property": "parent", "op": "=", "value": cat}],
+                                }
+                            ]
+                        },
+                    },
+                },
+                {"name": "count", "valueInteger": sample_size},
+            ],
+        }
+        t0 = time.perf_counter()
+        resp = await client.post_fhir("ValueSet/$expand", body)
+        elapsed = time.perf_counter() - t0
+        latencies.append(elapsed)
+        resp.raise_for_status()
+        expansion = resp.json().get("expansion", {})
+        contains = expansion.get("contains", [])
+        if not contains:
+            raise ValueError(f"Terminology server returned empty concepts when sampling {cat}")
+        for concept in contains:
+            display = concept.get("display", "")
+            raw_payload = json.dumps(
+                {
+                    "parameter": [
+                        {"name": "display", "valueString": display},
+                        {"name": "version", "valueString": release},
+                    ]
+                }
+            )
+            raw_sizes.append(len(raw_payload.encode("utf-8")))
+
+    for cat in ("VMP", "AMP"):
+        body = {
+            "resourceType": "Parameters",
+            "parameter": [
+                {
+                    "name": "valueSet",
+                    "resource": {
+                        "resourceType": "ValueSet",
+                        "compose": {
+                            "include": [
+                                {
+                                    "system": "https://dmd.nhs.uk",
+                                    "filter": [{"property": "parent", "op": "=", "value": cat}],
+                                }
+                            ]
+                        },
+                    },
+                },
+                {"name": "property", "valueString": "parent"},
+                {"name": "property", "valueString": "VPI"},
+                {"name": "property", "valueString": "ROUTECD"},
+                {"name": "count", "valueInteger": sample_size},
+            ],
+        }
+        t0 = time.perf_counter()
+        resp = await client.post_fhir("ValueSet/$expand", body)
+        elapsed = time.perf_counter() - t0
+        latencies.append(elapsed)
+        resp.raise_for_status()
+        expansion = resp.json().get("expansion", {})
+        contains = expansion.get("contains", [])
+        if not contains:
+            raise ValueError(f"Terminology server returned empty concepts when sampling {cat}")
+        for concept in contains:
+            code = str(concept.get("code", "0")).strip()
+            cid = int(code) if code.isdigit() else 0
+            resolved = DMDConcept(
+                concept_id=cid,
+                valueString=concept.get("display") or "Sample Concept",
+            )
+            resolved_sizes.append(len(resolved.model_dump_json().encode("utf-8")))
+
+    return raw_sizes, resolved_sizes, latencies
+
+
+def build_capacity_plan(
+    release: str,
+    category_counts: dict[str, int],
+    mem_state: dict[str, int],
+    raw_payload_bytes: list[int],
+    resolved_payload_bytes: list[int],
+    latencies: list[float],
+    sample_request_count: int = 8,
+    safety_multiplier: float = DMD_WARM_MEMORY_SAFETY_MULTIPLIER,
+    container_app_timeout_s: int = 1800,
+) -> dict[str, Any]:
+    """Unified capacity, memory, key count, and duration model for plan() and warm()."""
+    route_n = category_counts.get("ROUTE", 0)
+    uom_n = category_counts.get("UOM", 0)
+    vmp_n = category_counts.get("VMP", 0)
+    amp_n = category_counts.get("AMP", 0)
+    unique_concepts = route_n + uom_n + vmp_n + amp_n
+
+    # Real page counts across all categories
+    route_pages = math.ceil(route_n / PAGE_SIZE) if route_n > 0 else 1
+    uom_pages = math.ceil(uom_n / PAGE_SIZE) if uom_n > 0 else 1
+    vmp_pages = math.ceil(vmp_n / PAGE_SIZE) if vmp_n > 0 else 1
+    amp_pages = math.ceil(amp_n / PAGE_SIZE) if amp_n > 0 else 1
+    total_expansion_pages = route_pages + uom_pages + vmp_pages + amp_pages
+    projected_http_requests = total_expansion_pages + sample_request_count
+
+    # Exact correspondence to actual warm() writes:
+    # ROUTE: 1 raw key per concept
+    # UOM: 1 raw key per concept
+    # VMP: 1 resolved key per concept
+    # AMP: 1 resolved key per concept
+    # Manifest: 1 key
+    # Active release: 1 key
+    total_raw_keys = route_n + uom_n
+    total_resolved_keys = vmp_n + amp_n
+    metadata_keys = 2
+    total_keys = total_raw_keys + total_resolved_keys + metadata_keys
+
+    raw_stats = _calculate_stats(raw_payload_bytes)
+    resolved_stats = _calculate_stats(resolved_payload_bytes)
+    latency_stats = _calculate_stats(latencies)
+
+    raw_unit_bytes = raw_stats["p95"]
+    resolved_unit_bytes = resolved_stats["p95"]
+
+    projected_raw_bytes = int(total_raw_keys * raw_unit_bytes)
+    projected_resolved_bytes = int(total_resolved_keys * resolved_unit_bytes)
+
+    avg_key_name_bytes = 65
+    redis_key_overhead = 128
+    projected_overhead_bytes = int(total_keys * (avg_key_name_bytes + redis_key_overhead))
+
+    allocator_frag = 1.25
+    base_delta = projected_raw_bytes + projected_resolved_bytes + projected_overhead_bytes
+    projected_total_redis_delta = int(base_delta * allocator_frag * safety_multiplier)
+
+    current_used = mem_state.get("used_memory", 0)
+    maxmemory = mem_state.get("maxmemory", 0)
+
+    fail_closed = False
+    fail_reasons: list[str] = []
+    warnings: list[str] = []
+
+    if maxmemory <= 0:
+        fail_closed = True
+        fail_reasons.append(
+            f"Redis maxmemory must be configured and positive (got {maxmemory} bytes). "
+            "Failing closed to protect Redis DB 0/1 from unconstrained memory usage."
+        )
+        projected_total_memory = current_used + projected_total_redis_delta
+        projected_memory_percent = 0.0
+    else:
+        projected_total_memory = current_used + projected_total_redis_delta
+        projected_memory_percent = round((projected_total_memory / maxmemory) * 100.0, 2)
+        if projected_memory_percent > DMD_WARM_MAX_REDIS_MEMORY_PERCENT:
+            fail_closed = True
+            fail_reasons.append(
+                f"Projected total Redis memory ({projected_memory_percent}%) exceeds guard limit "
+                f"({DMD_WARM_MAX_REDIS_MEMORY_PERCENT}%). Maxmemory: {maxmemory} bytes."
+            )
+        if current_used >= maxmemory:
+            fail_closed = True
+            fail_reasons.append("Redis current used_memory is already at or above maxmemory.")
+        if current_used > (maxmemory * 0.5):
+            warnings.append(
+                "Existing Redis memory exceeds 50% maxmemory before warm start (coexisting prior release or DB 0 keys)."
+            )
+
+    # Sequential concurrency = 1
+    lat_p95 = latency_stats["p95"]
+    projected_duration = round(projected_http_requests * lat_p95, 2)
+    fits_timeout = projected_duration <= container_app_timeout_s
+    if not fits_timeout:
+        fail_closed = True
+        fail_reasons.append(
+            f"Projected warm duration ({projected_duration}s) exceeds Container Apps Job timeout "
+            f"({container_app_timeout_s}s)."
+        )
+
+    return {
+        "release": release,
+        "counts_by_category": category_counts,
+        "unique_concept_count": unique_concepts,
+        "page_counts": {
+            "ROUTE": route_pages,
+            "UOM": uom_pages,
+            "VMP": vmp_pages,
+            "AMP": amp_pages,
+        },
+        "projected_terminology_requests": projected_http_requests,
+        "key_counts_by_type": {
+            "raw": total_raw_keys,
+            "resolved": total_resolved_keys,
+            "metadata": metadata_keys,
+        },
+        "total_keys": total_keys,
+        "sampled_raw_fhir_parameters": {
+            "mean_bytes": raw_stats["mean"],
+            "p50_bytes": raw_stats["p50"],
+            "p95_bytes": raw_stats["p95"],
+            "max_bytes": raw_stats["max"],
+        },
+        "sampled_resolved_dmd_concept": {
+            "mean_bytes": resolved_stats["mean"],
+            "p50_bytes": resolved_stats["p50"],
+            "p95_bytes": resolved_stats["p95"],
+            "max_bytes": resolved_stats["max"],
+        },
+        "projected_raw_bytes": projected_raw_bytes,
+        "projected_resolved_bytes": projected_resolved_bytes,
+        "projected_redis_key_metadata_overhead_bytes": projected_overhead_bytes,
+        "safety_multiplier": safety_multiplier,
+        "allocator_fragmentation_multiplier": allocator_frag,
+        "projected_total_redis_delta_bytes": projected_total_redis_delta,
+        "current_redis_used_memory_bytes": current_used,
+        "redis_maxmemory_bytes": maxmemory,
+        "projected_total_memory_bytes": projected_total_memory,
+        "projected_memory_percentage": projected_memory_percent,
+        "sampled_request_latency_seconds": {
+            "mean": latency_stats["mean"],
+            "p50": latency_stats["p50"],
+            "p95": latency_stats["p95"],
+            "max": latency_stats["max"],
+        },
+        "projected_duration_seconds": projected_duration,
+        "container_apps_timeout_seconds": container_app_timeout_s,
+        "fits_timeout": fits_timeout,
+        "fail_closed": fail_closed,
+        "fail_reasons": fail_reasons,
+        "warnings": warnings,
+    }
 
 
 async def warm() -> int:
@@ -494,6 +776,7 @@ async def warm() -> int:
     warm_start_time = time.monotonic()
     try:
         mem_start = await get_redis_memory_state()
+        baseline_evicted_keys = mem_start["evicted_keys"]
         check_memory_guard(mem_start)
         logger.info(
             "Initial Redis state: used_memory=%d maxmemory=%d evicted_keys=%d",
@@ -508,57 +791,98 @@ async def warm() -> int:
         async with httpx.AsyncClient(timeout=_TIMEOUT, limits=_LIMITS) as http_client:
             client = TerminologyClient(http_client, base_url, token)
 
-            # 1. Discover current release and concept estimate
-            release, estimated_total = await discover_release(client)
-            logger.info("Discovered upstream dm+d release: %s (estimated %d concepts)", release, estimated_total)
+            # 1. Discover whole-release category totals and release version
+            cap_discovery = await discover_release_capacity(client)
+            release = cap_discovery["release"]
+            counts = cap_discovery["counts"]
+            expected_ROUTE = counts["ROUTE"]
+            expected_UOM = counts["UOM"]
+            expected_VMP = counts["VMP"]
+            expected_AMP = counts["AMP"]
+            logger.info("Discovered upstream dm+d release: %s (counts: %s)", release, counts)
 
-            # Preflight memory check before writing anything
-            check_preflight_memory(mem_start, estimated_total)
+            # 2. Sample payload metrics and latencies from discovered release
+            raw_sizes, resolved_sizes, sample_latencies = await sample_payload_metrics(client, release, sample_size=10)
+
+            # 3. Build unified capacity and duration plan
+            plan_data = build_capacity_plan(
+                release=release,
+                category_counts=counts,
+                mem_state=mem_start,
+                raw_payload_bytes=raw_sizes,
+                resolved_payload_bytes=resolved_sizes,
+                latencies=sample_latencies,
+                sample_request_count=8,
+            )
+
+            # Preflight safety checks before writing anything
+            if plan_data.get("fail_closed"):
+                reasons = "; ".join(plan_data.get("fail_reasons", []))
+                raise RuntimeError(f"Warm preflight failed: {reasons}")
+
+            # Double check preflight memory guard
+            check_preflight_memory(
+                mem_start,
+                projected_bytes=plan_data["projected_total_redis_delta_bytes"],
+            )
 
             # In-memory lookup dictionaries for resolving dependencies
             route_map: dict[str, str] = {}
             uom_map: dict[str, str] = {}
             vmp_lookup: dict[str, tuple[VPI | None, CD | None]] = {}
 
-            # 2. Expand ROUTE
+            # Stage 1/4: Expand ROUTE
             if not await renew_lock(owner_token):
                 raise RuntimeError("Lost distributed warmer lock before ROUTE stage. Aborting.")
-            logger.info("Stage 1/4: Expanding ROUTE concepts")
-            route_count = await _expand_and_cache_lookups(client, "ROUTE", release, route_map, mem_start)
+            logger.info("Stage 1/4: Expanding ROUTE concepts (expected: %d)", expected_ROUTE)
+            route_count = await _expand_and_cache_lookups(
+                client, "ROUTE", release, route_map, baseline_evicted_keys, expected_ROUTE
+            )
             logger.info("Cached %d ROUTE concepts", route_count)
 
-            # 3. Expand UOM
+            # Stage 2/4: Expand UOM
             if not await renew_lock(owner_token):
                 raise RuntimeError("Lost distributed warmer lock before UOM stage. Aborting.")
-            logger.info("Stage 2/4: Expanding UOM concepts")
-            uom_count = await _expand_and_cache_lookups(client, "UOM", release, uom_map, mem_start)
+            logger.info("Stage 2/4: Expanding UOM concepts (expected: %d)", expected_UOM)
+            uom_count = await _expand_and_cache_lookups(
+                client, "UOM", release, uom_map, baseline_evicted_keys, expected_UOM
+            )
             logger.info("Cached %d UOM concepts", uom_count)
 
-            # 4. Expand VMP (with VPI and ROUTECD)
+            # Stage 3/4: Expand VMP (with VPI and ROUTECD)
             if not await renew_lock(owner_token):
                 raise RuntimeError("Lost distributed warmer lock before VMP stage. Aborting.")
-            logger.info("Stage 3/4: Expanding and resolving VMP concepts")
-            vmp_count = await _expand_vmp_concepts(client, release, route_map, uom_map, vmp_lookup, mem_start)
+            logger.info("Stage 3/4: Expanding and resolving VMP concepts (expected: %d)", expected_VMP)
+            vmp_count = await _expand_vmp_concepts(
+                client, release, route_map, uom_map, vmp_lookup, baseline_evicted_keys, expected_VMP
+            )
             logger.info("Resolved and cached %d VMP concepts", vmp_count)
 
-            # 5. Expand AMP (inheriting VPI and ROUTECD from parent VMP)
+            # Stage 4/4: Expand AMP (inheriting VPI and ROUTECD from parent VMP)
             if not await renew_lock(owner_token):
                 raise RuntimeError("Lost distributed warmer lock before AMP stage. Aborting.")
-            logger.info("Stage 4/4: Expanding and resolving AMP concepts")
-            amp_count = await _expand_amp_concepts(client, release, route_map, uom_map, vmp_lookup, mem_start)
+            logger.info("Stage 4/4: Expanding and resolving AMP concepts (expected: %d)", expected_AMP)
+            amp_count = await _expand_amp_concepts(
+                client, release, route_map, uom_map, vmp_lookup, baseline_evicted_keys, expected_AMP
+            )
             logger.info("Resolved and cached %d AMP concepts", amp_count)
 
-        # 6. Verify completeness
-        if route_count == 0 or uom_count == 0 or vmp_count == 0 or amp_count == 0:
+        # 6. Verify exact completeness
+        if (
+            route_count != expected_ROUTE
+            or uom_count != expected_UOM
+            or vmp_count != expected_VMP
+            or amp_count != expected_AMP
+        ):
             raise ValueError(
-                f"Incomplete category count during warm: route={route_count}, "
-                f"uom={uom_count}, vmp={vmp_count}, amp={amp_count}"
+                f"Incomplete category count during warm: route={route_count}/{expected_ROUTE}, "
+                f"uom={uom_count}/{expected_UOM}, vmp={vmp_count}/{expected_VMP}, amp={amp_count}/{expected_AMP}"
             )
 
         # 7. Check for Redis key evictions during warm
         mem_end = await get_redis_memory_state()
-        if mem_end["evicted_keys"] > mem_start["evicted_keys"]:
-            evicted_delta = mem_end["evicted_keys"] - mem_start["evicted_keys"]
+        if mem_end["evicted_keys"] > baseline_evicted_keys:
+            evicted_delta = mem_end["evicted_keys"] - baseline_evicted_keys
             raise RuntimeError(f"Redis evicted {evicted_delta} keys during warm! Aborting release activation.")
 
         # 8. Write success manifest
@@ -619,7 +943,8 @@ async def _expand_and_cache_lookups(
     parent: str,
     expected_release: str,
     lookup_map: dict[str, str],
-    mem_state: dict[str, int],
+    baseline_evicted_keys: int,
+    expected_count: int,
 ) -> int:
     """Expand concepts for parent (ROUTE or UOM) and cache raw lookup data."""
     body = {
@@ -656,6 +981,7 @@ async def _expand_and_cache_lookups(
         }
 
         resp = await client.post_fhir("ValueSet/$expand", paged_body)
+        resp.raise_for_status()
         data = resp.json()
         expansion = data.get("expansion", {})
         contains = expansion.get("contains", [])
@@ -673,10 +999,10 @@ async def _expand_and_cache_lookups(
         batch_bytes = 0
 
         for concept in contains:
-            code = str(concept.get("code", ""))
+            code = str(concept.get("code", "")).strip()
             display = concept.get("display", "")
             if not code or not display:
-                continue
+                raise ValueError(f"Concept in {parent} page has missing code or display: {concept}")
 
             lookup_map[code] = display
             raw_payload = json.dumps(
@@ -688,17 +1014,28 @@ async def _expand_and_cache_lookups(
                 }
             )
             k = raw_key(expected_release, code)
-            batch_bytes += len(k) + len(raw_payload)
+            batch_bytes += len(k.encode("utf-8")) + len(raw_payload.encode("utf-8"))
             pipe.setex(k, DMD_RESOLVED_TTL, raw_payload)
             total_processed += 1
 
-        check_memory_guard(mem_state, batch_bytes)
+        # Per-batch guard: inspect CURRENT Redis state before writing
+        current_mem = await get_redis_memory_state()
+        if current_mem["evicted_keys"] > baseline_evicted_keys:
+            evicted_delta = current_mem["evicted_keys"] - baseline_evicted_keys
+            raise RuntimeError(
+                f"Redis evicted {evicted_delta} keys during {parent} warm stage! "
+                f"(current={current_mem['evicted_keys']}, baseline={baseline_evicted_keys}). Aborting."
+            )
+        check_memory_guard(current_mem, batch_bytes)
         await pipe.execute()
 
         total = expansion.get("total")
         if total is not None and (offset + len(contains)) >= total:
             break
         offset += len(contains)
+
+    if total_processed != expected_count:
+        raise ValueError(f"Processed count mismatch for {parent}: expected {expected_count}, got {total_processed}")
 
     return total_processed
 
@@ -709,7 +1046,8 @@ async def _expand_vmp_concepts(
     route_map: dict[str, str],
     uom_map: dict[str, str],
     vmp_lookup: dict[str, tuple[VPI | None, CD | None]],
-    mem_state: dict[str, int],
+    baseline_evicted_keys: int,
+    expected_count: int,
 ) -> int:
     """Page VMP concepts, resolve DMDConcept objects, and write to Redis."""
     body = {
@@ -749,6 +1087,7 @@ async def _expand_vmp_concepts(
         }
 
         resp = await client.post_fhir("ValueSet/$expand", paged_body)
+        resp.raise_for_status()
         data = resp.json()
         expansion = data.get("expansion", {})
         contains = expansion.get("contains", [])
@@ -765,10 +1104,10 @@ async def _expand_vmp_concepts(
         batch_bytes = 0
 
         for concept in contains:
-            code = str(concept.get("code", ""))
+            code = str(concept.get("code", "")).strip()
             display = concept.get("display", "")
             if not code or not display:
-                continue
+                raise ValueError(f"Concept in VMP page has missing code or display: {concept}")
 
             props = _extract_concept_properties(concept)
 
@@ -792,7 +1131,7 @@ async def _expand_vmp_concepts(
             try:
                 concept_id = int(code)
             except ValueError:
-                continue
+                raise ValueError(f"VMP concept code is not an integer: {code}")
 
             resolved_concept = DMDConcept(
                 concept_id=concept_id,
@@ -803,17 +1142,27 @@ async def _expand_vmp_concepts(
 
             payload = resolved_concept.model_dump_json()
             k = resolved_key(expected_release, code)
-            batch_bytes += len(k) + len(payload)
+            batch_bytes += len(k.encode("utf-8")) + len(payload.encode("utf-8"))
             pipe.setex(k, DMD_RESOLVED_TTL, payload)
             total_processed += 1
 
-        check_memory_guard(mem_state, batch_bytes)
+        current_mem = await get_redis_memory_state()
+        if current_mem["evicted_keys"] > baseline_evicted_keys:
+            evicted_delta = current_mem["evicted_keys"] - baseline_evicted_keys
+            raise RuntimeError(
+                f"Redis evicted {evicted_delta} keys during VMP warm stage! "
+                f"(current={current_mem['evicted_keys']}, baseline={baseline_evicted_keys}). Aborting."
+            )
+        check_memory_guard(current_mem, batch_bytes)
         await pipe.execute()
 
         total = expansion.get("total")
         if total is not None and (offset + len(contains)) >= total:
             break
         offset += len(contains)
+
+    if total_processed != expected_count:
+        raise ValueError(f"Processed count mismatch for VMP: expected {expected_count}, got {total_processed}")
 
     return total_processed
 
@@ -824,7 +1173,8 @@ async def _expand_amp_concepts(
     route_map: dict[str, str],
     uom_map: dict[str, str],
     vmp_lookup: dict[str, tuple[VPI | None, CD | None]],
-    mem_state: dict[str, int],
+    baseline_evicted_keys: int,
+    expected_count: int,
 ) -> int:
     """Page AMP concepts, resolve DMDConcept objects inheriting from parent VMP, and write to Redis."""
     body = {
@@ -864,6 +1214,7 @@ async def _expand_amp_concepts(
         }
 
         resp = await client.post_fhir("ValueSet/$expand", paged_body)
+        resp.raise_for_status()
         data = resp.json()
         expansion = data.get("expansion", {})
         contains = expansion.get("contains", [])
@@ -880,10 +1231,10 @@ async def _expand_amp_concepts(
         batch_bytes = 0
 
         for concept in contains:
-            code = str(concept.get("code", ""))
+            code = str(concept.get("code", "")).strip()
             display = concept.get("display", "")
             if not code or not display:
-                continue
+                raise ValueError(f"Concept in AMP page has missing code or display: {concept}")
 
             props = _extract_concept_properties(concept)
 
@@ -909,7 +1260,7 @@ async def _expand_amp_concepts(
             try:
                 concept_id = int(code)
             except ValueError:
-                continue
+                raise ValueError(f"AMP concept code is not an integer: {code}")
 
             resolved_concept = DMDConcept(
                 concept_id=concept_id,
@@ -920,17 +1271,27 @@ async def _expand_amp_concepts(
 
             payload = resolved_concept.model_dump_json()
             k = resolved_key(expected_release, code)
-            batch_bytes += len(k) + len(payload)
+            batch_bytes += len(k.encode("utf-8")) + len(payload.encode("utf-8"))
             pipe.setex(k, DMD_RESOLVED_TTL, payload)
             total_processed += 1
 
-        check_memory_guard(mem_state, batch_bytes)
+        current_mem = await get_redis_memory_state()
+        if current_mem["evicted_keys"] > baseline_evicted_keys:
+            evicted_delta = current_mem["evicted_keys"] - baseline_evicted_keys
+            raise RuntimeError(
+                f"Redis evicted {evicted_delta} keys during AMP warm stage! "
+                f"(current={current_mem['evicted_keys']}, baseline={baseline_evicted_keys}). Aborting."
+            )
+        check_memory_guard(current_mem, batch_bytes)
         await pipe.execute()
 
         total = expansion.get("total")
         if total is not None and (offset + len(contains)) >= total:
             break
         offset += len(contains)
+
+    if total_processed != expected_count:
+        raise ValueError(f"Processed count mismatch for AMP: expected {expected_count}, got {total_processed}")
 
     return total_processed
 
@@ -1014,6 +1375,11 @@ def format_plan_summary(plan_data: dict[str, Any]) -> str:
         f"  UOM:                        {plan_data['counts_by_category'].get('UOM', 0):,}",
         f"  VMP:                        {plan_data['counts_by_category'].get('VMP', 0):,}",
         f"  AMP:                        {plan_data['counts_by_category'].get('AMP', 0):,}",
+        "Cache Key Writes Modelled:",
+        f"  Raw Lookup Keys:            {plan_data['key_counts_by_type']['raw']:,}",
+        f"  Resolved DMDConcept Keys:   {plan_data['key_counts_by_type']['resolved']:,}",
+        f"  Metadata Keys:              {plan_data['key_counts_by_type']['metadata']:,}",
+        f"  Total Keys:                 {plan_data['total_keys']:,}",
         f"Projected HTTP Requests:      {plan_data['projected_terminology_requests']}",
         "Payload Sizes (p95):",
         f"  Raw FHIR Parameters:        {plan_data['sampled_raw_fhir_parameters']['p95_bytes']} bytes",
@@ -1028,7 +1394,7 @@ def format_plan_summary(plan_data: dict[str, Any]) -> str:
         f"  Current Used Memory:        {plan_data['current_redis_used_memory_bytes'] / (1024 * 1024):.2f} MB",
         f"  Redis Maxmemory:            {plan_data['redis_maxmemory_bytes'] / (1024 * 1024):.2f} MB",
         f"  Projected Total Memory:     {plan_data['projected_total_memory_bytes'] / (1024 * 1024):.2f} MB ({plan_data['projected_memory_percentage']}%)",
-        "Runtime Duration:",
+        "Runtime Duration (Sequential Concurrency = 1):",
         f"  p95 Request Latency:        {plan_data['sampled_request_latency_seconds']['p95']}s",
         f"  Projected Duration:         {plan_data['projected_duration_seconds']}s",
         f"  Container Apps Timeout:     {plan_data['container_apps_timeout_seconds']}s",
@@ -1051,7 +1417,7 @@ async def plan(
     sample_size: int = 10,
     safety_multiplier: float = DMD_WARM_MEMORY_SAFETY_MULTIPLIER,
     container_app_timeout_s: int = 1800,
-    concurrency: int = 5,
+    concurrency: int = 1,
     client: TerminologyClient | None = None,
     mem_state: dict[str, int] | None = None,
     category_counts: dict[str, int] | None = None,
@@ -1062,214 +1428,92 @@ async def plan(
     json_output: bool = False,
 ) -> dict[str, Any]:
     """Dry-run capacity planning mode. Strictly read-only: does not acquire lock, mutate Redis, or write keys."""
+    if client is None and category_counts is None:
+        raise ValueError(
+            "A live TerminologyClient or explicit category_counts test argument must be provided. "
+            "Synthetic production fallback is prohibited."
+        )
+
     if mem_state is None:
         mem_state = await get_redis_memory_state()
 
-    current_used = mem_state.get("used_memory", 0)
-    maxmemory = mem_state.get("maxmemory", 0)
-    if maxmemory <= 0:
-        maxmemory = 256 * 1024 * 1024
-
-    discovered_release = release or "unknown"
-    cat_counts = category_counts.copy() if category_counts else {}
-
-    raw_sizes: list[int] = []
-    resolved_sizes: list[int] = []
-    latencies: list[float] = list(request_latencies) if request_latencies else []
-
-    if raw_samples:
-        for s in raw_samples:
-            raw_sizes.append(len(json.dumps(s).encode("utf-8")))
-
-    if resolved_samples:
-        for r in resolved_samples:
-            resolved_sizes.append(len(json.dumps(r.dict()).encode("utf-8")))
-
-    if client is not None and not cat_counts:
-        try:
-            rel, _ = await discover_release(client)
-            discovered_release = rel
-            for cat in ("ROUTE", "UOM", "VMP", "AMP"):
-                t0 = time.perf_counter()
-                body = {
-                    "resourceType": "Parameters",
-                    "parameter": [
+    if client is None:
+        discovered_release = release or "test-release"
+        cat_counts = category_counts.copy()
+        raw_sizes = (
+            [len(json.dumps(s).encode("utf-8")) for s in raw_samples]
+            if raw_samples
+            else [
+                len(
+                    json.dumps(
                         {
-                            "name": "valueSet",
-                            "resource": {
-                                "resourceType": "ValueSet",
-                                "compose": {
-                                    "include": [
-                                        {
-                                            "system": "https://dmd.nhs.uk",
-                                            "filter": [{"property": "parent", "op": "=", "value": cat}],
-                                        }
-                                    ]
-                                },
-                            },
-                        },
-                        {"name": "count", "valueInteger": sample_size},
-                    ],
-                }
-                resp = await client.post_fhir("ValueSet/$expand", body)
-                elapsed = time.perf_counter() - t0
-                latencies.append(elapsed)
-
-                if resp.status_code == 200:
-                    exp = resp.json().get("expansion", {})
-                    cat_counts[cat] = exp.get("total", len(exp.get("contains", [])))
-                    for concept in exp.get("contains", []):
-                        raw_sizes.append(len(json.dumps(concept).encode("utf-8")))
-                        if cat in ("VMP", "AMP"):
-                            concept_id = concept.get("code")
-                            if concept_id:
-                                res_concept = DMDConcept(
-                                    concept_id=int(concept_id) if str(concept_id).isdigit() else 0,
-                                    valueString=concept.get("display") or "Sample Concept",
-                                )
-                                resolved_sizes.append(len(res_concept.model_dump_json().encode("utf-8")))
-                else:
-                    cat_counts[cat] = 0
-        except Exception as exc:
-            logger.warning("Could not sample terminology server in plan mode: %s", exc)
-
-    if not cat_counts:
-        cat_counts = {
-            "ROUTE": 150,
-            "UOM": 250,
-            "VMP": 25000,
-            "AMP": 35000,
-        }
-    if discovered_release == "unknown":
-        discovered_release = "2026-10-15"
-
-    if not raw_sizes:
-        raw_sizes = [512, 768, 1024]
-    if not resolved_sizes:
-        resolved_sizes = [384, 512, 768]
-    if not latencies:
-        latencies = [0.15, 0.25, 0.40]
-
-    raw_stats = _calculate_stats(raw_sizes)
-    resolved_stats = _calculate_stats(resolved_sizes)
-    latency_stats = _calculate_stats(latencies)
-
-    unique_concepts = sum(cat_counts.values())
-
-    vmp_pages = math.ceil(cat_counts.get("VMP", 0) / PAGE_SIZE) if cat_counts.get("VMP", 0) > 0 else 1
-    amp_pages = math.ceil(cat_counts.get("AMP", 0) / PAGE_SIZE) if cat_counts.get("AMP", 0) > 0 else 1
-    projected_http_requests = 1 + 1 + 1 + vmp_pages + amp_pages
-
-    route_n = cat_counts.get("ROUTE", 0)
-    uom_n = cat_counts.get("UOM", 0)
-    vmp_n = cat_counts.get("VMP", 0)
-    amp_n = cat_counts.get("AMP", 0)
-
-    # ROUTE: 1 raw key per concept (properties:none)
-    # UOM: 1 raw key per concept (properties:none)
-    # VMP: 1 raw key (properties:none) + 1 raw key (properties:ROUTECD,VPI,parent) + 1 resolved key
-    # AMP: 1 raw key (properties:none) + 1 raw key (properties:ROUTECD,VPI,parent) + 1 resolved key
-    total_raw_keys = route_n + uom_n + (2 * vmp_n) + (2 * amp_n)
-    total_resolved_keys = vmp_n + amp_n
-    metadata_keys = 2
-    total_keys = total_raw_keys + total_resolved_keys + metadata_keys
-
-    raw_unit_bytes = raw_stats["p95"]
-    resolved_unit_bytes = resolved_stats["p95"]
-
-    projected_raw_bytes = int(total_raw_keys * raw_unit_bytes)
-    projected_resolved_bytes = int(total_resolved_keys * resolved_unit_bytes)
-
-    avg_key_name_bytes = 65
-    redis_key_overhead = 128
-    projected_overhead_bytes = int(total_keys * (avg_key_name_bytes + redis_key_overhead))
-
-    allocator_frag = 1.25
-    base_delta = projected_raw_bytes + projected_resolved_bytes + projected_overhead_bytes
-    projected_total_redis_delta = int(base_delta * allocator_frag * safety_multiplier)
-
-    projected_total_memory = current_used + projected_total_redis_delta
-    projected_memory_percent = round((projected_total_memory / maxmemory) * 100.0, 2)
-
-    lat_p95 = latency_stats["p95"]
-    effective_concurrency = max(1, concurrency)
-    projected_duration = round((projected_http_requests * lat_p95) / effective_concurrency, 2)
-    fits_timeout = projected_duration <= container_app_timeout_s
-
-    fail_closed = False
-    fail_reasons: list[str] = []
-    warnings: list[str] = []
-
-    if projected_memory_percent > DMD_WARM_MAX_REDIS_MEMORY_PERCENT:
-        fail_closed = True
-        fail_reasons.append(
-            f"Projected total Redis memory ({projected_memory_percent}%) exceeds guard limit "
-            f"({DMD_WARM_MAX_REDIS_MEMORY_PERCENT}%). Maxmemory: {maxmemory} bytes."
+                            "parameter": [
+                                {"name": "display", "valueString": "Sample"},
+                                {"name": "version", "valueString": discovered_release},
+                            ]
+                        }
+                    ).encode("utf-8")
+                )
+            ]
         )
-
-    if not fits_timeout:
-        fail_closed = True
-        fail_reasons.append(
-            f"Projected warm duration ({projected_duration}s) exceeds Container Apps Job timeout "
-            f"({container_app_timeout_s}s)."
+        resolved_sizes = (
+            [len(r.model_dump_json().encode("utf-8")) for r in resolved_samples]
+            if resolved_samples
+            else [len(DMDConcept(concept_id=1, valueString="Sample").model_dump_json().encode("utf-8"))]
         )
+        latencies = list(request_latencies) if request_latencies else [0.1]
+        sample_request_count = len(latencies)
+    else:
+        # Live discovery & sampling path
+        cap_discovery = await discover_release_capacity(client)
+        discovered_release = cap_discovery["release"]
+        cat_counts = cap_discovery["counts"]
 
-    if current_used >= maxmemory:
-        fail_closed = True
-        fail_reasons.append("Redis current used_memory is already at or above maxmemory.")
-
-    if current_used > (maxmemory * 0.5):
-        warnings.append(
-            "Existing Redis memory exceeds 50% maxmemory before warm start (coexisting prior release or DB 0 keys)."
+        raw_sizes, resolved_sizes, latencies = await sample_payload_metrics(
+            client=client,
+            release=discovered_release,
+            sample_size=sample_size,
         )
+        sample_request_count = 8  # 4 discovery calls + 4 sampling calls
 
-    report = {
-        "release": discovered_release,
-        "counts_by_category": cat_counts,
-        "unique_concept_count": unique_concepts,
-        "projected_terminology_requests": projected_http_requests,
-        "sampled_raw_fhir_parameters": {
-            "mean_bytes": raw_stats["mean"],
-            "p50_bytes": raw_stats["p50"],
-            "p95_bytes": raw_stats["p95"],
-            "max_bytes": raw_stats["max"],
-        },
-        "sampled_resolved_dmd_concept": {
-            "mean_bytes": resolved_stats["mean"],
-            "p50_bytes": resolved_stats["p50"],
-            "p95_bytes": resolved_stats["p95"],
-            "max_bytes": resolved_stats["max"],
-        },
-        "projected_raw_bytes": projected_raw_bytes,
-        "projected_resolved_bytes": projected_resolved_bytes,
-        "projected_redis_key_metadata_overhead_bytes": projected_overhead_bytes,
-        "safety_multiplier": safety_multiplier,
-        "allocator_fragmentation_multiplier": allocator_frag,
-        "projected_total_redis_delta_bytes": projected_total_redis_delta,
-        "current_redis_used_memory_bytes": current_used,
-        "redis_maxmemory_bytes": maxmemory,
-        "projected_total_memory_bytes": projected_total_memory,
-        "projected_memory_percentage": projected_memory_percent,
-        "sampled_request_latency_seconds": {
-            "mean": latency_stats["mean"],
-            "p50": latency_stats["p50"],
-            "p95": latency_stats["p95"],
-            "max": latency_stats["max"],
-        },
-        "projected_duration_seconds": projected_duration,
-        "container_apps_timeout_seconds": container_app_timeout_s,
-        "fits_timeout": fits_timeout,
-        "fail_closed": fail_closed,
-        "fail_reasons": fail_reasons,
-        "warnings": warnings,
-    }
+    plan_data = build_capacity_plan(
+        release=discovered_release,
+        category_counts=cat_counts,
+        mem_state=mem_state,
+        raw_payload_bytes=raw_sizes,
+        resolved_payload_bytes=resolved_sizes,
+        latencies=latencies,
+        sample_request_count=sample_request_count,
+        safety_multiplier=safety_multiplier,
+        container_app_timeout_s=container_app_timeout_s,
+    )
 
     if json_output:
-        print(json.dumps(report, indent=2))
+        print(json.dumps(plan_data, indent=2))
     else:
-        print(format_plan_summary(report))
+        print(format_plan_summary(plan_data))
 
-    return report
+    return plan_data
+
+
+async def plan_cli(sample_size: int = 10, json_output: bool = False) -> int:
+    """Execute real read-only CLI plan/dry-run against live terminology and Redis INFO.
+
+    Strictly read-only: does not acquire lock, mutate Redis, or write keys.
+    """
+    mem_state = await get_redis_memory_state()
+    token = await fetch_token_in_memory()
+    base_url = os.getenv("DMD_BASE_URL", "https://ontology.nhs.uk/production1/fhir")
+
+    async with httpx.AsyncClient(timeout=_TIMEOUT, limits=_LIMITS) as http_client:
+        client = TerminologyClient(http_client, base_url, token)
+        plan_data = await plan(
+            sample_size=sample_size,
+            client=client,
+            mem_state=mem_state,
+            json_output=json_output,
+        )
+    return 1 if plan_data.get("fail_closed") else 0
 
 
 def main() -> None:
@@ -1308,14 +1552,22 @@ def main() -> None:
 
     if args.subcommand == "warm":
         if args.dry_run:
-            result = asyncio.run(plan())
-            sys.exit(1 if result.get("fail_closed") else 0)
+            try:
+                exit_code = asyncio.run(plan_cli(sample_size=10, json_output=False))
+            except Exception as exc:
+                logger.error("Warm dry-run failed: %s", exc)
+                exit_code = 1
+            sys.exit(exit_code)
         else:
             exit_code = asyncio.run(warm())
             sys.exit(exit_code)
     elif args.subcommand == "plan":
-        result = asyncio.run(plan(sample_size=args.sample_size, json_output=args.json))
-        sys.exit(1 if result.get("fail_closed") else 0)
+        try:
+            exit_code = asyncio.run(plan_cli(sample_size=args.sample_size, json_output=args.json))
+        except Exception as exc:
+            logger.error("Plan failed: %s", exc)
+            exit_code = 1
+        sys.exit(exit_code)
     elif args.subcommand == "status":
         asyncio.run(status())
         sys.exit(0)

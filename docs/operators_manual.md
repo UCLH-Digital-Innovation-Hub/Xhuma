@@ -608,10 +608,11 @@ From within the application environment, Container App shell, or maintenance con
 Reports:
 - Discovered dm+d release and category concept counts (ROUTE, UOM, VMP, AMP)
 - Empirical payload sizes (mean, p50, p95, max for raw Parameters and resolved DMDConcept)
-- Key metadata and allocator fragmentation overhead (1.25x)
+- Key metadata overhead and allocator fragmentation multiplier (1.25x)
+- Exact key count correspondence to warm writes (ROUTE + UOM raw, VMP + AMP resolved, 2 metadata keys)
 - Configurable safety multiplier (default 1.5x)
 - Projected Redis memory delta and total memory including prior release coexistence
-- Projected duration under configured concurrency against the 1800s Container Apps timeout
+- Sequential duration projection (concurrency = 1, total requests * p95 latency) against the 1800s Container Apps timeout
 - Active release pointer TTL and warmer lock state
 
 #### Operational Scenarios & Troubleshooting
@@ -623,24 +624,25 @@ Reports:
    - If the active release pointer expires or is absent, the application safely degrades to unversioned on-demand terminology lookup (`snomed:<concept_id>`). Prescription conversion is never interrupted.
 
 2. **Redis Memory Safety & Instance-Wide Evictions:**
-   - **Critical Architecture Fact**: Redis `maxmemory` and eviction policies (such as `allkeys-lru`) are **instance-wide across all logical databases (DB 0, DB 1, DB 2)**. Redis does NOT partition memory limits per database.
+   - **Critical Architecture Fact**: Redis `maxmemory` and eviction policies (such as `allkeys-lru`) are **instance-wide across all logical databases (DB 0 application sessions, DB 1 PDS cache, DB 2 dm+d terminology cache)**. Redis does NOT partition memory limits per database.
    - If memory is exhausted during warming, Redis could evict active DB 0 application session keys or DB 1 PDS cache keys.
-   - To prevent this, the warmer enforces:
-     - A full-run memory preflight before any concept is written (aborting if current used + projected delta with 1.5x multiplier exceeds 80% ceiling).
-     - Per-batch memory and eviction checks.
+   - Furthermore, `FLUSHDB` and wildcard `KEYS *` are strictly forbidden; old release keys age out naturally via 9-day TTL retirement.
+   - To prevent memory exhaustion and evictions, the warmer enforces:
+     - A full-run memory preflight before any concept is written (aborting if current used + projected delta with 1.5x multiplier exceeds 80% ceiling, or if `maxmemory <= 0`).
+     - Per-batch memory and eviction checks before pipeline execution.
      - An eviction delta check at completion: if `evicted_keys` increases by even 1 key during warming, the run aborts immediately and refuses activation.
 
 3. **Platform Retries and Distributed Locks:**
    - Container Apps Job `replica_retry_limit` is strictly set to `0`. A platform retry would spawn a separate process with a new random lock token, colliding with the still-held distributed lock.
    - All network retries and 401 token refreshes are handled within the single application process under a monotonic 120s deadline.
 
-4. **Heartbeat Telemetry & Alerting Constraints:**
+4. **Heartbeat Telemetry & Blocked Scheduler:**
    - Upon successful activation, the warmer logs a structured completion event:
      ```json
      dmd_cache_event {"event": "warm_succeeded", "release": "...", "duration_seconds": ..., "concept_count": ..., "memory_delta_bytes": ..., "evictions": 0}
      ```
    - Azure Monitor Scheduled Query Rules enforce an API hard cap on query lookback windows of 48 hours (`P2D` / 2880 mins). A 7.5-day scheduled query alert cannot be created directly via `azurerm_monitor_scheduled_query_rules_alert_v2`.
-   - Therefore, `dmd_cache_schedule_enabled` is blocked by a Terraform precondition until a 48h-compatible post-warm check or external watchdog is implemented. Both `dmd_cache_warm_enabled` and `dmd_cache_schedule_enabled` remain `false` across all environments.
+   - Therefore, `dmd_cache_schedule_enabled` is blocked by both a Terraform precondition and a check assertion (`condition = !var.dmd_cache_schedule_enabled`) until a 48h-compatible post-warm check or external watchdog is implemented. Both `dmd_cache_warm_enabled` and `dmd_cache_schedule_enabled` remain `false` across all environments.
 
 5. **PRD Acceptance Prerequisites:**
    Before enabling `dmd_cache_schedule_enabled = true` in production tfvars, operators must verify a complete, successful non-PRD execution demonstrating:

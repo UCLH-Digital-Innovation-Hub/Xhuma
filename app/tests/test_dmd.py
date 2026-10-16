@@ -474,7 +474,8 @@ async def test_warmer_aborts_and_does_not_activate_on_eviction():
         patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock),
         patch("app.ops.dmd_cache.get_redis_memory_state", new_callable=AsyncMock) as mem_mock,
         patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock) as token_mock,
-        patch("app.ops.dmd_cache.discover_release", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache.discover_release_capacity", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache.sample_payload_metrics", new_callable=AsyncMock) as sample_mock,
         patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock) as exp1_mock,
         patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock) as exp2_mock,
         patch("app.ops.dmd_cache._expand_amp_concepts", new_callable=AsyncMock) as exp3_mock,
@@ -482,15 +483,21 @@ async def test_warmer_aborts_and_does_not_activate_on_eviction():
     ):
         lock_mock.return_value = True
         token_mock.return_value = "token"
-        rel_mock.return_value = ("202610.1.0", 50000)
+        rel_mock.return_value = {
+            "release": "202610.1.0",
+            "counts": {"ROUTE": 100, "UOM": 100, "VMP": 500, "AMP": 500},
+            "total_concepts": 1200,
+            "page_counts": {"ROUTE": 1, "UOM": 1, "VMP": 1, "AMP": 1},
+        }
+        sample_mock.return_value = ([512], [512], [0.1])
         exp1_mock.return_value = 100
         exp2_mock.return_value = 500
         exp3_mock.return_value = 500
 
         # Simulate eviction detected:
         mem_mock.side_effect = [
-            {"used_memory": 1000, "maxmemory": 10000, "evicted_keys": 0},  # start
-            {"used_memory": 5000, "maxmemory": 10000, "evicted_keys": 5},  # end (evicted 5 keys!)
+            {"used_memory": 1000, "maxmemory": 200_000_000, "evicted_keys": 0},  # start
+            {"used_memory": 5000, "maxmemory": 200_000_000, "evicted_keys": 5},  # end (evicted 5 keys!)
         ]
 
         exit_code = await warm()
@@ -520,7 +527,8 @@ async def test_successful_complete_warm_activates_at_end():
         patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock),
         patch("app.ops.dmd_cache.get_redis_memory_state", new_callable=AsyncMock) as mem_mock,
         patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock) as token_mock,
-        patch("app.ops.dmd_cache.discover_release", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache.discover_release_capacity", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache.sample_payload_metrics", new_callable=AsyncMock) as sample_mock,
         patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock) as exp1_mock,
         patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock) as exp2_mock,
         patch("app.ops.dmd_cache._expand_amp_concepts", new_callable=AsyncMock) as exp3_mock,
@@ -528,14 +536,20 @@ async def test_successful_complete_warm_activates_at_end():
     ):
         lock_mock.return_value = True
         token_mock.return_value = "token"
-        rel_mock.return_value = ("202610.1.0", 50000)
+        rel_mock.return_value = {
+            "release": "202610.1.0",
+            "counts": {"ROUTE": 50, "UOM": 60, "VMP": 1000, "AMP": 2000},
+            "total_concepts": 3110,
+            "page_counts": {"ROUTE": 1, "UOM": 1, "VMP": 1, "AMP": 2},
+        }
+        sample_mock.return_value = ([512], [512], [0.1])
         exp1_mock.side_effect = [50, 60]  # route, uom
         exp2_mock.return_value = 1000  # vmp
         exp3_mock.return_value = 2000  # amp
 
         mem_mock.side_effect = [
-            {"used_memory": 1000, "maxmemory": 200000000, "evicted_keys": 0},
-            {"used_memory": 2000, "maxmemory": 200000000, "evicted_keys": 0},
+            {"used_memory": 1000, "maxmemory": 200_000_000, "evicted_keys": 0},
+            {"used_memory": 2000, "maxmemory": 200_000_000, "evicted_keys": 0},
         ]
 
         exit_code = await warm()
@@ -568,18 +582,25 @@ async def test_partial_vmp_failure_does_not_activate():
         patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock),
         patch("app.ops.dmd_cache.get_redis_memory_state", new_callable=AsyncMock) as mem_mock,
         patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock) as token_mock,
-        patch("app.ops.dmd_cache.discover_release", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache.discover_release_capacity", new_callable=AsyncMock) as rel_mock,
+        patch("app.ops.dmd_cache.sample_payload_metrics", new_callable=AsyncMock) as sample_mock,
         patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock) as exp1_mock,
         patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock) as exp2_mock,
         patch("app.ops.dmd_cache.snomed_client", autospec=True) as cache,
     ):
         lock_mock.return_value = True
         token_mock.return_value = "token"
-        rel_mock.return_value = ("202610.1.0", 50000)
+        rel_mock.return_value = {
+            "release": "202610.1.0",
+            "counts": {"ROUTE": 50, "UOM": 60, "VMP": 1000, "AMP": 2000},
+            "total_concepts": 3110,
+            "page_counts": {"ROUTE": 1, "UOM": 1, "VMP": 1, "AMP": 2},
+        }
+        sample_mock.return_value = ([512], [512], [0.1])
         exp1_mock.side_effect = [50, 60]
         exp2_mock.side_effect = RuntimeError("VMP expansion HTTP timeout")
 
-        mem_mock.return_value = {"used_memory": 1000, "maxmemory": 200000000, "evicted_keys": 0}
+        mem_mock.return_value = {"used_memory": 1000, "maxmemory": 200_000_000, "evicted_keys": 0}
 
         exit_code = await warm()
         assert exit_code == 1
@@ -1337,7 +1358,8 @@ def test_terraform_logic_app_custom_recurrence_and_role_actions():
 @patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock)
 @patch("app.ops.dmd_cache.renew_lock", new_callable=AsyncMock)
 @patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock)
-@patch("app.ops.dmd_cache.discover_release", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.discover_release_capacity", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.sample_payload_metrics", new_callable=AsyncMock)
 @patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock)
 @patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock)
 @patch("app.ops.dmd_cache._expand_amp_concepts", new_callable=AsyncMock)
@@ -1345,6 +1367,7 @@ async def test_warm_success_emits_structured_dmd_cache_event(
     mock_amp,
     mock_vmp,
     mock_lookups,
+    mock_sample,
     mock_discover,
     mock_token,
     mock_renew,
@@ -1360,7 +1383,13 @@ async def test_warm_success_emits_structured_dmd_cache_event(
     mock_acq.return_value = True
     mock_renew.return_value = True
     mock_token.return_value = "token123"
-    mock_discover.return_value = ("202610.1.0", 50000)
+    mock_discover.return_value = {
+        "release": "202610.1.0",
+        "counts": {"ROUTE": 100, "UOM": 100, "VMP": 1000, "AMP": 2000},
+        "total_concepts": 3200,
+        "page_counts": {"ROUTE": 1, "UOM": 1, "VMP": 1, "AMP": 2},
+    }
+    mock_sample.return_value = ([512], [512], [0.1])
     mock_lookups.return_value = 100
     mock_vmp.return_value = 1000
     mock_amp.return_value = 2000
@@ -1387,3 +1416,482 @@ async def test_warm_success_emits_structured_dmd_cache_event(
         assert event_dict["concept_count"] == 3200
         assert event_dict["evictions"] == 0
         assert "duration_seconds" in event_dict
+
+
+# ==============================================================================
+# PHASE 2 & 18: CLINICAL RUNTIME BEHAVIOUR & CACHE CONTRACT TESTS
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_runtime_warmed_vmp_zero_http_requests(mock_snomed):
+    """Verify warmed VMP dmd_lookup() resolves completely from Redis with zero HTTP requests."""
+    from app.ccda.dmd import DMDConcept, dmd_lookup
+    from app.ccda.models.datatypes import CD
+
+    vmp_concept = DMDConcept(
+        concept_id=318412000,
+        valueString="Paracetamol 500mg tablets",
+        route=CD(code="260548002", displayName="Oral", codeSystemName="https://dmd.nhs.uk"),
+    )
+
+    # Active release is set to 202610.1.0
+    mock_snomed.get = AsyncMock(
+        side_effect=lambda key: "202610.1.0" if key == "dmd:active-release" else vmp_concept.model_dump_json()
+    )
+
+    with patch("app.ccda.dmd.get_dmd_concept", new_callable=AsyncMock) as mock_get_concept:
+        result = await dmd_lookup("318412000")
+        assert result is not None
+        assert result.concept_id == 318412000
+        assert result.valueString == "Paracetamol 500mg tablets"
+        # Zero HTTP calls to upstream terminology
+        mock_get_concept.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_runtime_warmed_amp_zero_http_requests(mock_snomed):
+    """Verify warmed AMP dmd_lookup() resolves completely from Redis with zero HTTP requests."""
+    from app.ccda.dmd import DMDConcept, dmd_lookup
+    from app.ccda.models.datatypes import CD
+
+    amp_concept = DMDConcept(
+        concept_id=12345000,
+        valueString="Panadol 500mg tablets (GSK)",
+        route=CD(code="260548002", displayName="Oral", codeSystemName="https://dmd.nhs.uk"),
+    )
+
+    mock_snomed.get = AsyncMock(
+        side_effect=lambda key: "202610.1.0" if key == "dmd:active-release" else amp_concept.model_dump_json()
+    )
+
+    with patch("app.ccda.dmd.get_dmd_concept", new_callable=AsyncMock) as mock_get_concept:
+        result = await dmd_lookup("12345000")
+        assert result is not None
+        assert result.concept_id == 12345000
+        assert result.valueString == "Panadol 500mg tablets (GSK)"
+        mock_get_concept.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_runtime_unwarmed_concept_fallback_pinned_lookup_and_caches_resolved(mock_snomed):
+    """Verify unwarmed concept performs pinned upstream lookup and safely caches the resolved result."""
+    from app.ccda.dmd import dmd_lookup
+
+    mock_snomed.get = AsyncMock(side_effect=lambda key: "202610.1.0" if key == "dmd:active-release" else None)
+    mock_snomed.setex = AsyncMock(return_value=True)
+
+    raw_upstream = {
+        "concept_id": 99999000,
+        "parameter": [
+            {"name": "display", "valueString": "Unwarmed Solution 100mg/ml"},
+        ],
+    }
+
+    with patch("app.ccda.dmd.get_dmd_concept", new_callable=AsyncMock, return_value=raw_upstream) as mock_get:
+        result = await dmd_lookup("99999000")
+        assert result is not None
+        assert result.concept_id == 99999000
+        assert result.valueString == "Unwarmed Solution 100mg/ml"
+
+        # Upstream was called with pinned release
+        mock_get.assert_awaited_once_with(99999000, properties=["VPI", "ROUTECD", "parent"], release="202610.1.0")
+
+        # Resolved result was cached under active release
+        expected_cache_key = "dmd:resolved:v1:202610.1.0:99999000"
+        mock_snomed.setex.assert_awaited_once()
+        call_args = mock_snomed.setex.call_args[0]
+        assert call_args[0] == expected_cache_key
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_runtime_no_active_release_uses_on_demand_lookup(mock_snomed):
+    """Verify when no active-release exists, lookup safely falls back to unpinned on-demand lookup."""
+    from app.ccda.dmd import dmd_lookup
+
+    mock_snomed.get = AsyncMock(return_value=None)
+    mock_snomed.setex = AsyncMock(return_value=True)
+
+    raw_upstream = {
+        "concept_id": 88888000,
+        "parameter": [
+            {"name": "display", "valueString": "On Demand Capsule 250mg"},
+        ],
+    }
+
+    with patch("app.ccda.dmd.get_dmd_concept", new_callable=AsyncMock, return_value=raw_upstream) as mock_get:
+        result = await dmd_lookup("88888000")
+        assert result is not None
+        assert result.concept_id == 88888000
+        # Upstream called without release pin
+        mock_get.assert_awaited_once_with(88888000, properties=["VPI", "ROUTECD", "parent"], release=None)
+
+
+@pytest.mark.asyncio
+@patch("app.ccda.dmd.snomed_client", autospec=True)
+async def test_runtime_release_mismatch_prevents_cache_write(mock_snomed):
+    """Verify upstream response with mismatched release raises ValueError and writes nothing to cache."""
+    import httpx
+
+    from app.ccda.dmd import get_dmd_concept
+
+    mock_snomed.get = AsyncMock(return_value=None)
+    mock_snomed.setex = AsyncMock()
+
+    mismatched_response = {
+        "parameter": [
+            {"name": "version", "valueString": "http://snomed.info/sct/83821000000107/version/202609.1.0"},
+            {"name": "display", "valueString": "Mismatched Release Product"},
+        ]
+    }
+
+    with patch("app.ccda.dmd.get_terminology_token", new_callable=AsyncMock, return_value="token123"):
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_http_get:
+            req = httpx.Request("GET", "https://ontology.nhs.uk/fhir/CodeSystem/$lookup")
+            mock_http_get.return_value = httpx.Response(200, json=mismatched_response, request=req)
+            with pytest.raises(ValueError, match="does not match requested release"):
+                await get_dmd_concept(77777000, release="202610.1.0")
+
+            # Cache was NOT written
+            mock_snomed.setex.assert_not_called()
+
+
+# ==============================================================================
+# PHASE 3 & 4: REAL CAPACITY PLANNING & DISCOVERY TESTS
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_without_client_or_test_inputs_fails_closed():
+    """Verify plan() raises ValueError if neither a client nor explicit test arguments are provided."""
+    from app.ops.dmd_cache import plan
+
+    with pytest.raises(ValueError, match="Synthetic production fallback is prohibited"):
+        await plan()
+
+
+@pytest.mark.asyncio
+@patch("app.ops.dmd_cache.snomed_client", autospec=True)
+@patch("app.ops.dmd_cache.fetch_token_in_memory", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.discover_release_capacity", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.sample_payload_metrics", new_callable=AsyncMock)
+async def test_plan_cli_executes_real_readonly_discovery_and_makes_zero_redis_writes(
+    mock_sample, mock_discover, mock_token, mock_snomed
+):
+    """Verify CLI plan path executes real discovery without acquiring locks or writing to Redis."""
+    from app.ops.dmd_cache import plan_cli
+
+    mock_token.return_value = "secret_in_memory_token"
+    mock_discover.return_value = {
+        "release": "202610.1.0",
+        "counts": {"ROUTE": 150, "UOM": 250, "VMP": 25000, "AMP": 35000},
+        "total_concepts": 60400,
+        "page_counts": {"ROUTE": 1, "UOM": 1, "VMP": 25, "AMP": 35},
+    }
+    mock_sample.return_value = ([512, 520], [600, 610], [0.15, 0.20])
+    mock_snomed.info.return_value = {
+        "used_memory": 40 * 1024 * 1024,
+        "maxmemory": 256 * 1024 * 1024,
+        "evicted_keys": 0,
+    }
+
+    with patch("app.ops.dmd_cache.acquire_lock", new_callable=AsyncMock) as mock_acq:
+        exit_code = await plan_cli(sample_size=10, json_output=True)
+
+        assert mock_acq.await_count == 0
+        assert mock_snomed.set.await_count == 0
+        assert mock_snomed.setex.await_count == 0
+        assert mock_snomed.delete.await_count == 0
+        assert mock_snomed.pipeline.call_count == 0
+        assert exit_code == 0
+
+
+@pytest.mark.asyncio
+async def test_discover_release_capacity_fails_on_inconsistent_releases():
+    """Verify discover_release_capacity raises ValueError if category calls return conflicting releases."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient, discover_release_capacity
+
+    mock_http_client = AsyncMock(spec=httpx.AsyncClient)
+
+    def side_effect(url, **kwargs):
+        json_body = kwargs.get("json", {})
+        params = json_body.get("parameter", [])
+        cat = params[0]["resource"]["compose"]["include"][0]["filter"][0]["value"]
+
+        rel = "202610.1.0" if cat == "ROUTE" else "202609.1.0"
+
+        resp = {
+            "resourceType": "ValueSet",
+            "expansion": {
+                "total": 100,
+                "parameter": [{"name": "version", "valueUri": f"http://snomed.info/sct/83821000000107/version/{rel}"}],
+            },
+        }
+        req = httpx.Request("POST", f"https://ontology.nhs.uk/fhir/{url}")
+        return httpx.Response(200, json=resp, request=req)
+
+    mock_http_client.post.side_effect = side_effect
+    client = TerminologyClient(mock_http_client, "https://ontology.nhs.uk/fhir", "token123")
+
+    with pytest.raises(ValueError, match="Release mismatch across categories"):
+        await discover_release_capacity(client)
+
+
+# ==============================================================================
+# PHASE 5, 6 & 7: EXACT KEY MODELING, DURATION & REDIS SAFETY TESTS
+# ==============================================================================
+
+
+def test_capacity_plan_exact_key_correspondence_matches_warm():
+    """Verify build_capacity_plan models exactly the keys written by warm() (raw=ROUTE+UOM, resolved=VMP+AMP, metadata=2)."""
+    from app.ops.dmd_cache import build_capacity_plan
+
+    plan_res = build_capacity_plan(
+        release="202610.1.0",
+        category_counts={"ROUTE": 150, "UOM": 250, "VMP": 25000, "AMP": 35000},
+        raw_payload_bytes=[500],
+        resolved_payload_bytes=[600],
+        latencies=[0.1],
+        mem_state={"used_memory": 20 * 1024 * 1024, "maxmemory": 256 * 1024 * 1024, "evicted_keys": 0},
+    )
+
+    # Raw keys written: ROUTE + UOM only
+    assert plan_res["key_counts_by_type"]["raw"] == 400
+    # Resolved keys written: VMP + AMP only
+    assert plan_res["key_counts_by_type"]["resolved"] == 60000
+    # Metadata keys written: manifest + active pointer
+    assert plan_res["key_counts_by_type"]["metadata"] == 2
+    assert plan_res["total_keys"] == 60402
+
+
+def test_capacity_plan_sequential_duration_projection():
+    """Verify projected duration calculates request_count * p95 latency with concurrency=1."""
+    from app.ops.dmd_cache import build_capacity_plan
+
+    # ROUTE: 1000 (1 page), UOM: 1000 (1 page), VMP: 10000 (10 pages), AMP: 20000 (20 pages) = 32 pages
+    # Sample requests = 8
+    # Total requests = 40
+    # p95 latency = 0.5s -> 40 * 0.5 = 20.0s
+    plan_res = build_capacity_plan(
+        release="202610.1.0",
+        category_counts={"ROUTE": 1000, "UOM": 1000, "VMP": 10000, "AMP": 20000},
+        raw_payload_bytes=[500],
+        resolved_payload_bytes=[600],
+        latencies=[0.5],
+        mem_state={"used_memory": 20 * 1024 * 1024, "maxmemory": 256 * 1024 * 1024, "evicted_keys": 0},
+    )
+
+    assert plan_res["projected_terminology_requests"] == 40
+    assert plan_res["projected_duration_seconds"] == pytest.approx(20.0, 0.1)
+    assert plan_res["fits_timeout"] is True
+    assert plan_res["fail_closed"] is False
+
+
+def test_capacity_plan_duration_over_1800s_fails_closed():
+    """Verify projected duration > 1800s sets fits_timeout=False and fail_closed=True."""
+    from app.ops.dmd_cache import build_capacity_plan
+
+    # Latency 50.0s per request -> 40 * 50 = 2000s > 1800s
+    plan_res = build_capacity_plan(
+        release="202610.1.0",
+        category_counts={"ROUTE": 1000, "UOM": 1000, "VMP": 10000, "AMP": 20000},
+        raw_payload_bytes=[500],
+        resolved_payload_bytes=[600],
+        latencies=[50.0],
+        mem_state={"used_memory": 20 * 1024 * 1024, "maxmemory": 256 * 1024 * 1024, "evicted_keys": 0},
+    )
+
+    assert plan_res["fits_timeout"] is False
+    assert plan_res["fail_closed"] is True
+    assert any("exceeds Container Apps Job timeout" in r for r in plan_res["fail_reasons"])
+
+
+def test_maxmemory_zero_or_negative_fails_closed():
+    """Verify check_preflight_memory and check_memory_guard fail closed if maxmemory <= 0."""
+    from app.ops.dmd_cache import check_memory_guard, check_preflight_memory
+
+    with pytest.raises(RuntimeError, match="Redis maxmemory must be configured and positive"):
+        check_preflight_memory({"maxmemory": 0, "used_memory": 1024}, 5000)
+
+    with pytest.raises(RuntimeError, match="Redis maxmemory must be configured and positive"):
+        check_preflight_memory({"maxmemory": -1, "used_memory": 1024}, 5000)
+
+    with pytest.raises(RuntimeError, match="Redis maxmemory must be configured and positive"):
+        check_memory_guard(
+            {"maxmemory": 0, "used_memory": 1024, "evicted_keys": 0},
+            5000,
+        )
+
+
+@pytest.mark.asyncio
+@patch("app.ops.dmd_cache.snomed_client", autospec=True)
+async def test_intermediate_eviction_stops_warm_before_next_batch(mock_snomed):
+    """Verify _expand_vmp_concepts halts immediately if intermediate Redis INFO shows evicted_keys increased."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient, _expand_vmp_concepts
+
+    mock_client = AsyncMock(spec=TerminologyClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    resp_p1 = httpx.Response(
+        200,
+        json={
+            "resourceType": "ValueSet",
+            "expansion": {
+                "offset": 0,
+                "contains": [
+                    {
+                        "code": "1001",
+                        "display": "VMP Product 1",
+                        "designation": [{"value": "Tablet"}],
+                        "property": [{"code": "form", "valueCoding": {"display": "Tablet"}}],
+                    }
+                ],
+            },
+        },
+        request=req,
+    )
+    mock_client.post_fhir.return_value = resp_p1
+
+    # info() call during batch guard reports evicted_keys = 1
+    mock_snomed.info.return_value = {"used_memory": 1000, "maxmemory": 1000000, "evicted_keys": 1}
+
+    with pytest.raises(RuntimeError, match="Redis evicted 1 keys during VMP warm stage"):
+        await _expand_vmp_concepts(
+            client=mock_client,
+            expected_release="202610.1.0",
+            route_map={},
+            uom_map={},
+            vmp_lookup={},
+            baseline_evicted_keys=0,
+            expected_count=1,
+        )
+
+
+# ==============================================================================
+# PHASE 8: RELEASE COMPLETENESS & ACTIVATION TESTS
+# ==============================================================================
+
+
+@pytest.mark.asyncio
+@patch("app.ops.dmd_cache.snomed_client", autospec=True)
+@patch("app.ops.dmd_cache.acquire_lock", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.release_lock", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.renew_lock", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.fetch_token", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.discover_release_capacity", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache.sample_payload_metrics", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache._expand_and_cache_lookups", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache._expand_vmp_concepts", new_callable=AsyncMock)
+@patch("app.ops.dmd_cache._expand_amp_concepts", new_callable=AsyncMock)
+async def test_completeness_processed_mismatch_prevents_activation(
+    mock_amp,
+    mock_vmp,
+    mock_lookups,
+    mock_sample,
+    mock_discover,
+    mock_token,
+    mock_renew,
+    mock_rel,
+    mock_acq,
+    mock_snomed,
+):
+    """Verify warm() fails closed and does NOT activate if processed count != expected count."""
+    from app.ops.dmd_cache import warm
+
+    mock_acq.return_value = True
+    mock_renew.return_value = True
+    mock_token.return_value = "token123"
+    mock_discover.return_value = {
+        "release": "202610.1.0",
+        "counts": {"ROUTE": 100, "UOM": 100, "VMP": 1000, "AMP": 2000},
+        "total_concepts": 3200,
+        "page_counts": {"ROUTE": 1, "UOM": 1, "VMP": 1, "AMP": 2},
+    }
+    mock_sample.return_value = ([512], [512], [0.1])
+    mock_lookups.return_value = 100
+    mock_vmp.return_value = 999  # Processed 999 instead of expected 1000!
+    mock_amp.return_value = 2000
+
+    mock_snomed.info.return_value = {
+        "used_memory": 30 * 1024 * 1024,
+        "maxmemory": 256 * 1024 * 1024,
+        "evicted_keys": 0,
+    }
+
+    exit_code = await warm()
+    assert exit_code != 0
+
+    # Ensure dmd:active-release was never written
+    for call in mock_snomed.setex.call_args_list:
+        assert call[0][0] != "dmd:active-release"
+
+
+@pytest.mark.asyncio
+@patch("app.ops.dmd_cache.snomed_client", autospec=True)
+async def test_concept_with_missing_code_or_display_fails_closed(mock_snomed):
+    """Verify expansion fails closed if a concept contains no code or display."""
+    import httpx
+
+    from app.ops.dmd_cache import TerminologyClient, _expand_and_cache_lookups
+
+    mock_client = AsyncMock(spec=TerminologyClient)
+    req = httpx.Request("POST", "https://ontology.nhs.uk/fhir/ValueSet/$expand")
+    resp_malformed = httpx.Response(
+        200,
+        json={
+            "resourceType": "ValueSet",
+            "expansion": {
+                "offset": 0,
+                "contains": [
+                    {"code": "1001"}  # Missing display!
+                ],
+            },
+        },
+        request=req,
+    )
+    mock_client.post_fhir.return_value = resp_malformed
+
+    with pytest.raises(ValueError, match="missing code or display"):
+        await _expand_and_cache_lookups(
+            client=mock_client,
+            parent="ROUTE",
+            expected_release="202610.1.0",
+            lookup_map={},
+            baseline_evicted_keys=0,
+            expected_count=1,
+        )
+
+
+# ==============================================================================
+# PHASE 14 & 19: TERRAFORM SCHEDULER BLOCK & TARGET INVARIANTS TESTS
+# ==============================================================================
+
+
+def test_terraform_schedule_enabled_is_blocked_and_all_targets_disabled():
+    """Verify infra/main.tf asserts !var.dmd_cache_schedule_enabled and all target files keep flags false."""
+    import json
+    import pathlib
+
+    main_tf = pathlib.Path("infra/main.tf").read_text()
+    assert "!var.dmd_cache_schedule_enabled" in main_tf
+    assert "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog" in main_tf
+
+    variables_tf = pathlib.Path("infra/variables.tf").read_text()
+    assert 'variable "dmd_cache_warm_enabled"' in variables_tf
+    assert "default     = false" in variables_tf
+
+    # Inspect targets.json and verify all targets have dmd_cache flags disabled
+    targets_data = json.loads(pathlib.Path("infra/targets.json").read_text())
+    for target in targets_data.get("targets", []):
+        tfvars_path = target.get("tfvars_file")
+        if tfvars_path and pathlib.Path(tfvars_path).exists():
+            tfvars_text = pathlib.Path(tfvars_path).read_text()
+            assert "dmd_cache_warm_enabled = true" not in tfvars_text
+            assert "dmd_cache_schedule_enabled = true" not in tfvars_text

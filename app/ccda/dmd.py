@@ -139,7 +139,7 @@ async def get_dmd_concept(concept_id: int | str, properties: list = None, releas
 
     if cached_concept:
         logging.info(f"Cache hit for SNOMED concept {concept_id} (key={cache_key})")
-        return json.loads(cached_concept.decode("utf-8"))
+        return json.loads(_decode_cached_token(cached_concept))
 
     logging.info(f"Cache miss for SNOMED concept {concept_id}. Fetching from DMD API.")
 
@@ -282,7 +282,7 @@ async def dmd_lookup(concept_id: int | str) -> DMDConcept:
     """Lookup a dm+d concept, using active-release resolved cache where available."""
     # 1. Check if an active release is registered
     active_release_bytes = await snomed_client.get(ACTIVE_RELEASE_KEY)
-    active_release = active_release_bytes.decode("utf-8") if active_release_bytes else None
+    active_release = _decode_cached_token(active_release_bytes)
 
     if active_release:
         key = dmd_resolved_key(concept_id, active_release)
@@ -293,7 +293,7 @@ async def dmd_lookup(concept_id: int | str) -> DMDConcept:
 
         if cached_resolved:
             logging.info(f"Resolved cache hit for concept {concept_id} under release {active_release}")
-            return DMDConcept.model_validate_json(cached_resolved.decode("utf-8"))
+            return DMDConcept.model_validate_json(_decode_cached_token(cached_resolved))
 
         # On miss: resolve pinned to active_release and cache
         logging.info(f"Resolved cache miss for concept {concept_id}. Resolving pinned to release {active_release}.")

@@ -212,15 +212,20 @@ flowchart TD
    - Resolved concepts (`dmd:resolved:v1:...`): **9 days** TTL
    - Active release pointer (`dmd:active-release`): **8 days** TTL
    - Success manifest (`dmd:warm:v1:...:manifest`): **9 days** TTL
-   The active pointer expires before underlying data expires, ensuring a 24-hour grace window for schedule failures while preventing orphaned pointers. Old release data ages out naturally without requiring destructive Redis operations (`DEL`, `KEYS`, `FLUSHDB`).
+   The active pointer expires before underlying data expires, ensuring a 24-hour grace window for schedule failures while preventing orphaned pointers. Old release data ages out naturally without requiring destructive Redis operations (`DEL`, `KEYS`, `FLUSHDB`). `FLUSHDB` and wildcard `KEYS *` are strictly prohibited to avoid blocking the single-threaded Redis event loop and risking cross-database eviction or data loss.
 10. **Redis Memory Safety & Coexistence Overhead**:
-    - Redis memory limits and eviction policies are **instance-wide across all logical databases (DB 0, DB 1, DB 2)**.
-    - Sizing models account for raw concepts, resolved concepts, Redis key/dictEntry overhead (~128 bytes per key), allocator fragmentation (1.25x), and old-release coexistence during the warm.
-    - Preflight check verifies that current memory + projected delta with safety multiplier (1.5x) does not exceed 80% of `maxmemory`.
+    - **Instance-Wide Physical Memory Sharing**: Redis `maxmemory` and eviction policies are **instance-wide across all logical databases (DB 0 application sessions, DB 1 PDS cache, DB 2 dm+d terminology cache)**. Redis DB 2 shares physical memory with DB 0 and DB 1. An eviction in DB 2 could evict active clinical sessions or PDS data.
+    - Sizing models correspond exactly to actual writes: raw lookups (ROUTE + UOM), resolved concepts (VMP + AMP), Redis key/dictEntry overhead (~128 bytes per key), allocator fragmentation (1.25x), and old-release coexistence during the warm.
+    - Preflight check verifies that current memory + projected delta with safety multiplier (1.5x) does not exceed 80% of `maxmemory`. Both preflight and per-batch guards fail closed immediately if `maxmemory <= 0`.
     - If `evicted_keys` increases during warm, the run aborts immediately and refuses activation.
-11. **Heartbeat Telemetry & Alerting Constraints**:
+11. **Sequential Concurrency & Duration Projection**:
+    - Terminology expansion requests execute sequentially (concurrency = 1).
+    - The capacity model projects total HTTP requests: discovery and sampling requests (8) plus expansion pages (`ceil(ROUTE/1000) + ceil(UOM/1000) + ceil(VMP/1000) + ceil(AMP/1000)`).
+    - Projected duration is calculated as `request_count * p95_latency`. The warmer and capacity plan fail closed if projected duration exceeds the 1800s Container Apps Job execution timeout.
+12. **Heartbeat Telemetry & Blocked Scheduler**:
     - Upon warm success, the job emits a structured JSON event: `dmd_cache_event {"event": "warm_succeeded", "release": "...", "duration_seconds": ..., "concept_count": ..., "memory_delta_bytes": ..., "evictions": 0}`.
-    - Scheduled Query Rules in Azure Monitor strictly cap query lookback windows to 48 hours (`P2D` / 2880 mins). Therefore, a direct 7.5-day heartbeat alert is not safely implementable directly via AzureRM scheduled query alerts. Schedule enablement is blocked by a Terraform precondition until a 48h-compatible watchdog or intermediate verification is provisioned.
+    - Scheduled Query Rules in Azure Monitor strictly cap query lookback windows to 48 hours (`P2D` / 2880 mins). Therefore, a direct 7.5-day heartbeat alert is not safely implementable directly via AzureRM scheduled query alerts.
+    - The Logic App scheduler is intentionally blocked by both a Terraform precondition and a check assertion (`condition = !var.dmd_cache_schedule_enabled`) until a 48h-compatible missed-success watchdog is designed and accepted. Both `dmd_cache_warm_enabled` and `dmd_cache_schedule_enabled` remain `false` across all environments.
 
 ### Runtime Fallback Behaviour
 When `dmd_lookup(concept_id)` executes during prescription conversion:

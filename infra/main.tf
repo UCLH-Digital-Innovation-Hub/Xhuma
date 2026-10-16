@@ -645,6 +645,10 @@ resource "azurerm_logic_app_workflow" "dmd_warm" {
 
   lifecycle {
     precondition {
+      condition     = !var.dmd_cache_schedule_enabled
+      error_message = "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog is implemented and accepted."
+    }
+    precondition {
       condition     = var.dmd_cache_warm_enabled
       error_message = "dmd_cache_schedule_enabled requires dmd_cache_warm_enabled to be true."
     }
@@ -947,6 +951,11 @@ resource "azurerm_monitor_metric_alert" "la_triggers_failed" {
 }
 
 check "dmd_cache_invariants" {
+  assert {
+    condition     = !var.dmd_cache_schedule_enabled
+    error_message = "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog is implemented and accepted."
+  }
+
   assert {
     condition     = !var.dmd_cache_schedule_enabled || var.dmd_cache_warm_enabled
     error_message = "dmd_cache_schedule_enabled requires dmd_cache_warm_enabled to be true."
