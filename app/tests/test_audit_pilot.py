@@ -5,11 +5,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main
-from app.audit.audit import AuditFailureException
+from app.audit.audit import AuditFailureException, attempt_audit
 from app.audit.build import build_audit_event
 from app.audit.models import AuditOutcome, SAMLAttributes
 from app.audit.store import insert_audit_event
 from app.ccda.models.datatypes import CD
+from app.gpconnect import _fetch_gpconnect_record
+from app.soap.responses.iti_38 import iti_38_response
 
 
 @pytest.fixture
@@ -32,11 +34,11 @@ Content-Type: application/xop+xml; charset=UTF-8; type="application/soap+xml"
 
 
 @pytest.mark.asyncio
-@patch("app.soap.soap.attempt_audit", new_callable=AsyncMock)
-@patch("app.soap.soap.client.get")
-@patch("app.soap.soap.extract_trusted_saml_assertion")
+@patch("app.soap.responses.iti_39.attempt_audit", new_callable=AsyncMock)
+@patch("app.soap.soap.client.hmget")
+@patch("app.soap.saml_helper.extract_trusted_saml_assertion")
 async def test_iti39_direct_and_callback_blocked_on_audit_failure(
-    mock_extract_saml, mock_redis_get, mock_attempt_audit, client
+    mock_extract_saml, mock_redis_hmget, mock_attempt_audit, client
 ):
     mock_extract_saml.return_value = {
         "AttributeStatement": {
@@ -49,14 +51,7 @@ async def test_iti39_direct_and_callback_blocked_on_audit_failure(
         }
     }
 
-    def redis_get_side_effect(key):
-        if key == "test-doc-123":
-            return b"<CCDA></CCDA>"
-        if key == "doc_patient:test-doc-123":
-            return b"1234567890"
-        return None
-
-    mock_redis_get.side_effect = redis_get_side_effect
+    mock_redis_hmget.return_value = [b"<CCDA></CCDA>", b"1234567890"]
     mock_attempt_audit.side_effect = AuditFailureException("Audit failed")
 
     # Direct response (anonymous replyTo)
@@ -65,7 +60,7 @@ async def test_iti39_direct_and_callback_blocked_on_audit_failure(
         content=create_iti39_request(reply_to="http://www.w3.org/2005/08/addressing/anonymous"),
         headers={"Content-Type": "application/soap+xml", "X-ARR-ClientCert": "ZHVtbXk="},
     )
-    assert response_sync.status_code == 502
+    assert response_sync.status_code == 500
 
     # Callback response
     response_async = client.post(
@@ -73,14 +68,14 @@ async def test_iti39_direct_and_callback_blocked_on_audit_failure(
         content=create_iti39_request(reply_to="https://test.nhs.uk"),
         headers={"Content-Type": "application/soap+xml", "X-ARR-ClientCert": "ZHVtbXk="},
     )
-    assert response_async.status_code == 502
+    assert response_async.status_code == 500
+    assert all(c.kwargs["nhs_number"] == "1234567890" for c in mock_attempt_audit.await_args_list)
+    assert [c.kwargs["detail"]["delivery_mode"] for c in mock_attempt_audit.await_args_list] == ["sync", "async"]
 
 
 @pytest.mark.asyncio
 async def test_unknown_subject_builder_and_store():
     # Test through real builder and store
-    from app.audit.models import SAMLAttributes
-    from app.ccda.models.datatypes import CD
 
     saml = SAMLAttributes(
         subject_id="user1",
@@ -128,8 +123,8 @@ async def test_unknown_subject_builder_and_store():
 
 
 @pytest.mark.asyncio
-@patch("app.soap.soap.attempt_audit", new_callable=AsyncMock)
-@patch("app.soap.soap.extract_trusted_saml_assertion")
+@patch("app.soap.responses.iti_39.attempt_audit", new_callable=AsyncMock)
+@patch("app.soap.saml_helper.extract_trusted_saml_assertion")
 async def test_iti39_destination_denial(mock_extract_saml, mock_attempt_audit, client):
     mock_extract_saml.return_value = {
         "AttributeStatement": {
@@ -142,20 +137,22 @@ async def test_iti39_destination_denial(mock_extract_saml, mock_attempt_audit, c
         }
     }
     with patch(
-        "app.soap.soap.client.get",
-        side_effect=lambda k: b"data" if k == "test-doc-123" or k == "doc_patient:test-doc-123" else None,
+        "app.soap.soap.client.hmget",
+        return_value=[b"data", b"1234567890"],
     ):
         response = client.post(
             "/SOAP/iti39",
             content=create_iti39_request(reply_to="https://malicious.com"),
             headers={"Content-Type": "application/soap+xml", "X-ARR-ClientCert": "ZHVtbXk="},
         )
-        assert response.status_code == 403
+        assert response.status_code == 400
+        assert "wsa:InvalidAddressingHeader" in response.text
 
         mock_attempt_audit.assert_called_once()
         kwargs = mock_attempt_audit.call_args.kwargs
         assert kwargs["outcome"] == AuditOutcome.deny
         assert kwargs["detail"]["error"] == "ReplyTo domain not allowed"
+        assert kwargs["nhs_number"] == "1234567890"
 
 
 @pytest.mark.asyncio
@@ -163,7 +160,6 @@ async def test_iti39_destination_denial(mock_extract_saml, mock_attempt_audit, c
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_restricted_patient_denial(mock_lookup, mock_attempt_audit):
     mock_lookup.return_value = {"meta": {"security": [{"code": "R"}]}}
-    from app.gpconnect import _fetch_gpconnect_record
 
     response = await _fetch_gpconnect_record(9690937278, MagicMock(), request=MagicMock())
     assert response.status_code == 403
@@ -217,10 +213,6 @@ async def test_redis_publication_audit_failure_interaction(
 
                     mock_attempt_audit.side_effect = audit_side_effect
 
-                    from app.audit.models import SAMLAttributes
-                    from app.ccda.models.datatypes import CD
-                    from app.gpconnect import _fetch_gpconnect_record
-
                     saml = SAMLAttributes(
                         subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code")
                     )
@@ -249,9 +241,6 @@ async def test_iti38_cache_miss_audit_failure_propagation(mock_redis_get, mock_g
     mock_gpconnect.side_effect = AuditFailureException("Failed to persist audit event")
 
     # Test iti_38_response
-    from app.audit.models import SAMLAttributes
-    from app.ccda.models.datatypes import CD
-    from app.soap.responses.iti_38 import iti_38_response
 
     saml = SAMLAttributes(subject_id="user1", organization="org1", organization_id="orgid1", role=CD(code="code"))
     request = MagicMock()
@@ -266,7 +255,7 @@ async def test_iti38_cache_miss_audit_failure_propagation(mock_redis_get, mock_g
 @pytest.mark.asyncio
 @patch("app.soap.responses.iti_38.gpconnect", new_callable=AsyncMock)
 @patch("app.soap.responses.iti_38.redis_client.get")
-@patch("app.soap.soap.extract_trusted_saml_assertion")
+@patch("app.soap.saml_helper.extract_trusted_saml_assertion")
 async def test_iti38_endpoint_audit_failure(mock_extract, mock_redis_get, mock_gpconnect, client):
     mock_extract.return_value = {
         "AttributeStatement": {
@@ -285,7 +274,7 @@ async def test_iti38_endpoint_audit_failure(mock_extract, mock_redis_get, mock_g
     request_xml = """<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><MessageID>123</MessageID></s:Header><s:Body><AdhocQueryRequest><AdhocQuery><Slot name="$XDSDocumentEntryPatientId"><ValueList><Value>9690937278</Value></ValueList></Slot></AdhocQuery></AdhocQueryRequest></s:Body></s:Envelope>"""
 
     response = client.post("/SOAP/iti38", content=request_xml, headers={"Content-Type": "application/soap+xml"})
-    assert response.status_code == 502
+    assert response.status_code == 500
     assert "Failed to persist audit event" not in response.text
     assert "SQL" not in response.text
 
@@ -294,9 +283,6 @@ async def test_iti38_endpoint_audit_failure(mock_extract, mock_redis_get, mock_g
 @patch("app.audit.build.build_audit_event", new_callable=AsyncMock)
 @patch("app.audit.store.insert_audit_event", new_callable=AsyncMock)
 async def test_attempt_audit_preserves_none(mock_insert, mock_build):
-    from app.audit.audit import attempt_audit
-    from app.audit.models import SAMLAttributes
-    from app.ccda.models.datatypes import CD
 
     request = MagicMock()
     request.app.state.SessionLocal = MagicMock()
@@ -322,7 +308,6 @@ async def test_attempt_audit_preserves_none(mock_insert, mock_build):
 
 @pytest.mark.asyncio
 async def test_audit_boundary_failure_closure():
-    from app.audit.audit import attempt_audit
 
     request = MagicMock()
     request.headers = {}
@@ -360,7 +345,6 @@ async def test_audit_boundary_failure_closure():
 
 @pytest.mark.asyncio
 async def test_audit_missing_pseudonymisation_key():
-    from app.audit.audit import attempt_audit
 
     request = MagicMock()
     request.headers = {}

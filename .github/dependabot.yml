@@ -14,6 +14,10 @@ updates:
     allow:
       - dependency-type: "all"
 
+    # Keep fhirclient on the pinned STU3-compatible version.
+    ignore:
+      - dependency-name: "fhirclient"
+
     # Example: chore(deps): bump package from X to Y
     commit-message:
       prefix: "chore"
