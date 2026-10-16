@@ -539,6 +539,124 @@ Database-level assurance checks must be performed through an approved restricted
 
 ---
 
+### 9.4 dm+d Cache Warmer Operations and Diagnostics
+
+The dm+d cache warmer operates as a target-local manual Azure Container Apps Job triggered weekly on Monday at 05:00 UK local time (DST-aware `GMT Standard Time`) via an Azure Consumption Logic App. It pre-populates target-local Redis DB 2 with resolved `DMDConcept` representations.
+
+#### Trigger Manual Job Execution
+
+Operators can trigger a manual run of the warmer job (e.g. for acceptance testing or recovery):
+
+```bash
+az containerapp job start \
+  --name <app-service-name>-dmd-warm \
+  --resource-group <resource-group>
+```
+
+The output returns an execution ID, e.g. `<app-service-name>-dmd-warm-<execution-id>`.
+
+#### Check Job Execution Status
+
+```bash
+az containerapp job execution list \
+  --name <app-service-name>-dmd-warm \
+  --resource-group <resource-group> \
+  -o table
+```
+
+To view details for a specific run:
+```bash
+az containerapp job execution show \
+  --name <app-service-name>-dmd-warm \
+  --resource-group <resource-group> \
+  --job-execution-name <execution-name> \
+  -o json
+```
+
+#### Query Warmer Logs in Log Analytics
+
+Warmer logs contain only structured metadata (release, counts, memory, timings) and strictly omit secrets or PHI:
+
+```bash
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query '
+ContainerAppConsoleLogs_CL
+| where ContainerJobName_s == "<app-service-name>-dmd-warm"
+| where TimeGenerated > ago(2h)
+| project TimeGenerated, Log_s
+| order by TimeGenerated desc
+' \
+  -o table
+```
+
+#### Dry-Run Capacity Planning & Status via CLI
+
+From within the application environment, Container App shell, or maintenance container:
+
+```bash
+# Execute read-only capacity planning estimate (no lock, no Redis writes)
+/code/.venv/bin/python -m app.ops.dmd_cache plan
+
+# Plan mode with machine-readable JSON output
+/code/.venv/bin/python -m app.ops.dmd_cache plan --json
+
+# Inspect operational cache status
+/code/.venv/bin/python -m app.ops.dmd_cache status
+```
+
+Reports:
+- Discovered dm+d release and category concept counts (ROUTE, UOM, VMP, AMP)
+- Empirical payload sizes (mean, p50, p95, max for raw Parameters and resolved DMDConcept)
+- Key metadata overhead and allocator fragmentation multiplier (1.25x)
+- Exact key count correspondence to warm writes (ROUTE + UOM raw, VMP + AMP resolved, 2 metadata keys)
+- Configurable safety multiplier (default 1.5x)
+- Projected Redis memory delta and total memory including prior release coexistence
+- Sequential duration projection (concurrency = 1, total requests * p95 latency) against the 1800s Container Apps timeout
+- Active release pointer TTL and warmer lock state
+
+#### Operational Scenarios & Troubleshooting
+
+1. **What a failed Monday warm means:**
+   - The warmer acquires a distributed Redis lock (`dmd:warm:v1:lock`) with a 45-minute TTL and releases it safely using a token-matched Lua script on exit.
+   - If a failure occurs (monotonic 120s HTTP retry budget exhausted, upstream Terminology Server downtime, memory ceiling breach), the active release pointer (`dmd:active-release`) remains untouched pointing to the prior release.
+   - The prior release data is valid for 9 days, while the active pointer has an 8-day TTL. This ensures a 24-hour grace window across weekly runs.
+   - If the active release pointer expires or is absent, the application safely degrades to unversioned on-demand terminology lookup (`snomed:<concept_id>`). Prescription conversion is never interrupted.
+
+2. **Redis Memory Safety & Instance-Wide Evictions:**
+   - **Critical Architecture Fact**: Redis `maxmemory` and eviction policies (such as `allkeys-lru`) are **instance-wide across all logical databases (DB 0 application sessions, DB 1 PDS cache, DB 2 dm+d terminology cache)**. Redis does NOT partition memory limits per database.
+   - If memory is exhausted during warming, Redis could evict active DB 0 application session keys or DB 1 PDS cache keys.
+   - Furthermore, `FLUSHDB` and wildcard `KEYS *` are strictly forbidden; old release keys age out naturally via 9-day TTL retirement.
+   - To prevent memory exhaustion and evictions, the warmer enforces:
+     - A full-run memory preflight before any concept is written (aborting if current used + projected delta with 1.5x multiplier exceeds 80% ceiling, or if `maxmemory <= 0`).
+     - Per-batch memory and eviction checks before pipeline execution.
+     - An eviction delta check at completion: if `evicted_keys` increases by even 1 key during warming, the run aborts immediately and refuses activation.
+
+3. **Platform Retries and Distributed Locks:**
+   - Container Apps Job `replica_retry_limit` is strictly set to `0`. A platform retry would spawn a separate process with a new random lock token, colliding with the still-held distributed lock.
+   - All network retries and 401 token refreshes are handled within the single application process under a monotonic 120s deadline.
+
+4. **Heartbeat Telemetry & Blocked Scheduler:**
+   - Upon successful activation, the warmer logs a structured completion event:
+     ```json
+     dmd_cache_event {"event": "warm_succeeded", "release": "...", "duration_seconds": ..., "concept_count": ..., "memory_delta_bytes": ..., "evictions": 0}
+     ```
+   - Azure Monitor Scheduled Query Rules enforce an API hard cap on query lookback windows of 48 hours (`P2D` / 2880 mins). A 7.5-day scheduled query alert cannot be created directly via `azurerm_monitor_scheduled_query_rules_alert_v2`.
+   - Therefore, `dmd_cache_schedule_enabled` is blocked by both a Terraform precondition and a check assertion (`condition = !var.dmd_cache_schedule_enabled`) until a 48h-compatible post-warm check or external watchdog is implemented. Both `dmd_cache_warm_enabled` and `dmd_cache_schedule_enabled` remain `false` across all environments.
+
+5. **PRD Acceptance Prerequisites:**
+   Before enabling `dmd_cache_schedule_enabled = true` in production tfvars, operators must verify a complete, successful non-PRD execution demonstrating:
+   - Successful image digest pull via dedicated job variable (`var.dmd_cache_job_image`)
+   - Key Vault secret resolution via user-assigned managed identity across firewalled `ca_subnet`
+   - TLS Redis DB 2 connectivity and Terminology Server HTTPS access under monotonic retry budgets
+   - Zero key evictions and recorded memory delta within limits
+   - Atomic pointer activation and resolved cache hits during medication translation
+   - Valid schedule start time (`dmd_cache_schedule_start_time` set to Monday 05:xx at least 7 days in future)
+   - Configured Azure Monitor alert action group IDs (`dmd_cache_alert_action_group_ids`)
+
+
+---
+
 ## 10. Assurance and Evidence Records
 
 Specific deployment rehearsals and assurance events are captured as immutable evidence records. These records are retained separately from this living operational runbook to preserve point-in-time factual observations.

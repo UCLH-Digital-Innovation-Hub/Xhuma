@@ -19,3 +19,7 @@ cors_origins             = "*"
 require_mtls             = "true"
 external_relay_url       = ""
 external_relay_client_id = "client1"
+
+# dm+d Cache Warmer (Manual infrastructure in Play only; scheduler remains explicitly blocked)
+dmd_cache_warm_enabled     = true
+dmd_cache_schedule_enabled = false

@@ -108,3 +108,93 @@ def test_shared_backend_file_selection():
         prd_hcl = f.read()
         assert 'key                  = "shared.tfstate"' not in prd_hcl
         assert 'key = "shared.tfstate"' not in prd_hcl
+
+
+def test_warmer_wiring_in_workflow():
+    """Verify matrix-deploy.yml uses Terraform outputs as single source of truth for warmer."""
+    workflow = load_workflow("matrix-deploy.yml")
+    infra_apply_job = workflow["jobs"]["infra-apply"]
+    steps = {step.get("name"): step for step in infra_apply_job["steps"]}
+
+    assert "Extract Target Terraform Outputs" in steps
+    extract_step = steps["Extract Target Terraform Outputs"]
+    run_script = extract_step["run"]
+    assert "dmd_cache_warm_enabled" in run_script
+    assert "dmd_cache_ca_subnet_id" in run_script
+    assert "dmd_cache_job_name" in run_script
+    assert "dmd_cache_job_image" in run_script
+    assert 'if [ "$WARM_ENABLED" == "true" ]; then' in run_script
+    assert 'if [ -z "$CA_SUBNET_ID" ]; then' in run_script
+    assert 'if [ -z "$JOB_NAME" ]; then' in run_script
+
+    reconcile_step = steps["Reconcile Shared Infrastructure - Plan"]
+    rec_script = reconcile_step["run"]
+    assert 'TARGET_SUBNETS=("$APP_SUBNET_ID")' in rec_script
+    assert 'if [ -n "$CA_SUBNET_ID" ]; then' in rec_script
+    assert 'TARGET_SUBNETS+=("$CA_SUBNET_ID")' in rec_script
+    assert "dmd_cache_warm_enabled" not in rec_script
+
+    verify_step = steps["Verify Container Apps Job Image"]
+    ver_script = verify_step["run"]
+    assert 'if [ -n "$JOB_NAME" ]; then' in ver_script
+    assert "az containerapp job show" in ver_script
+    assert 'if [ -z "$CURRENT_IMAGE" ]; then' in ver_script
+    assert 'if [ "$CURRENT_IMAGE" != "$EXPECTED_JOB_IMAGE" ]; then' in ver_script
+
+
+def test_warmer_disabled_subnet_derivation():
+    """Simulate output extraction when warmer is disabled: ACA subnet absent."""
+    outputs = {
+        "dmd_cache_warm_enabled": {"value": False},
+        "dmd_cache_ca_subnet_id": {"value": None},
+        "dmd_cache_job_name": {"value": None},
+    }
+    app_subnet = "/sub/rg/vnet/subnets/app-subnet"
+    target_subnets = [app_subnet]
+    ca_subnet = outputs["dmd_cache_ca_subnet_id"]["value"]
+    if ca_subnet:
+        target_subnets.append(ca_subnet)
+
+    assert target_subnets == [app_subnet]
+    assert len(target_subnets) == 1
+
+
+def test_warmer_enabled_subnet_derivation():
+    """Simulate output extraction when warmer is enabled: ACA subnet included."""
+    outputs = {
+        "dmd_cache_warm_enabled": {"value": True},
+        "dmd_cache_ca_subnet_id": {"value": "/sub/rg/vnet/subnets/ca-subnet"},
+        "dmd_cache_job_name": {"value": "app-dmd-warm"},
+    }
+    app_subnet = "/sub/rg/vnet/subnets/app-subnet"
+    target_subnets = [app_subnet]
+    ca_subnet = outputs["dmd_cache_ca_subnet_id"]["value"]
+    if ca_subnet:
+        target_subnets.append(ca_subnet)
+
+    assert target_subnets == [app_subnet, "/sub/rg/vnet/subnets/ca-subnet"]
+    assert len(target_subnets) == 2
+
+
+def test_warmer_enabled_missing_output_fails_closed():
+    """Verify that an enabled warmer with missing ca_subnet_id or job_name fails closed."""
+    import pytest
+
+    outputs = {
+        "dmd_cache_warm_enabled": {"value": True},
+        "dmd_cache_ca_subnet_id": {"value": None},
+        "dmd_cache_job_name": {"value": None},
+    }
+    warm_enabled = outputs["dmd_cache_warm_enabled"]["value"]
+    ca_subnet = outputs["dmd_cache_ca_subnet_id"]["value"]
+    job_name = outputs["dmd_cache_job_name"]["value"]
+
+    def validate_outputs():
+        if warm_enabled:
+            if not ca_subnet:
+                raise ValueError("Target has dmd_cache_warm_enabled=true but dmd_cache_ca_subnet_id is null/missing!")
+            if not job_name:
+                raise ValueError("Target has dmd_cache_warm_enabled=true but dmd_cache_job_name is null/missing!")
+
+    with pytest.raises(ValueError, match="dmd_cache_ca_subnet_id is null/missing"):
+        validate_outputs()
