@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from azure.identity import ManagedIdentityCredential
+from azure.keyvault.secrets import SecretClient
 
 from app.ccda.dmd import canonicalize_properties
 from app.ccda.models.datatypes import CD
@@ -497,12 +499,64 @@ def check_memory_guard(mem_state: dict[str, int], additional_bytes: int = 0) -> 
         )
 
 
+def _load_dmd_credentials() -> tuple[str, str]:
+    """Resolve dm+d client credentials with fail-closed precedence.
+
+    Precedence:
+    1. If BOTH DMD_CLIENT_ID and DMD_CLIENT_SECRET are set in environment, use them.
+    2. If exactly ONE of DMD_CLIENT_ID or DMD_CLIENT_SECRET is set, fail closed (no mixing).
+    3. If neither is set, retrieve 'dmd-client-id' and 'dmd-client-secret' from Azure Key Vault
+       using ManagedIdentityCredential(client_id=AZURE_CLIENT_ID) and SecretClient(vault_url=KEY_VAULT_URL).
+       Both KEY_VAULT_URL and AZURE_CLIENT_ID must be set.
+    4. Validate both returned values are non-empty strings.
+    5. Never log secret values, token values, client secrets, or Key Vault response bodies.
+    """
+    env_id = os.getenv("DMD_CLIENT_ID")
+    env_secret = os.getenv("DMD_CLIENT_SECRET")
+
+    has_id = bool(env_id and env_id.strip())
+    has_secret = bool(env_secret and env_secret.strip())
+
+    if has_id and has_secret:
+        return env_id.strip(), env_secret.strip()
+
+    if has_id or has_secret:
+        raise ValueError(
+            "Partial dm+d credentials configured in environment: both DMD_CLIENT_ID and DMD_CLIENT_SECRET "
+            "must be provided together, or neither to use Key Vault."
+        )
+
+    vault_url = os.getenv("KEY_VAULT_URL")
+    azure_client_id = os.getenv("AZURE_CLIENT_ID")
+
+    if not vault_url or not vault_url.strip() or not azure_client_id or not azure_client_id.strip():
+        raise ValueError(
+            "dm+d credentials not found in environment and Key Vault configuration is incomplete: "
+            "KEY_VAULT_URL and AZURE_CLIENT_ID must both be set when DMD_CLIENT_ID/DMD_CLIENT_SECRET are absent."
+        )
+
+    try:
+        with ManagedIdentityCredential(client_id=azure_client_id.strip()) as credential:
+            with SecretClient(vault_url=vault_url.strip(), credential=credential) as client:
+                id_bundle = client.get_secret("dmd-client-id")
+                secret_bundle = client.get_secret("dmd-client-secret")
+                dmd_client_id = id_bundle.value if id_bundle else None
+                dmd_client_secret = secret_bundle.value if secret_bundle else None
+    except Exception as exc:
+        logger.error("Failed to retrieve dm+d credentials from Key Vault.")
+        raise RuntimeError("Failed to retrieve dm+d credentials from Key Vault using managed identity.") from exc
+
+    if not dmd_client_id or not dmd_client_id.strip():
+        raise ValueError("Key Vault secret 'dmd-client-id' is missing or empty.")
+    if not dmd_client_secret or not dmd_client_secret.strip():
+        raise ValueError("Key Vault secret 'dmd-client-secret' is missing or empty.")
+
+    return dmd_client_id.strip(), dmd_client_secret.strip()
+
+
 async def fetch_token_in_memory() -> str:
     """Fetch terminology token via client credentials purely in memory without Redis caching."""
-    client_id = os.getenv("DMD_CLIENT_ID")
-    client_secret = os.getenv("DMD_CLIENT_SECRET")
-    if not client_id or not client_secret:
-        raise ValueError("DMD_CLIENT_ID and DMD_CLIENT_SECRET must be set in environment variables.")
+    client_id, client_secret = _load_dmd_credentials()
 
     url = os.getenv(
         "DMD_AUTH_URL",

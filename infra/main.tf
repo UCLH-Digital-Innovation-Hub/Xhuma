@@ -567,18 +567,6 @@ resource "azurerm_container_app_job" "dmd_warm" {
   }
 
   secret {
-    name                = "dmd-client-id"
-    key_vault_secret_id = "${data.azurerm_key_vault.shared_kv.vault_uri}secrets/dmd-client-id"
-    identity            = azurerm_user_assigned_identity.dmd_job_mi[0].id
-  }
-
-  secret {
-    name                = "dmd-client-secret"
-    key_vault_secret_id = "${data.azurerm_key_vault.shared_kv.vault_uri}secrets/dmd-client-secret"
-    identity            = azurerm_user_assigned_identity.dmd_job_mi[0].id
-  }
-
-  secret {
     name  = "redis-password"
     value = azurerm_redis_cache.redis.primary_access_key
   }
@@ -609,12 +597,12 @@ resource "azurerm_container_app_job" "dmd_warm" {
         value = var.dmd_base_url
       }
       env {
-        name        = "DMD_CLIENT_ID"
-        secret_name = "dmd-client-id"
+        name  = "KEY_VAULT_URL"
+        value = data.azurerm_key_vault.shared_kv.vault_uri
       }
       env {
-        name        = "DMD_CLIENT_SECRET"
-        secret_name = "dmd-client-secret"
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.dmd_job_mi[0].client_id
       }
       env {
         name  = "REDIS_HOST"

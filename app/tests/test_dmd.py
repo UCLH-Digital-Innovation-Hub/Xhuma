@@ -2266,3 +2266,231 @@ def test_terraform_cae_lifecycle_and_authoritative_attributes():
         assert authoritative_attr not in ignored_items, (
             f"{authoritative_attr} must remain authoritative and not be ignored"
         )
+
+
+def test_load_dmd_credentials_both_env_present(monkeypatch):
+    """1. Both DMD env credentials present: uses environment values, no Key Vault call."""
+    from app.ops.dmd_cache import _load_dmd_credentials
+
+    monkeypatch.setenv("DMD_CLIENT_ID", "env-client-id")
+    monkeypatch.setenv("DMD_CLIENT_SECRET", "env-client-secret")
+    monkeypatch.delenv("KEY_VAULT_URL", raising=False)
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+
+    with (
+        patch("app.ops.dmd_cache.SecretClient") as mock_sc,
+        patch("app.ops.dmd_cache.ManagedIdentityCredential") as mock_mi,
+    ):
+        client_id, client_secret = _load_dmd_credentials()
+        assert client_id == "env-client-id"
+        assert client_secret == "env-client-secret"
+        mock_sc.assert_not_called()
+        mock_mi.assert_not_called()
+
+
+def test_load_dmd_credentials_only_client_id_fails_closed(monkeypatch):
+    """2. Only client ID present: fail closed."""
+    from app.ops.dmd_cache import _load_dmd_credentials
+
+    monkeypatch.setenv("DMD_CLIENT_ID", "env-client-id")
+    monkeypatch.delenv("DMD_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("KEY_VAULT_URL", "https://vault.azure.net/")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "azure-client-id")
+
+    with pytest.raises(ValueError, match="Partial dm\\+d credentials"):
+        _load_dmd_credentials()
+
+
+def test_load_dmd_credentials_only_client_secret_fails_closed(monkeypatch):
+    """3. Only client secret present: fail closed."""
+    from app.ops.dmd_cache import _load_dmd_credentials
+
+    monkeypatch.delenv("DMD_CLIENT_ID", raising=False)
+    monkeypatch.setenv("DMD_CLIENT_SECRET", "env-client-secret")
+    monkeypatch.setenv("KEY_VAULT_URL", "https://vault.azure.net/")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "azure-client-id")
+
+    with pytest.raises(ValueError, match="Partial dm\\+d credentials"):
+        _load_dmd_credentials()
+
+
+def test_load_dmd_credentials_from_key_vault_success(monkeypatch):
+    """4. Neither present, valid KV configuration: ManagedIdentityCredential receives exact AZURE_CLIENT_ID, SecretClient uses KEY_VAULT_URL, exact two secret names requested."""
+    from unittest.mock import MagicMock
+
+    from app.ops.dmd_cache import _load_dmd_credentials
+
+    monkeypatch.delenv("DMD_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DMD_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("KEY_VAULT_URL", "https://kv-test.vault.azure.net/")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "mi-client-uuid-1234")
+
+    mock_client = MagicMock()
+    id_bundle = MagicMock()
+    id_bundle.value = "kv-resolved-client-id"
+    secret_bundle = MagicMock()
+    secret_bundle.value = "kv-resolved-client-secret"
+
+    def get_secret_side_effect(name):
+        if name == "dmd-client-id":
+            return id_bundle
+        elif name == "dmd-client-secret":
+            return secret_bundle
+        raise KeyError(name)
+
+    mock_client.get_secret.side_effect = get_secret_side_effect
+
+    with (
+        patch("app.ops.dmd_cache.ManagedIdentityCredential") as mock_mi,
+        patch("app.ops.dmd_cache.SecretClient") as mock_sc,
+    ):
+        mock_sc.return_value.__enter__.return_value = mock_client
+        client_id, client_secret = _load_dmd_credentials()
+
+        assert client_id == "kv-resolved-client-id"
+        assert client_secret == "kv-resolved-client-secret"
+
+        mock_mi.assert_called_once_with(client_id="mi-client-uuid-1234")
+        mock_sc.assert_called_once()
+        assert mock_sc.call_args[1]["vault_url"] == "https://kv-test.vault.azure.net/"
+        assert mock_client.get_secret.call_count == 2
+        mock_client.get_secret.assert_any_call("dmd-client-id")
+        mock_client.get_secret.assert_any_call("dmd-client-secret")
+
+
+def test_load_dmd_credentials_key_vault_unavailable_fails_closed(monkeypatch):
+    """5. Key Vault unavailable: fail closed."""
+    from unittest.mock import MagicMock
+
+    from app.ops.dmd_cache import _load_dmd_credentials
+
+    monkeypatch.delenv("DMD_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DMD_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("KEY_VAULT_URL", "https://kv-test.vault.azure.net/")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "mi-client-uuid-1234")
+
+    mock_client = MagicMock()
+    mock_client.get_secret.side_effect = ConnectionError("Key Vault endpoint unreachable")
+
+    with (
+        patch("app.ops.dmd_cache.ManagedIdentityCredential"),
+        patch("app.ops.dmd_cache.SecretClient") as mock_sc,
+    ):
+        mock_sc.return_value.__enter__.return_value = mock_client
+        with pytest.raises(RuntimeError, match="Failed to retrieve dm\\+d credentials from Key Vault"):
+            _load_dmd_credentials()
+
+
+def test_load_dmd_credentials_one_kv_secret_missing_or_empty_fails_closed(monkeypatch):
+    """6. One KV secret missing/empty: fail closed."""
+    from unittest.mock import MagicMock
+
+    from app.ops.dmd_cache import _load_dmd_credentials
+
+    monkeypatch.delenv("DMD_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DMD_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("KEY_VAULT_URL", "https://kv-test.vault.azure.net/")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "mi-client-uuid-1234")
+
+    mock_client = MagicMock()
+    id_bundle = MagicMock()
+    id_bundle.value = "valid-id"
+    empty_bundle = MagicMock()
+    empty_bundle.value = "   "
+
+    mock_client.get_secret.side_effect = [id_bundle, empty_bundle]
+
+    with (
+        patch("app.ops.dmd_cache.ManagedIdentityCredential"),
+        patch("app.ops.dmd_cache.SecretClient") as mock_sc,
+    ):
+        mock_sc.return_value.__enter__.return_value = mock_client
+        with pytest.raises(ValueError, match="Key Vault secret 'dmd-client-secret' is missing or empty"):
+            _load_dmd_credentials()
+
+
+def test_load_dmd_credentials_no_config_at_all_fails_closed(monkeypatch):
+    """7. No credential configuration at all: fail closed."""
+    from app.ops.dmd_cache import _load_dmd_credentials
+
+    monkeypatch.delenv("DMD_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DMD_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("KEY_VAULT_URL", raising=False)
+    monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+
+    with pytest.raises(
+        ValueError,
+        match="dm\\+d credentials not found in environment and Key Vault configuration is incomplete",
+    ):
+        _load_dmd_credentials()
+
+
+def test_load_dmd_credentials_never_logs_secrets(monkeypatch, caplog):
+    """8. Secrets/tokens never appear in log messages on failure or success."""
+    import logging
+    from unittest.mock import MagicMock
+
+    from app.ops.dmd_cache import _load_dmd_credentials
+
+    monkeypatch.delenv("DMD_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DMD_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("KEY_VAULT_URL", "https://kv-test.vault.azure.net/")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "mi-client-uuid-1234")
+
+    secret_raw = "SUPER_SECRET_VALUE_XYZ"
+    mock_client = MagicMock()
+    mock_client.get_secret.side_effect = RuntimeError(f"Internal error with raw payload: {secret_raw}")
+
+    with (
+        patch("app.ops.dmd_cache.ManagedIdentityCredential"),
+        patch("app.ops.dmd_cache.SecretClient") as mock_sc,
+    ):
+        mock_sc.return_value.__enter__.return_value = mock_client
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(RuntimeError):
+                _load_dmd_credentials()
+
+    for record in caplog.records:
+        assert secret_raw not in record.message
+        assert "SUPER_SECRET" not in record.message
+
+
+def test_terraform_container_app_job_runtime_kv_resolution_invariants():
+    """Verify Container Apps Job does not declare Key Vault secrets directly, but passes KEY_VAULT_URL and AZURE_CLIENT_ID for runtime resolution."""
+    import pathlib
+
+    main_tf = pathlib.Path("infra/main.tf").read_text()
+    job_section = main_tf.split('resource "azurerm_container_app_job" "dmd_warm"')[1].split(
+        'resource "azurerm_logic_app_workflow" "dmd_warm"'
+    )[0]
+
+    # No Container Apps Key Vault secret block exists for dmd-client-id or dmd-client-secret
+    assert "key_vault_secret_id" not in job_section
+    assert 'name                = "dmd-client-id"' not in job_section
+    assert 'name                = "dmd-client-secret"' not in job_section
+
+    # Job container receives KEY_VAULT_URL and AZURE_CLIENT_ID
+    assert 'name  = "KEY_VAULT_URL"' in job_section
+    assert "value = data.azurerm_key_vault.shared_kv.vault_uri" in job_section
+    assert 'name  = "AZURE_CLIENT_ID"' in job_section
+    assert "value = azurerm_user_assigned_identity.dmd_job_mi[0].client_id" in job_section
+
+    # MI remains attached to the Job
+    assert "identity_ids = [azurerm_user_assigned_identity.dmd_job_mi[0].id]" in job_section
+
+    # MI has Key Vault access policy with Get permission
+    policy_section = main_tf.split('resource "azurerm_key_vault_access_policy" "dmd_job_shared_policy"')[1].split(
+        'resource "azurerm_container_app_job" "dmd_warm"'
+    )[0]
+    assert 'secret_permissions = ["Get"]' in policy_section
+    assert "object_id    = azurerm_user_assigned_identity.dmd_job_mi[0].principal_id" in policy_section
+
+    # CA subnet has Microsoft.KeyVault service endpoint
+    ca_subnet_section = main_tf.split('resource "azurerm_subnet" "ca_subnet"')[1].split(
+        'resource "azurerm_user_assigned_identity" "locust_mi"'
+    )[0]
+    assert 'service_endpoints    = ["Microsoft.KeyVault"]' in ca_subnet_section
+
+    # Job remains manual
+    assert "manual_trigger_config {" in job_section
+    assert "replica_retry_limit          = 0" in job_section
