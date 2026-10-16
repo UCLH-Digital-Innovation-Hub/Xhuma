@@ -11,7 +11,7 @@ client = TestClient(app, raise_server_exceptions=False)
 
 
 def test_soap_exception_handler():
-    with patch("app.soap.soap.iti39", side_effect=Exception("Test SOAP Exception")):
+    with patch("app.soap.soap.clean_soap", side_effect=RuntimeError("Test SOAP Exception")):
         # We simulate a hit to a SOAP route to trigger the exception
         response = client.post(
             "/SOAP/iti39",
