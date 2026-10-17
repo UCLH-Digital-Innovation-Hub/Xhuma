@@ -12,7 +12,7 @@ The shared helpers in `app/ccda/helpers.py` distinguish three CDA representation
 
 They share one formatting function, `fhir_to_cda_timestamp`, which reads the original FHIR value using `as_json()`. The FHIR library's `isostring` property can normalise partial dates and lose fractional seconds.
 
-An absent date passed to a typed helper becomes explicitly unknown (`nullFlavor="UNK"`). Clinical mappings that omit an absent endpoint construct their interval directly. Medication duration retains this omission behaviour. Duration and dosing frequency remain separate effective-time elements; medication serialization no longer merges artificial low/high operator objects.
+An absent date passed to a typed helper becomes explicitly unknown (`nullFlavor="UNK"`). Clinical mappings that omit an absent endpoint construct their interval directly. Medication duration retains this omission behaviour. Duration and dosing frequency remain separate effective-time elements; medication serialisation no longer merges artificial low/high operator objects.
 
 These helpers do not choose the clinical date. Allergy onset, authorship, specimen collection and report finalisation retain their separate meanings. The investigation mapping documents the Epic-specific distinction between collection and finalisation.
 
