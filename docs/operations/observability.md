@@ -14,7 +14,7 @@ Xhuma's telemetry pipeline is built upon standard Azure Monitor and OpenTelemetr
 - **OpenTelemetry Instrumentation:** The FastAPI application is instrumented using the OpenTelemetry Python SDK, generating traces, metrics, and structured log events.
 - **Application Insights & Log Analytics:** Each target environment (Play, INT, PRD) routes telemetry to its target-local Log Analytics Workspace and Application Insights component, configured via the target's `APPLICATIONINSIGHTS_CONNECTION_STRING`.
 - **Structured Traces & Dependencies:** Outbound HTTP requests to upstream NHS APIs (PDS, SDS, GP Connect), Redis cache interactions, and PostgreSQL audit operations are tracked as correlated OpenTelemetry dependencies.
-- **Alerting State & Codification:** Alerting is not fully codified across the entire platform. While specific Terraform modules provision targeted alerts and Action Groups (such as for the automated dm+d warmer scheduler when enabled), general platform-wide proactive alerting, paging policies, and triage routing remain partially operator-configured rather than fully automated platform-wide IaC. Operators must maintain active monitoring during critical maintenance windows.
+- **Telemetry and Alerting Boundary:** Xhuma emits telemetry to the configured Azure Monitor/Application Insights environment. Notification routing, escalation, support coverage and response procedures are deployment-specific operator responsibilities. The Terraform implementation supports Azure Monitor alerts for failed scheduler runs/triggers when scheduling is enabled and an operator-supplied Action Group is configured. Alert recipients, paging, and escalation paths are deployment-specific operator configurations rather than intrinsic Xhuma behaviours.
 
 ```mermaid
 flowchart TD
@@ -34,7 +34,7 @@ flowchart TD
         QP[Azure Monitor Query Pack<br/><b>xhuma-operational-diagnostics</b><br/>(Stores 20 KQL Query Definitions)]
     end
 
-    Operator([On-Call Operator]) -->|Applies Query Definitions to Target Telemetry| TargetLA
+    Operator([Authorised Operator]) -->|Applies Query Definitions to Target Telemetry| TargetLA
     QP -.->|Queries executed in context of| TargetLA
 ```
 
@@ -166,6 +166,14 @@ To maintain rigorous, evidence-based operations, operators must avoid overstatin
 > [!IMPORTANT]
 > **Liveness vs Functional Readiness:**  
 > An HTTP 200 on `/health` proves coarse application process liveness only. It does **not** prove end-to-end functional or clinical readiness (e.g. Spine connectivity, valid mTLS certificates, or populated cache keys).
+
+> [!IMPORTANT]
+> **Query Pack vs Alerting System:**  
+> The `xhuma-operational-diagnostics` Query Pack stores KQL query definitions for interactive, on-demand diagnostics. It is **not** an active alerting system, does not monitor thresholds continuously, and does not page or notify operators.
+
+> [!IMPORTANT]
+> **Telemetry Instrumentation vs Active Human Monitoring:**  
+> Xhuma instruments application events and emits OpenTelemetry data to Application Insights. Telemetry instrumentation does **not** constitute active human surveillance, 24/7 monitoring, or a managed operations centre. Operating hours, monitoring coverage, alert routing, and triage workflows are defined by the deploying organisation's operating model.
 
 ---
 

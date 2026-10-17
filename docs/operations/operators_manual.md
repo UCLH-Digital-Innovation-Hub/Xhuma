@@ -7,6 +7,85 @@ For the 20-query KQL diagnostics library, see the [Observability & Diagnostics G
 
 ---
 
+## Table of Contents
+
+- [Operational Responsibility Boundary](#operational-responsibility-boundary)
+  - [Responsibility Matrix](#responsibility-matrix)
+  - [Core Assurance Distinctions](#core-assurance-distinctions)
+- [1. Environment Architecture & Promotion Model](#1-environment-architecture--promotion-model)
+  - [Target Mapping and Resources](#target-mapping-and-resources)
+- [2. Infrastructure Bootstrapping and State Storage](#2-infrastructure-bootstrapping-and-state-storage)
+  - [2.1 Bootstrapping Procedure](#21-bootstrapping-procedure)
+- [3. Azure Service Principal & Permissions](#3-azure-service-principal--permissions)
+- [4. Setting Up Variables and GitHub Environments](#4-setting-up-variables-and-github-environments)
+  - [4.1 Matrix Deployment Workflow](#41-matrix-deployment-workflow)
+- [5. Key Vault Population](#5-key-vault-population)
+- [6. Deployment Orchestration and Review Gates](#6-deployment-orchestration-and-review-gates)
+  - [6.1 Continuous Integration and Build Controls](#61-continuous-integration-and-build-controls)
+  - [6.2 First Deployment & Protected Plans](#62-first-deployment--protected-plans)
+  - [6.3 Terraform Plan Review Before Approval](#63-terraform-plan-review-before-approval)
+  - [6.4 Plan Retries & Image Deployment](#64-plan-retries--image-deployment)
+  - [6.5 Digest Rollback & Recovery Controls](#65-digest-rollback--recovery-controls)
+- [7. Verification and Health Checks](#7-verification-and-health-checks)
+  - [7.1 Safe Verification Boundaries](#71-safe-verification-boundaries)
+  - [7.2 Post-Deployment Health Verification](#72-post-deployment-health-verification)
+  - [7.3 Key Vault Reference Verification](#73-key-vault-reference-verification)
+  - [7.4 HSCN Relay Observability & Diagnostics](#74-hscn-relay-observability--diagnostics)
+- [8. Shared Infrastructure Adoption (Terraform)](#8-shared-infrastructure-adoption-terraform)
+- [9. Operational Observability & Shared Query Pack](#9-operational-observability--shared-query-pack)
+  - [9.1 Shared Azure Monitor Query Pack](#91-shared-azure-monitor-query-pack)
+  - [9.2 Key Operational Boundaries](#92-key-operational-boundaries)
+  - [9.3 How to Run Queries](#93-how-to-run-queries)
+- [10. dm+d Cache Warmer Operations and Diagnostics](#10-dmd-cache-warmer-operations-and-diagnostics)
+  - [10.1 Operational State Across Environments](#101-operational-state-across-environments)
+  - [10.2 Terminology Publication Schedule & Operational Timing](#102-terminology-publication-schedule--operational-timing)
+  - [10.3 Release-Freshness Operational Caveat](#103-release-freshness-operational-caveat)
+  - [10.4 Scheduler State & Manual Triggering](#104-scheduler-state--manual-triggering)
+  - [10.5 Proven Safety Invariants](#105-proven-safety-invariants)
+  - [10.6 Trigger Manual Job Execution](#106-trigger-manual-job-execution)
+  - [10.7 Check Execution Status & Logs](#107-check-execution-status--logs)
+  - [10.8 Operational Failure Modes and Recovery](#108-operational-failure-modes-and-recovery)
+  - [10.9 First-Environment Warmer Commissioning Sequence](#109-first-environment-warmer-commissioning-sequence)
+- [11. Quick Operator Commands](#11-quick-operator-commands)
+- [12. Assurance and Evidence Records](#12-assurance-and-evidence-records)
+
+---
+
+## Operational Responsibility Boundary
+
+Xhuma provides the application, infrastructure-as-code, and observability controls implemented in this repository. Deployment-specific operational arrangements are defined by the local deploying organisation's operating model, including:
+- **Support Hours & Coverage:** The local organisation determines operational support hours (e.g. core business hours vs extended coverage); Xhuma does not encode a 24/7 or continuous human monitoring service.
+- **Alert Recipients & Action Groups:** Xhuma provisions telemetry emitters and metric alert primitives. Notification routing, alert destinations, and Azure Monitor Action Groups are supplied by the operator.
+- **Escalation Routes & Paging:** Incident triage, on-call rotas, paging policies, and escalation paths are defined by the local organisation's IT service management procedures.
+- **Incident Management:** Severity classification, communication channels, major incident handling, and post-incident reviews belong to the deploying entity.
+- **Service Ownership & Access Groups:** Azure RBAC assignments, Microsoft Entra ID security groups, key vault access approval, and repository access control are managed under local organizational governance.
+
+### Responsibility Matrix
+
+| Xhuma Provides (Repository Controls) | Operator Configures (Local Operating Model) |
+| :--- | :--- |
+| **Structured Application Telemetry** (OpenTelemetry traces, metrics, structured logs) | Log Analytics workspace data retention, daily cap, and ingestion policies |
+| **Azure Monitor & Application Insights Integration** | Environment access controls, Azure RBAC assignments, and log access permissions |
+| **Standardised Diagnostic Query Pack** (`xhuma-operational-diagnostics`, 20 KQL queries) | Authorised operator access, query execution, and diagnostic triage workflows |
+| **dm+d Scheduler Failure Alert Resources** (`RunsFailed`, `TriggersFailed` metric alerts) | Azure Monitor Action Groups (`dmd_cache_alert_action_group_ids`), notification channels, and on-call routing |
+| **Coarse Process Liveness Endpoint** (`/health` returning `{"status":"ok"}`) | External synthetic monitoring probes, clinical uptime alerting, and end-to-end synthetic checks |
+| **Deployment Safety Gates** (linting, pytest, Trivy scans, plan hashing, drift fail-closed checks) | GitHub Environment protection policies, designated human plan/apply reviewers, and change advisory processes |
+| **Digest Rollback Commands & Image Manifests** | Support hours, rollback authorisation, escalation routes, and incident response procedures |
+| **Immutable PostgreSQL Audit Trail Persistence** | Audit log review cadence, regulatory compliance audits, and long-term retention policies |
+
+### Core Assurance Distinctions
+
+To ensure audit safety under NHS England and SCAL assurance frameworks, operators and auditors must preserve these distinctions:
+
+1. **Query Pack != Alerting System:** The shared diagnostic Query Pack (`xhuma-operational-diagnostics`) provides 20 pre-written KQL query definitions for interactive troubleshooting. It is **not** an automated alerting system; it does not evaluate conditions continuously, trigger pages, or route incident notifications.
+2. **`/health` != End-to-End Clinical Readiness:** The `/health` endpoint is unauthenticated and returns a coarse HTTP 200 process-liveness signal confirming that the Python Uvicorn worker is running. It does **not** probe Spine connectivity, SDS directory routing, GP Connect reachability, Redis cache contents, or mTLS certificate validity.
+3. **Scheduler Failure Alerts != Release-Freshness Watchdog:** The Terraform-supported metric alerts (`la_runs_failed`, `la_triggers_failed`) trigger only when an automated Logic App execution or trigger reports an infrastructure failure. They do **not** verify whether NHS England published an expected new release or whether the cached data is fresh.
+4. **`warm_succeeded` != Proof of New Weekly Release:** A `warm_succeeded` event confirms that the warmer completed a technical caching cycle for the terminology release visible at runtime. If upstream release publication was delayed, `warm_succeeded` may reflect re-warming of the existing active release.
+5. **Telemetry Instrumentation != Active Human Monitoring:** Xhuma instruments code paths and emits telemetry to Azure Monitor / Application Insights. Emitting telemetry does not imply active human surveillance, 24/7 monitoring, or an active network operations centre.
+6. **Rollback Controls != Formal Disaster-Recovery Service:** The container digest rollback procedure provides tactical operational recovery from a defective container deployment. It is not an enterprise business continuity, geo-redundant failover, or disaster-recovery service.
+
+---
+
 ## 1. Environment Architecture & Promotion Model
 
 Xhuma operates a strict pull-request-based promotion model. Code merges into branch streams, triggering automated matrix deployment pipelines (`.github/workflows/matrix-deploy.yml`):
@@ -203,9 +282,9 @@ jq -r '
 ![Play Deploy Digest](../assets/play-deploy-digest.png)
 *Figure 7 — Application image deployed deterministically using exact immutable SHA-256 digest.*
 
-### 6.5 Digest Rollback & Recovery
+### 6.5 Digest Rollback & Recovery Controls
 
-1. **Recovery Ownership**: If a deployment introduces regressions, authorized operators can perform a rollback.
+1. **Recovery Ownership**: If a deployment introduces regressions, authorized operators can perform a rollback. Digest rollback provides tactical container recovery for defective deployments; it is not an enterprise disaster-recovery or database point-in-time recovery service.
 2. **Rollback Procedure**:
    - Identify the previous known-good digest from the deployment step summary.
    - Manually redeploy the previous digest via Azure CLI:
@@ -301,6 +380,7 @@ Operational diagnostics across Play, INT, and PRD are standardised through a sha
 1. **Stores Queries, Not Telemetry:** The Query Pack stores KQL query definitions only; it does not store logs, aggregate telemetry, or create an extra Log Analytics Workspace.
 2. **Scoping:** The exact same queries are executed in the context of the target environment's Log Analytics Workspace or Application Insights component.
 3. **RBAC Isolation:** Access to the Query Pack and access to underlying telemetry are separate. An operator must have reader permissions on the target resource group to view telemetry.
+4. **Diagnostic Tool != Alerting System:** The Query Pack is an on-demand investigative tool for interactive troubleshooting. It does not actively evaluate alerts, page operators, or route incident notifications. Notification routing, escalation, and incident response procedures are local operator responsibilities.
 
 ### 9.3 How to Run Queries
 1. Open the [Azure Portal](https://portal.azure.com).
@@ -355,6 +435,7 @@ The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azur
 ### 10.4 Scheduler State & Manual Triggering
 
 - **Scheduler Implementation:** The automated Azure Logic App scheduling path exists in Terraform (`infra/main.tf`), but `dmd_cache_schedule_enabled` is **deliberately blocked by fail-closed assertions** (`condition = !var.dmd_cache_schedule_enabled`) pending acceptance of the missed-success/freshness watchdog. Automated scheduling is not active in any environment.
+- **Scheduler Alerting Primitives:** The Terraform implementation supports Azure Monitor alerts for failed scheduler runs/triggers (`azurerm_monitor_metric_alert.la_runs_failed` and `la_triggers_failed`) when scheduling is enabled and an operator-supplied Action Group is configured (`dmd_cache_alert_action_group_ids`). Alert destinations and notification routing are operator-supplied configurations.
 - **Warmer Infrastructure Enabled != Scheduler Enabled:** The Container Apps Job remains manually triggerable via CLI or Azure Portal even when automatic recurrence is disabled.
 
 ### 10.5 Proven Safety Invariants

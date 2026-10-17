@@ -338,6 +338,10 @@ Xhuma's production telemetry foundation consists of:
 - **Shared Azure Monitor Query Pack:** Cross-target operational diagnostics via `xhuma-operational-diagnostics` in the shared Xhuma Azure services scope;
 - **Operational Diagnostic Guide:** Detailed in [Observability & Diagnostics Guide](../operations/observability.md).
 
+> [!NOTE]
+> **Operational Responsibility Boundary:** Xhuma emits telemetry to the configured Azure Monitor/Application Insights environment. Notification routing, escalation paths, support coverage, and incident response procedures are deployment-specific operator responsibilities.
+
+
 ---
 
 ## Deployment Architecture

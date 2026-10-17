@@ -65,7 +65,7 @@ flowchart TD
     PG[(Target PostgreSQL Metrics)] -->|Azure Monitor Metrics| LAW
     
     LAW -->|Analysed via 20 KQL Queries| QP[Shared Query Pack: xhuma-operational-diagnostics]
-    QP --> Operator([On-Call Operator])
+    QP --> Operator([Authorised Operator])
 ```
 
 ### 2.2 Application Logging and PHI Minimisation Flow
