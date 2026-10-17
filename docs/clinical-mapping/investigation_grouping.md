@@ -196,7 +196,7 @@ Caption timestamps use the common specimen collection instant when all reference
 
 Explicit report and observation performer references to Organization resources can add a “Performing laboratory / organisation” table containing name, scope, address and contact details, with widths of 25%, 25%, 30% and 20%. Aliases are deduplicated by resource identity. Observation-level organisations remain labelled with their result names. Unrelated organisations, practitioners and unresolved references do not produce invented laboratory details. These details are narrative additions; structured performer mapping is separate work.
 
-The [comparison CCDAs](assurance/evidence/investigation-grouping-comparison/README.md) show the reviewed before-and-after behaviour. The [assessment](assurance/evidence/2026-09-29-investigations-assessment.md) records the original findings and wider converter issues; it is historical evidence rather than a description of the current grouping code.
+The [comparison CCDAs](../assurance/evidence/investigation-grouping-comparison/README.md) show the reviewed before-and-after behaviour. The [assessment](../assurance/evidence/2026-09-29-investigations-assessment.md) records the original findings and wider converter issues; it is historical evidence rather than a description of the current grouping code.
 
 For clinical review, check that group headings describe their linked tests, comments remain with the correct result or group, transferred headings retain their children, and flat reports do not imply unsupported relationships. A successful XML conversion alone does not confirm clinical correctness or Epic display behaviour.
 
@@ -275,7 +275,7 @@ These measurements describe the grouping implementation reviewed on 1 October 20
 
 ### Baseline: repeated graph preparation
 
-Before the shared-graph change, [`group_investigation()`](../app/ccda/entries/investigation_grouping.py) rebuilt its observation identity map, other-report roots and relationship edges for every diagnostic report. Each call scanned the bundle index, including aliases, and the observations' `has-member` and `derived-from` relationships. Scope expansion repeatedly scanned all edges until no more observations entered the report, followed by another edge scan to build groups and comments. The shared-graph implementation retains those traversal scans to preserve ordering, while removing the repeated preparation.
+Before the shared-graph change, [`group_investigation()`](../../app/ccda/entries/investigation_grouping.py) rebuilt its observation identity map, other-report roots and relationship edges for every diagnostic report. Each call scanned the bundle index, including aliases, and the observations' `has-member` and `derived-from` relationships. Scope expansion repeatedly scanned all edges until no more observations entered the report, followed by another edge scan to build groups and comments. The shared-graph implementation retains those traversal scans to preserve ordering, while removing the repeated preparation.
 
 For R reports, N index entries, D report-result references scanned through the index and E observation relationships, the baseline repeated preparation was approximately O(R × (N + D + E)). Scope expansion adds full-edge passes whose number depends on link depth and source ordering. List membership checks used for deduplication can add further cost for large panels. Doubling the number of reports and observations can therefore require substantially more than twice the grouping work.
 
@@ -292,7 +292,7 @@ The timings demonstrate superlinear growth in this experiment. They are not prod
 
 ### Implemented shared investigation graph
 
-[`build_investigation_graph(index)`](../app/ccda/entries/investigation_grouping.py) now prepares an `InvestigationGraph` from the complete bundle reference index. [`convert_bundle()`](../app/ccda/fhir2ccda.py) builds it on reaching the first non-empty investigation section, then passes the same graph to every report and any subsequent investigation sections. Bundles with no investigation entries do not build a graph.
+[`build_investigation_graph(index)`](../../app/ccda/entries/investigation_grouping.py) now prepares an `InvestigationGraph` from the complete bundle reference index. [`convert_bundle()`](../../app/ccda/fhir2ccda.py) builds it on reaching the first non-empty investigation section, then passes the same graph to every report and any subsequent investigation sections. Bundles with no investigation entries do not build a graph.
 
 The graph contains:
 
@@ -333,7 +333,7 @@ Shared preparation remains O(N + D + E). For a report with Vᵣ reachable observ
 
 ### Measured effect of indexed traversal
 
-The [raw A/B measurements](investigation-indexed-benchmark-2026-10-01.json) compare the working-tree shared-graph implementation immediately before this change with indexed traversal. The baseline source hash is recorded because it included earlier uncommitted work. These are medians of nine alternating A/B runs, after warm-up, on Python 3.14.7. Independent copies of the 452-resource fixture have IDs and references rewritten before parsing. Timings include one shared graph build plus grouping all reports, and exclude parsing, rendering, serialization and external I/O. Individual stage medians need not sum to the median total.
+The [raw A/B measurements](../reference/investigation-indexed-benchmark-2026-10-01.json) compare the working-tree shared-graph implementation immediately before this change with indexed traversal. The baseline source hash is recorded because it included earlier uncommitted work. These are medians of nine alternating A/B runs, after warm-up, on Python 3.14.7. Independent copies of the 452-resource fixture have IDs and references rewritten before parsing. Timings include one shared graph build plus grouping all reports, and exclude parsing, rendering, serialization and external I/O. Individual stage medians need not sum to the median total.
 
 | Resources | Reports | Before: shared graph + grouping | After: indexed graph + grouping | Speedup |
 | --- | ---: | ---: | ---: | ---: |
@@ -368,6 +368,6 @@ Investigation grouping and result rendering perform CPU work without network I/O
 
 Continue reducing repeated traversal work first. If large conversions still delay requests, evaluate a bounded process pool or separate conversion workers, including queue limits, serialization costs, cancellation behavior and the deployment's relay constraints. Avoid creating an unbounded task or process for every report.
 
-Separate timings now cover index construction, shared graph preparation, per-report grouping, post-grouping result rendering and XML/base64 serialization, alongside an event-loop delay probe. See [the updated pipeline profile and monitoring guide](benchmarking.md#reprofile-1-october-2026) for measurements, instrument names and a repeatable offline profiling command. The reprofile still found an approximately 865 ms heartbeat gap during four concurrent conversions of the 452-resource fixture.
+Separate timings now cover index construction, shared graph preparation, per-report grouping, post-grouping result rendering and XML/base64 serialization, alongside an event-loop delay probe. See [the updated pipeline profile and monitoring guide](../operations/benchmarking.md#reprofile-1-october-2026) for measurements, instrument names and a repeatable offline profiling command. The reprofile still found an approximately 865 ms heartbeat gap during four concurrent conversions of the 452-resource fixture.
 
 Continue validating on supplier fixtures and synthetic bundles with increasing report count, relationship depth, alias count and shared observations. Track event-loop delay, peak memory and output equivalence alongside latency; fixed wall-clock thresholds in ordinary unit tests would be unreliable.

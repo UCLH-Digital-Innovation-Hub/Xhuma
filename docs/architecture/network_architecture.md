@@ -4,13 +4,20 @@ This document provides an overview of the Xhuma middleware network architecture.
 
 ## 1. Cloud Infrastructure (Azure)
 
-Xhuma's cloud infrastructure is provisioned via Terraform (`infra/main.tf`). The infrastructure is hosted on Microsoft Azure within a centralised Resource Group.
+Xhuma's cloud infrastructure is provisioned via Terraform (`infra/main.tf`). The infrastructure is hosted on Microsoft Azure across target-isolated resource groups (`rg-xhuma-play`, `rg-xhuma-int`, `rg-xhuma-prd`), with centrally managed shared services maintained in a dedicated shared resource group (`rg-xhuma-shared`).
 
 ### Azure Components
-* **App Service (Linux Web App):** The main API container host. It runs the Dockerised FastAPI application and serves incoming HTTP/SOAP traffic over TLS. WebSockets are enabled to support outbound tunnelling.
-* **PostgreSQL Flexible Server:** Provides persistent relational storage for audit logging and service configuration. It is protected by internal Azure firewall rules.
-* **Redis Cache:** A managed memory cache used for storing transient data such as NHS OAuth Tokens, PDS demographic lookups, and generated CCDA documents to reduce redundant NHS API calls.
-* **Observability Foundations:** Azure Application Insights and a Log Analytics Workspace are used to store OpenTelemetry metrics, traces, and application logs. (Note: These provide telemetry foundations, but proactive alert routing and escalation remain outstanding).
+* **Target-Local Resource Groups (`rg-xhuma-<target>`):**
+  * **App Service (Linux Web App):** The main API container host (`python:3.13-slim`). It runs the Dockerised FastAPI application and serves incoming HTTP/SOAP traffic over TLS. WebSockets are enabled to support outbound tunnelling.
+  * **PostgreSQL Flexible Server:** Dedicated target-local relational storage for clinical audit logging and service configuration, protected by private VNet integration (`db-subnet`).
+  * **Azure Cache for Redis:** Managed in-memory cache partitioned into DB 0 (CCDA documents), DB 1 (PDS/SDS lookups), and DB 2 (pre-warmed dm+d terminology), protected by TLS and target VNet firewalls.
+  * **Target Virtual Network & Subnets:** Dedicated target VNet containing `app-subnet` (App Service integration), `db-subnet` (delegated to PostgreSQL), and `ca-subnet` (delegated to Container Apps Environment for dm+d warmer).
+  * **Local Key Vault:** Stores target-specific certificate bundles (such as `epic-ca-cert`).
+  * **Target Observability:** Target-local Log Analytics Workspace and Application Insights component capturing OpenTelemetry traces, dependencies, and application logs.
+* **Shared Resource Group (`rg-xhuma-shared`):**
+  * **Shared Key Vault:** Centrally managed vault holding NHS API credentials, signing keys, and dm+d client credentials, accessible only from authorized target subnets via guarded network ACLs.
+  * **Public JWKS Blob Storage:** Static `$web` storage publishing the public JSON Web Key Set for upstream NHS token verification.
+  * **Operational Diagnostics Query Pack:** Standardised cross-target query definitions (`xhuma-operational-diagnostics`).
 
 ---
 

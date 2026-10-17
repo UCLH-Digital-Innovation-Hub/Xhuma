@@ -15,10 +15,15 @@ A single end-to-end clinical query traverses several independent trust boundarie
    - **Type:** Client certificate mapped to `MTLS_TRUSTED_THUMBPRINTS`.
    - **Verification:** Xhuma confirms the thumbprint against an explicit allowlist.
 
-3. **Epic SAML Assertion (Signing Identity)**
-   - **Role:** Provides the clinical user's identity and context (XSPA).
-   - **Validation:** Xhuma strictly validates the `Issuer` against `SAML_TRUSTED_ISSUER`.
-   - **Note:** In version 0.9.2, SAML trust relies on the authenticated Epic mTLS tunnel + explicit issuer allowlisting. Full cryptographic XML-DSig verification is deferred to 0.9.3.
+3. **Epic SAML Assertion (Identity and Context)**
+   - **Role:** Provides the clinical user's identity, role, and healthcare purpose context (XSPA).
+   - **Current Trust Model:**
+     - Inbound transport is authenticated through Epic mTLS.
+     - SAML assertion presence and XML structure are strictly validated.
+     - The assertion `Issuer` is verified against an explicit trusted issuer allow-list (`SAML_TRUSTED_ISSUER`).
+     - Required clinical and XSPA context attributes (subject ID, role, purpose of use) are validated.
+     - Independent cryptographic SAML XML-DSig signature verification is not currently implemented; transport-level mTLS and issuer allowlisting govern assertion authenticity.
+   - **Future Hardening:** Independent cryptographic XML-DSig verification is documented as a planned future hardening consideration.
 
 4. **NHS API Platform API Key & JWT Signing Key (JWKS)**
    - **Role:** Authenticates Xhuma to the NHS API Platform (PDS).
