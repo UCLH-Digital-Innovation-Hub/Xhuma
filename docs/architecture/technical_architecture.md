@@ -300,14 +300,11 @@ The warmer is designed as **standard target-local operational infrastructure** a
   $$\text{discover} \longrightarrow \text{warm} \longrightarrow \text{verify} \longrightarrow \text{activate} \longrightarrow \text{retire naturally by TTL}$$
   New release keys are versioned (`dmd:resolved:v1:<release>:<concept_id>`). The active pointer (`dmd:active-release`) is atomically updated only after full verification. The prior release is not deleted; old keys age out naturally under their 9-day TTL. `FLUSHDB` and wildcard `KEYS *` are strictly prohibited.
 
-### Release-Freshness and Scheduler Watchdog
+### Release-Freshness and Scheduler Monitoring
 
-A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. In Xhuma 1.0.0, an independent missed-success and release-freshness watchdog alert (`azurerm_monitor_scheduled_query_rules_alert_v2.dmd_warm_watchdog`) monitors Log Analytics telemetry (`ContainerAppConsoleLogs_CL`) across the Monday operating window:
+INT and PRD schedule the target-local dm+d warmer for Monday 05:00 UK local time. Logic App trigger and run failures are routed through Azure Monitor to the operator-supplied Action Group (`azurerm_monitor_metric_alert.la_triggers_failed`, `la_runs_failed`). First-environment commissioning remains manual. Release freshness is verified operationally after the first scheduled cycle; automated freshness alerting is deferred until its telemetry query is proven against Play.
 
-1. **Missed Success:** Detects if no successful `warm_succeeded` event was logged in the preceding 24 hours during the active Monday window.
-2. **Release Freshness Failure:** Detects if a warm succeeded but `release_advanced == false` (indicating that the newly active release did not advance from the prior release).
-
-The watchdog evaluates starting at 06:00 UK local time (providing operational headroom after the 05:00 recurrence). It operates independently of Logic App execution metrics (`RunsFailed`/`TriggersFailed`), ensuring alerts fire even if the orchestrator completed successfully while failing to obtain an advanced upstream release. Alert destinations are plumbed via the environment-protected GitHub secret `DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON`. First commissioning of any target remains manual before unattended operation is accepted.
+A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. The warmer Container Apps Job can also be triggered manually via CLI or Azure Portal.
 
 ### Proven Safety Invariants
 
