@@ -301,3 +301,28 @@ def test_migration_guard_jq_replace_paths_diagnostics(tmp_path):
     assert "SENSITIVE_OLD_VALUE" not in output
     assert "SENSITIVE_NEW_VALUE" not in output
     assert "SECRET_PASSWORD" not in output
+
+
+def test_dmd_action_group_workflow_wiring():
+    workflow_path = ".github/workflows/matrix-deploy.yml"
+    with open(workflow_path, "r") as f:
+        content = f.read()
+    workflow = yaml.safe_load(content)
+
+    # 1. Custom validation step and script call are strictly absent
+    assert "validate_action_groups.py" not in content, "Custom action group validator script must not be called"
+    assert "Validate dm+d Action Group Configuration" not in content, "Validator step must be absent"
+
+    # 2. Plan step wires TF_VAR_dmd_cache_alert_action_group_ids directly with safe [] fallback
+    infra_plan_job = workflow["jobs"]["infra-plan"]
+    plan_step = None
+    for step in infra_plan_job["steps"]:
+        if step.get("name") == "Terraform Plan":
+            plan_step = step
+            break
+    assert plan_step is not None, "Terraform Plan step must exist"
+    env_vars = plan_step.get("env", {})
+    action_group_wiring = env_vars.get("TF_VAR_dmd_cache_alert_action_group_ids")
+    assert action_group_wiring == "${{ secrets.DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON || '[]' }}", (
+        "Action group IDs must be wired directly from secret with safe [] fallback"
+    )

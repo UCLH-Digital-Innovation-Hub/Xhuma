@@ -284,16 +284,12 @@ The warmer is designed as **standard target-local operational infrastructure** a
 - Resolves dm+d credentials (`dmd-client-id`, `dmd-client-secret`) at runtime from the shared Key Vault using the Job's user-assigned managed identity.
 - Exposes no public control endpoint.
 
-### Operational State vs Required v1.0 Baseline
+### Configured Target Baseline in v1.0
 
-- **Current Repository State:**
-  - Play: Warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler disabled.
-  - INT: Warmer infrastructure currently disabled by target configuration/default; scheduler disabled.
-  - PRD: Warmer infrastructure currently disabled by target configuration/default; scheduler disabled.
-- **Required v1.0 Operational Baseline:**
-  - Play: Warmer infrastructure enabled.
-  - INT: **Warmer infrastructure MUST be explicitly enabled** (`dmd_cache_warm_enabled = true` in INT target configuration tfvars).
-  - PRD: **Warmer infrastructure MUST be explicitly enabled** (`dmd_cache_warm_enabled = true` in PRD target configuration tfvars).
+- **Configured Target Baseline in v1.0:**
+  - Play: Target-local warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler disabled (`dmd_cache_schedule_enabled = false`). Play remains the manually exercised non-production warmer target.
+  - INT: Target-local warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler temporarily disabled (`dmd_cache_schedule_enabled = false`) pending operator RBAC commissioning. Inherits default dm+d endpoint.
+  - PRD: Target-local warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler temporarily disabled (`dmd_cache_schedule_enabled = false`) pending operator RBAC commissioning. Retains explicit production direct-care endpoint (`https://ontology.nhs.uk/production2/fhir`).
   - Note: The global Terraform default remains `false`; enablement is deliberate per target.
 
 ### Terminology Publication & Warm Schedule
@@ -304,11 +300,11 @@ The warmer is designed as **standard target-local operational infrastructure** a
   $$\text{discover} \longrightarrow \text{warm} \longrightarrow \text{verify} \longrightarrow \text{activate} \longrightarrow \text{retire naturally by TTL}$$
   New release keys are versioned (`dmd:resolved:v1:<release>:<concept_id>`). The active pointer (`dmd:active-release`) is atomically updated only after full verification. The prior release is not deleted; old keys age out naturally under their 9-day TTL. `FLUSHDB` and wildcard `KEYS *` are strictly prohibited.
 
-### Release-Freshness and Scheduler Watchdog
+### Release-Freshness and Scheduler Monitoring
 
-A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. It is therefore combined with release-freshness monitoring before unattended weekly scheduling is enabled.
+In Xhuma 1.0.0, target-local warmer infrastructure is standard in Play, INT, and PRD (`dmd_cache_warm_enabled = true`), while automated weekly recurrence is temporarily deferred across all targets (`dmd_cache_schedule_enabled = false`) pending operator RBAC and Action Group commissioning. Initial commissioning and the first Monday refresh are performed manually. This operational deferral does not block Xhuma application operation or manual terminology cache warming.
 
-The scheduler implementation remains deliberately disabled pending acceptance of the missed-success/release-freshness watchdog. Existing Logic App failure metrics detect execution failures; the additional watchdog is required to distinguish successful execution from successful acquisition of the expected new upstream release. The warmer Container Apps Job can be triggered manually via CLI or Azure Portal while automated recurrence remains disabled.
+The underlying Logic App workflow, recurrence trigger, custom job-operator role, and failure alerts (`la_triggers_failed`, `la_runs_failed`) remain implemented in Terraform (`infra/main.tf`) and will be enabled in a subsequent operational update once target authorization permissions are established. A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. The warmer Container Apps Job can be triggered manually via CLI or Azure Portal.
 
 ### Proven Safety Invariants
 

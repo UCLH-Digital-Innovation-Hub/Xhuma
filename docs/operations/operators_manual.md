@@ -397,17 +397,38 @@ The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azur
   $$\text{discover} \longrightarrow \text{warm} \longrightarrow \text{verify} \longrightarrow \text{activate} \longrightarrow \text{retire naturally by TTL}$$
   New release keys are versioned (`dmd:resolved:v1:<release>:<concept_id>`). The active release pointer (`dmd:active-release`) is atomically updated only after full verification. The prior release is not destructively deleted; old keys expire naturally under their 9-day TTL. **Never describe normal dm+d operation as a "purge".** `FLUSHDB` and wildcard `KEYS *` are strictly prohibited.
 
-### 10.3 Release-Freshness and Scheduler Watchdog
+### 10.3 Release-Freshness and Operational Verification
 
-A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. It is therefore combined with release-freshness monitoring before unattended weekly scheduling is enabled.
+In Xhuma 1.0.0, target-local dm+d warmer infrastructure is standard in Play, INT, and PRD (`dmd_cache_warm_enabled = true`), while automated weekly recurrence remains temporarily deferred across all targets (`dmd_cache_schedule_enabled = false`) pending operator RBAC and Action Group commissioning. Initial environment commissioning and the first Monday terminology refresh are executed manually. This operational deferral does not block Xhuma application operation, SOAP/FHIR/C-CDA processing, or manual terminology cache warming.
 
-The scheduler implementation remains deliberately disabled pending acceptance of the missed-success/release-freshness watchdog. Existing Logic App failure metrics detect execution failures; the additional watchdog is required to distinguish successful execution from successful acquisition of the expected new upstream release.
+A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. The existing completion event reports:
+- `event: "warm_succeeded"`
+- `release`
+- `duration_seconds`
+- `concept_count`
+- `memory_delta_bytes`
+- `evictions`
 
-### 10.4 Scheduler State & Manual Triggering
+#### Manual Operational Freshness Verification
 
-- **Scheduler Enablement Guard:** The automated Azure Logic App scheduling path exists in Terraform (`infra/main.tf`), but `dmd_cache_schedule_enabled` is blocked by fail-closed assertions (`condition = !var.dmd_cache_schedule_enabled`) pending acceptance of the release-freshness watchdog.
-- **Scheduler Alerting Primitives:** The Terraform implementation supports Azure Monitor alerts for failed scheduler runs/triggers (`azurerm_monitor_metric_alert.la_runs_failed` and `la_triggers_failed`) when scheduling is enabled and an operator-supplied Action Group is configured (`dmd_cache_alert_action_group_ids`). Alert destinations and notification routing are configured through the local organisation's operating model.
-- **Manual Execution Availability:** The warmer Container Apps Job can be triggered manually via CLI or Azure Portal even while automated recurrence remains disabled.
+When commissioning a target or executing the manual Monday refresh, the operator verifies:
+1. the Container Apps Job execution reached `Succeeded`;
+2. a `warm_succeeded` completion event exists in Log Analytics;
+3. the completion time matches the operating window;
+4. concept counts are complete;
+5. eviction delta is zero;
+6. active release pointer is present;
+7. active release TTL is healthy;
+8. distributed lock is released;
+9. direct resolved cache read succeeds;
+10. the active release is compared with the previously recorded release and the expected upstream weekly release.
+
+### 10.4 Scheduler State & Follow-up Enablement
+
+- **Warmer Configuration by Target:** In Xhuma 1.0.0, target-local warmer infrastructure is standard in Play, INT, and PRD (`dmd_cache_warm_enabled = true`), while automated scheduling is disabled for all targets (`dmd_cache_schedule_enabled = false`).
+- **Generic Scheduler Implementation Preserved:** The underlying Azure Logic App workflow, trigger recurrence, custom role definition, role assignment, and failure alert resources remain implemented in Terraform (`infra/main.tf`). Because `dmd_cache_schedule_enabled = false`, these resources evaluate to `count = 0` and are not provisioned during the v1.0 release. Automated scheduling will be enabled through a small operational follow-up once deployment identity authorization permissions are established.
+- **Action Group Secret Prerequisite:** The workflow wires `DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON` directly to `TF_VAR_dmd_cache_alert_action_group_ids` with a safe `[]` fallback during Terraform planning. When scheduling is later enabled for INT or PRD, valid operator-supplied Action Group IDs must be populated in `<target>-plan`.
+- **Manual Commissioning Requirement:** Automated recurrence is designed for ongoing renewal, not initial commissioning. Every target must be manually commissioned and verified using the sequence in Section 10.9 before unattended operation is accepted.
 
 ### 10.5 Proven Safety Invariants
 
@@ -478,7 +499,7 @@ When commissioning the warmer for the first time in an environment (or verifying
 9. **Verify distributed lock released:** Confirm `dmd:warm:v1:lock` is no longer held.
 10. **Verify direct resolved-cache read:** Probe a resolved concept key in Redis DB 2 to confirm data presence.
 11. **Verify a real application path produces a resolved terminology cache hit:** Execute an ITI-38 document conversion request and verify telemetry records a cache hit without an outbound HTTP call to the NHS Terminology Server.
-12. **Only then consider automated recurrence commissioning:** Do not enable automated scheduler recurrence until all preceding steps succeed and freshness watchdog monitoring is accepted.
+12. **Only then consider automated recurrence commissioned:** First target acceptance is confirmed only after all preceding manual verification steps succeed and release freshness is verified operationally after the first scheduled Monday cycle.
 
 ---
 

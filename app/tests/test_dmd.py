@@ -2141,18 +2141,37 @@ async def test_concept_with_missing_code_or_display_fails_closed(mock_snomed):
 # ==============================================================================
 
 
-def test_terraform_schedule_enabled_is_blocked_and_safeguards_active():
-    """Verify infra/main.tf asserts !var.dmd_cache_schedule_enabled and variables default to false."""
+def test_terraform_scheduler_invariants_and_unconditional_blocker_removed():
+    """Verify infra/main.tf removes old unconditional schedule blocker while retaining invariants."""
     import pathlib
+    import re
 
     main_tf = pathlib.Path("infra/main.tf").read_text()
-    assert main_tf.count("condition     = !var.dmd_cache_schedule_enabled") >= 2
-    assert "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog" in main_tf
+    # Unconditional blocker removed (only conditional invariants using || remain)
+    assert not re.search(r"condition\s*=\s*!var\.dmd_cache_schedule_enabled\s*$", main_tf, re.MULTILINE)
+    assert "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog" not in main_tf
+
+    # Invariants retained
+    assert "dmd_cache_schedule_enabled requires dmd_cache_warm_enabled to be true" in main_tf
+    assert "dmd_cache_schedule_start_time is required when dmd_cache_schedule_enabled is true" in main_tf
+    assert (
+        "At least one alert action group ID is required in dmd_cache_alert_action_group_ids when dmd_cache_schedule_enabled is true"
+        in main_tf
+    )
+
+    # Existing failure metric alerts retained
+    assert 'resource "azurerm_monitor_metric_alert" "la_runs_failed"' in main_tf
+    assert 'resource "azurerm_monitor_metric_alert" "la_triggers_failed"' in main_tf
+
+    # Scheduler and RBAC resources remain conditionally guarded by schedule_enabled
+    assert "count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0" in main_tf
+    assert "count              = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0" in main_tf
 
     variables_tf = pathlib.Path("infra/variables.tf").read_text()
     assert 'variable "dmd_cache_warm_enabled"' in variables_tf
     assert "default     = false" in variables_tf
     assert 'variable "dmd_cache_schedule_enabled"' in variables_tf
+    assert "default     = false" in variables_tf
 
 
 def test_terraform_play_warm_enabled_and_schedule_disabled():
@@ -2167,19 +2186,19 @@ def test_terraform_play_warm_enabled_and_schedule_disabled():
     )
 
 
-def test_terraform_int_and_prd_remain_warmer_disabled():
-    """Verify INT and PRD environments remain warmer-disabled."""
+def test_terraform_int_and_prd_enable_warmer_and_keep_schedule_disabled():
+    """Verify INT and PRD environments enable target-local warmer while keeping schedule disabled for v1.0."""
     import pathlib
     import re
 
     for env_name in ("int", "prd"):
         tfvars_path = pathlib.Path(f"infra/env/{env_name}.tfvars")
-        if tfvars_path.exists():
-            tfvars_text = tfvars_path.read_text()
-            assert not re.search(r"dmd_cache_warm_enabled\s*=\s*true", tfvars_text), f"{env_name} must not enable warm"
-            assert not re.search(r"dmd_cache_schedule_enabled\s*=\s*true", tfvars_text), (
-                f"{env_name} must not enable schedule"
-            )
+        assert tfvars_path.exists()
+        tfvars_text = tfvars_path.read_text()
+        assert re.search(r"dmd_cache_warm_enabled\s*=\s*true", tfvars_text), f"{env_name} must enable warm"
+        assert re.search(r"dmd_cache_schedule_enabled\s*=\s*false", tfvars_text), f"{env_name} must keep schedule false"
+        assert not re.search(r"dmd_cache_schedule_start_time", tfvars_text)
+        assert not re.search(r"dmd_cache_warm_minute", tfvars_text)
 
 
 def test_terraform_container_app_job_is_manual_only():
