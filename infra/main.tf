@@ -672,6 +672,11 @@ resource "azurerm_logic_app_trigger_custom" "dmd_warm" {
   name         = "weekly-dmd-warm-recurrence"
   logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
 
+  depends_on = [
+    azurerm_logic_app_action_custom.check_status,
+    azurerm_role_assignment.logic_app_job_operator,
+  ]
+
   body = jsonencode({
     type = "Recurrence"
     recurrence = {
@@ -714,6 +719,10 @@ resource "azurerm_logic_app_action_custom" "poll_async_start" {
   count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
   name         = "Poll_Async_Start_If_202"
   logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
+
+  depends_on = [
+    azurerm_logic_app_action_custom.start_job,
+  ]
 
   body = jsonencode({
     type = "If"
@@ -779,6 +788,10 @@ resource "azurerm_logic_app_action_custom" "poll_execution" {
   name         = "Poll_Execution_Until_Terminal"
   logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
 
+  depends_on = [
+    azurerm_logic_app_action_custom.poll_async_start,
+  ]
+
   body = jsonencode({
     type       = "Until"
     expression = "@or(equals(body('Get_Execution_Status')?['properties']?['status'], 'Succeeded'), equals(body('Get_Execution_Status')?['properties']?['status'], 'Failed'), equals(body('Get_Execution_Status')?['properties']?['status'], 'Stopped'))"
@@ -821,6 +834,10 @@ resource "azurerm_logic_app_action_custom" "check_status" {
   count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
   name         = "Check_Job_Terminal_Status"
   logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
+
+  depends_on = [
+    azurerm_logic_app_action_custom.poll_execution,
+  ]
 
   body = jsonencode({
     type = "If"
@@ -891,6 +908,9 @@ resource "azurerm_role_assignment" "logic_app_job_operator" {
   scope              = data.azurerm_resource_group.rg.id
   role_definition_id = azurerm_role_definition.dmd_job_operator[0].role_definition_resource_id
   principal_id       = azurerm_logic_app_workflow.dmd_warm[0].identity[0].principal_id
+
+  principal_type                   = "ServicePrincipal"
+  skip_service_principal_aad_check = true
 }
 
 resource "azurerm_monitor_metric_alert" "la_runs_failed" {
