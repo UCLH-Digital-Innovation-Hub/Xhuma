@@ -31,8 +31,6 @@ gp_connect_include_immunisations  = "true"
 
 ccda_expiry_hours = "4"
 
-# dm+d Cache Warmer and Weekly Schedule (Standard target-local infrastructure in INT)
-dmd_cache_warm_enabled        = true
-dmd_cache_schedule_enabled    = true
-dmd_cache_warm_minute         = 0
-dmd_cache_schedule_start_time = "2026-10-12T05:00:00"
+# dm+d Cache Warmer (Standard target-local infrastructure in INT; schedule deferred)
+dmd_cache_warm_enabled     = true
+dmd_cache_schedule_enabled = false

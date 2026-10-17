@@ -2163,6 +2163,10 @@ def test_terraform_scheduler_invariants_and_unconditional_blocker_removed():
     assert 'resource "azurerm_monitor_metric_alert" "la_runs_failed"' in main_tf
     assert 'resource "azurerm_monitor_metric_alert" "la_triggers_failed"' in main_tf
 
+    # Scheduler and RBAC resources remain conditionally guarded by schedule_enabled
+    assert "count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0" in main_tf
+    assert "count              = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0" in main_tf
+
     variables_tf = pathlib.Path("infra/variables.tf").read_text()
     assert 'variable "dmd_cache_warm_enabled"' in variables_tf
     assert "default     = false" in variables_tf
@@ -2182,8 +2186,8 @@ def test_terraform_play_warm_enabled_and_schedule_disabled():
     )
 
 
-def test_terraform_int_and_prd_enable_warmer_and_schedule():
-    """Verify INT and PRD environments enable target-local warmer and weekly schedule."""
+def test_terraform_int_and_prd_enable_warmer_and_keep_schedule_disabled():
+    """Verify INT and PRD environments enable target-local warmer while keeping schedule disabled for v1.0."""
     import pathlib
     import re
 
@@ -2192,9 +2196,9 @@ def test_terraform_int_and_prd_enable_warmer_and_schedule():
         assert tfvars_path.exists()
         tfvars_text = tfvars_path.read_text()
         assert re.search(r"dmd_cache_warm_enabled\s*=\s*true", tfvars_text), f"{env_name} must enable warm"
-        assert re.search(r"dmd_cache_schedule_enabled\s*=\s*true", tfvars_text), f"{env_name} must enable schedule"
-        assert re.search(r'dmd_cache_schedule_start_time\s*=\s*"2026-10-12T05:00:00"', tfvars_text)
-        assert re.search(r"dmd_cache_warm_minute\s*=\s*0", tfvars_text)
+        assert re.search(r"dmd_cache_schedule_enabled\s*=\s*false", tfvars_text), f"{env_name} must keep schedule false"
+        assert not re.search(r"dmd_cache_schedule_start_time", tfvars_text)
+        assert not re.search(r"dmd_cache_warm_minute", tfvars_text)
 
 
 def test_terraform_container_app_job_is_manual_only():

@@ -397,9 +397,9 @@ The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azur
   $$\text{discover} \longrightarrow \text{warm} \longrightarrow \text{verify} \longrightarrow \text{activate} \longrightarrow \text{retire naturally by TTL}$$
   New release keys are versioned (`dmd:resolved:v1:<release>:<concept_id>`). The active release pointer (`dmd:active-release`) is atomically updated only after full verification. The prior release is not destructively deleted; old keys expire naturally under their 9-day TTL. **Never describe normal dm+d operation as a "purge".** `FLUSHDB` and wildcard `KEYS *` are strictly prohibited.
 
-### 10.3 Release-Freshness and Scheduler Monitoring
+### 10.3 Release-Freshness and Operational Verification
 
-INT and PRD schedule the target-local dm+d warmer for Monday 05:00 UK local time. Logic App trigger and run failures are routed through Azure Monitor to the operator-supplied Action Group. First-environment commissioning remains manual. Release freshness is verified operationally after the first scheduled cycle; automated freshness alerting is deferred until its telemetry query is proven against Play.
+In Xhuma 1.0.0, target-local dm+d warmer infrastructure is standard in Play, INT, and PRD (`dmd_cache_warm_enabled = true`), while automated weekly recurrence remains temporarily deferred across all targets (`dmd_cache_schedule_enabled = false`) pending operator RBAC and Action Group commissioning. Initial environment commissioning and the first Monday terminology refresh are executed manually. This operational deferral does not block Xhuma application operation, SOAP/FHIR/C-CDA processing, or manual terminology cache warming.
 
 A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. The existing completion event reports:
 - `event: "warm_succeeded"`
@@ -409,26 +409,26 @@ A `warm_succeeded` event confirms complete successful caching and activation of 
 - `memory_delta_bytes`
 - `evictions`
 
-#### Manual First-Monday Freshness Verification
+#### Manual Operational Freshness Verification
 
-After the first scheduled INT and PRD run, the operator verifies:
-1. the Logic App trigger occurred;
-2. the Container Apps Job reached `Succeeded`;
-3. a `warm_succeeded` completion event exists;
-4. the completion time matches the Monday operating window;
-5. concept counts are complete;
-6. eviction delta is zero;
-7. active release pointer is present;
-8. active release TTL is healthy;
-9. distributed lock is released;
+When commissioning a target or executing the manual Monday refresh, the operator verifies:
+1. the Container Apps Job execution reached `Succeeded`;
+2. a `warm_succeeded` completion event exists in Log Analytics;
+3. the completion time matches the operating window;
+4. concept counts are complete;
+5. eviction delta is zero;
+6. active release pointer is present;
+7. active release TTL is healthy;
+8. distributed lock is released;
+9. direct resolved cache read succeeds;
 10. the active release is compared with the previously recorded release and the expected upstream weekly release.
 
-### 10.4 Scheduler State & Manual Triggering
+### 10.4 Scheduler State & Follow-up Enablement
 
-- **Scheduler Configuration by Target:** In Xhuma 1.0.0, weekly recurrence is standard target-local infrastructure in INT and PRD (`dmd_cache_warm_enabled = true`, `dmd_cache_schedule_enabled = true`, `dmd_cache_warm_minute = 0`, start time `2026-10-12T05:00:00`). Play retains manual execution with scheduling disabled (`dmd_cache_schedule_enabled = false`).
-- **Action Group Secret Prerequisite:** When scheduling is enabled for a target, operator-supplied Azure Monitor Action Group resource IDs must be provided via the environment-protected GitHub secret `DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON` in the relevant plan environment (`int-plan`, `prd-plan`). Terraform Plan passes this directly to `TF_VAR_dmd_cache_alert_action_group_ids` with a safe `[]` fallback. If scheduling is enabled and the secret is absent or empty, Terraform planning fails closed on the non-empty Action Group precondition.
-- **Alerting Primitives:** Alert destinations route notifications for Logic App trigger failures (`la_triggers_failed`) and Logic App run failures (`la_runs_failed`) via the operator-supplied Action Group.
-- **Manual Commissioning Requirement:** Automated recurrence is designed for ongoing weekly renewal, not first-environment commissioning. Every target must be manually commissioned and verified using the sequence in Section 10.9 before unattended operation is accepted.
+- **Warmer Configuration by Target:** In Xhuma 1.0.0, target-local warmer infrastructure is standard in Play, INT, and PRD (`dmd_cache_warm_enabled = true`), while automated scheduling is disabled for all targets (`dmd_cache_schedule_enabled = false`).
+- **Generic Scheduler Implementation Preserved:** The underlying Azure Logic App workflow, trigger recurrence, custom role definition, role assignment, and failure alert resources remain implemented in Terraform (`infra/main.tf`). Because `dmd_cache_schedule_enabled = false`, these resources evaluate to `count = 0` and are not provisioned during the v1.0 release. Automated scheduling will be enabled through a small operational follow-up once deployment identity authorization permissions are established.
+- **Action Group Secret Prerequisite:** The workflow wires `DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON` directly to `TF_VAR_dmd_cache_alert_action_group_ids` with a safe `[]` fallback during Terraform planning. When scheduling is later enabled for INT or PRD, valid operator-supplied Action Group IDs must be populated in `<target>-plan`.
+- **Manual Commissioning Requirement:** Automated recurrence is designed for ongoing renewal, not initial commissioning. Every target must be manually commissioned and verified using the sequence in Section 10.9 before unattended operation is accepted.
 
 ### 10.5 Proven Safety Invariants
 

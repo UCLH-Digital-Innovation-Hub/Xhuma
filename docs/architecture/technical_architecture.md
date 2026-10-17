@@ -288,8 +288,8 @@ The warmer is designed as **standard target-local operational infrastructure** a
 
 - **Configured Target Baseline in v1.0:**
   - Play: Target-local warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler disabled (`dmd_cache_schedule_enabled = false`). Play remains the manually exercised non-production warmer target.
-  - INT: Target-local warmer infrastructure and weekly Monday 05:00 UK schedule enabled (`dmd_cache_warm_enabled = true`, `dmd_cache_schedule_enabled = true`, `dmd_cache_warm_minute = 0`, start time `2026-10-12T05:00:00`). Inherits default dm+d endpoint.
-  - PRD: Target-local warmer infrastructure and weekly Monday 05:00 UK schedule enabled (`dmd_cache_warm_enabled = true`, `dmd_cache_schedule_enabled = true`, `dmd_cache_warm_minute = 0`, start time `2026-10-12T05:00:00`). Retains explicit production direct-care endpoint (`https://ontology.nhs.uk/production2/fhir`).
+  - INT: Target-local warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler temporarily disabled (`dmd_cache_schedule_enabled = false`) pending operator RBAC commissioning. Inherits default dm+d endpoint.
+  - PRD: Target-local warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler temporarily disabled (`dmd_cache_schedule_enabled = false`) pending operator RBAC commissioning. Retains explicit production direct-care endpoint (`https://ontology.nhs.uk/production2/fhir`).
   - Note: The global Terraform default remains `false`; enablement is deliberate per target.
 
 ### Terminology Publication & Warm Schedule
@@ -302,9 +302,9 @@ The warmer is designed as **standard target-local operational infrastructure** a
 
 ### Release-Freshness and Scheduler Monitoring
 
-INT and PRD schedule the target-local dm+d warmer for Monday 05:00 UK local time. Logic App trigger and run failures are routed through Azure Monitor to the operator-supplied Action Group (`azurerm_monitor_metric_alert.la_triggers_failed`, `la_runs_failed`). First-environment commissioning remains manual. Release freshness is verified operationally after the first scheduled cycle; automated freshness alerting is deferred until its telemetry query is proven against Play.
+In Xhuma 1.0.0, target-local warmer infrastructure is standard in Play, INT, and PRD (`dmd_cache_warm_enabled = true`), while automated weekly recurrence is temporarily deferred across all targets (`dmd_cache_schedule_enabled = false`) pending operator RBAC and Action Group commissioning. Initial commissioning and the first Monday refresh are performed manually. This operational deferral does not block Xhuma application operation or manual terminology cache warming.
 
-A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. The warmer Container Apps Job can also be triggered manually via CLI or Azure Portal.
+The underlying Logic App workflow, recurrence trigger, custom job-operator role, and failure alerts (`la_triggers_failed`, `la_runs_failed`) remain implemented in Terraform (`infra/main.tf`) and will be enabled in a subsequent operational update once target authorization permissions are established. A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. The warmer Container Apps Job can be triggered manually via CLI or Azure Portal.
 
 ### Proven Safety Invariants
 
