@@ -126,7 +126,7 @@ Input: GP Connect FHIR STU3 Structured Record Bundle
   └─► Immunisations (Immunization -> C-CDA Section 11369-6)
   │
   ▼
-XML DOM Construction & Serialization (C-CDA Release 2.1)
+XML DOM Construction & Serialisation (C-CDA Release 2.1)
   │
   ▼
 Output: Consolidated CDA XML Document
@@ -176,7 +176,7 @@ flowchart TD
 
 ---
 
-## 6. Audit Trail Flow
+## 6. Clinical Audit Event Flow
 
 ```mermaid
 flowchart TD
@@ -202,6 +202,4 @@ flowchart LR
     Endpoint -->|Returns status: ok| Response["HTTP 200 {status: ok}"]
 ```
 
-> [!IMPORTANT]
-> **Coarse Process Liveness Only:**  
-> The `/health` endpoint is unauthenticated and performs a fast, coarse process-liveness check confirming that the Uvicorn worker process is running and accepting HTTP connections. It does **not** execute automated dependency health probes (Spine, Redis, PostgreSQL), does **not** test downstream reachability, and does **not** trip circuit breakers or trigger automated failover routines. Complete functional readiness must be verified through the operational procedures in the [Operator's Manual](../operations/operators_manual.md).
+`/health` provides coarse process-liveness verification and is used as the automated post-deployment liveness check. Functional acceptance is performed separately using the relevant SOAP/mTLS/PDS/SDS/GP Connect checks defined in the [Operator's Manual](../operations/operators_manual.md).

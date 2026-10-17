@@ -14,7 +14,7 @@ Xhuma's telemetry pipeline is built upon standard Azure Monitor and OpenTelemetr
 - **OpenTelemetry Instrumentation:** The FastAPI application is instrumented using the OpenTelemetry Python SDK, generating traces, metrics, and structured log events.
 - **Application Insights & Log Analytics:** Each target environment (Play, INT, PRD) routes telemetry to its target-local Log Analytics Workspace and Application Insights component, configured via the target's `APPLICATIONINSIGHTS_CONNECTION_STRING`.
 - **Structured Traces & Dependencies:** Outbound HTTP requests to upstream NHS APIs (PDS, SDS, GP Connect), Redis cache interactions, and PostgreSQL audit operations are tracked as correlated OpenTelemetry dependencies.
-- **Telemetry and Alerting Boundary:** Xhuma emits telemetry to the configured Azure Monitor/Application Insights environment. Notification routing, escalation, support coverage and response procedures are deployment-specific operator responsibilities. The Terraform implementation supports Azure Monitor alerts for failed scheduler runs/triggers when scheduling is enabled and an operator-supplied Action Group is configured. Alert recipients, paging, and escalation paths are deployment-specific operator configurations rather than intrinsic Xhuma behaviours.
+- **Telemetry and Alerting Architecture:** Xhuma emits structured telemetry into the configured Azure Monitor / Application Insights environment. Deploying organisations integrate these signals into their established monitoring and incident-management arrangements. The Terraform implementation supports Azure Monitor alerts for failed scheduler runs/triggers when scheduling is enabled and an operator-supplied Action Group is configured.
 
 ```mermaid
 flowchart TD
@@ -44,7 +44,7 @@ flowchart TD
 
 ### 2.1 Overview and Scope Boundaries
 
-Operational diagnostics across Play, INT, and PRD are standardised through a shared Azure Monitor Query Pack:
+The `xhuma-operational-diagnostics` Query Pack provides a consistent diagnostic vocabulary across Xhuma deployments, covering pipeline performance, SOAP/XDS, GP Connect, PDS/SDS, relay behaviour, dm+d, cache behaviour, audit persistence, mTLS, performance and application errors. Automated alerting uses Azure Monitor resources, with notification destinations and escalation routes configured through the deploying organisation's operating model.
 
 | Property | Value |
 | :--- | :--- |
@@ -54,10 +54,10 @@ Operational diagnostics across Play, INT, and PRD are standardised through a sha
 | **Scope** | Cross-target diagnostic queries (Play, INT, PRD) |
 | **Reference Export** | [Query Pack Reference Snapshot](../reference/xhuma-operational-diagnostics-querypack.json) |
 
-#### Important Architectural Boundaries:
+#### Operational Integration Boundaries:
 
-1. **Query Definitions Only:** An Azure Monitor Query Pack stores **KQL query definitions only**. It does **not** store, aggregate, or retain application telemetry or log data.
-2. **No Duplicate Ingestion or Workspaces:** The Query Pack does not create an additional Log Analytics Workspace, nor does it incur duplicate data ingestion charges. Telemetry remains strictly within each target's local Log Analytics Workspace.
+1. **Query Definitions Only:** The Query Pack stores reusable KQL query definitions. Application telemetry remains in the target environment's Log Analytics Workspace and Application Insights component.
+2. **Resource Efficiency:** The Query Pack does not create an additional Log Analytics Workspace or incur duplicate ingestion charges. Telemetry remains strictly within each target's local workspace.
 3. **Cross-Target Reusability:** The exact same query definitions can be executed across any Xhuma target environment by scoping the Azure Portal Logs query window to the target-specific resource.
 4. **RBAC Isolation:** Access to the Query Pack (`Microsoft.OperationalInsights/queryPacks/read`) and access to underlying telemetry (`Microsoft.OperationalInsights/workspaces/read` or `Microsoft.Insights/components/read`) are **distinct and separate RBAC concerns**. Having access to the Query Pack alone does **not** grant access to view target telemetry; operators must hold reader permissions on the specific target's resource group or workspace.
 
@@ -151,29 +151,13 @@ When diagnosing live production or integration issues, consult this decision tab
 
 ---
 
-## 5. What Diagnostic Queries Prove (and What They Do Not)
+## 5. Interpreting Diagnostic Telemetry
 
-To maintain rigorous, evidence-based operations, operators must avoid overstating query results:
+To ensure effective operational triage, operators interpret query findings alongside system context:
 
-> [!IMPORTANT]
-> **Relay Transport vs Upstream Application Health:**  
-> A query result showing relay `transport=relay` or `outcome=ok` proves solely that the internal relay agent transmitted the payload toward the remote endpoint. If the remote endpoint returns an HTTP 500 or malformed FHIR payload, that is an **upstream application failure**, not a relay delivery success. Furthermore, relay logs do **not** prove TLS negotiation.
-
-> [!IMPORTANT]
-> **Cache Hit vs Clinical Correctness:**  
-> A high cache hit rate in `Xhuma | dm+d | Cache hit/miss summary` proves that Redis is serving previously stored concepts. It does **not** prove that the underlying mapping or clinical dosage translation is clinically correct. Clinical semantics are governed by [dm+d Mapping](../clinical-mapping/dm+d_mapping.md).
-
-> [!IMPORTANT]
-> **Liveness vs Functional Readiness:**  
-> An HTTP 200 on `/health` proves coarse application process liveness only. It does **not** prove end-to-end functional or clinical readiness (e.g. Spine connectivity, valid mTLS certificates, or populated cache keys).
-
-> [!IMPORTANT]
-> **Query Pack vs Alerting System:**  
-> The `xhuma-operational-diagnostics` Query Pack stores KQL query definitions for interactive, on-demand diagnostics. It is **not** an active alerting system, does not monitor thresholds continuously, and does not page or notify operators.
-
-> [!IMPORTANT]
-> **Telemetry Instrumentation vs Active Human Monitoring:**  
-> Xhuma instruments application events and emits OpenTelemetry data to Application Insights. Telemetry instrumentation does **not** constitute active human surveillance, 24/7 monitoring, or a managed operations centre. Operating hours, monitoring coverage, alert routing, and triage workflows are defined by the deploying organisation's operating model.
+- **Relay Transport vs Upstream Application:** A query result showing relay `transport=relay` or `outcome=ok` confirms successful transmission across the reverse tunnel. If the upstream GP practice endpoint returns an HTTP 500 or application error, the issue resides in upstream processing rather than relay transport.
+- **Cache Hit vs Clinical Transformation:** Telemetry in `Xhuma | dm+d | Cache hit/miss summary` verifies concept retrieval from Redis. Clinical transformation correctness is governed by the mapping rules defined in [dm+d Mapping](../clinical-mapping/dm+d_mapping.md).
+- **Diagnostic Queries & Operational Monitoring:** The shared Query Pack provides on-demand diagnostic inspection across telemetry stages. Automated alerting uses Azure Monitor resources, with notification destinations and escalation routing integrated through the deploying organisation's operating model.
 
 ---
 

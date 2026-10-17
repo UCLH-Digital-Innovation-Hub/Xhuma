@@ -42,7 +42,7 @@ FHIR versions are service-specific and are not uniform across all integrations:
 
 ### 2.2 Security & Cryptography
 - **Cryptographic Operations:** `cryptography` (X.509 certificate loading, CA signature verification, RSA/EC key operations).
-- **JWT & JWKS:** `pyjwt`, `jwcrypto` (token generation, key rotation, and JWKS serialization).
+- **JWT & JWKS:** `pyjwt`, `jwcrypto` (token generation, key rotation, and JWKS serialisation).
 - **mTLS Enforcement:** Custom `MTLSMiddleware` inspecting Azure-forwarded `X-ARR-ClientCert` against CA bundle and optional fingerprint allowlists.
 
 ### 2.3 Persistence & In-Memory Data Stores

@@ -15,7 +15,7 @@ Xhuma's cloud infrastructure is provisioned via Terraform (`infra/main.tf`). The
   * **Local Key Vault:** Stores target-specific certificate bundles (such as `epic-ca-cert`).
   * **Target Observability:** Target-local Log Analytics Workspace and Application Insights component capturing OpenTelemetry traces, dependencies, and application logs.
 * **Shared Services Scope (`<shared-resource-group>`):**
-  * **Shared Key Vault:** Centrally managed vault holding NHS API credentials, signing keys, and dm+d client credentials, accessible only from authorized target subnets via guarded network rules.
+  * **Shared Key Vault:** Centrally managed vault holding NHS API credentials, signing keys, and dm+d client credentials, accessible only from authorised target subnets via guarded network rules.
   * **Public JWKS Blob Storage:** Static `$web` storage publishing the public JSON Web Key Set for upstream NHS token verification.
   * **Operational Diagnostics Query Pack:** Standardised cross-target query definitions (`xhuma-operational-diagnostics`).
 

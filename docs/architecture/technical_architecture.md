@@ -6,7 +6,7 @@ The Xhuma application tier is stateless. It acts as an intermediary middleware s
 
 All system state is strictly externalised:
 - **Transient & Optimisation State:** Demographic query caches, directory routing details, and assembled C-CDA documents are externalised to target-local Redis;
-- **Durable Clinical Audit State:** Immutable audit logs and transaction records are stored in target-local PostgreSQL;
+- **Durable Clinical Audit State:** Structured clinical audit records and transaction events are stored in target-local PostgreSQL;
 - **Cryptographic Keys & Secrets:** NHS signing keys, certificates, and external credentials are externalised to Azure Key Vault;
 - **Stateless Instances:** Application container instances do not rely on local persistent disk or in-memory session affinity, allowing seamless horizontal scaling and deterministic container restarts.
 
@@ -29,7 +29,7 @@ flowchart TD
 
     subgraph UCLHBoundary[System Boundary UCLH]
         Xhuma["Xhuma\n[System]\nStateless application tier"]:::system
-        Monitor["UCLH Logging & Monitoring\n[System]\nAudit trail layer"]:::system
+        Monitor["UCLH Logging & Monitoring\n[System]\nAudit & telemetry layer"]:::system
     end
 
     NHSE["NHSE APIs\n[External System]\nPDS, SDS, GP Connect"]:::ext_system
@@ -163,7 +163,7 @@ flowchart LR
     Xhuma -->|11. ITI-38 Metadata| Epic
     Epic -->|12. ITI-39 Retrieve Document| Xhuma
     Xhuma -->|13. Cached C-CDA XML| Epic
-    Xhuma -.->|Persists immutable audit| AuditStore
+    Xhuma -.->|Persists structured audit events| AuditStore
 ```
 
 ### Clinician Interaction Sequence
@@ -249,7 +249,7 @@ sequenceDiagram
 ### 4. CCDA Conversion Engine (`app/ccda/`)
 - Transforms FHIR bundles into C-CDA XML documents adhering to HL7 specifications.
 - Implements clinical mapping rules for allergies, structured dm+d doses, and lab investigations.
-- Output serialization and structure are verified against standard schemas in automated testing and assurance suites.
+- Output serialisation and structure are verified against standard schemas in automated testing and assurance suites.
 
 ### 5. PDS Integration (`app/pds/`)
 - Verifies patient identities against the NHS Personal Demographics Service (FHIR R4 where implemented).
@@ -304,15 +304,11 @@ The warmer is designed as **standard target-local operational infrastructure** a
   $$\text{discover} \longrightarrow \text{warm} \longrightarrow \text{verify} \longrightarrow \text{activate} \longrightarrow \text{retire naturally by TTL}$$
   New release keys are versioned (`dmd:resolved:v1:<release>:<concept_id>`). The active pointer (`dmd:active-release`) is atomically updated only after full verification. The prior release is not deleted; old keys age out naturally under their 9-day TTL. `FLUSHDB` and wildcard `KEYS *` are strictly prohibited.
 
-### Release-Freshness Operational Caveat
+### Release-Freshness and Scheduler Watchdog
 
-> [!WARNING]
-> The current warmer implementation discovers whatever upstream release is visible at execution time. It does not currently require the discovered release to differ from the already-active release. Therefore, a `warm_succeeded` event proves a technically successful complete warm, but does **not** by itself prove that the newly expected weekly release was available upstream. If upstream publication were delayed, Xhuma could successfully re-warm the previous release. Future scheduler/watchdog acceptance must verify release advancement.
+A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. It is therefore combined with release-freshness monitoring before unattended weekly scheduling is enabled.
 
-### Scheduler State
-
-- The automated Azure Logic App scheduling path exists in Terraform (`infra/main.tf`), but `dmd_cache_schedule_enabled` is **deliberately blocked by fail-closed assertions** pending acceptance of the missed-success/freshness watchdog.
-- Warmer infrastructure enabled != scheduler enabled. The Job remains manually triggerable via `az containerapp job start`.
+The scheduler implementation remains deliberately disabled pending acceptance of the missed-success/release-freshness watchdog. Existing Logic App failure metrics detect execution failures; the additional watchdog is required to distinguish successful execution from successful acquisition of the expected new upstream release. The warmer Container Apps Job can be triggered manually via CLI or Azure Portal while automated recurrence remains disabled.
 
 ### Proven Safety Invariants
 
@@ -337,10 +333,6 @@ Xhuma's production telemetry foundation consists of:
 - **OpenTelemetry Instrumentation:** FastAPI middleware emitting traces, metrics, and correlated operation IDs;
 - **Shared Azure Monitor Query Pack:** Cross-target operational diagnostics via `xhuma-operational-diagnostics` in the shared Xhuma Azure services scope;
 - **Operational Diagnostic Guide:** Detailed in [Observability & Diagnostics Guide](../operations/observability.md).
-
-> [!NOTE]
-> **Operational Responsibility Boundary:** Xhuma emits telemetry to the configured Azure Monitor/Application Insights environment. Notification routing, escalation paths, support coverage, and incident response procedures are deployment-specific operator responsibilities.
-
 
 ---
 

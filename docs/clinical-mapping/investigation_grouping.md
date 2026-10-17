@@ -271,7 +271,7 @@ Malformed GP Connect JSON or FHIR bundles return HTTP 502 with `success: false` 
 
 ## Performance and scaling considerations
 
-These measurements describe the grouping implementation reviewed on 1 October 2026 and the subsequent shared-graph change. They are engineering observations, not clinical acceptance evidence. Graph preparation is shared across reports. The indexed traversal measurements below record the subsequent optimization.
+These measurements describe the grouping implementation reviewed on 1 October 2026 and the subsequent shared-graph change. They are engineering observations, not clinical acceptance evidence. Graph preparation is shared across reports. The indexed traversal measurements below record the subsequent optimisation.
 
 ### Baseline: repeated graph preparation
 
@@ -279,7 +279,7 @@ Before the shared-graph change, [`group_investigation()`](../../app/ccda/entries
 
 For R reports, N index entries, D report-result references scanned through the index and E observation relationships, the baseline repeated preparation was approximately O(R × (N + D + E)). Scope expansion adds full-edge passes whose number depends on link depth and source ordering. List membership checks used for deduplication can add further cost for large panels. Doubling the number of reports and observations can therefore require substantially more than twice the grouping work.
 
-A local experiment used independent in-memory copies of the existing `investigations/9465700088.json` fixture, with resource IDs, fullUrl aliases and references rewritten for each copy. Each bundle was parsed and indexed before timing all its reports through `group_investigation()`. These are medians of five runs on Python 3.14.7; they exclude FHIR parsing, result rendering, XML serialization and external I/O.
+A local experiment used independent in-memory copies of the existing `investigations/9465700088.json` fixture, with resource IDs, fullUrl aliases and references rewritten for each copy. Each bundle was parsed and indexed before timing all its reports through `group_investigation()`. These are medians of five runs on Python 3.14.7; they exclude FHIR parsing, result rendering, XML serialisation and external I/O.
 
 | Synthetic fixture copies | Resources | Reports | Grouping time |
 | --- | ---: | ---: | ---: |
@@ -308,7 +308,7 @@ The graph's containers are read-only mappings, tuples and frozen sets. The FHIR 
 
 ### Measured effect of sharing graph preparation
 
-The same synthetic fixture procedure was rerun against the original grouping function and the shared-graph implementation in one local session. These are medians of five runs on Python 3.14.7. The shared time includes graph construction once plus grouping every report; both columns exclude parsing, rendering, XML serialization and external I/O.
+The same synthetic fixture procedure was rerun against the original grouping function and the shared-graph implementation in one local session. These are medians of five runs on Python 3.14.7. The shared time includes graph construction once plus grouping every report; both columns exclude parsing, rendering, XML serialisation and external I/O.
 
 | Resources | Reports | Original grouping | Shared graph plus grouping | Graph construction alone |
 | --- | ---: | ---: | ---: | ---: |
@@ -319,7 +319,7 @@ The same synthetic fixture procedure was rerun against the original grouping fun
 
 Grouping was approximately 3.3–5.6 times faster in this experiment. These are grouping improvements, not equivalent end-to-end conversion speedups. At that stage, growth remained superlinear because each report still scanned the complete ordered edge sequence. The largest graph retained approximately 607 KiB of additional traced Python allocations, with approximately 981 KiB peak allocations during construction, excluding already parsed resources; these figures are not process RSS.
 
-Before/after checks compared every grouping field, mapping order, structured organizer and narrative table across 86 reports from the three valid investigation fixtures. The intentionally malformed fixture was excluded at FHIR parsing. An additional 1,200 randomized report groupings matched the original implementation, covering aliases, overlapping roots, missing links and cycles. Persistent regression tests cover report-state isolation, shared direct observations, distinct resources with matching IDs, existing edge discovery order, standalone callers, and one graph build across multiple non-empty investigation sections.
+Before/after checks compared every grouping field, mapping order, structured organizer and narrative table across 86 reports from the three valid investigation fixtures. The intentionally malformed fixture was excluded at FHIR parsing. An additional 1,200 randomised report groupings matched the original implementation, covering aliases, overlapping roots, missing links and cycles. Persistent regression tests cover report-state isolation, shared direct observations, distinct resources with matching IDs, existing edge discovery order, standalone callers, and one graph build across multiple non-empty investigation sections.
 
 ### Implemented indexed traversal
 
@@ -333,7 +333,7 @@ Shared preparation remains O(N + D + E). For a report with Vᵣ reachable observ
 
 ### Measured effect of indexed traversal
 
-The [raw A/B measurements](../reference/investigation-indexed-benchmark-2026-10-01.json) compare the working-tree shared-graph implementation immediately before this change with indexed traversal. The baseline source hash is recorded because it included earlier uncommitted work. These are medians of nine alternating A/B runs, after warm-up, on Python 3.14.7. Independent copies of the 452-resource fixture have IDs and references rewritten before parsing. Timings include one shared graph build plus grouping all reports, and exclude parsing, rendering, serialization and external I/O. Individual stage medians need not sum to the median total.
+The [raw A/B measurements](../reference/investigation-indexed-benchmark-2026-10-01.json) compare the working-tree shared-graph implementation immediately before this change with indexed traversal. The baseline source hash is recorded because it included earlier uncommitted work. These are medians of nine alternating A/B runs, after warm-up, on Python 3.14.7. Independent copies of the 452-resource fixture have IDs and references rewritten before parsing. Timings include one shared graph build plus grouping all reports, and exclude parsing, rendering, serialisation and external I/O. Individual stage medians need not sum to the median total.
 
 | Resources | Reports | Before: shared graph + grouping | After: indexed graph + grouping | Speedup |
 | --- | ---: | ---: | ---: | ---: |
@@ -358,16 +358,16 @@ The baseline path is a local session snapshot, not a repository dependency. For 
 
 ### Content and ordering validation
 
-Before/after comparisons matched every existing grouping field and dictionary order, plus complete structured organizers and narrative tables, across all 86 reports in the three valid investigation fixtures. An additional 4,000 deterministic randomized report groupings matched the baseline, including overlapping roots, aliases, forward/reverse links, duplicates, comments, missing links and cycles. The malformed fixture remains excluded at FHIR parsing.
+Before/after comparisons matched every existing grouping field and dictionary order, plus complete structured organizers and narrative tables, across all 86 reports in the three valid investigation fixtures. An additional 4,000 deterministic randomised report groupings matched the baseline, including overlapping roots, aliases, forward/reverse links, duplicates, comments, missing links and cycles. The malformed fixture remains excluded at FHIR parsing.
 
 Persistent regressions additionally cover child-only entry points resolving parents and siblings, multiple seed ordering, immutable deduplicated associations, a 1,500-link reverse-ordered chain and a guard that rejects full-edge iteration while 1,000 unrelated edges are present. Existing tests retain coverage for shared results, report boundaries, missing results, zero/false values, valued groups and rendering-state isolation. The renderer remains recursive; extremely deep rendered chains still warrant a separate iterative-rendering change.
 
 ### Async execution and validation
 
-Investigation grouping and result rendering perform CPU work without network I/O. Their async wrappers do not make that work parallel. Adding `asyncio.gather()` around reports would not remove repeated scans or provide CPU parallelism on the normal event loop. In a separate local experiment, four concurrent full conversions of the 452-resource fixture produced a roughly 1.1-second gap in a heartbeat scheduled every 5 ms. That measurement includes parsing, rendering and serialization and must not be attributed to grouping alone.
+Investigation grouping and result rendering perform CPU work without network I/O. Their async wrappers do not make that work parallel. Adding `asyncio.gather()` around reports would not remove repeated scans or provide CPU parallelism on the normal event loop. In a separate local experiment, four concurrent full conversions of the 452-resource fixture produced a roughly 1.1-second gap in a heartbeat scheduled every 5 ms. That measurement includes parsing, rendering and serialisation and must not be attributed to grouping alone.
 
-Continue reducing repeated traversal work first. If large conversions still delay requests, evaluate a bounded process pool or separate conversion workers, including queue limits, serialization costs, cancellation behavior and the deployment's relay constraints. Avoid creating an unbounded task or process for every report.
+Continue reducing repeated traversal work first. If large conversions still delay requests, evaluate a bounded process pool or separate conversion workers, including queue limits, serialisation costs, cancellation behaviour and the deployment's relay constraints. Avoid creating an unbounded task or process for every report.
 
-Separate timings now cover index construction, shared graph preparation, per-report grouping, post-grouping result rendering and XML/base64 serialization, alongside an event-loop delay probe. See [the updated pipeline profile and monitoring guide](../operations/benchmarking.md#reprofile-1-october-2026) for measurements, instrument names and a repeatable offline profiling command. The reprofile still found an approximately 865 ms heartbeat gap during four concurrent conversions of the 452-resource fixture.
+Separate timings now cover index construction, shared graph preparation, per-report grouping, post-grouping result rendering and XML/base64 serialisation, alongside an event-loop delay probe. See [the updated pipeline profile and monitoring guide](../operations/benchmarking.md#reprofile-1-october-2026) for measurements, instrument names and a repeatable offline profiling command. The reprofile still found an approximately 865 ms heartbeat gap during four concurrent conversions of the 452-resource fixture.
 
 Continue validating on supplier fixtures and synthetic bundles with increasing report count, relationship depth, alias count and shared observations. Track event-loop delay, peak memory and output equivalence alongside latency; fixed wall-clock thresholds in ordinary unit tests would be unreliable.
