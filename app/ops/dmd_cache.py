@@ -1056,6 +1056,16 @@ async def warm() -> int:
             json.dumps(manifest),
         )
 
+        # 8b. Capture previous active release prior to activation for freshness telemetry
+        previous_active_bytes = await snomed_client.get(ACTIVE_RELEASE_KEY)
+        if isinstance(previous_active_bytes, bytes):
+            previous_release: str | None = previous_active_bytes.decode("utf-8")
+        elif isinstance(previous_active_bytes, str):
+            previous_release = previous_active_bytes
+        else:
+            previous_release = None
+        release_advanced = previous_release != release
+
         # 9. ATOMIC ACTIVATION: Update active release pointer at the end
         await snomed_client.setex(ACTIVE_RELEASE_KEY, DMD_ACTIVE_RELEASE_TTL, release)
         logger.info("Successfully activated dm+d release: %s", release)
@@ -1066,6 +1076,8 @@ async def warm() -> int:
         completion_event = {
             "event": "warm_succeeded",
             "release": release,
+            "previous_release": previous_release,
+            "release_advanced": release_advanced,
             "duration_seconds": duration_seconds,
             "concept_count": total_concepts,
             "memory_delta_bytes": mem_end["used_memory"] - mem_start["used_memory"],

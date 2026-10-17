@@ -284,16 +284,12 @@ The warmer is designed as **standard target-local operational infrastructure** a
 - Resolves dm+d credentials (`dmd-client-id`, `dmd-client-secret`) at runtime from the shared Key Vault using the Job's user-assigned managed identity.
 - Exposes no public control endpoint.
 
-### Operational State vs Required v1.0 Baseline
+### Configured Target Baseline in v1.0
 
-- **Current Repository State:**
-  - Play: Warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler disabled.
-  - INT: Warmer infrastructure currently disabled by target configuration/default; scheduler disabled.
-  - PRD: Warmer infrastructure currently disabled by target configuration/default; scheduler disabled.
-- **Required v1.0 Operational Baseline:**
-  - Play: Warmer infrastructure enabled.
-  - INT: **Warmer infrastructure MUST be explicitly enabled** (`dmd_cache_warm_enabled = true` in INT target configuration tfvars).
-  - PRD: **Warmer infrastructure MUST be explicitly enabled** (`dmd_cache_warm_enabled = true` in PRD target configuration tfvars).
+- **Configured Target Baseline in v1.0:**
+  - Play: Target-local warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler disabled (`dmd_cache_schedule_enabled = false`). Play remains the manually exercised non-production warmer target.
+  - INT: Target-local warmer infrastructure and weekly Monday 05:00 UK schedule enabled (`dmd_cache_warm_enabled = true`, `dmd_cache_schedule_enabled = true`, `dmd_cache_warm_minute = 0`, start time `2026-10-12T05:00:00`). Inherits default dm+d endpoint.
+  - PRD: Target-local warmer infrastructure and weekly Monday 05:00 UK schedule enabled (`dmd_cache_warm_enabled = true`, `dmd_cache_schedule_enabled = true`, `dmd_cache_warm_minute = 0`, start time `2026-10-12T05:00:00`). Retains explicit production direct-care endpoint (`https://ontology.nhs.uk/production2/fhir`).
   - Note: The global Terraform default remains `false`; enablement is deliberate per target.
 
 ### Terminology Publication & Warm Schedule
@@ -306,9 +302,12 @@ The warmer is designed as **standard target-local operational infrastructure** a
 
 ### Release-Freshness and Scheduler Watchdog
 
-A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. It is therefore combined with release-freshness monitoring before unattended weekly scheduling is enabled.
+A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. In Xhuma 1.0.0, an independent missed-success and release-freshness watchdog alert (`azurerm_monitor_scheduled_query_rules_alert_v2.dmd_warm_watchdog`) monitors Log Analytics telemetry (`ContainerAppConsoleLogs_CL`) across the Monday operating window:
 
-The scheduler implementation remains deliberately disabled pending acceptance of the missed-success/release-freshness watchdog. Existing Logic App failure metrics detect execution failures; the additional watchdog is required to distinguish successful execution from successful acquisition of the expected new upstream release. The warmer Container Apps Job can be triggered manually via CLI or Azure Portal while automated recurrence remains disabled.
+1. **Missed Success:** Detects if no successful `warm_succeeded` event was logged in the preceding 24 hours during the active Monday window.
+2. **Release Freshness Failure:** Detects if a warm succeeded but `release_advanced == false` (indicating that the newly active release did not advance from the prior release).
+
+The watchdog evaluates starting at 06:00 UK local time (providing operational headroom after the 05:00 recurrence). It operates independently of Logic App execution metrics (`RunsFailed`/`TriggersFailed`), ensuring alerts fire even if the orchestrator completed successfully while failing to obtain an advanced upstream release. Alert destinations are plumbed via the environment-protected GitHub secret `DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON`. First commissioning of any target remains manual before unattended operation is accepted.
 
 ### Proven Safety Invariants
 

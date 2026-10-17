@@ -652,10 +652,6 @@ resource "azurerm_logic_app_workflow" "dmd_warm" {
 
   lifecycle {
     precondition {
-      condition     = !var.dmd_cache_schedule_enabled
-      error_message = "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog is implemented and accepted."
-    }
-    precondition {
       condition     = var.dmd_cache_warm_enabled
       error_message = "dmd_cache_schedule_enabled requires dmd_cache_warm_enabled to be true."
     }
@@ -957,10 +953,48 @@ resource "azurerm_monitor_metric_alert" "la_triggers_failed" {
   }
 }
 
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "dmd_warm_watchdog" {
+  count                   = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name                    = "${var.app_service_name}-dmd-warm-watchdog"
+  resource_group_name     = data.azurerm_resource_group.rg.name
+  location                = data.azurerm_resource_group.rg.location
+  scopes                  = [azurerm_log_analytics_workspace.law.id]
+  description             = "Alert when weekly dm+d cache warm misses success or fails to advance upstream release"
+  severity                = 1
+  evaluation_frequency    = "PT30M"
+  window_duration         = "P1D"
+  auto_mitigation_enabled = true
+
+  criteria {
+    query = templatefile("${path.module}/kql/dmd_cache_watchdog.kql", {
+      app_service_name = var.app_service_name
+    })
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+    failing_periods {
+      minimum_failing_periods_to_trigger_alert = 1
+      number_of_evaluation_periods             = 1
+    }
+  }
+
+  action {
+    action_groups = var.dmd_cache_alert_action_group_ids
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(var.dmd_cache_alert_action_group_ids) > 0
+      error_message = "At least one alert action group ID is required for the dm+d cache warmer watchdog."
+    }
+    ignore_changes = [tags["CostCenter"]]
+  }
+}
+
 check "dmd_cache_invariants" {
   assert {
-    condition     = !var.dmd_cache_schedule_enabled
-    error_message = "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog is implemented and accepted."
+    condition     = !var.dmd_cache_schedule_enabled || length(azurerm_monitor_scheduled_query_rules_alert_v2.dmd_warm_watchdog) > 0
+    error_message = "dmd_cache_schedule_enabled requires the independent missed-success / release-freshness watchdog alert to be active."
   }
 
   assert {

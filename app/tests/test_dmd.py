@@ -1413,6 +1413,8 @@ async def test_warm_success_emits_structured_dmd_cache_event(
 
         assert event_dict["event"] == "warm_succeeded"
         assert event_dict["release"] == "202610.1.0"
+        assert "previous_release" in event_dict
+        assert "release_advanced" in event_dict
         assert event_dict["concept_count"] == 3200
         assert event_dict["evictions"] == 0
         assert "duration_seconds" in event_dict
@@ -2141,13 +2143,14 @@ async def test_concept_with_missing_code_or_display_fails_closed(mock_snomed):
 # ==============================================================================
 
 
-def test_terraform_schedule_enabled_is_blocked_and_safeguards_active():
-    """Verify infra/main.tf asserts !var.dmd_cache_schedule_enabled and variables default to false."""
+def test_terraform_schedule_enabled_watchdog_safeguards_active():
+    """Verify infra/main.tf requires the watchdog alert when scheduling is enabled and variables default to false."""
     import pathlib
 
     main_tf = pathlib.Path("infra/main.tf").read_text()
-    assert main_tf.count("condition     = !var.dmd_cache_schedule_enabled") >= 2
-    assert "dmd_cache_schedule_enabled remains blocked until a missed-success watchdog" in main_tf
+    assert "length(azurerm_monitor_scheduled_query_rules_alert_v2.dmd_warm_watchdog) > 0" in main_tf
+    assert "azurerm_monitor_scheduled_query_rules_alert_v2" in main_tf
+    assert "dmd_warm_watchdog" in main_tf
 
     variables_tf = pathlib.Path("infra/variables.tf").read_text()
     assert 'variable "dmd_cache_warm_enabled"' in variables_tf
@@ -2167,19 +2170,21 @@ def test_terraform_play_warm_enabled_and_schedule_disabled():
     )
 
 
-def test_terraform_int_and_prd_remain_warmer_disabled():
-    """Verify INT and PRD environments remain warmer-disabled."""
+def test_terraform_int_and_prd_enable_warmer_and_schedule():
+    """Verify INT and PRD environments enable target-local warmer and weekly schedule."""
     import pathlib
     import re
 
     for env_name in ("int", "prd"):
         tfvars_path = pathlib.Path(f"infra/env/{env_name}.tfvars")
-        if tfvars_path.exists():
-            tfvars_text = tfvars_path.read_text()
-            assert not re.search(r"dmd_cache_warm_enabled\s*=\s*true", tfvars_text), f"{env_name} must not enable warm"
-            assert not re.search(r"dmd_cache_schedule_enabled\s*=\s*true", tfvars_text), (
-                f"{env_name} must not enable schedule"
-            )
+        assert tfvars_path.exists()
+        tfvars_text = tfvars_path.read_text()
+        assert re.search(r"dmd_cache_warm_enabled\s*=\s*true", tfvars_text), f"{env_name} must enable warm"
+        assert re.search(r"dmd_cache_schedule_enabled\s*=\s*true", tfvars_text), (
+            f"{env_name} must enable schedule"
+        )
+        assert re.search(r'dmd_cache_schedule_start_time\s*=\s*"2026-10-12T05:00:00"', tfvars_text)
+        assert re.search(r"dmd_cache_warm_minute\s*=\s*0", tfvars_text)
 
 
 def test_terraform_container_app_job_is_manual_only():

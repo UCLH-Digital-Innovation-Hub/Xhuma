@@ -399,15 +399,19 @@ The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azur
 
 ### 10.3 Release-Freshness and Scheduler Watchdog
 
-A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. It is therefore combined with release-freshness monitoring before unattended weekly scheduling is enabled.
+A `warm_succeeded` event confirms complete successful caching and activation of the release visible upstream at execution time. In Xhuma 1.0.0, an independent missed-success and release-freshness watchdog alert (`azurerm_monitor_scheduled_query_rules_alert_v2.dmd_warm_watchdog`) monitors Log Analytics telemetry (`ContainerAppConsoleLogs_CL`) across the Monday operating window:
 
-The scheduler implementation remains deliberately disabled pending acceptance of the missed-success/release-freshness watchdog. Existing Logic App failure metrics detect execution failures; the additional watchdog is required to distinguish successful execution from successful acquisition of the expected new upstream release.
+1. **Missed Success:** Detects if no successful `warm_succeeded` event was logged in the preceding 24 hours during the active Monday window.
+2. **Release Freshness Failure:** Detects if a warm succeeded but `release_advanced == false` (indicating that the newly active release did not advance from the prior release).
+
+The watchdog evaluates starting at 06:00 UK local time (providing operational headroom after the 05:00 recurrence). It is completely independent of Logic App execution metrics (`RunsFailed`/`TriggersFailed`), ensuring alerts fire even if the orchestrator completed successfully while failing to obtain an advanced upstream release.
 
 ### 10.4 Scheduler State & Manual Triggering
 
-- **Scheduler Enablement Guard:** The automated Azure Logic App scheduling path exists in Terraform (`infra/main.tf`), but `dmd_cache_schedule_enabled` is blocked by fail-closed assertions (`condition = !var.dmd_cache_schedule_enabled`) pending acceptance of the release-freshness watchdog.
-- **Scheduler Alerting Primitives:** The Terraform implementation supports Azure Monitor alerts for failed scheduler runs/triggers (`azurerm_monitor_metric_alert.la_runs_failed` and `la_triggers_failed`) when scheduling is enabled and an operator-supplied Action Group is configured (`dmd_cache_alert_action_group_ids`). Alert destinations and notification routing are configured through the local organisation's operating model.
-- **Manual Execution Availability:** The warmer Container Apps Job can be triggered manually via CLI or Azure Portal even while automated recurrence remains disabled.
+- **Scheduler Configuration by Target:** In Xhuma 1.0.0, weekly recurrence is standard target-local infrastructure in INT and PRD (`dmd_cache_warm_enabled = true`, `dmd_cache_schedule_enabled = true`, `dmd_cache_warm_minute = 0`, start time `2026-10-12T05:00:00`). Play retains manual execution with scheduling disabled (`dmd_cache_schedule_enabled = false`).
+- **Action Group Secret Prerequisite:** When scheduling is enabled for a target, operator-supplied Azure Monitor Action Group resource IDs must be provided via the environment-protected GitHub secret `DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON` in the relevant plan environment (`int-plan`, `prd-plan`). Fail-closed workflow validation ensures Terraform planning fails safely without exposing Action Group resource IDs if the secret is absent, malformed, or empty.
+- **Alerting Primitives:** Alert destinations route notifications for Logic App trigger failures (`la_triggers_failed`), Logic App run failures (`la_runs_failed`), and missed-success/freshness failures (`dmd_warm_watchdog`).
+- **Manual Commissioning Requirement:** Automated recurrence is designed for ongoing weekly renewal, not first-environment commissioning. Every target must be manually commissioned and verified using the 12-step sequence in Section 10.9 before unattended operation is accepted.
 
 ### 10.5 Proven Safety Invariants
 
@@ -478,7 +482,7 @@ When commissioning the warmer for the first time in an environment (or verifying
 9. **Verify distributed lock released:** Confirm `dmd:warm:v1:lock` is no longer held.
 10. **Verify direct resolved-cache read:** Probe a resolved concept key in Redis DB 2 to confirm data presence.
 11. **Verify a real application path produces a resolved terminology cache hit:** Execute an ITI-38 document conversion request and verify telemetry records a cache hit without an outbound HTTP call to the NHS Terminology Server.
-12. **Only then consider automated recurrence commissioning:** Do not enable automated scheduler recurrence until all preceding steps succeed and freshness watchdog monitoring is accepted.
+12. **Only then consider automated recurrence commissioned:** Confirm that the weekly recurrence trigger and independent watchdog alerts are active and healthy; first target acceptance is confirmed only after all preceding manual verification steps succeed.
 
 ---
 
