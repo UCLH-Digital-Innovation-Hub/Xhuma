@@ -168,4 +168,4 @@ curl -s -H "X-API-Key: $API_KEY" "https://<host>/_diag/compare?nhsno=9690937278&
 
 Gate/TTL matrix, route registration per environment (absent in `prd`, present in `int` and in
 `prd` with the flag), API-key enforcement, all three layouts, and the invalid/expired/empty paths.
-Operator notes added to [`operators_manual.md`](operators_manual.md) §7.9.
+Operator notes added to [`operators_manual.md`](operations/operators_manual.md) §7.5.

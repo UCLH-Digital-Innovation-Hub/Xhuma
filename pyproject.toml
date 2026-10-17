@@ -22,7 +22,7 @@ dependencies = [
     "opentelemetry-instrumentation-logging",
     "opentelemetry-instrumentation-redis",
     "asyncpg",
-    "sqlalchemy",
+    "sqlalchemy[asyncio]",
     "grpcio",
     "python-multipart>=0.0.31",
     "sqlmodel",

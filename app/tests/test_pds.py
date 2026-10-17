@@ -328,10 +328,13 @@ def test_terraform_app_service_sds_self_identity_configured():
     assert '"XHUMA_ODS_CODE"' in main_tf and "var.xhuma_ods_code" in main_tf
     assert '"XHUMA_MHS_PARTY_KEY"' in main_tf and "var.xhuma_mhs_party_key" in main_tf
 
-    # Play configuration
-    assert "xhuma_ods_code" in play_tfvars and '"Z6G1Z"' in play_tfvars
-    assert "RRV00-824607" not in play_tfvars
-    assert "Z6G1Z-838808" not in play_tfvars
+    # Play configuration (operates against INT Spine, aligned with INT consumer identity)
+    assert 'xhuma_ods_code           = "RRV00"' in play_tfvars or 'xhuma_ods_code = "RRV00"' in play_tfvars
+    assert (
+        'xhuma_mhs_party_key      = "RRV00-824607"' in play_tfvars
+        or 'xhuma_mhs_party_key = "RRV00-824607"' in play_tfvars
+    )
+    assert "Z6G1Z" not in play_tfvars
 
     # INT configuration
     assert "200000002574" in int_tfvars
@@ -345,6 +348,37 @@ def test_terraform_app_service_sds_self_identity_configured():
 
     # Ensure AUDIT_FAIL_OPEN remains unset in Terraform
     assert "AUDIT_FAIL_OPEN" not in main_tf
+
+
+def test_play_sds_consumer_identity_matches_int():
+    """Play operates against INT Spine, so its SDS consumer identity must match INT."""
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    play_tfvars = (repo_root / "infra" / "env" / "play.tfvars").read_text()
+    int_tfvars = (repo_root / "infra" / "env" / "int.tfvars").read_text()
+
+    def parse_tfvars(content: str) -> dict[str, str]:
+        settings = {}
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.split("#")[0].strip().strip('"')
+                settings[k] = v
+        return settings
+
+    play_config = parse_tfvars(play_tfvars)
+    int_config = parse_tfvars(int_tfvars)
+
+    assert play_config["env"] == "int"
+    assert play_config["org_code"] == int_config["org_code"] == "RRV00"
+    assert play_config["org_asid"] == int_config["org_asid"] == "200000002574"
+    assert play_config["xhuma_ods_code"] == int_config["xhuma_ods_code"] == "RRV00"
+    assert play_config["xhuma_mhs_party_key"] == int_config["xhuma_mhs_party_key"] == "RRV00-824607"
 
 
 @pytest.mark.asyncio
