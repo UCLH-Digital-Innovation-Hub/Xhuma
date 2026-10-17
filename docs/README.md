@@ -74,9 +74,11 @@ docs/
 │       ├── 2026-09-29-investigations-report-inventory.csv
 │       ├── 2026-10-06-int-matrix-cutover.md
 │       ├── 2026-10-09-prd-state-reconciliation.md
+│       ├── 2026-10-16-play-dmd-cache-warmer-commissioning.md
 │       └── investigation-grouping-comparison/
 │
-├── reference/                                 # Benchmark data profiles and index schemas
+├── reference/                                 # Reference query packs, benchmark profiles, and schemas
+│   ├── xhuma-operational-diagnostics-querypack.json
 │   ├── benchmarking-profile-2026-10-01.json
 │   └── investigation-indexed-benchmark-2026-10-01.json
 │

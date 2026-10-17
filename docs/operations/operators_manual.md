@@ -1,62 +1,41 @@
 # Xhuma Operator's Manual
 
-**Document Purpose:** This manual provides a comprehensive, authoritative, end-to-end runbook for deploying, configuring, verifying, and maintaining the Xhuma middleware across NHS Trust environments (Play, INT, PRD). It is designed to be operational without reliance on unwritten tribal knowledge.
+This manual is the authoritative operational guide for deploying, configuring, verifying, and troubleshooting Xhuma across all target environments (Play, INT, PRD).
 
-**Security Rule for Operators:**
-> [!WARNING]
-> **Screenshots and Logs:** Operational evidence must not contain credentials, tokens, patient data, certificate material, secret-valued configuration or protected infrastructure identifiers.
-
-> **Note:** Screenshots included in this manual are illustrative evidence captured during the September 2026 Play rehearsal. Commands, configuration parameters, and invariants in this runbook are authoritative; UI screenshots may change as GitHub and Azure evolve.
-
-> **Tired? In a hurry?** See the [Xhuma Deployment for Tired Humans](./deployment_for_tired_humans.md) quick-start guide.
+For quick deployment guidance, see [Xhuma Deployment for Tired Humans](deployment_for_tired_humans.md).  
+For the 20-query KQL diagnostics library, see the [Observability & Diagnostics Guide](observability.md).
 
 ---
 
-## Table of Contents
-1. [Architecture Overview & Environment Mapping](#1-architecture-overview--environment-mapping)
-2. [Infrastructure Bootstrapping and State Storage](#2-infrastructure-bootstrapping-and-state-storage)
-3. [Azure Service Principal & Permissions](#3-azure-service-principal--permissions)
-4. [Setting Up Variables and GitHub Environments](#4-setting-up-variables-and-github-environments)
-5. [Key Vault Population](#5-key-vault-population)
-6. [Deployment Orchestration and Review Gates](#6-deployment-orchestration-and-review-gates)
-7. [Verification and Health Checks](#7-verification-and-health-checks)
-8. [Shared Infrastructure Adoption (Terraform)](#8-shared-infrastructure-adoption-terraform)
-9. [Operational Observability & Shared Query Pack](#9-operational-observability--shared-query-pack)
-10. [dm+d Cache Warmer Operations and Diagnostics](#10-dmd-cache-warmer-operations-and-diagnostics)
-11. [Quick Operator Commands](#11-quick-operator-commands)
-12. [Assurance and Evidence Records](#12-assurance-and-evidence-records)
+## 1. Environment Architecture & Promotion Model
 
----
-
-## 1. Architecture Overview & Environment Mapping
-
-Xhuma utilises a **target-isolated deployment model with centrally managed shared services**. Every target environment (Play, INT, PRD) receives its own dedicated cloud footprint for compute, cache, database, and networking to ensure strict multi-tenant blast-radius containment and prevent cross-contamination of health data.
-
-### 1.1 Environment Promotion Sequence
-
-Environment promotion follows a strict, pull-request-driven progression:
+Xhuma operates a strict pull-request-based promotion model. Code merges into branch streams, triggering automated matrix deployment pipelines (`.github/workflows/matrix-deploy.yml`):
 
 ```text
-feature/* ──(PR)──> dev ──(PR)──> int ──(PR)──> main
-                      │             │             │
-                      ▼             ▼             ▼
-                     Play          INT           PRD
+feature/* ──> dev ──(PR)──> int ──(PR)──> main
+               │             │             │
+               ▼             ▼             ▼
+             Play           INT           PRD
 ```
 
-| Branch | Target Environment | Target Directory / Backend | Deployment Workflow |
+Each deployment run builds and scans an immutable container image tagged by commit SHA and referenced by its immutable SHA-256 digest (`ghcr.io/uclh-digital-innovation-hub/xhuma@sha256:...`). Each target deployment uses the exact immutable digest produced, reviewed, and verified for that deployment run.
+
+### Target Mapping and Resources
+
+| Git Branch | Target Name | Configuration / State Files | Authoritative Workflow |
 | :--- | :--- | :--- | :--- |
 | `dev` | **Play** | `infra/backends/play.hcl`, `infra/env/play.tfvars` | `.github/workflows/matrix-deploy.yml` |
 | `int` | **INT** | `infra/backends/int.hcl`, `infra/env/int.tfvars` | `.github/workflows/matrix-deploy.yml` |
 | `main` | **PRD** | `infra/backends/prd.hcl`, `infra/env/prd.tfvars` | `.github/workflows/matrix-deploy.yml` |
 
 - **Target-Local Resources:** Each environment receives a dedicated Azure App Service for containers, target-isolated VNet and subnets, target-local Managed Redis, target-local PostgreSQL audit database, target-local Key Vault, and target-local Log Analytics / Application Insights workspace.
-- **Shared Resources:** A separately managed Azure Resource Group (`rg-xhuma-shared`) hosts services with independent lifecycles, such as the Public JSON Web Key Set (JWKS) via Blob Storage and the Shared Key Vault for NHS-wide API keys, signing keys, and dm+d credentials.
+- **Shared Resources:** The shared Xhuma Azure services scope hosts services with independent lifecycles, such as the Public JSON Web Key Set (JWKS) via Blob Storage and the Shared Key Vault for NHS-wide API keys, signing keys, and dm+d credentials.
 
 ---
 
 ## 2. Infrastructure Bootstrapping and State Storage
 
-Terraform state and reviewed execution plans are stored securely in Azure Blob Storage. Each target has its own storage account within its target resource group.
+Terraform state and reviewed execution plans are stored securely in Azure Blob Storage. Each target has its own storage account within its target-local resource group.
 
 ### 2.1 Bootstrapping Procedure
 The target-agnostic setup script establishes the backend storage:
@@ -64,24 +43,29 @@ The target-agnostic setup script establishes the backend storage:
 1. **Target Configuration**: Verify target definitions in `infra/targets.json` and backend coordinates in `infra/backends/<target>.hcl`.
 2. **Execution**: The `matrix-deploy.yml` workflow automatically runs the bootstrap script:
    ```bash
-   export AZURE_SUBSCRIPTION_ID="<your-subscription>"
-   export AZURE_TENANT_ID="<your-tenant>"
+   export AZURE_SUBSCRIPTION_ID="<target-subscription-id>"
+   export AZURE_TENANT_ID="<target-tenant-id>"
    export XHUMA_BACKEND_FILE="infra/backends/play.hcl"
    bash infra/bootstrap/setup-target.sh
    ```
    This provisions the state storage account and blob containers in the target resource group. The `tfplans` container automatically expires files after 7 days to prevent unbounded plan retention.
 
-*(Note: Entra Blob authentication and OIDC are scheduled as subsequent hardening changes. We currently use interim storage-key authentication and long-lived Service Principal credentials.)*
+*(Note: Entra Blob authentication and OIDC are scheduled as subsequent hardening changes. We currently use interim storage-key authentication and Service Principal credentials.)*
 
 ---
 
 ## 3. Azure Service Principal & Permissions
 
-To allow GitHub Actions to deploy infrastructure and code, Xhuma relies on a Service Principal with client secrets:
+To allow GitHub Actions to deploy infrastructure and code, Xhuma relies on Azure deployment credentials:
 
-1. **Target Resource Group Permissions**: The SP requires Contributor and User Access Administrator (or scoped RBAC equivalent) over the target Azure Resource Group and state backend.
-2. **Shared Key Vault Access Prerequisite**: The Terraform configuration manages network access rules and access policies on the shared Key Vault. The Service Principal requires sufficient rights to manage these policies.
-3. **Expiry & Rotation**: Ensure the deployment credential is rotated before expiry. Update the relevant GitHub Secret (`AZURE_CREDENTIALS`) upon rotation.
+1. **Target Resource Group Permissions**: The deployment identity requires Contributor and User Access Administrator (or scoped RBAC equivalent) over the target Azure Resource Group and state backend.
+2. **Shared Key Vault Access Prerequisite**: The Terraform configuration manages network access rules and access policies on the shared Key Vault. The deployment identity requires sufficient rights to manage these network rules and policies.
+3. **Authentication Secrets**: Deployment authentication inputs are provided via repository secrets:
+   - `AZURE_CLIENT_ID`
+   - `AZURE_CLIENT_SECRET`
+   - `AZURE_TENANT_ID`
+   - `AZURE_SUBSCRIPTION_ID`
+   Ensure credentials are periodically rotated before expiry.
 
 ---
 
@@ -89,27 +73,27 @@ To allow GitHub Actions to deploy infrastructure and code, Xhuma relies on a Ser
 
 ### 4.1 Matrix Deployment Workflow
 
-Deployments rely on protected GitHub Environments to enforce strict manual approval gates between Plan generation, Infrastructure Apply, and Application Deployment.
+Deployments rely on GitHub Environments to provide controlled stages between Plan generation, Infrastructure Apply, and Application Deployment.
 
-![Play matrix deployment pipeline](../assets/play-plan-approval-gate.png)
-*Figure 1 — Pre-plan approval gate — Run #32 paused before `Infra Plan - play` because the `play-plan` GitHub Environment required reviewer approval.*
+![Play Plan Review Gate](../assets/play-plan-review-gate.png)
+*Figure 1 — Plan review gate in the Matrix Deployment Pilot.*
 
-**Protected Environment Gates:**
+**Deployment Environment Stages:**
 
-| Gate Stage | Environment Name | Required Reviewer Action |
+| Stage | Environment Name Pattern | Reviewer / Policy Action |
 | :--- | :--- | :--- |
-| **Plan Gate** | `<target>-plan` (e.g. `play-plan`) | Approve generation of the immutable Terraform plan. |
-| **Infra Apply Gate** | `<rg-target-infra>` (e.g. `rg-xhuma-play-infra`) | Review plan summary, inspect attribute paths, and approve apply. |
-| **App Deploy Gate** | `<target>-app` (e.g. `play-app`) | Review scanned image digest and approve container deployment. |
+| **Plan Stage** | `<target>-plan` (e.g. `play-plan`) | Plan executes under the target's plan environment. A plan-stage approval may occur depending on current GitHub Environment protection policy. (Repository-managed configuration alone does not prove human reviewers are configured on all plan environments). |
+| **Infra Apply Gate** | Configured target infrastructure approval environment (e.g. `<target infrastructure approval environment>`) | Review plan summary, inspect attribute paths, verify zero unexplained destruction, and approve apply. |
+| **App Deploy Gate** | Configured target deployment environment (e.g. `<target application deployment environment>`) | Review scanned image digest and approve container deployment. |
 
-**Actual Deployment Sequence:**
+**Actual Deployment Sequence from `matrix-deploy.yml`:**
 
-1. **Configure GitHub Environments & Secrets:** Ensure environments exist and deployment credentials are saved with designated human approvers.
-2. **Automatic Bootstrap and Plan:** The workflow creates state storage (if missing) and executes `terraform plan`. The generated plan is uploaded securely and its SHA256 hash is published to the job summary.
-3. **Review and Approved Apply:** Operators review the plan output against explicit STOP conditions. Once approved, the apply job verifies the plan hash and provisions the infrastructure.
-4. **Local-Vault Onboarding:** With infrastructure provisioned, the operator injects required operational secrets (`epic-ca-cert`) into the target-local Key Vault.
-5. **Approved Application Deployment:** Once the vault is ready, the deployment job replaces the inert bootstrap image with the candidate application container digest.
-6. **Verification and Health Check:** The deployed container digest is verified on App Service and `/health` is checked.
+1. **CI & Tests (`ci`):** Executes Ruff linting, formatting checks, and pytest suite with coverage.
+2. **Build & Scan (`build`):** Builds the container image, tags it with the source commit SHA, and scans it using Trivy for `HIGH` and `CRITICAL` vulnerabilities. Outputs the immutable image digest.
+3. **Target Selection (`prepare-targets`):** Validates `infra/targets.json` against schema and determines the active matrix targets for the triggered branch.
+4. **Infra Plan (`infra-plan`):** Runs under the target's plan environment (`<target>-plan`). Checks existing state preflight for brownfield targets, runs `terraform init`, generates a saved plan, uploads the plan blob to storage, computes its SHA-256 hash, and emits summary diagnostics. Unexplained destructive actions on existing state targets trigger a fail-closed STOP condition.
+5. **Infra Apply (`infra-apply`):** Runs under the configured target infrastructure approval environment after approval. Downloads the exact manifest and plan, cryptographically verifies the SHA-256 plan hash against the manifest, runs `terraform apply`, reconciles shared Key Vault network rules via `guard_shared_plan.py`, refreshes App Service Key Vault references, and validates reference resolution.
+6. **Application Deployment (`deploy`):** Runs under the configured target deployment environment after approval. Deploys the candidate container pinned to the immutable SHA-256 digest produced by the build stage, verifies the deployed digest on App Service, and checks application process liveness via `/health`.
 
 ---
 
@@ -118,10 +102,10 @@ Deployments rely on protected GitHub Environments to enforce strict manual appro
 Infrastructure and application liveness can be established before the target-local Epic CA is populated. However, `epic-ca-cert` is required before Epic/SOAP/mTLS functional acceptance.
 
 1. `epic-ca-cert`: The target-specific Epic verification CA bundle required by application semantics (Base64 PEM) used for mutual TLS (mTLS). It may contain the direct issuing intermediate(s).
-2. **Populating the Vault**: Use the Azure Portal or CLI to add the secret to the newly provisioned Local Key Vault (e.g., `<app_service_name>-kv`):
+2. **Populating the Vault**: Use the Azure Portal or CLI to add the secret to the provisioned Local Key Vault:
    ```bash
    az keyvault secret set \
-     --vault-name "<target-kv-name>" \
+     --vault-name "<target-key-vault>" \
      --name "epic-ca-cert" \
      --file /path/to/epic-ca-bundle.pem
    ```
@@ -147,7 +131,7 @@ Before any deployment plan is generated, the pipeline enforces strict quality an
 
 1. **Trigger**: Merge an approved pull request into the mapped branch (`dev` for Play, `int` for INT, `main` for PRD) following the promotion sequence `feature/*` → `dev` → `int` → `main`.
 2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are published in GitHub.
-3. **Review & Approval**: An authorized operator reviews the plan summary in GitHub (and the full plan in Azure Storage if necessary) using the inspection procedure below, then approves the infrastructure environment (`<rg-target-infra>`).
+3. **Review & Approval**: An authorized operator reviews the plan summary in GitHub (and the full plan in Azure Storage if necessary) using the inspection procedure below, then approves the configured target infrastructure environment.
 
 ### 6.3 Terraform Plan Review Before Approval
 
@@ -158,69 +142,51 @@ Do NOT approve the infrastructure apply gate if any of the following occur:
 
 | Check | Failure Condition (STOP Immediately) |
 | :--- | :--- |
-| **Plan Hash** | Plan SHA-256 differs from the value in the workflow job summary. |
-| **Target / Subscription** | Target, subscription ID, or resource group does not match target configuration. |
-| **Destructive Replacement** | Any unexpected `destroy` or `replace` action (`-/+`) on persistent resources (Redis, PostgreSQL, Key Vault, Storage). |
-| **Shared Resource Drift** | Any unintended change to shared Key Vault, shared DNS, or external networking. |
-| **State Drift** | Unexplained attribute drift (e.g. tags, service endpoints, diagnostic settings). |
-| **Unresolved Secrets** | Key Vault reference strings missing or unresolvable. |
+| **Unexpected Deletions** | `destroy > 0` on persistent data stores (PostgreSQL, Redis, Storage). |
+| **Resource Replacement** | An existing resource is marked for replacement (`-/+`) rather than in-place update (`~`). |
+| **Shared Resource Drift** | Shared Key Vault policies or network rules show unexplained modifications or removals. |
+| **Target Isolation Violation** | Plan modifies resources outside the target's explicit scope. |
+| **Unverified Digest** | Application container image does not match the immutable SHA-256 digest built in the preceding CI stage. |
+| **Brownfield State Adoption** | Migration guard fails or detects unexpected recreate actions on state-adopted targets. |
 
-#### Step-by-Step Review Procedure
+#### Safe Plan Inspection Procedure
+If a plan contains unexpected changes, download and inspect the JSON representation safely:
 
-1. **Select the target Azure subscription:**
-   ```bash
-   az account set --subscription "<target-subscription-id>"
-   ```
-2. **Securely obtain the plan storage credentials:**
-   ```bash
-   RG_NAME="<backend-resource-group>"
-   SA_NAME="<backend-storage-account>"
-   ```
-3. **Download the exact immutable `.tfplan`:**
-   ```bash
-   PLAN_FILE="<plan-filename>"
-   az storage blob download \
-     --auth-mode login \
-     --account-name "$SA_NAME" \
-     --container-name tfplans \
-     --name "$PLAN_FILE" \
-     --file "/tmp/$PLAN_FILE"
-   ```
-4. **Verify SHA-256 hash:**
-   ```bash
-   sha256sum "/tmp/$PLAN_FILE"
-   ```
-   Compare the output hash with the manifest or GitHub Actions job summary. **STOP if SHA differs.**
+```bash
+# 1. Download the plan file from Azure Storage
+az storage blob download \
+  --account-name "<target-storage-account>" \
+  --container-name tfplans \
+  --name "<plan-blob-name>.tfplan" \
+  --file /tmp/plan.tfplan \
+  --auth-mode key
 
-5. **Initialise Terraform locally without connecting to remote state:**
-   ```bash
-   git checkout <commit-sha>
-   terraform init -backend=false -input=false
-   ```
-6. **Review headline counts and changes:**
-   ```bash
-   terraform show -json "/tmp/$PLAN_FILE" | jq '.resource_changes[] | {address, actions: .change.actions}'
-   ```
-7. **Extract changed attribute paths only (safe from secret leakage):**
-   ```bash
-   terraform show -json "/tmp/$PLAN_FILE" | jq -r '
-     .resource_changes[]
-     | select(.change.actions != ["no-op"])
-     | .address as $addr
-     | (.change.before // {}) as $before
-     | (.change.after // {}) as $after
-     | ([($before | paths(scalars)), ($after | paths(scalars))] | unique[]) as $p
-     | select(($before | getpath($p)) != ($after | getpath($p)))
-     | "\($addr)\t\($p | map(tostring) | join("."))"
-   '
-   ```
+# 2. Convert to JSON
+cd infra
+terraform show -json /tmp/plan.tfplan > /tmp/plan.json
 
-> **Example (Play Rehearsal Drift Detection):**
-> A superficially safe plan showed: `0 to add, 15 to change, 0 to destroy`.
->
-> ![Play Plan Summary](../assets/play-plan-summary.png)
-> *Figure 4 — Play rehearsal plan showing 0 add / 15 change / 0 destroy. Further inspection revealed unexplained drift and Apply was withheld.*
->
+# 3. Inspect actions per resource
+jq -r '.resource_changes[] | "\(.change.actions | join(","))\t\(.address)"' /tmp/plan.json
+
+# 4. Deep attribute inspection for modified resources
+jq -r '
+  .resource_changes[]
+  | select(.change.actions != ["no-op"])
+  | .address as $addr
+  | (.change.before // {}) as $before
+  | (.change.after // {}) as $after
+  | ([($before | paths(scalars)), ($after | paths(scalars))] | unique[]) as $p
+  | select(($before | getpath($p)) != ($after | getpath($p)))
+  | "\($addr)\t\($p | map(tostring) | join("."))"
+' /tmp/plan.json
+```
+
+> **Example (Play Rehearsal Drift Detection):**  
+> A superficially safe plan showed: `0 to add, 15 to change, 0 to destroy`.  
+>  
+> ![Play Plan Summary](../assets/play-plan-summary.png)  
+> *Figure 4 — Play rehearsal plan showing 0 add / 15 change / 0 destroy. Further inspection revealed unexplained drift and Apply was withheld.*  
+>  
 > Attribute-path inspection revealed that Terraform intended to remove externally-managed organisational tags and Application Insights hidden links. Apply was withheld, and Terraform configuration was corrected via `ignore_changes`.
 
 ![Play Convergence Check](../assets/play-convergence-no-changes.png)
@@ -228,17 +194,14 @@ Do NOT approve the infrastructure apply gate if any of the following occur:
 
 ### 6.4 Plan Retries & Image Deployment
 
-![Infrastructure Apply Approval Gate](../assets/play-infra-apply-approval-gate.png)
-*Figure 6 — Infrastructure Apply approval gate pausing at `rg-xhuma-play-infra` with plan hash and image digest visible.*
-
 ![Play Infrastructure Apply Success](../assets/play-infra-apply-success.png)
-*Figure 7 — Successful infrastructure Apply job completing after manual approval.*
+*Figure 6 — Successful infrastructure Apply job completing after manual approval.*
 
-1. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a new workflow run must be triggered.
-2. **Image Deployment**: After infrastructure applies the bootstrap image, the pipeline deploys the exact scanned Docker image digest. This step requires separate environment approval (`<target>-app`).
+1. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same reviewed plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a new workflow run must be triggered.
+2. **Image Deployment**: The pipeline deploys the exact scanned Docker image digest verified during the build stage. This step executes under the target application deployment environment.
 
 ![Play Deploy Digest](../assets/play-deploy-digest.png)
-*Figure 8 — Application image deployed deterministically using exact immutable SHA-256 digest.*
+*Figure 7 — Application image deployed deterministically using exact immutable SHA-256 digest.*
 
 ### 6.5 Digest Rollback & Recovery
 
@@ -248,8 +211,8 @@ Do NOT approve the infrastructure apply gate if any of the following occur:
    - Manually redeploy the previous digest via Azure CLI:
      ```bash
      az webapp config container set \
-       --name <app_service> \
-       --resource-group <rg> \
+       --name <target-app-service> \
+       --resource-group <target-resource-group> \
        --docker-custom-image-name ghcr.io/uclh-digital-innovation-hub/xhuma@sha256:<previous-digest>
      ```
    - **PostgreSQL Compatibility Notice:** Reverting the container digest does **not** revert database schema migrations. Rollback is only safe when the previous application release is compatible with the current Alembic schema.
@@ -260,43 +223,42 @@ Do NOT approve the infrastructure apply gate if any of the following occur:
 
 ### 7.1 Safe Verification Boundaries
 - **Liveness Probe**: The `/health` endpoint is unauthenticated and returns a coarse HTTP 200 process-liveness signal: `{"status":"ok"}`. It does not perform downstream NHS requests or leak credentials.
-- **Process Liveness vs Clinical Readiness:** HTTP 200 on `/health` proves process and container liveness. It does **not** prove end-to-end clinical readiness (e.g. Spine connectivity, valid mTLS certificates, or populated cache keys).
+- **Process Liveness vs Clinical Readiness:** HTTP 200 on `/health` proves coarse application process liveness only. It does **not** prove end-to-end clinical readiness (e.g. Spine connectivity, valid mTLS certificates, or populated cache keys).
 - **Manual Clinical Check**: Because GitHub Actions runners lack clinical mTLS certificates, a manual synthetic check must be performed from a trusted clinical workstation to verify SOAP mTLS, SAML validation, and audit persistence.
 
 ### 7.2 Post-Deployment Health Verification
 
-Run this reproducible command to verify application liveness:
+Run this reproducible command to verify application process liveness:
 
 ```bash
 curl -sS \
   -o /tmp/xhuma-health.json \
   -w 'HTTP %{http_code}\n' \
-  https://<app_service>.azurewebsites.net/health
+  https://<target-app-service>.azurewebsites.net/health
 
 cat /tmp/xhuma-health.json
 ```
 
 ![Final Health State](../assets/final-health-state.png)
-*Figure 9 — Post-deployment liveness verification: Play App Service returned HTTP 200 with `{"status":"ok"}`.*
+*Figure 8 — Post-deployment liveness verification: App Service returned HTTP 200 with `{"status":"ok"}`.*
 
 ### 7.3 Key Vault Reference Verification
 
-Ensure App Service `@Microsoft.KeyVault(...)` configuration references are resolved:
+Listing App Service settings containing `@Microsoft.KeyVault(...)` does **not** prove the references are resolved. Verify actual resolution status without exposing secret values using the Azure App Service configuration references status endpoint:
 
 ```bash
-az webapp config appsettings list \
-  --name <app_service> \
-  --resource-group <rg> \
-  --query "[?contains(value, '@Microsoft.KeyVault')].{name:name, value:value}" \
+az rest --method get \
+  --uri "https://management.azure.com/subscriptions/<target-subscription-id>/resourceGroups/<target-resource-group>/providers/Microsoft.Web/sites/<target-app-service>/config/configreferences/appsettings?api-version=2022-03-01" \
+  --query "value[].{name:name, status:properties.status, vault:properties.vaultName}" \
   -o table
 ```
 
 **Verification Sequence:**
 1. Confirm App Service managed identity exists.
 2. Confirm access policy on shared vault (`Get`, `List` secrets).
-3. Confirm App Service subnet is permitted by shared vault network ACL.
-4. Confirm reference status is `Resolved`.
-5. **STOP** if status is `AccessToKeyVaultDenied`, `SecretNotFound`, or unresolved.
+3. Confirm target-local subnets (App Service and Container Apps warmer) are admitted by shared vault network rules.
+4. Confirm every required reference reports `status: "Resolved"`.
+5. **STOP** if status reports `AccessToKeyVaultDenied`, `SecretNotFound`, or any status other than `Resolved`.
 
 ### 7.4 HSCN Relay Observability & Diagnostics
 
@@ -313,9 +275,11 @@ The WebSocket relay hub consumes and sanitises client-side diagnostics (`relay_l
 The shared Key Vault is adopted into a separate shared Terraform state. The matrix workflow automatically:
 - Reads the current shared Key Vault network ACL;
 - Preserves existing rules;
-- Adds only the target App Service subnet;
+- Admits target-local subnets required by deployed components, including:
+  - App Service integration subnet
+  - Container Apps warmer subnet when the warmer is enabled;
 - Guards the shared plan with `guard_shared_plan.py` to fail closed if unexpected changes are proposed;
-- Verifies the subnet is present post-apply.
+- Verifies required subnets are present post-apply.
 
 ---
 
@@ -328,8 +292,10 @@ Operational diagnostics across Play, INT, and PRD are standardised through a sha
 | Property | Value |
 | :--- | :--- |
 | **Resource Name** | `xhuma-operational-diagnostics` |
-| **Resource Group** | `rg-xhuma-shared` |
+| **Location** | The shared Xhuma Azure services scope |
+| **Type** | `Microsoft.OperationalInsights/queryPacks` |
 | **Full Catalogue & Guide** | [Observability & Diagnostics Guide](observability.md) |
+| **Reference Export** | [Query Pack Reference Snapshot](../reference/xhuma-operational-diagnostics-querypack.json) |
 
 ### 9.2 Key Operational Boundaries
 1. **Stores Queries, Not Telemetry:** The Query Pack stores KQL query definitions only; it does not store logs, aggregate telemetry, or create an extra Log Analytics Workspace.
@@ -338,7 +304,7 @@ Operational diagnostics across Play, INT, and PRD are standardised through a sha
 
 ### 9.3 How to Run Queries
 1. Open the [Azure Portal](https://portal.azure.com).
-2. Navigate to the target resource group (`rg-xhuma-play`, `rg-xhuma-int`, or `rg-xhuma-prd`).
+2. Navigate to the target resource group (`<play-resource-group>`, `<int-resource-group>`, or `<prd-resource-group>`).
 3. Open the target's **Log Analytics Workspace** or **Application Insights** instance.
 4. Click **Logs**, open **Query Packs**, and select `xhuma-operational-diagnostics`.
 5. Run the required diagnostic query. See [Observability & Diagnostics](observability.md) for the complete 20-query catalogue and symptom decision matrix.
@@ -347,15 +313,15 @@ Operational diagnostics across Play, INT, and PRD are standardised through a sha
 
 ## 10. dm+d Cache Warmer Operations and Diagnostics
 
-The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azurerm_container_app_job.dmd_warm`) provisioned with a **manual trigger configuration**. It pre-populates target-local Redis DB 2 with resolved `DMDConcept` representations so clinical prescription conversions execute with sub-millisecond local latency.
+The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azurerm_container_app_job.dmd_warm`) provisioned with a **manual trigger configuration**. It pre-populates target-local Redis DB 2 with resolved `DMDConcept` representations so clinical prescription conversions execute with low-millisecond target-local Redis lookups.
 
 ### 10.1 Operational State Across Environments
 
 | Environment | Current Implemented State | Required v1.0 Operational Baseline |
 | :--- | :--- | :--- |
-| **Play (`rg-xhuma-play`)** | Warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler disabled. | Warmer infrastructure enabled; manual execution operational. |
-| **INT (`rg-xhuma-int`)** | Warmer infrastructure disabled (inherits default `false`); scheduler disabled. | **Warmer infrastructure MUST be explicitly enabled** (`dmd_cache_warm_enabled = true` in INT target tfvars). |
-| **PRD (`rg-xhuma-prd`)** | Warmer infrastructure disabled (inherits default `false`); scheduler disabled. | **Warmer infrastructure MUST be explicitly enabled** (`dmd_cache_warm_enabled = true` in PRD target tfvars). |
+| **Play** | Warmer infrastructure enabled (`dmd_cache_warm_enabled = true`); scheduler disabled. | Warmer infrastructure enabled; manual execution operational. |
+| **INT** | Warmer infrastructure currently disabled by target configuration/default; scheduler disabled. | **Warmer infrastructure MUST be explicitly enabled** (`dmd_cache_warm_enabled = true` in INT target tfvars). |
+| **PRD** | Warmer infrastructure currently disabled by target configuration/default; scheduler disabled. | **Warmer infrastructure MUST be explicitly enabled** (`dmd_cache_warm_enabled = true` in PRD target tfvars). |
 
 > [!IMPORTANT]
 > **v1.0 Implementation Note:** The warmer is standard target-local operational infrastructure for INT and PRD in v1.0. Enabling it must occur via explicit per-target tfvars configuration (`dmd_cache_warm_enabled = true` in `infra/env/int.tfvars` and `infra/env/prd.tfvars`), **not** by changing the global Terraform default to true.
@@ -363,8 +329,8 @@ The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azur
 ### 10.2 Terminology Publication Schedule & Operational Timing
 
 - **Project Operational Assumption:** Refreshed upstream dm+d releases are normally expected to become available at approximately **04:00 UK local time on Monday** via the NHS Terminology Server. This is a project operational planning assumption based on observed release operations, **not** an externally guaranteed NHS SLA. Occasional small publication delays can occur.
-- **Xhuma Warm Target:** Xhuma targets warming at approximately **05:00 UK local time on Monday**, providing a one-hour publication buffer.
-- **DST-Aware Recurrence:** Azure recurrence uses `GMT Standard Time`, keeping the schedule aligned with UK local time across GMT and BST.
+- **Xhuma Warm Target:** Xhuma targets warming at approximately **05:00 UK local time on Monday**, providing around one hour of publication headroom.
+- **DST-Aware Recurrence:** Azure recurrence uses `GMT Standard Time`, maintaining UK local timing across GMT and BST.
 - **No Cache Purge:** Xhuma operates strictly on the model:
   $$\text{discover} \longrightarrow \text{warm} \longrightarrow \text{verify} \longrightarrow \text{activate} \longrightarrow \text{retire naturally by TTL}$$
   New release keys are versioned (`dmd:resolved:v1:<release>:<concept_id>`). The active release pointer (`dmd:active-release`) is atomically updated only after full verification. The prior release is not destructively deleted; old keys expire naturally under their 9-day TTL. **Never describe normal dm+d operation as a "purge".** `FLUSHDB` and wildcard `KEYS *` are strictly prohibited.
@@ -380,11 +346,11 @@ The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azur
 > - If upstream publication were delayed beyond the scheduled run, Xhuma could successfully re-warm the previous release.
 >
 > Future scheduler/watchdog acceptance must verify:
-> 1. Successful execution
+> 1. Job success
 > 2. Cache completeness
 > 3. Zero evictions
 > 4. Active pointer health
-> 5. Release freshness/advancement where a new upstream release is expected
+> 5. Expected release freshness/advancement where a new release is due
 
 ### 10.4 Scheduler State & Manual Triggering
 
@@ -399,7 +365,7 @@ The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azur
 4. **Distributed Warmer Lock TTL:** 2700 seconds (`local.dmd_lock_ttl_seconds = 2700`, acquired at `dmd:warm:v1:lock`).
 5. **Strict Timeout Hierarchy:** $1800\text{s (job)} < 2100\text{s (poll)} < 2700\text{s (lock)}$.
 6. **Dedicated Digest-Pinned Image:** Job runs the immutable digest (`var.dmd_cache_job_image`).
-7. **Runtime Key Vault Credential Resolution:** Resolves `dmd-client-id` and `dmd-client-secret` at runtime via user-assigned managed identity.
+7. **Runtime Key Vault Credential Resolution:** Resolves dm+d credentials at runtime from the shared Key Vault via user-assigned managed identity.
 8. **Redis Memory Safety Preflight:** Aborts before writes if current memory + projected delta with 1.5x multiplier exceeds 80% of `maxmemory`.
 9. **Zero Eviction Tolerance:** Aborts immediately if `evicted_keys` increases by even 1 key during warming.
 10. **Grace Period Coexistence:** 9-day data TTL vs 8-day active pointer TTL provides a 24-hour grace window during schedule delays.
@@ -409,8 +375,8 @@ The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azur
 
 ```bash
 az containerapp job start \
-  --name <app-service-name>-dmd-warm \
-  --resource-group <resource-group>
+  --name <target-app-service>-dmd-warm \
+  --resource-group <target-resource-group>
 ```
 
 ### 10.7 Check Execution Status & Logs
@@ -418,8 +384,8 @@ az containerapp job start \
 ```bash
 # List executions
 az containerapp job execution list \
-  --name <app-service-name>-dmd-warm \
-  --resource-group <resource-group> \
+  --name <target-app-service>-dmd-warm \
+  --resource-group <target-resource-group> \
   -o table
 
 # Query logs in Log Analytics
@@ -427,7 +393,7 @@ az monitor log-analytics query \
   --workspace "$LAW_ID" \
   --analytics-query '
 ContainerAppConsoleLogs_CL
-| where ContainerJobName_s == "<app-service-name>-dmd-warm"
+| where ContainerJobName_s == "<target-app-service>-dmd-warm"
 | where TimeGenerated > ago(2h)
 | project TimeGenerated, Log_s
 | order by TimeGenerated desc
@@ -439,11 +405,28 @@ ContainerAppConsoleLogs_CL
 
 1. **What a failed warm means:**
    - Active release pointer (`dmd:active-release`) remains untouched, pointing to the prior release.
-   - The prior release data remains valid for up to 9 days (24-hour grace window).
-   - If the active pointer expires, the application degrades gracefully to unversioned on-demand terminology lookup (`snomed:<concept_id>`). Clinical prescription conversion is never interrupted.
+   - The prior release data remains valid for up to 9 days (providing a grace window).
+   - A warmer failure leaves the previous active release available and preserves the existing on-demand terminology fallback path. It does not guarantee subsequent clinical conversion if downstream terminology dependencies are also unavailable.
 2. **Instance-Wide Redis Memory Safety:**
    - Redis `maxmemory` and eviction policies are instance-wide across all logical databases (DB 0 application, DB 1 PDS, DB 2 dm+d).
    - Preflight checks and zero-eviction guards prevent dm+d warming from evicting active PDS cache or application session keys.
+
+### 10.9 First-Environment Warmer Commissioning Sequence
+
+When commissioning the warmer for the first time in an environment (or verifying a re-commissioned target), execute this strict 12-step verification sequence:
+
+1. **Review infrastructure plan:** Inspect the target Terraform plan enabling the warmer infrastructure.
+2. **Verify expected additive infrastructure only:** Confirm that the plan proposes only additive Container Apps Environment, Container Apps Job, and user-assigned managed identity resources with zero destructive changes.
+3. **Run warmer dry-run/preflight:** Trigger the preflight command or inspect memory capacity.
+4. **Require `CLEARED TO WARM`:** Ensure Redis memory headroom satisfies the 80% ceiling requirement.
+5. **Execute one manual warm:** Trigger the Container Apps Job manually via `az containerapp job start`.
+6. **Verify successful completion:** Confirm the Job execution finishes with status `Succeeded`.
+7. **Verify zero evictions:** Confirm Redis `evicted_keys` delta is exactly 0.
+8. **Verify active release pointer:** Confirm `dmd:active-release` points to the expected discovered release (e.g. `202610.1.0`).
+9. **Verify distributed lock released:** Confirm `dmd:warm:v1:lock` is no longer held.
+10. **Verify direct resolved-cache read:** Probe a resolved concept key in Redis DB 2 to confirm data presence.
+11. **Verify a real application path produces a resolved terminology cache hit:** Execute an ITI-38 document conversion request and verify telemetry records a cache hit without an outbound HTTP call to the NHS Terminology Server.
+12. **Only then consider automated recurrence commissioning:** Do not enable automated scheduler recurrence until all preceding steps succeed and freshness watchdog monitoring is accepted.
 
 ---
 
@@ -457,7 +440,7 @@ Use these safe generic commands to inspect environments. Replace placeholders wi
   ```
 - **App Service managed identity:**
   ```bash
-  az webapp identity show --name <app_service> --resource-group <rg> --query principalId -o tsv
+  az webapp identity show --name <target-app-service> --resource-group <target-resource-group> --query principalId -o tsv
   ```
 - **SHA-256 plan verification:**
   ```bash
@@ -480,17 +463,20 @@ Use these safe generic commands to inspect environments. Replace placeholders wi
     | "\($addr)\t\($p | map(tostring) | join("."))"
   '
   ```
-- **App Service health:**
+- **App Service process liveness:**
   ```bash
-  curl -s https://<app_service>.azurewebsites.net/health
+  curl -s https://<target-app-service>.azurewebsites.net/health
   ```
-- **Key Vault reference verification:**
+- **Key Vault reference resolution status (safe):**
   ```bash
-  az webapp config appsettings list --name <app_service> --resource-group <rg> --query "[?contains(value, '@Microsoft.KeyVault')].{name:name, value:value}" -o table
+  az rest --method get \
+    --uri "https://management.azure.com/subscriptions/<target-subscription-id>/resourceGroups/<target-resource-group>/providers/Microsoft.Web/sites/<target-app-service>/config/configreferences/appsettings?api-version=2022-03-01" \
+    --query "value[].{name:name, status:properties.status, vault:properties.vaultName}" \
+    -o table
   ```
 - **Currently deployed container digest:**
   ```bash
-  az webapp config show --name <app_service> --resource-group <rg> --query 'linuxFxVersion' -o tsv
+  az webapp config show --name <target-app-service> --resource-group <target-resource-group> --query 'linuxFxVersion' -o tsv
   ```
 - **Workflow run inspection:**
   ```bash
@@ -507,4 +493,5 @@ Specific deployment rehearsals, cutovers, and clean-room convergence tests are p
 - [Play Clean Room Rebuild and Convergence (25 September 2026)](../assurance/evidence/2026-09-25-play-clean-room-rebuild-and-convergence.md)
 - [INT Matrix Cutover Record (6 October 2026)](../assurance/evidence/2026-10-06-int-matrix-cutover.md)
 - [PRD State Reconciliation Record (9 October 2026)](../assurance/evidence/2026-10-09-prd-state-reconciliation.md)
+- [Play dm+d Cache Warmer Commissioning (16 October 2026)](../assurance/evidence/2026-10-16-play-dmd-cache-warmer-commissioning.md)
 - [Medical Device Regulatory Statement](../assurance/medical_device_statement.md)

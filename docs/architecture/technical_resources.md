@@ -1,118 +1,108 @@
-# Technical Resources
+# Technical Resources & Verified Inventory
 
-## NHS Digital Services Integration
+This document provides a verified inventory of standards, protocols, libraries, and tooling implemented in Xhuma, reconciled directly against `pyproject.toml`, `Dockerfile`, GitHub Actions workflows, and active repository code.
 
-### Authentication & Security
-- **JWT Implementation**: Used for NHS API authentication
-  - Algorithm: RS512
-  - Key Storage: PEM format
-  - Token Lifetime: 300 seconds
-  - Headers Required:
-    - `typ`: JWT
-    - `kid`: Key ID
+---
 
-### SOAP Services
-- **IHE ITI Profiles Implementation**:
-  - ITI-55: Cross Gateway Patient Discovery
-  - ITI-38: Cross Gateway Query
-  - ITI-39: Cross Gateway Retrieve
-- **SOAP Headers**:
-  - Content-Type: application/soap+xml
-- **Namespaces**:
-  - SOAP Envelope: http://www.w3.org/2003/05/soap-envelope
-  - Addressing: http://www.w3.org/2005/08/addressing
-  - ebXML RegRep: urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0
-  - IHE XDS.b: urn:ihe:iti:xds-b:2007
+## 1. NHS Digital Standards & Services Integration
 
-### GP Connect
-- **Service Description**: GP Connect enables information sharing between different clinical systems
-- **Documentation**: [GP Connect Documentation](https://digital.nhs.uk/developer/api-catalogue/gp-connect)
-- **Environment URLs**:
-  - Integration: https://orange.testlab.nhs.uk/
-- **Headers Required**:
-  - JWT Token
-  - Content-Type
-- **Authentication**: JWT-based
+### 1.1 Authentication & Token Signing
+- **JWT Implementation:** Outbound NHS API authentication uses signed JSON Web Tokens (RS512 via `cryptography`, `jwcrypto`, and `pyjwt`).
+- **Key Management:** Private keys are stored securely in Azure Key Vault; public JWKS keysets are served via `/jwk`.
+- **Token Lifetime:** 300-second assertion validity window with unique `jti` claims.
 
-### Patient Demographics Service (PDS)
-- **Service Description**: National demographics service
-- **Documentation**: [PDS Documentation](https://digital.nhs.uk/developer/api-catalogue/personal-demographics-service-fhir)
-- **Implementation**: FHIR-based REST API
-- **Authentication**: JWT-based
+### 1.2 IHE ITI SOAP Transactions
+- **Profiles Implemented:**
+  - **ITI-55:** Cross Gateway Patient Discovery (patient demographic verification via PDS).
+  - **ITI-38:** Cross Gateway Query (clinical document query; fetches and converts GP Connect structured record on cache miss).
+  - **ITI-39:** Cross Gateway Retrieve (retrieves cached C-CDA XML documents by `DocumentUniqueId`).
+- **Transport & Envelope:** SOAP 1.2 (`application/soap+xml`), WS-Addressing, ebXML RegRep 3.0, IHE XDS.b.
+- **Fault Semantics:** Custom `SoapFault` returning HTTP 400 for SOAP Sender faults and HTTP 500 for SOAP Receiver faults.
 
-## Standards and Specifications
+### 1.3 FHIR Standards by Upstream Service
+FHIR versions are service-specific and are not uniform across all integrations:
+- **GP Connect Structured Records:** FHIR STU3 (CareConnect profiles: AllergyIntolerance, MedicationStatement, Condition, Observation, Immunization).
+- **Personal Demographics Service (PDS) & Spine Directory Service (SDS):** FHIR R4 where implemented.
+- **Endpoint Discovery:** Practice endpoints and ASIDs are resolved dynamically via SDS LDAP/FHIR queries or routed through the configured transport (reverse WebSocket relay or direct HTTPS), rather than relying on static or obsolete integration URLs.
 
-### HL7 CCDA
-- **Standard**: Consolidated Clinical Document Architecture
-- **Documentation**: [HL7 CCDA Documentation](http://www.hl7.org/implement/standards/product_brief.cfm?product_id=492)
-- **Implementation**: Custom conversion from FHIR to CCDA
+### 1.4 Clinical Document Architecture (C-CDA)
+- **Standard:** HL7 Consolidated Clinical Document Architecture (C-CDA) Release 2.1.
+- **Conversion Engine:** Custom transformation engine (`app/ccda/`) mapping FHIR resources into structured C-CDA sections (Allergies, Medications with dm+d coding, Problems, Results/Investigations, Immunisations).
 
-### FHIR
-- **Version**: STU3 (for GP Connect compatibility)
-- **Documentation**: [FHIR STU3](http://hl7.org/fhir/STU3/)
-- **Implementation**: Used for GP Connect and PDS interactions
+---
 
-### IHE ITI
-- **Profiles Implemented**:
-  - ITI-55: Cross Gateway Patient Discovery
-  - ITI-38: Cross Gateway Query
-  - ITI-39: Cross Gateway Retrieve
-- **Documentation**: [IHE ITI Technical Framework](https://www.ihe.net/resources/technical_frameworks/#IT)
+## 2. Verified Technology Stack
 
-## System Architecture & Technologies
+### 2.1 Runtime Platform & Core Frameworks
+- **Base Container Image:** `python:3.13-slim` (managed via Astral `uv`).
+- **Language:** Python 3.13.
+- **Web Framework:** FastAPI with Uvicorn (`uvicorn[standard]`).
+- **HTTP Client:** HTTPX (async client with connection pooling and trace propagation).
+- **XML Processing:** `xmltodict`, `defusedxml` (safe parsing against XML entity expansion vulnerabilities).
 
-### Production / Target Runtime
-Technologies actively used in deployed Azure target environments:
+### 2.2 Security & Cryptography
+- **Cryptographic Operations:** `cryptography` (X.509 certificate loading, CA signature verification, RSA/EC key operations).
+- **JWT & JWKS:** `pyjwt`, `jwcrypto` (token generation, key rotation, and JWKS serialization).
+- **mTLS Enforcement:** Custom `MTLSMiddleware` inspecting Azure-forwarded `X-ARR-ClientCert` against CA bundle and optional fingerprint allowlists.
 
-- **FastAPI / Python**: Main web framework and application language.
-- **Azure App Service**: Container hosting environment.
-- **Azure Managed PostgreSQL**: Persistent storage for audit logs and system configuration.
-- **Azure Managed Redis**: Transient caching for NHS number mappings, documents, and PDS/SDS results.
-- **Azure Key Vault**: Secure storage for secrets, certificates (Epic mTLS CA), and tokens.
-- **Application Insights & Log Analytics**: Azure Monitor components for production telemetry, distributed tracing, and request logging.
-- **OpenTelemetry**: Instrumentation for distributed tracing and performance metrics.
-- **GitHub Actions**: Matrix CI/CD pipeline orchestration.
-- **Terraform**: Infrastructure as Code (IaC) for deterministic target provisioning.
-- **GHCR (GitHub Container Registry)**: Immutable container image storage and digest verification.
+### 2.3 Persistence & In-Memory Data Stores
+- **Cache Engine:** Azure Cache for Redis (accessed asynchronously via `redis.asyncio` / `redis`).
+  - DB 0: Generated C-CDA documents.
+  - DB 1: PDS demographic and SDS directory lookup caches.
+  - DB 2: Target-local pre-warmed dm+d terminology concepts.
+- **Relational Database:** Azure Database for PostgreSQL Flexible Server.
+  - Access Layer: `SQLAlchemy[asyncio]`, `asyncpg`, `sqlmodel`, `psycopg[binary]`.
+  - Schema Migrations: `alembic` (transactional DDL).
 
-### Local Development / Test Tooling
-Technologies used strictly for local engineering, testing, and continuous integration:
+### 2.4 Cloud & Operational Infrastructure
+- **Cloud Provider:** Microsoft Azure (target-isolated resource groups with centrally managed shared services).
+- **Container Hosting:** Azure App Service for Containers (stateless application tier).
+- **Batch Processing:** Azure Container Apps Job (dm+d cache warmer; target-local manual trigger).
+- **Secrets & Identity:** Azure Key Vault (user-assigned and system-assigned managed identities).
+- **Infrastructure as Code (IaC):** Terraform (`hashicorp/setup-terraform`, version 1.5.7).
+- **Container Registry:** GitHub Container Registry (GHCR) with immutable SHA-256 digest referencing.
 
-- **Docker Compose**: Local service orchestration and environment parity.
-- **Prometheus & Grafana**: Local metric collection and visualisation stack (not deployed to production targets).
-- **pytest & pytest-asyncio**: Primary testing framework for unit and async integration tests.
-- **schemathesis**: API Fuzzing framework generating edge-case requests from the OpenAPI schema.
-- **hypothesis**: Property-Based Testing for internal FHIR/C-CDA mapping resilience.
-- **testcontainers**: Container-based testing for Redis integration.
-- **locust**: Load and performance testing.
-- **black, flake8, mypy, bandit**: Code formatting, style enforcement, type checking, and security linting.
+### 2.5 Observability & Telemetry
+- **Telemetry Pipeline:** OpenTelemetry Python SDK integrated with Azure Monitor (`azure-monitor-opentelemetry`).
+- **Instrumentation Packages:**
+  - `opentelemetry-api`
+  - `opentelemetry-sdk`
+  - `opentelemetry-instrumentation-fastapi`
+  - `opentelemetry-instrumentation-asgi`
+  - `opentelemetry-instrumentation-httpx`
+  - `opentelemetry-instrumentation-logging`
+  - `opentelemetry-instrumentation-redis`
+  - `opentelemetry-exporter-otlp-proto-grpc`
+- **Analytics Store:** Azure Log Analytics Workspace and Application Insights per target.
+- **Shared Query Library:** Azure Monitor Query Pack (`xhuma-operational-diagnostics`, 20 KQL queries).
 
-### Health Checks
-- **Endpoints**:
-  - `/health`: Primary coarse liveness probe checked by the deployment pipeline.
-- **Implementation**: FastAPI endpoint.
+---
 
-## Security Tools
+## 3. Engineering, Testing & Quality Tooling
 
-### JWT Management
-- **python-jose**: JWT implementation
-- **cryptography**: Cryptographic operations
+### 3.1 Test Frameworks
+- **Primary Test Runner:** `pytest` with `pytest-asyncio` for asynchronous test suites.
+- **Coverage & Benchmarking:** `coverage`, `pytest-cov`, `pytest-benchmark`, `pytest-sugar`.
+- **API Fuzz Testing:** `schemathesis` (OpenAPI-driven schema validation).
+- **Property-Based Testing:** `hypothesis` (data model and conversion resilience).
+- **Performance & Load Testing:** `locust`.
 
-### API Security
-- **Rate limiting**: FastAPI middleware
-- **Input validation**: Pydantic models
-- **CORS**: FastAPI CORS middleware
-- **Security headers**: Custom middleware
+### 3.2 Linting, Formatting & Dependency Management
+- **Code Quality & Formatting:** `ruff` (fast unified linter and formatter configuring `select = ["E", "F"]`, `extend-select = ["I"]`, and double-quote styling).
+- **Unused Dependency Detection:** `creosote`.
+- **Git Hooks:** `pre-commit`.
+- **Vulnerability Scanning:** Trivy container vulnerability scanner (`aquasecurity/trivy-action`) running against immutable image digests in CI.
+- **Dependency Automation:** GitHub Dependabot.
 
-## Additional Resources
+---
 
-### Documentation Tools
-- **mkdocs**: Documentation generation
-- **OpenAPI**: API documentation
-- **sphinx**: Python documentation
+## 4. Architectural Boundaries and Non-Included Technologies
 
-### Development Tools
-- **pre-commit**: Git hooks
-- **dependabot**: Dependency updates
-- **renovate**: Package management
-- **git-flow**: Version control workflow
+To prevent design ambiguity, the following technologies are **not** part of Xhuma's current configuration or runtime:
+
+- **No `python-jose`:** JWT handling is provided strictly by `pyjwt` and `jwcrypto`.
+- **No standalone `black`, `flake8`, `mypy`, or `bandit`:** Code formatting and linting are unified under `ruff`.
+- **No `testcontainers`:** Redis and PostgreSQL tests run against local managed services or fixtures.
+- **No `mkdocs` or `sphinx`:** Technical documentation is maintained as native GitHub Flavored Markdown within the repository.
+- **No rate-limiting or security-header middleware:** Rate limiting and public ingress security headers are handled by upstream Azure App Service / front-door network controls rather than custom application middleware.
+- **No `git-flow` or `renovate`:** Promotion follows the unified matrix PR workflow (`feature/*` → `dev` → `int` → `main`) managed via Dependabot and GitHub Actions.
