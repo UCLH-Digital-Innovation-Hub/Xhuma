@@ -14,7 +14,7 @@
 
 Xhuma converts GP Connect structured records into CCDA (Consolidated Clinical Document Architecture) documents. It implements IHE ITI profiles through a FastAPI service, with Redis caching and PostgreSQL audit storage.
 
-For deployment and operations, start with the [Operator's Manual](docs/operators_manual.md) or the [deployment quick-start guide](docs/deployment_for_tired_humans.md).
+For deployment and operations, start with the [Operator's Manual](docs/operations/operators_manual.md) or the [deployment quick-start guide](docs/operations/deployment_for_tired_humans.md). See the [Documentation Index](docs/README.md) for full engineering and operational documentation.
 
 ### Contents
 
@@ -47,10 +47,13 @@ For deployment and operations, start with the [Operator's Manual](docs/operators
 
 For detailed documentation, see:
 
-- [Technical architecture](docs/technical_architecture.md)
-- [Data flow](docs/data_flow.md)
-- [Technical resources](docs/technical_resources.md)
-- [Structured dose mapping](docs/dm+d_mapping.md)
+- [Documentation Index](docs/README.md)
+- [Technical architecture](docs/architecture/technical_architecture.md)
+- [Network architecture](docs/architecture/network_architecture.md)
+- [Data flow](docs/architecture/data_flow.md)
+- [Technical resources](docs/architecture/technical_resources.md)
+- [Structured dose mapping](docs/clinical-mapping/dm+d_mapping.md)
+- [Observability & Diagnostics](docs/operations/observability.md)
 
 ## System flow
 
@@ -186,7 +189,7 @@ Replace the placeholder credentials in `.env`. The table summarises the main set
 
 PostgreSQL stores clinical audit records and must be available for clinical requests. Audit persistence failures are fail-closed in deployed environments (`ENV=prod` is always fail-closed). Compose runs Alembic migrations before starting the application.
 
-Direct GP Connect calls also require `keys/nhs_certs/client_cert.pem`, `client_key.pem` and `nhs_bundle.pem`. Compose mounts the `keys/` directory read-only. For deployed certificate and secret management, follow the [Operator's Manual](docs/operators_manual.md).
+Direct GP Connect calls also require `keys/nhs_certs/client_cert.pem`, `client_key.pem` and `nhs_bundle.pem`. Compose mounts the `keys/` directory read-only. For deployed certificate and secret management, follow the [Operator's Manual](docs/operations/operators_manual.md).
 
 ### Terminology services
 
@@ -215,7 +218,7 @@ To start the full stack, including the bundled Nginx proxy, configure its hostna
 docker compose up -d --build
 ```
 
-Point the public site at `NGINX_PUBLIC_SERVER_NAME` and the relay agent at `NGINX_RELAY_SERVER_NAME`. The separate relay hostname allows Nginx to require its dedicated client CA at the TLS layer. See the [Operator's Manual](docs/operators_manual.md) for deployed TLS and relay configuration.
+Point the public site at `NGINX_PUBLIC_SERVER_NAME` and the relay agent at `NGINX_RELAY_SERVER_NAME`. The separate relay hostname allows Nginx to require its dedicated client CA at the TLS layer. See the [Operator's Manual](docs/operations/operators_manual.md) for deployed TLS and relay configuration.
 
 ### Key Management and JWK Rotation
 
@@ -244,15 +247,18 @@ Target infrastructure includes an Azure App Service for containers, managed Redi
 
 ### CI/CD pipelines and deployment
 
-- The [matrix deployment workflow](.github/workflows/matrix-deploy.yml) deploys `dev` to `play` and `int` to `int`, using target-specific Terraform state, approval gates and immutable container image digests.
-- INT uses the matrix deployment path and reuses its existing Terraform state. The [INT cutover record](docs/assurance/evidence/2026-10-06-int-matrix-cutover.md) documents the migration.
-- Production on `main` remains on the legacy [infrastructure](.github/workflows/infra.yml) and [application deployment](.github/workflows/cd.yml) workflows.
+- The [matrix deployment workflow](.github/workflows/matrix-deploy.yml) is the unified deployment pipeline across all environments, mapping branches to targets via [infra/targets.json](infra/targets.json):
+  - `dev` → Play
+  - `int` → INT
+  - `main` → PRD
+- Deployments use target-specific Terraform state, immutable container image digests, distinct Plan/Apply approval gates, guarded shared Key Vault network reconciliation, and fail-closed migration guards for brownfield environments.
+- Historical environment migrations and state adoptions are preserved in the [INT cutover record](docs/assurance/evidence/2026-10-06-int-matrix-cutover.md) and [PRD state reconciliation record](docs/assurance/evidence/2026-10-09-prd-state-reconciliation.md).
 
-Use the [Operator's Manual](docs/operators_manual.md) for GitHub environment setup, Azure deployment credentials, Key Vault population, shared infrastructure adoption and deployment verification. The [deployment quick-start guide](docs/deployment_for_tired_humans.md) gives a shorter walkthrough.
+Use the [Operator's Manual](docs/operations/operators_manual.md) for GitHub environment setup, Azure deployment credentials, Key Vault population, shared infrastructure adoption and deployment verification. The [deployment quick-start guide](docs/operations/deployment_for_tired_humans.md) gives a shorter walkthrough.
 
 ### Observability
 
-Azure Monitor OpenTelemetry correlates logs and traces in Application Insights. Terraform configures `APPLICATIONINSIGHTS_CONNECTION_STRING`; managed Redis metrics are available through Azure Monitor.
+Azure Monitor OpenTelemetry correlates logs and traces in Application Insights. Terraform configures `APPLICATIONINSIGHTS_CONNECTION_STRING`; managed Redis metrics are available through Azure Monitor. Cross-target operational diagnostics are supported by the shared Query Pack (`xhuma-operational-diagnostics`); see the [Observability & Diagnostics Guide](docs/operations/observability.md).
 
 ## Redis configuration
 
@@ -301,10 +307,19 @@ The default pytest configuration excludes [SCAL tests](app/tests/scal/) and API 
 
 ## Branch strategy
 
-- `main`: Production releases using the legacy deployment path
-- `int`: Integration and stabilisation; deploys to the INT target through the matrix workflow
-- `dev`: Active development and feature integration; deploys to the play target through the matrix workflow
-- `feature/*`: Feature branches opened against `dev`
+Promotion across environments follows a strict PR-based progression:
+
+```text
+feature/* → dev → int → main
+              │      │      │
+              ▼      ▼      ▼
+            Play    INT    PRD
+```
+
+- `feature/*`: Feature branches opened against `dev` via pull requests
+- `dev`: Active development and feature integration; deploys to the Play target via the matrix deployment workflow
+- `int`: Integration and stabilisation; promoted via pull request from `dev` and deploys to the INT target via the matrix deployment workflow
+- `main`: Production releases; promoted via pull request from `int` and deploys to the PRD target via the matrix deployment workflow
 
 ## Contributing
 

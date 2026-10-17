@@ -10,8 +10,11 @@ profiles for healthcare interoperability.
 """
 
 import asyncio
+import datetime
 import logging
+import math
 import os
+import tempfile
 import traceback
 import uuid
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
@@ -26,7 +29,7 @@ if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 from fhirclient.models.operationoutcome import OperationOutcome, OperationOutcomeIssue
 from opentelemetry import metrics
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
@@ -42,7 +45,7 @@ from .middleware.mtls import MTLSMiddleware
 from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
-from .security import get_jwk_keyset, verify_api_key
+from .security import fix_pem_formatting, get_jwk_keyset, verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 from .telemetry import monitor_event_loop
@@ -76,9 +79,6 @@ async def lifespan(app: FastAPI):
         else:
             print("Warning: API_KEY and NHS_API_KEY are identical. This is allowed in dev/int but forbidden in prod.")
 
-    import datetime
-    import math
-
     ccda_expiry_str = os.getenv("CCDA_EXPIRY_HOURS", "4")
     try:
         expiry_hours = float(ccda_expiry_str)
@@ -111,6 +111,37 @@ async def lifespan(app: FastAPI):
             await redis_client.setex("registry", 86400, str(REGISTRY_ID).encode())
         except Exception as e:
             print(f"Warning: Failed to connect to Redis during startup: {e}")
+
+        # Handle NHS Certificates securely
+        cert_dir_obj = tempfile.TemporaryDirectory()
+        resources.callback(cert_dir_obj.cleanup)
+        app.state.nhs_cert_dir_obj = cert_dir_obj
+        cert_dir = cert_dir_obj.name
+        os.chmod(cert_dir, 0o700)
+        os.environ["NHS_CERT_DIR_EPHEMERAL"] = cert_dir
+
+        if os.getenv("NHS_CLIENT_CERT") and os.getenv("NHS_CLIENT_KEY") and os.getenv("NHS_BUNDLE"):
+            try:
+                cert_path = os.path.join(cert_dir, "client_cert.pem")
+                key_path = os.path.join(cert_dir, "client_key.pem")
+                bundle_path = os.path.join(cert_dir, "nhs_bundle.pem")
+
+                with open(cert_path, "w") as f:
+                    f.write(fix_pem_formatting(os.getenv("NHS_CLIENT_CERT")))
+                with os.fdopen(os.open(key_path, os.O_WRONLY | os.O_CREAT, 0o600), "w") as f:
+                    f.write(fix_pem_formatting(os.getenv("NHS_CLIENT_KEY")))
+                with open(bundle_path, "w") as f:
+                    f.write(fix_pem_formatting(os.getenv("NHS_BUNDLE")))
+                print("Successfully hydrated NHS certificates to ephemeral filesystem storage.")
+            except Exception:
+                print(
+                    "Warning: Failed to hydrate NHS certificates to ephemeral storage (malformed material). GP Connect will fail closed."
+                )
+        else:
+            if os.getenv("ENV", "prod").lower() == "prod" and os.getenv("USE_RELAY") not in ("1", "true", "True"):
+                print(
+                    "Warning: Missing NHS_CLIENT_CERT, NHS_CLIENT_KEY or NHS_BUNDLE in production. Direct GP Connect will fail closed."
+                )
 
         # Handle JWK generation/verification securely entirely in-memory
         app.state.jwk_json = {}
@@ -157,15 +188,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Xhuma",
     description="A stateless middleware service for GP Connect to CCDA conversion",
-    version="0.9.2",
+    version="1.0.0",
     lifespan=lifespan,
 )
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights
 if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
     try:
         # Ensure the root logger captures INFO logs so they are exported
-        import logging
-
+        # Keep these optional imports conditional and failure-tolerant: telemetry
+        # configuration must not prevent the application from starting.
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.instrumentation.logging import LoggingInstrumentor
@@ -194,15 +225,7 @@ async def audit_failure_handler(request: Request, exc: AuditFailureException):
 
     path = request.url.path
     if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
-        fault_xml = f"""<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
-    <env:Body>
-        <env:Fault>
-            <env:Code><env:Value>env:Receiver</env:Value></env:Code>
-            <env:Reason><env:Text xml:lang="en">Internal Server Error (TraceID: {trace_id})</env:Text></env:Reason>
-        </env:Fault>
-    </env:Body>
-</env:Envelope>"""
-        return Response(content=fault_xml, status_code=502, media_type="application/soap+xml")
+        return soap.SoapFault(f"Internal Server Error (TraceID: {trace_id})", code="Receiver").response()
 
     elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
         issue = OperationOutcomeIssue()
@@ -232,15 +255,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
     path = request.url.path
     if path.startswith("/SOAP") or path.startswith("/iti") or "soap" in path.lower():
-        fault_xml = f"""<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope">
-    <env:Body>
-        <env:Fault>
-            <env:Code><env:Value>env:Receiver</env:Value></env:Code>
-            <env:Reason><env:Text xml:lang="en">Internal Server Error (TraceID: {trace_id})</env:Text></env:Reason>
-        </env:Fault>
-    </env:Body>
-</env:Envelope>"""
-        return Response(content=fault_xml, status_code=500, media_type="application/soap+xml")
+        return soap.SoapFault(f"Internal Server Error (TraceID: {trace_id})", code="Receiver").response()
 
     elif path.startswith("/FHIR") or path.startswith("/pds") or "fhir" in path.lower():
         issue = OperationOutcomeIssue()

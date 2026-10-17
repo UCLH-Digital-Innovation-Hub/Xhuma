@@ -57,41 +57,113 @@ async def get_terminology_token():
         return token_data["access_token"]
 
 
-def dmd_cache_key(concept_id: int, properties: list = None) -> str:
-    """Generate a cache key for a DMD concept based on its ID and requested properties."""
-    if properties:
-        properties_key = ",".join(sorted(properties))
-        return f"snomed:{concept_id}:properties:{properties_key}"
-    return f"snomed:{concept_id}"
+ACTIVE_RELEASE_KEY = "dmd:active-release"
+DMD_RESOLVED_TTL = int(os.getenv("DMD_RESOLVED_TTL", 9 * 24 * 3600))  # 9 days
+DMD_ACTIVE_RELEASE_TTL = int(os.getenv("DMD_ACTIVE_RELEASE_TTL", 8 * 24 * 3600))  # 8 days
 
 
-async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
-    # Check if the concept is in the cache
-    cache_key = dmd_cache_key(concept_id, properties)
+def canonicalize_properties(properties: list[str] | set[str] | tuple[str, ...] | None) -> str:
+    """Canonicalize a collection of property names into a deterministic key segment.
+
+    Semantics:
+    - None or empty collection indicates no property filters were requested -> 'none'.
+    - Surrounding whitespace is stripped from each property name. Empty strings are discarded.
+    - Property names are deduplicated and sorted lexicographically, then joined with commas.
+    """
+    if not properties:
+        return "none"
+    cleaned = set()
+    for p in properties:
+        if p is None:
+            continue
+        p_str = str(p).strip()
+        if p_str:
+            cleaned.add(p_str)
+    if not cleaned:
+        return "none"
+    return ",".join(sorted(cleaned))
+
+
+def dmd_cache_key(concept_id: int | str, properties: list | None = None) -> str:
+    """Generate a legacy cache key for a DMD concept based on its ID and canonical requested properties."""
+    prop_sig = canonicalize_properties(properties)
+    if prop_sig == "none":
+        return f"snomed:{concept_id}"
+    return f"snomed:{concept_id}:properties:{prop_sig}"
+
+
+def dmd_raw_key(concept_id: int | str, release: str, properties: list | None = None) -> str:
+    """Generate a versioned raw cache key for a DMD concept with a canonical property signature."""
+    prop_sig = canonicalize_properties(properties)
+    return f"dmd:raw:v1:{release}:{concept_id}:properties:{prop_sig}"
+
+
+def dmd_resolved_key(concept_id: int | str, release: str) -> str:
+    """Generate a versioned resolved cache key for a DMDConcept."""
+    return f"dmd:resolved:v1:{release}:{concept_id}"
+
+
+def _lookup_version(data: dict) -> str | None:
+    """Extract release version from a FHIR Parameters $lookup response."""
+    for p in data.get("parameter", []):
+        name = p.get("name")
+        if name in ("version", "system-version", "used-system"):
+            val = p.get("valueString") or p.get("valueUri") or ""
+            if "|" in val:
+                _, _, ver = val.partition("|")
+                if ver:
+                    return ver
+            if "/version/" in val:
+                _, _, ver = val.partition("/version/")
+                if ver:
+                    return ver
+            if val:
+                return val
+        elif name == "system":
+            val = p.get("valueUri") or p.get("valueString") or ""
+            if "|" in val:
+                _, _, ver = val.partition("|")
+                if ver:
+                    return ver
+            if "/version/" in val:
+                _, _, ver = val.partition("/version/")
+                if ver:
+                    return ver
+    return None
+
+
+async def get_dmd_concept(concept_id: int | str, properties: list = None, release: str = None) -> dict:
+    """Fetch concept data from cache or DMD API, optionally pinned to a specific release."""
+    # Determine cache key based on whether release is specified
+    if release:
+        cache_key = dmd_raw_key(concept_id, release, properties)
+    else:
+        cache_key = dmd_cache_key(concept_id, properties)
+
     with measure("terminology.cache.read") as span:
         cached_concept = await snomed_client.get(cache_key)
         span.set_attribute("cache.hit", bool(cached_concept))
     record_cache("terminology", bool(cached_concept))
+
     if cached_concept:
-        logging.info(f"Cache hit for SNOMED concept {concept_id}")
-        # cached concept is stored as json string, decode it before returning
-        return json.loads(cached_concept.decode("utf-8"))
+        logging.info(f"Cache hit for SNOMED concept {concept_id} (key={cache_key})")
+        return json.loads(_decode_cached_token(cached_concept))
 
     logging.info(f"Cache miss for SNOMED concept {concept_id}. Fetching from DMD API.")
-    # If not in cache, fetch from DMD API
 
-    # check for cached token
     token = _decode_cached_token(await snomed_client.get("dmd_token"))
-    # if token is not cached, fetch a new one
     if not token:
         logging.info("No cached DMD token found. Fetching new token.")
         token = await get_terminology_token()
 
+    dmd_base_url = os.getenv("DMD_BASE_URL", "https://ontology.nhs.uk/production1/fhir")
     async with httpx.AsyncClient() as client:
-        url = f"https://ontology.nhs.uk/production1/fhir/CodeSystem/$lookup?system=https://dmd.nhs.uk&code={concept_id}"
+        url = f"{dmd_base_url}/CodeSystem/$lookup?system=https://dmd.nhs.uk&code={concept_id}"
         if properties:
             for prop in properties:
                 url += f"&property={prop}"
+        if release:
+            url += f"&version={release}"
 
         headers = {
             "Authorization": f"Bearer {token}",
@@ -109,108 +181,137 @@ async def get_dmd_concept(concept_id: int, properties: list = None) -> dict:
                 span.set_attribute("http.response.status_code", response.status_code)
                 response.raise_for_status()
 
+        response.raise_for_status()
         concept_data = response.json()
-        # cache the concept data for 1 week
-        await snomed_client.setex(cache_key, 7 * 24 * 3600, json.dumps(concept_data))
-        # print(f"Cached DMD concept {concept_id} with properties {properties} under key {cache_key}")
+
+        # Reject if response release mismatches requested release or is missing
+        if release:
+            resp_version = _lookup_version(concept_data)
+            if resp_version != release:
+                version_repr = resp_version if resp_version is not None else "missing"
+                raise ValueError(
+                    f"DMD lookup returned release {version_repr} which does not match requested release {release}"
+                )
+            # cache for configured resolved TTL
+            await snomed_client.setex(cache_key, DMD_RESOLVED_TTL, json.dumps(concept_data))
+        else:
+            # fallback cache for 7 days
+            await snomed_client.setex(cache_key, 7 * 24 * 3600, json.dumps(concept_data))
 
         return concept_data
 
 
-async def dmd_lookup(concept_id: int) -> DMDConcept:
+async def _resolve_dmd_concept(concept_id: int, release: str = None) -> DMDConcept:
+    """Internal resolution of DMDConcept with release pinning on all dependent lookups."""
     properties = ["VPI", "ROUTECD", "parent"]
-    dmd = await get_dmd_concept(concept_id, properties=properties)
-    # make sure dmd is a dict
+    dmd = await get_dmd_concept(concept_id, properties=properties, release=release)
     if not isinstance(dmd, dict):
         logging.error(f"Unexpected DMD concept data format for concept {concept_id}: {dmd}")
         dmd = json.loads(dmd)
 
-    display_name = [prop["valueString"] for prop in dmd["parameter"] if prop["name"] == "display"]
+    display_name = [prop["valueString"] for prop in dmd.get("parameter", []) if prop.get("name") == "display"]
+    val_str = display_name[0] if display_name else ""
 
     processed_dmd = DMDConcept(
-        concept_id=concept_id,
-        valueString=display_name[0],
+        concept_id=int(concept_id),
+        valueString=val_str,
     )
 
     async def get_property(property_name: str, concept_data: dict) -> list:
         property_list = []
-        for parm in concept_data["parameter"]:
-            if parm["name"] == "property":
-                for part in parm["part"]:
-                    if part["name"] == "code" and part["valueCode"] == property_name:
+        for parm in concept_data.get("parameter", []):
+            if parm.get("name") == "property":
+                for part in parm.get("part", []):
+                    if part.get("name") == "code" and part.get("valueCode") == property_name:
                         property_list.append(parm)
         return property_list
 
-    async def get_subproperty(property_data: dict, subproperty_name: str) -> dict:
-        for part in property_data["part"]:
-            if part["name"] == "subproperty":
-                for subpart in part["part"]:
-                    if subpart["name"] == "code" and subpart["valueCode"] == subproperty_name:
+    async def get_subproperty(property_data: dict, subproperty_name: str) -> dict | None:
+        for part in property_data.get("part", []):
+            if part.get("name") == "subproperty":
+                for subpart in part.get("part", []):
+                    if subpart.get("name") == "code" and subpart.get("valueCode") == subproperty_name:
                         return part
+        return None
 
-    # check if there is a parent property
+    # Check parent property: if AMP, fetch parent VMP
     parents = await get_property("parent", dmd)
     if len(parents) == 2:
-        # if there is AMP and code
-        value_codes = [parent["part"][1]["valueCode"] for parent in parents]
+        value_codes = [parent["part"][1]["valueCode"] for parent in parents if len(parent.get("part", [])) > 1]
         if "AMP" in value_codes:
-            # pop the AMP parent as we don't want to process it
-            amp_index = value_codes.index("AMP")
-            value_codes.pop(amp_index)
-
-            # check remaining parent is an int
+            value_codes.remove("AMP")
             if len(value_codes) == 1 and value_codes[0].isdigit():
-                dmd = await get_dmd_concept(int(value_codes[0]), properties=properties)
+                dmd = await get_dmd_concept(int(value_codes[0]), properties=properties, release=release)
 
     vpi_properties = await get_property("VPI", dmd)
-    # logging.info(f"Found {len(vpi_properties)} VPI properties for concept {concept_id}")
     if len(vpi_properties) == 1:
-        # single ingrediant so process
         dose_value_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_VAL")
         dose_value = None
-        for subpart in dose_value_part["part"]:
-            if subpart["name"] == "valueDecimal":
-                dose_value = subpart["valueDecimal"]
+        if dose_value_part:
+            for subpart in dose_value_part.get("part", []):
+                if subpart.get("name") == "valueDecimal":
+                    dose_value = subpart.get("valueDecimal")
+
         dose_unit_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_UOMCD")
         dose_unit_code = None
-        for subpart in dose_unit_part["part"]:
-            if subpart["name"] == "valueCoding":
-                dose_unit_code = subpart["valueCoding"]["code"]
+        if dose_unit_part:
+            for subpart in dose_unit_part.get("part", []):
+                if subpart.get("name") == "valueCoding":
+                    dose_unit_code = subpart["valueCoding"].get("code")
+
+        unit_display = None
         if dose_unit_code:
-            # lookup the unit code in SNOMED to get the display name
-            unit_concept = await get_dmd_concept(dose_unit_code)
-            # pprint.pprint(unit_concept)
-            # print(type(unit_concept))
-            unit_display_parameter = [parm for parm in unit_concept["parameter"] if parm["name"] == "display"]
-            unit_display = unit_display_parameter[0]["valueString"] if unit_display_parameter else None
+            unit_concept = await get_dmd_concept(dose_unit_code, release=release)
+            unit_display_param = [parm for parm in unit_concept.get("parameter", []) if parm.get("name") == "display"]
+            unit_display = unit_display_param[0].get("valueString") if unit_display_param else None
 
-        processed_dmd.vpi = VPI(value=dose_value, unit=unit_display)
+        processed_dmd.vpi = VPI(value=dose_value, unit=unit_display or "")
 
-    # look for routeCD property
     route_properties = await get_property("ROUTECD", dmd)
-    # logging.info(
-    #     f"Found {len(route_properties)} ROUTECD properties for concept {concept_id}"
-    # )
-    # pprint.pprint(route_properties)
     if len(route_properties) == 1:
         route_code = None
-        for subpart in route_properties[0]["part"]:
-            if subpart["name"] == "value":
-                route_code = subpart["valueCoding"]["code"]
+        for subpart in route_properties[0].get("part", []):
+            if subpart.get("name") == "value":
+                route_code = subpart.get("valueCoding", {}).get("code")
+
         if route_code:
-            # lookup the route code in SNOMED to get the display name
-            route_concept = await get_dmd_concept(route_code)
-            # print(f"Route concept for code {route_code}:")
-            # pprint.pprint(route_concept)
-            route_display_parameter = [parm for parm in route_concept["parameter"] if parm["name"] == "display"]
-            route_display = route_display_parameter[0]["valueString"] if route_display_parameter else None
+            route_concept = await get_dmd_concept(route_code, release=release)
+            route_display_param = [parm for parm in route_concept.get("parameter", []) if parm.get("name") == "display"]
+            route_display = route_display_param[0].get("valueString") if route_display_param else None
             processed_dmd.route = CD(
                 code=route_code,
                 displayName=route_display,
-                codeSystemName="https://dmd.nhs.uk",  # Assuming the code system is DMD, OID will be snomed as dmd is subset
+                codeSystemName="https://dmd.nhs.uk",
             )
 
     return processed_dmd
+
+
+async def dmd_lookup(concept_id: int | str) -> DMDConcept:
+    """Lookup a dm+d concept, using active-release resolved cache where available."""
+    # 1. Check if an active release is registered
+    active_release_bytes = await snomed_client.get(ACTIVE_RELEASE_KEY)
+    active_release = _decode_cached_token(active_release_bytes)
+
+    if active_release:
+        key = dmd_resolved_key(concept_id, active_release)
+        with measure("terminology.resolved.cache.read") as span:
+            cached_resolved = await snomed_client.get(key)
+            span.set_attribute("cache.hit", bool(cached_resolved))
+        record_cache("terminology.resolved", bool(cached_resolved))
+
+        if cached_resolved:
+            logging.info(f"Resolved cache hit for concept {concept_id} under release {active_release}")
+            return DMDConcept.model_validate_json(_decode_cached_token(cached_resolved))
+
+        # On miss: resolve pinned to active_release and cache
+        logging.info(f"Resolved cache miss for concept {concept_id}. Resolving pinned to release {active_release}.")
+        result = await _resolve_dmd_concept(int(concept_id), release=active_release)
+        await snomed_client.setex(key, DMD_RESOLVED_TTL, result.model_dump_json())
+        return result
+
+    # 2. No active release: safe existing on-demand fallback
+    return await _resolve_dmd_concept(int(concept_id), release=None)
 
 
 if __name__ == "__main__":
