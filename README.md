@@ -244,9 +244,12 @@ Target infrastructure includes an Azure App Service for containers, managed Redi
 
 ### CI/CD pipelines and deployment
 
-- The [matrix deployment workflow](.github/workflows/matrix-deploy.yml) deploys `dev` to `play` and `int` to `int`, using target-specific Terraform state, approval gates and immutable container image digests.
-- INT uses the matrix deployment path and reuses its existing Terraform state. The [INT cutover record](docs/assurance/evidence/2026-10-06-int-matrix-cutover.md) documents the migration.
-- Production on `main` remains on the legacy [infrastructure](.github/workflows/infra.yml) and [application deployment](.github/workflows/cd.yml) workflows.
+- The [matrix deployment workflow](.github/workflows/matrix-deploy.yml) is the unified deployment pipeline across all environments, mapping branches to targets via [infra/targets.json](infra/targets.json):
+  - `dev` → Play
+  - `int` → INT
+  - `main` → PRD
+- Deployments use target-specific Terraform state, immutable container image digests, distinct Plan/Apply approval gates, guarded shared Key Vault network reconciliation, and fail-closed migration guards for brownfield environments.
+- Historical environment migrations and state adoptions are preserved in the [INT cutover record](docs/assurance/evidence/2026-10-06-int-matrix-cutover.md) and [PRD state reconciliation record](docs/assurance/evidence/2026-10-09-prd-state-reconciliation.md).
 
 Use the [Operator's Manual](docs/operators_manual.md) for GitHub environment setup, Azure deployment credentials, Key Vault population, shared infrastructure adoption and deployment verification. The [deployment quick-start guide](docs/deployment_for_tired_humans.md) gives a shorter walkthrough.
 
@@ -301,10 +304,19 @@ The default pytest configuration excludes [SCAL tests](app/tests/scal/) and API 
 
 ## Branch strategy
 
-- `main`: Production releases using the legacy deployment path
-- `int`: Integration and stabilisation; deploys to the INT target through the matrix workflow
-- `dev`: Active development and feature integration; deploys to the play target through the matrix workflow
-- `feature/*`: Feature branches opened against `dev`
+Promotion across environments follows a strict PR-based progression:
+
+```text
+feature/* → dev → int → main
+              │      │      │
+              ▼      ▼      ▼
+            Play    INT    PRD
+```
+
+- `feature/*`: Feature branches opened against `dev` via pull requests
+- `dev`: Active development and feature integration; deploys to the Play target via the matrix deployment workflow
+- `int`: Integration and stabilisation; promoted via pull request from `dev` and deploys to the INT target via the matrix deployment workflow
+- `main`: Production releases; promoted via pull request from `int` and deploys to the PRD target via the matrix deployment workflow
 
 ## Contributing
 

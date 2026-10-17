@@ -16,17 +16,32 @@ Xhuma's cloud infrastructure is provisioned via Terraform (`infra/main.tf`). The
 
 ## 2. CI/CD Deployment Flow
 
-Xhuma uses GitHub Actions for automated deployment. The architecture is currently migrating to a target-isolated matrix deployment model.
+Xhuma uses GitHub Actions for automated deployment via a unified, target-isolated matrix deployment model (`.github/workflows/matrix-deploy.yml`).
 
-- **Legacy Pipelines (`cd.yml` / `infra.yml`)**: Currently manage the integration (`int`) and production (`prd`) environments.
-- **Matrix Pipeline (`matrix-deploy.yml`)**: Currently manages the `play` rehearsal environment, introducing strict environment approvals, immutable Docker image digests, and centralised shared services.
+Target environments and branch mappings are defined in `infra/targets.json`:
 
-### General Deployment Flow (Matrix Example)
+```text
+feature/* → dev → int → main
+              │      │      │
+              ▼      ▼      ▼
+            Play    INT    PRD
+```
 
-1. **Build:** The CI pipeline builds the Docker image from the source branch.
-2. **Registry:** The built image is tagged with its SHA-256 digest and pushed to the GitHub Container Registry (`ghcr.io/uclh-digital-innovation-hub/xhuma`).
-3. **Plan & Infrastructure:** The workflow dynamically authenticates to Azure, bootstraps isolated state storage if needed, and generates a cryptographic Terraform plan. An authorised operator must review and approve this plan before infrastructure applies.
-4. **Deploy:** Once infrastructure is updated and healthy, a separate approval gate permits the deployment of the immutable container digest to the target Azure Web App.
+- **PR-Based Promotion:** Promotion across environments is strictly pull-request-based. Direct unreviewed branch pushes are not used for releases.
+- **Target Isolation:** Every target environment (Play, INT, PRD) maintains isolated Terraform remote state in its own storage account within the target resource group.
+- **Existing-State Migration Guards:** Brownfield environments (`INT` and `PRD`) enforce fail-closed existing-state preflight checks (`require_existing_state = true`) to prevent accidental resource destruction or unadopted infrastructure creation.
+- **Controlled Stages & Approval Gates:** Infrastructure Plan, infrastructure Apply, and application deployment are distinct controlled stages with environment approval gates.
+- **Immutable Container Digest:** The candidate image is built, vulnerability-scanned with Trivy, tagged with its immutable SHA-256 digest, and deployed consistently through all gates.
+- **Shared Key Vault Network Reconciliation:** Shared Key Vault network ACLs are reconciled via guarded target-specific plans (`guard_shared_plan.py`) to admit required target subnets while preserving all existing rules.
+
+### General Deployment Stages
+
+1. **CI, Test & Vulnerability Scan:** The workflow runs all tests and builds the candidate Docker image, scanning for CVEs using Trivy.
+2. **Registry Push:** The verified image is pushed to GitHub Container Registry (`ghcr.io/uclh-digital-innovation-hub/xhuma`) pinned to its exact SHA-256 digest.
+3. **Plan & Gate:** The workflow generates an immutable cryptographic Terraform plan (`.tfplan`) with a published SHA-256 hash. Any unexpected destroy or replacement action halts execution. Authorised operators review the plan summary before manual approval.
+4. **Infrastructure Apply:** Consumes the exact reviewed plan artefact from Azure Blob Storage.
+5. **Shared Reconciliation:** Reconciles target subnets (e.g. App Service integration subnet, Container Apps Job subnet) into the shared Key Vault network ACL under strict guard validation.
+6. **Application Deployment:** Deploys the exact scanned image digest to the target Azure Web App and verifies process liveness via `/health`.
 
 ---
 

@@ -1,6 +1,6 @@
 # Xhuma Operator's Manual
 
-**Document Purpose:** This manual provides a comprehensive, end-to-end runbook for deploying, configuring, and maintaining the Xhuma middleware across NHS Trust environments, including the `play` environment rehearsal.
+**Document Purpose:** This manual provides a comprehensive, end-to-end runbook for deploying, configuring, and maintaining the Xhuma middleware across NHS Trust environments (Play, INT, PRD).
 
 **Security Rule for Operators:**
 > [!WARNING]
@@ -80,7 +80,7 @@ The deployment relies on specific GitHub environments to orchestrate the provisi
 Deployments use protected GitHub Environments and dedicated Azure deployment identities. Target-specific credentials, role assignments, environment configuration and approval topology are maintained in the restricted operational record and are intentionally not reproduced in this public runbook.
 
 **Shared Resources Configuration:**
-The shared subscription ID must be explicitly provided to the environments running Terraform Plan (e.g., `<target>-plan` for matrix deployments) and the legacy `<legacy-workflow>.yml` workflow, which provisions legacy infrastructure.
+The shared subscription ID must be explicitly provided to the environments running Terraform Plan (e.g., `<target>-plan` for matrix deployments). The unified matrix deployment workflow (`matrix-deploy.yml`) handles target and shared reconciliation across all environments.
 
 **Actual Deployment Sequence:**
 
@@ -106,8 +106,8 @@ Infrastructure and application liveness can be established before the target-loc
 ## 6. Deployment Orchestration
 
 Deployment is handled by GitHub Actions (`.github/workflows/matrix-deploy.yml`), which enforces strict boundaries:
-- The matrix workflow (`matrix-deploy.yml`) is the authoritative deployment path for `int` and the `play` environment.
-- The legacy `infra.yml` remains present for the production/legacy path and retains a manual `workflow_dispatch` entry point. It must not be manually dispatched against `int`; this path is pending retirement or hardening.
+- The matrix workflow (`matrix-deploy.yml`) is the unified, authoritative deployment path for all environments (`dev` → Play, `int` → INT, `main` → PRD), mapping branches to targets via `infra/targets.json`.
+- The previously documented legacy workflows (`infra.yml` and `cd.yml`) have been decommissioned.
 
 ### 6.1 Continuous Integration and Build Controls
 
@@ -120,7 +120,7 @@ Before any deployment plan is generated, the pipeline enforces strict quality an
 *Figure 3 — Build & Push stage showing the immutable image build and Trivy vulnerability scan.*
 
 ### 6.2 First Deployment & Protected Plans
-1. **Trigger**: Push code to the mapped branch (e.g., `rehearsal/play-deployment`).
+1. **Trigger**: Merge an approved pull request into the mapped branch (`dev` for Play, `int` for INT, `main` for PRD) following the promotion sequence `feature/*` → `dev` → `int` → `main`.
 2. **Plan Generation**: The workflow generates a Terraform plan and securely uploads it to the `tfplans` container in Azure Storage. Only a non-secret plan hash and summary are available in GitHub. Plan generation will fail if a plan already exists for that run.
 3. **Review & Approval**: An authorized operator must review the plan summary in GitHub (and the full plan in Azure Storage if necessary) using the strict review hierarchy below. Then, explicitly approve the infrastructure environment (e.g., `<rg-target-infra>`).
 
@@ -541,7 +541,32 @@ Database-level assurance checks must be performed through an approved restricted
 
 ### 9.4 dm+d Cache Warmer Operations and Diagnostics
 
-The dm+d cache warmer operates as a target-local manual Azure Container Apps Job triggered weekly on Monday at 05:00 UK local time (DST-aware `GMT Standard Time`) via an Azure Consumption Logic App. It pre-populates target-local Redis DB 2 with resolved `DMDConcept` representations.
+The dm+d cache warmer operates as a target-local Azure Container Apps Job (`azurerm_container_app_job.dmd_warm`) provisioned with a **manual trigger configuration**. It pre-populates target-local Redis DB 2 with resolved `DMDConcept` representations so clinical prescription conversions execute with sub-millisecond local latency.
+
+#### Operational State Across Environments
+- **Play (`rg-xhuma-play`)**: Warmer infrastructure is enabled (`dmd_cache_warm_enabled = true`). The Container Apps Environment, Job, user-assigned managed identity, and delegated `ca-subnet` are provisioned. Execution is manual.
+- **INT (`rg-xhuma-int`) & PRD (`rg-xhuma-uclh-prd`)**: Warmer infrastructure is currently disabled (`dmd_cache_warm_enabled = false`).
+- **Scheduler State**: The automated Azure Logic App recurrence trigger is implemented in Terraform (`infra/main.tf`), but `dmd_cache_schedule_enabled` is deliberately blocked by a Terraform precondition and check assertion (`condition = !var.dmd_cache_schedule_enabled`) pending acceptance of a missed-success watchdog. The scheduler is not active in any environment.
+
+#### Terminology Publication Schedule & Operational Timing
+- **Upstream dm+d Publication**: NHS England / TRUD publishes dm+d releases weekly on Monday at approximately 04:00 UK time via the NHS Terminology Server.
+- **Xhuma Target Pre-warm Intent**: Xhuma's intended scheduled warm is Monday at 05:00 UK local time (`GMT Standard Time`, DST-aware across GMT/BST), with an optional per-target minute offset (`dmd_cache_warm_minute`) to prevent simultaneous upstream thundering herds across trusts.
+- **Buffer & Operational Assumption**: The one-hour gap provides a buffer for upstream publication processing. Upstream publication can occasionally experience small delays. This timing is the project's operational planning assumption, not an externally guaranteed NHS SLA.
+- **No Cache Purge**: Xhuma warms versioned release keys (`dmd:resolved:v1:<release>:<concept_id>`) in the background and atomically updates the active release pointer (`dmd:active-release`) only after successful verification. Old release keys age out naturally under their 9-day TTL. No destructive cache purge (`FLUSHDB` or `KEYS *`) is part of the normal operating model.
+- **Operational Caveat**: The warmer discovers whatever release is currently visible upstream at execution time. A successful job execution alone does not prove that a newly expected upstream release was visible if upstream publication was delayed. Future missed-success/freshness monitoring must verify release freshness/advancement as well as job execution success.
+
+#### Proven Safety Invariants
+1. **Container Apps Job Timeout:** 1800 seconds (`replica_timeout_in_seconds = local.dmd_job_replica_timeout_seconds = 1800`).
+2. **Zero Replica Retries:** `replica_retry_limit = 0`. Platform retries are prohibited because a new replica would spawn with a distinct random token and collide with the held distributed lock.
+3. **Logic App Polling Envelope:** 2100 seconds (`local.dmd_logic_poll_timeout_seconds = 2100`).
+4. **Distributed Warmer Lock TTL:** 2700 seconds (`local.dmd_lock_ttl_seconds = 2700`, acquired at `dmd:warm:v1:lock`).
+5. **Strict Hierarchy Invariant:** `1800s (replica timeout) < 2100s (poll timeout) < 2700s (lock TTL)`.
+6. **Dedicated Digest-Pinned Job Image:** The Job runs the immutable SHA256 container digest built and scanned by CI (`var.dmd_cache_job_image`), decoupled from App Service image drift.
+7. **Runtime Key Vault Credential Resolution:** The warmer resolves `dmd-client-id` and `dmd-client-secret` at runtime directly from Key Vault using the Job's user-assigned managed identity (`AZURE_CLIENT_ID` and `KEY_VAULT_URL`), decoupling Job creation from Key Vault network ACL reconciliation. Secrets and tokens are never logged.
+8. **Redis Memory Safety Guard:** Full-run memory preflight aborts before concept writes if current memory + projected delta with a 1.5x safety multiplier exceeds 80% of `maxmemory` (or if `maxmemory <= 0`).
+9. **Zero Eviction Tolerance:** If `evicted_keys` increases by even 1 key during warming, the run aborts immediately and refuses activation.
+10. **Grace Period Coexistence:** Data TTL is 9 days while the active pointer TTL is 8 days, ensuring a 24-hour grace window during schedule delays.
+11. **Prohibited Operations:** `FLUSHDB` and wildcard `KEYS *` are strictly forbidden to prevent blocking the single-threaded Redis event loop and causing cross-database eviction or data loss.
 
 #### Trigger Manual Job Execution
 
@@ -642,7 +667,7 @@ Reports:
      dmd_cache_event {"event": "warm_succeeded", "release": "...", "duration_seconds": ..., "concept_count": ..., "memory_delta_bytes": ..., "evictions": 0}
      ```
    - Azure Monitor Scheduled Query Rules enforce an API hard cap on query lookback windows of 48 hours (`P2D` / 2880 mins). A 7.5-day scheduled query alert cannot be created directly via `azurerm_monitor_scheduled_query_rules_alert_v2`.
-   - Therefore, `dmd_cache_schedule_enabled` is blocked by both a Terraform precondition and a check assertion (`condition = !var.dmd_cache_schedule_enabled`) until a 48h-compatible post-warm check or external watchdog is implemented. Both `dmd_cache_warm_enabled` and `dmd_cache_schedule_enabled` remain `false` across all environments.
+   - Therefore, `dmd_cache_schedule_enabled` is blocked by both a Terraform precondition and a check assertion (`condition = !var.dmd_cache_schedule_enabled`) until a 48h-compatible post-warm check or external watchdog is implemented. Play currently has warmer infrastructure enabled (`dmd_cache_warm_enabled = true`), but its scheduler is disabled (`dmd_cache_schedule_enabled = false`). In INT and PRD, warmer infrastructure remains disabled (`dmd_cache_warm_enabled = false`, `dmd_cache_schedule_enabled = false`).
 
 5. **PRD Acceptance Prerequisites:**
    Before enabling `dmd_cache_schedule_enabled = true` in production tfvars, operators must verify a complete, successful non-PRD execution demonstrating:

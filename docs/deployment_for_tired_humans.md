@@ -1,14 +1,17 @@
 # Xhuma Deployment for Tired Humans
 
 > [!IMPORTANT]
-> **INT Migration Notice:** The `INT` environment is the first brownfield matrix migration.
-> - It explicitly reuses existing `INT` Terraform state.
-> - The `int-plan` GitHub Environment is protected during migration.
-> - The existing-state preflight is mandatory and will block execution if state is missing.
-> - The first plan is expected to include PostgreSQL audit convergence.
-> - The existing custom domain `int.uclh.xhuma.co.uk` already exists and must survive.
-> - `EPIC_CA_CERT` is already populated and resolved.
-> - The `main`/`PRD` environment remains on the legacy pipeline and is untouched.
+> **Unified Matrix Deployment:** All environments (Play, INT, PRD) deploy via `.github/workflows/matrix-deploy.yml` based on branch mappings in `infra/targets.json`:
+> ```text
+> feature/* → dev → int → main
+>               │      │      │
+>               ▼      ▼      ▼
+>             Play    INT    PRD
+> ```
+> - Promotion across environments is strictly pull-request-based.
+> - Brownfield environments (`INT` and `PRD`) enforce fail-closed existing-state/migration preflight guards (`require_existing_state = true`).
+> - Target-specific Terraform state, immutable plan artefacts, digest-pinned container images, distinct approval gates, and guarded shared Key Vault network reconciliation apply across all environments.
+> - Any unexpected destroy or replacement action is a STOP condition.
 
 > The short version for when you need to deploy Xhuma without reading the entire Operator's Manual first.
 
@@ -22,15 +25,15 @@ Check:
 - you know which branch/commit should be deployed;
 - you are looking at the newest workflow run;
 - there are no older/stale runs waiting for approval;
-- you are not accidentally operating on INT or PRD.
+- you are operating on the intended target environment.
 
 Golden rule:
 
 > If you don't understand why Terraform wants to change something, don't approve it.
 
-## 1. Push the code
+## 1. Promote or merge the code
 
-A push to a deployment branch starts the matrix pipeline.
+Promotion across environments is PR-based (`feature/*` → `dev` → `int` → `main`). Merging a PR into a deployment branch triggers the matrix deployment workflow (`.github/workflows/matrix-deploy.yml`) for the mapped target (`dev` → Play, `int` → INT, `main` → PRD).
 
 Expected first stages:
 - Prepare Targets
@@ -110,12 +113,12 @@ At this point:
 - the exact plan has a SHA256 hash;
 - Apply is still BLOCKED.
 
-Before approving `rg-xhuma-play-infra` ask:
+Before approving the target infrastructure environment (e.g. `rg-xhuma-play-infra`, `rg-xhuma-int-infra`, `rg-xhuma-uclh-prd-infra`) ask:
 - Is this the correct target?
 - Is this the correct commit/run?
 - Do I understand every infrastructure change?
 - Are there any deletes/replacements?
-- Is anything from INT/PRD/shared infrastructure appearing unexpectedly?
+- Is anything from other environments or shared infrastructure appearing unexpectedly?
 
 If any answer is wrong or unclear: STOP.
 
