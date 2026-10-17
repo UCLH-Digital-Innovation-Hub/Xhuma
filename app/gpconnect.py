@@ -24,7 +24,7 @@ from .logging import record_application_failure
 from .pds.pds import lookup_patient, lookup_self_issuer, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
-from .settings import USE_RELAY
+from .settings import USE_RELAY, diag_compare_enabled, diag_ttl_minutes
 from .telemetry import measure
 
 # from app.metrics.metric_utils import classify_error, now
@@ -625,6 +625,22 @@ async def _fetch_gpconnect_record(
         pipe.expire(document_key, cache_ttl)
         with measure("ccda.cache.write", document_bytes=len(xop)):
             await pipe.execute()
+
+    # Diagnostics: when enabled (always in dev/local/int, opt-in via DIAG_COMPARE_ENABLED in prd),
+    # capture the received FHIR bundle and the serialised C-CDA, keyed off the same doc_uuid, so
+    # the gated /_diag/compare viewer can show "as received" next to "as sent". Both payloads are
+    # PHI, so they use a short, independent TTL (DIAG_TTL_MIN) and never run unless the gate is on.
+    if diag_compare_enabled():
+        try:
+            diag_ttl = timedelta(minutes=diag_ttl_minutes())
+            bundle_json = json.dumps(scr_bundle, indent=2, ensure_ascii=False)
+            ccda_xml = xmltodict.unparse(xml_ccda, pretty=True)
+            async with redis_client.pipeline() as diag_pipe:
+                diag_pipe.setex(f"diag:bundle:{doc_uuid}", diag_ttl, bundle_json)
+                diag_pipe.setex(f"diag:xml:{doc_uuid}", diag_ttl, ccda_xml)
+                await diag_pipe.execute()
+        except Exception as e:  # diagnostics must never break the main response
+            logging.warning("diag capture skipped for doc %s: %s", doc_uuid, e)
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
