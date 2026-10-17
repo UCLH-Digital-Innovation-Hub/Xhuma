@@ -8,7 +8,7 @@ dependencies = [
     "httpx",
     "xmltodict",
     "uvicorn[standard]",
-    "fhirclient~=3.0.0",
+    "fhirclient~=4.4.0",
     "redis",
     "cryptography>=50.0.2",
     "jwcrypto",

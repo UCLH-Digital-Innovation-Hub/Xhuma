@@ -683,15 +683,14 @@ wheels = [
 
 [[package]]
 name = "fhirclient"
-version = "3.0.0"
+version = "4.4.0"
 source = { registry = "https://pypi.python.org/simple" }
 dependencies = [
-    { name = "isodate" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/16/03/fa8904d97d4ff8ec5de4663871aa9a44989e310c22ddf1439f4532d1addb/fhirclient-3.0.0.tar.gz", hash = "sha256:2691ce49dcca437856c09f9ecf48cce26c5dd70c49c61762fcb6bb7ca219aa03", size = 337935, upload-time = "2017-04-13T18:59:21.004Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/65/49/bd3afa53c5d3ba4ee32fffadc19b31a64ffc5371fde5784c7dd4bad9b79a/fhirclient-4.4.0.tar.gz", hash = "sha256:922d6110f941741a67fdb8dc3afdeba21b8d1f30beafde7d2fbe523cf9192188", size = 264766, upload-time = "2026-02-10T15:37:59.339Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/f0/38d87d675f89a008abf80d85b85bb1343d1b4380ff18abcdd8fe2b7bd7cb/fhirclient-3.0.0-py2.py3-none-any.whl", hash = "sha256:ed62c7bf476098d23a82424ce3641742d70b534b955fa1e0c9f993694f9dd889", size = 577155, upload-time = "2017-04-13T18:59:29.578Z" },
+    { url = "https://files.pythonhosted.org/packages/e9/8b/e830f6034b05ab3eecea02648b78f3c9b0218443c77a8fa83c5a423e4848/fhirclient-4.4.0-py3-none-any.whl", hash = "sha256:85f25b11b2303ded7780708edc85aaf21be60fbd6439409b44085bcc1a991589", size = 425925, upload-time = "2026-02-10T15:37:57.862Z" },
 ]
 
 [[package]]
@@ -3043,7 +3042,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=50.0.2" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "fastapi", specifier = ">=0.143.0" },
-    { name = "fhirclient", specifier = "~=3.0.0" },
+    { name = "fhirclient", specifier = "~=4.4.0" },
     { name = "grpcio" },
     { name = "httpx" },
     { name = "jwcrypto" },
