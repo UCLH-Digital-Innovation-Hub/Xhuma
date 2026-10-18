@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock, MagicMock
+from xml.etree import ElementTree as ET
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,10 +14,10 @@ ENDPOINTS = ["/SOAP/iti38", "/SOAP/iti39", "/SOAP/iti55"]
 @pytest.fixture(autouse=True)
 def mock_dependencies(monkeypatch):
     monkeypatch.setenv("REQUIRE_MTLS", "false")
-    monkeypatch.setattr("app.soap.soap.client.get", AsyncMock(return_value=b"dummy"))
-    monkeypatch.setattr("app.soap.soap.httpx.post", MagicMock())
+    monkeypatch.setattr("app.soap.soap.client.hmget", AsyncMock(return_value=[b"dummy", b"1234567890"]))
+    monkeypatch.setattr("app.soap.responses.iti_39.httpx.post", MagicMock())
     monkeypatch.setattr(
-        "app.soap.soap.process_saml_attributes",
+        "app.soap.saml_helper.process_saml_attributes",
         lambda x: type(
             "obj",
             (object,),
@@ -31,6 +32,7 @@ def mock_dependencies(monkeypatch):
     monkeypatch.setattr("app.soap.soap.lookup_patient", AsyncMock(return_value={"id": "test"}))
 
     monkeypatch.setattr("app.soap.soap.attempt_audit", AsyncMock())
+    monkeypatch.setattr("app.soap.responses.iti_39.attempt_audit", AsyncMock())
 
     # mock the responses so they don't fail later in the pipeline
     async def mock_response(*args, **kwargs):
@@ -49,7 +51,11 @@ def test_rejects_invalid_saml_issuer(endpoint):
         content=invalid_soap_xml,
         headers={"Content-Type": "application/soap+xml"},
     )
-    assert response.status_code == 401
+    assert response.status_code == 400
+    root = ET.fromstring(response.content)
+    ns = {"env": "http://www.w3.org/2003/05/soap-envelope"}
+    assert root.findtext("env:Body/env:Fault/env:Code/env:Value", namespaces=ns) == "env:Sender"
+    assert response.headers["content-type"].startswith("application/soap+xml")
     assert "Untrusted SAML issuer" in response.text
 
 
@@ -61,7 +67,11 @@ def test_rejects_malformed_xml_no_assertion(endpoint):
         content=malformed_soap_xml,
         headers={"Content-Type": "application/soap+xml"},
     )
-    assert response.status_code == 401
+    assert response.status_code == 400
+    root = ET.fromstring(response.content)
+    ns = {"env": "http://www.w3.org/2003/05/soap-envelope"}
+    assert root.findtext("env:Body/env:Fault/env:Code/env:Value", namespaces=ns) == "env:Sender"
+    assert response.headers["content-type"].startswith("application/soap+xml")
     assert "Missing SAML assertion" in response.text
 
 
@@ -73,7 +83,11 @@ def test_rejects_multiple_assertions(endpoint):
         content=malformed_soap_xml,
         headers={"Content-Type": "application/soap+xml"},
     )
-    assert response.status_code == 401
+    assert response.status_code == 400
+    root = ET.fromstring(response.content)
+    ns = {"env": "http://www.w3.org/2003/05/soap-envelope"}
+    assert root.findtext("env:Body/env:Fault/env:Code/env:Value", namespaces=ns) == "env:Sender"
+    assert response.headers["content-type"].startswith("application/soap+xml")
     assert "Expected exactly one SAML assertion" in response.text
 
 
@@ -86,6 +100,10 @@ def test_xxe_malicious_entity_rejected(endpoint):
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Header><wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"><saml2:Assertion xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"><saml2:Issuer>&xxe;</saml2:Issuer></saml2:Assertion></wsse:Security></s:Header><s:Body></s:Body></s:Envelope>"""
     response = client.post(endpoint, content=xxe_soap_xml, headers={"Content-Type": "application/soap+xml"})
     assert response.status_code == 400
+    root = ET.fromstring(response.content)
+    ns = {"env": "http://www.w3.org/2003/05/soap-envelope"}
+    assert root.findtext("env:Body/env:Fault/env:Code/env:Value", namespaces=ns) == "env:Sender"
+    assert response.headers["content-type"].startswith("application/soap+xml")
     assert "Malformed XML" in response.text
 
 
@@ -93,7 +111,7 @@ def test_xxe_malicious_entity_rejected(endpoint):
 def test_rejects_incomplete_saml_context(endpoint, monkeypatch):
     # Override the mock for process_saml_attributes to return incomplete attributes (subject_id=None)
     monkeypatch.setattr(
-        "app.soap.soap.process_saml_attributes",
+        "app.soap.saml_helper.process_saml_attributes",
         lambda x: type(
             "obj",
             (object,),
@@ -111,7 +129,11 @@ def test_rejects_incomplete_saml_context(endpoint, monkeypatch):
         content=valid_soap_xml,
         headers={"Content-Type": "application/soap+xml"},
     )
-    assert response.status_code == 401
+    assert response.status_code == 400
+    root = ET.fromstring(response.content)
+    ns = {"env": "http://www.w3.org/2003/05/soap-envelope"}
+    assert root.findtext("env:Body/env:Fault/env:Code/env:Value", namespaces=ns) == "env:Sender"
+    assert response.headers["content-type"].startswith("application/soap+xml")
     assert "Incomplete SAML security context" in response.text
 
 
@@ -123,6 +145,10 @@ def test_iti39_rejects_ssrf_reply_to():
         headers={"Content-Type": "application/soap+xml"},
     )
     assert response.status_code == 400
+    root = ET.fromstring(response.content)
+    ns = {"env": "http://www.w3.org/2003/05/soap-envelope"}
+    assert root.findtext("env:Body/env:Fault/env:Code/env:Value", namespaces=ns) == "env:Sender"
+    assert response.headers["content-type"].startswith("application/soap+xml")
     assert "ReplyTo must use https" in response.text
 
 

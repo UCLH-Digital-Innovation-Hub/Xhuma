@@ -14,7 +14,7 @@ device_id           = "1"
 xhuma_ods_code      = "RRV00"
 xhuma_mhs_party_key = "RRV00-824607"
 env                 = "int"
-app_version         = "0.9.2"
+app_version         = "1.0.0"
 
 allowed_hosts = "*"
 cors_origins  = "*"
@@ -30,3 +30,7 @@ gp_connect_include_investigations = "true"
 gp_connect_include_immunisations  = "true"
 
 ccda_expiry_hours = "4"
+
+# dm+d Cache Warmer (Standard target-local infrastructure in INT; schedule deferred)
+dmd_cache_warm_enabled     = true
+dmd_cache_schedule_enabled = false

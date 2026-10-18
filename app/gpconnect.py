@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import ssl
+import time
 from datetime import timedelta
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ import xmltodict
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
+from opentelemetry.propagate import inject
 
 from .audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
 from .audit.models import AuditOutcome, SAMLAttributes
@@ -35,13 +37,38 @@ router = APIRouter()
 #     verify="keys/nhs_certs/nhs_bundle.pem",
 # )
 
-environment = os.getenv("ENV", "dev")
-if environment.lower() in ["dev", "int"]:
+environment = os.getenv("ENV", "dev").lower()
+if environment in ["dev", "int"]:
     RELAY_BASE_PATH = "https://proxy.int.spine2.ncrs.nhs.uk"
-    IS_DEV = environment.lower() == "dev"
+    IS_DEV = environment == "dev"
     OVER_INTERNET_PATH = "https://proxy.intspineservices.nhs.uk"
+elif environment == "prod":
+    RELAY_BASE_PATH = os.getenv("NHS_RELAY_BASE_PATH")
+    OVER_INTERNET_PATH = os.getenv("NHS_OVER_INTERNET_PATH")
+    IS_DEV = False
 else:
     raise ValueError(f"Unknown or unsupported environment: {environment}")
+
+
+def get_nhs_cert_paths():
+    cert_dir = os.environ.get("NHS_CERT_DIR_EPHEMERAL", "/tmp/nhs_certs")
+    if os.path.exists(os.path.join(cert_dir, "client_cert.pem")):
+        return (
+            os.path.join(cert_dir, "client_cert.pem"),
+            os.path.join(cert_dir, "client_key.pem"),
+            os.path.join(cert_dir, "nhs_bundle.pem"),
+        )
+
+    environment = os.getenv("ENV", "dev").lower()
+    if environment == "prod":
+        # In production, we must fail closed and never fall back to repo keys
+        raise FileNotFoundError("Production NHS certificates not found in ephemeral storage")
+
+    return (
+        "keys/nhs_certs/client_cert.pem",
+        "keys/nhs_certs/client_key.pem",
+        "keys/nhs_certs/nhs_bundle.pem",
+    )
 
 
 def create_nhs_ssl_context(cert_path, key_path, ca_path):
@@ -110,6 +137,17 @@ async def _fetch_gpconnect_record(
             pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
     except AuditFailureException:
         raise
+    except HTTPException as e:
+        if e.status_code == 404:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "error": "Patient not found on PDS",
+                    "xds_error_code": "XDSUnknownPatientId",
+                },
+            )
+        return JSONResponse(status_code=502, content={"success": False, "error": "PDS lookup upstream failure"})
     except Exception as e:
         msg = f"PDS lookup failed: {e}"
         record_application_failure(e)
@@ -147,7 +185,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"Unable to read GP ODS from PDS response: {e}"
+        msg = "Unable to read GP ODS from PDS response"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -155,17 +193,18 @@ async def _fetch_gpconnect_record(
             action="resolve_gp_ods",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"stage": "resolve_gp_ods", "exception_type": type(e).__name__},
         )
-        record_application_failure(e)
-        logging.exception(msg)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
+        return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
     try:
-        with measure("sds.device"):
+        with measure("sds.trace"):
             asid_trace = await sds_trace(gp_ods)
         await attempt_audit(
             request=request,
@@ -177,7 +216,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"SDS trace failed: {e}"
+        msg = f"SDS Trace failed for ODS code {gp_ods}"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -185,10 +224,11 @@ async def _fetch_gpconnect_record(
             action="sds_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"stage": "sds_trace", "exception_type": type(e).__name__},
         )
-        record_application_failure(e)
-        logging.exception(msg)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -205,9 +245,10 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"Unable to parse SDS trace response: {e}"
-        record_application_failure(e)
-        logging.exception(msg)
+        msg = "Unable to parse SDS trace response"
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -234,6 +275,9 @@ async def _fetch_gpconnect_record(
     try:
         with measure("sds.endpoint"):
             endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+            fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
+            if not isinstance(fhir_endpoint_url, str) or not fhir_endpoint_url.strip():
+                raise ValueError(f"Unable to find FHIR endpoint for ODS code {gp_ods}")
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -244,7 +288,7 @@ async def _fetch_gpconnect_record(
     except AuditFailureException:
         raise
     except Exception as e:
-        msg = f"SDS endpoint trace failed: {e}"
+        msg = f"SDS Endpoint resolution failed for ODS code {gp_ods}"
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -252,33 +296,15 @@ async def _fetch_gpconnect_record(
             action="fhir_endpoint_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"exception": str(e)},
+            detail={"stage": "sds_endpoint", "exception_type": type(e).__name__},
         )
-        record_application_failure(e)
-        logging.exception(msg)
+        safe_error = RuntimeError(msg)
+        record_application_failure(safe_error)
+        logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
         return JSONResponse(status_code=502, content={"success": False, "error": msg})
-
-    if "entry" not in endpoint_trace or len(endpoint_trace["entry"]) == 0:
-        msg = f"Unable to find FHIR endpoint for ODS code {gp_ods}"
-        await attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="fhir_endpoint_trace",
-            outcome=AuditOutcome.fail,
-            error_code="500",
-            detail={"message": msg},
-        )
-        logging.error(msg)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(msg + "\n")
-        return JSONResponse(status_code=500, content={"success": False, "error": msg})
-
-    fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
 
     # 6) Build request
     try:
@@ -318,12 +344,7 @@ async def _fetch_gpconnect_record(
     }
 
     # Inject OpenTelemetry traceparent context into headers for Relay propagation
-    try:
-        from opentelemetry.propagate import inject
-
-        inject(headers)
-    except ImportError:
-        pass
+    inject(headers)
     body = {
         "resourceType": "Parameters",
         "parameter": [
@@ -346,13 +367,10 @@ async def _fetch_gpconnect_record(
 
     async def _direct_http_call(url: str, headers: dict, body: dict) -> httpx.Response:
         """Make a direct POST and return an httpx.Response."""
+        cert_path, key_path, ca_path = get_nhs_cert_paths()
         async with httpx.AsyncClient(
-            cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
-            verify=create_nhs_ssl_context(
-                "keys/nhs_certs/client_cert.pem",
-                "keys/nhs_certs/client_key.pem",
-                "keys/nhs_certs/nhs_bundle.pem",
-            ),
+            cert=(cert_path, key_path),
+            verify=create_nhs_ssl_context(cert_path, key_path, ca_path),
             timeout=httpx.Timeout(30.0),
             http2=False,
         ) as session:
@@ -420,6 +438,8 @@ async def _fetch_gpconnect_record(
     resp = None
     try:
         if USE_RELAY:
+            if environment == "prod" and not RELAY_BASE_PATH:
+                raise ValueError("NHS_RELAY_BASE_PATH not configured for production. Failing closed.")
             url = f"{RELAY_BASE_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             with measure("gpconnect.http", transport="relay"):
                 resp = await _relay_call(url, headers, body)
@@ -428,6 +448,8 @@ async def _fetch_gpconnect_record(
             # resp = httpx.Response(status_code=status_code, content=resp_text)
 
         else:
+            if environment == "prod" and not OVER_INTERNET_PATH:
+                raise ValueError("NHS_OVER_INTERNET_PATH not configured for production. Failing closed.")
             url = f"{OVER_INTERNET_PATH}/{fhir_endpoint_url}/Patient/$gpc.getstructuredrecord"
             with measure("gpconnect.http", transport="direct"):
                 resp = await _direct_http_call(url, headers, body)
@@ -551,8 +573,6 @@ async def _fetch_gpconnect_record(
             except Exception:
                 pass
 
-    import time
-
     start_time = time.perf_counter()
     try:
         with measure("ccda.convert", span_name="FHIR2CCDA.convert_bundle", resource_count=len(fhir_bundle.entry or [])):
@@ -600,8 +620,9 @@ async def _fetch_gpconnect_record(
     # Use a pipeline to write all keys atomically with a consistent TTL
     async with redis_client.pipeline() as pipe:
         pipe.setex(str(nhsno), cache_ttl, doc_uuid)
-        pipe.setex(doc_uuid, cache_ttl, xop)
-        pipe.setex(f"doc_patient:{doc_uuid}", cache_ttl, str(nhsno))
+        document_key = f"document:{doc_uuid}"
+        pipe.hset(document_key, mapping={"nhs_number": str(nhsno), "content": xop})
+        pipe.expire(document_key, cache_ttl)
         with measure("ccda.cache.write", document_bytes=len(xop)):
             await pipe.execute()
 
@@ -614,8 +635,6 @@ async def _fetch_gpconnect_record(
 
 
 if __name__ == "__main__":
-    import asyncio
-
     xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
     saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
 

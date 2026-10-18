@@ -33,22 +33,35 @@ from ..models import (
 from .constants import COMMUNITY_ID, REGISTRY_ID
 
 
-async def iti_38_response(
-    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes, message_id: str | None = None
-):
-    response = AdhocQueryResponse()
-
-    def set_failure(code_context: str) -> None:
-        response.status = XDS_FAILURE_STATUS
-        response.registry_error_list = RegistryErrorList(
+def _failure_response(code_context: str, error_code: str = "XDSRegistryError") -> AdhocQueryResponse:
+    return AdhocQueryResponse(
+        status=XDS_FAILURE_STATUS,
+        registry_error_list=RegistryErrorList(
             highest_severity=XDS_ERROR_SEVERITY,
             error=RegistryError(
-                error_code="XDSRegistryError",
+                error_code=error_code,
                 code_context=code_context,
                 location=f"urn:oid:{COMMUNITY_ID}",
                 severity=XDS_ERROR_SEVERITY,
             ),
-        )
+        ),
+        registry_object_list={},
+    )
+
+
+async def iti_38_error(queryid: str, error_text: str, error_code: str = "XDSRegistryError") -> str:
+    """Generate an ITI-38 registry error response without querying documents."""
+    soap_response = SoapEnvelope.create(
+        ResponseHeader.create("urn:ihe:iti:2007:CrossGatewayQueryResponse", queryid),
+        ITI38ResponseBody(response=_failure_response(error_text, error_code)),
+    )
+    return xmltodict.unparse(soap_response.to_xml_dict(), pretty=True)
+
+
+async def iti_38_response(
+    request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes, message_id: str | None = None
+):
+    response = AdhocQueryResponse()
 
     # check the redis cache if there's an existing ccda
     with measure("document.cache.read") as span:
@@ -77,11 +90,15 @@ async def iti_38_response(
                 "error": f"Internal error retrieving structured record for patient. error: {e}",
             }
             audit_error_code = "DOCUMENT_QUERY_FAILURE"
-            set_failure("Unable to locate SCR for patient")
+            response = _failure_response("Unable to locate SCR for patient")
 
         if not r.get("success"):
             logging.warning(f"gpconnect failed for patient: {r.get('error')}")
-            set_failure(r.get("error", "Unknown error"))
+            error_code = r.get("xds_error_code", "XDSRegistryError")
+            error_text = r.get("error", "Unknown error")
+            if error_code == "XDSUnknownPatientId":
+                error_text = f"Patient ID {nhsno} is not known by this community"
+            response = _failure_response(error_text, error_code)
             if not audit_error_code:
                 audit_error_code = "DOCUMENT_QUERY_FAILURE"
         else:
@@ -189,7 +206,7 @@ async def iti_38_response(
         response.registry_object_list = {}
 
     soap_response = SoapEnvelope.create(
-        ResponseHeader.create("urn:ihe:iti:2007:CrossGatewayQueryResponse", queryid),
+        ResponseHeader.create("urn:ihe:iti:2007:CrossGatewayQueryResponse", message_id or queryid),
         ITI38ResponseBody(response=response),
     )
     return xmltodict.unparse(soap_response.to_xml_dict(), pretty=True)
