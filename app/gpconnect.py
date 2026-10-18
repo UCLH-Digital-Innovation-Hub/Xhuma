@@ -316,6 +316,12 @@ async def _fetch_gpconnect_record(
             step = "sds_endpoint.sds_lookup"
             with measure("sds.endpoint"):
                 endpoint_trace = await sds_trace(gp_ods, endpoint=True, mhsparty=nhsmhsparty)
+                step = "sds_endpoint.response_validation"
+                if not endpoint_trace or not endpoint_trace.get("entry"):
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"SDS Endpoint lookup returned no entries for ODS code {gp_ods}",
+                    )
                 step = "sds_endpoint.address_extraction"
                 fhir_endpoint_url = endpoint_trace["entry"][0]["resource"]["address"]
                 step = "sds_endpoint.address_validation"

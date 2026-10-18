@@ -388,13 +388,15 @@ async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path,
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("wire", ["json", "soap"])
 @pytest.mark.parametrize(
     ("endpoint_trace", "exception_type"),
     [
-        pytest.param(None, "TypeError", id="null-response"),
-        pytest.param({}, "KeyError", id="missing-entry"),
-        pytest.param({"entry": None}, "TypeError", id="null-entry"),
-        pytest.param({"entry": []}, "IndexError", id="empty-entry"),
+        pytest.param(None, "HTTPException", id="null-response"),
+        pytest.param({}, "HTTPException", id="missing-entry"),
+        pytest.param({"entry": None}, "HTTPException", id="null-entry"),
+        pytest.param({"entry": []}, "HTTPException", id="empty-entry"),
+        pytest.param({"resourceType": "Bundle", "total": 0}, "HTTPException", id="zero-matches"),
         pytest.param({"entry": [None]}, "TypeError", id="null-first-entry"),
         pytest.param({"entry": [{}]}, "KeyError", id="missing-resource"),
         pytest.param({"entry": [{"resource": None}]}, "TypeError", id="null-resource"),
@@ -406,7 +408,7 @@ async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path,
     ],
 )
 async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
-    mock_self_issuer, endpoint_trace, exception_type
+    mock_self_issuer, endpoint_trace, exception_type, wire
 ):
 
     with (
@@ -414,16 +416,32 @@ async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
         patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.gpconnect.httpx.AsyncClient") as client,
+        patch("app.soap.responses.iti_38.redis_client", autospec=True) as soap_cache,
+        patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock),
     ):
         sds.side_effect = [fake_sds_device_trace(), endpoint_trace]
+        soap_cache.get.return_value = None
+        if wire == "json":
+            response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+            assert response.status_code == 502
+            body = json.loads(response.body)
+            assert body["success"] is False
+            error = body["error"]
+        else:
+            iti38 = importlib.import_module("app.soap.responses.iti_38")
+            xml = await iti38.iti_38_response(get_mock_request(), 9690937278, "ceid", "queryid", saml)
+            error_node = ET.fromstring(xml).find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0}RegistryError")
+            assert error_node is not None
+            assert error_node.attrib["errorCode"] == "XDSRegistryError"
+            error = error_node.attrib["codeContext"]
 
-        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
-
-        assert response.status_code == 502
-        body = json.loads(response.body)
-        assert body["success"] is False
-        assert body["error"].startswith("SDS Endpoint resolution failed for ODS code E82665")
-        assert "step:" in body["error"]
+        assert error.startswith("SDS Endpoint resolution failed for ODS code E82665")
+        if exception_type == "HTTPException":
+            step = "response_validation"
+            assert "SDS Endpoint lookup returned no entries for ODS code E82665" in error
+        else:
+            step = "address_validation" if exception_type == "ValueError" else "address_extraction"
+            assert "step:" in error
         endpoint_audits = [
             call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
         ]
@@ -431,8 +449,7 @@ async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
         assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
         assert endpoint_audits[0]["error_code"] == "502"
         assert endpoint_audits[0]["detail"] == {
-            "step": "sds_endpoint."
-            + ("address_validation" if exception_type == "ValueError" else "address_extraction"),
+            "step": "sds_endpoint." + step,
             "exception_type": exception_type,
         }
         mock_self_issuer.assert_not_awaited()
