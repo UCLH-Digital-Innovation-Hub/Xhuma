@@ -423,11 +423,18 @@ When commissioning a target or executing the manual Monday refresh, the operator
 9. direct resolved cache read succeeds;
 10. the active release is compared with the previously recorded release and the expected upstream weekly release.
 
-### 10.4 Scheduler State & Follow-up Enablement
+### 10.4 Scheduler Architecture, Native Fallback & Operational State
 
-- **Warmer Configuration by Target:** In Xhuma 1.0.0, target-local warmer infrastructure is standard in Play, INT, and PRD (`dmd_cache_warm_enabled = true`), while automated scheduling is disabled for all targets (`dmd_cache_schedule_enabled = false`).
-- **Generic Scheduler Implementation Preserved:** The underlying Azure Logic App workflow, trigger recurrence, custom role definition, role assignment, and failure alert resources remain implemented in Terraform (`infra/main.tf`). Because `dmd_cache_schedule_enabled = false`, these resources evaluate to `count = 0` and are not provisioned during the v1.0 release. Automated scheduling will be enabled through a small operational follow-up once deployment identity authorization permissions are established.
-- **Action Group Secret Prerequisite:** The workflow wires `DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON` directly to `TF_VAR_dmd_cache_alert_action_group_ids` with a safe `[]` fallback during Terraform planning. When scheduling is later enabled for INT or PRD, valid operator-supplied Action Group IDs must be populated in `<target>-plan`.
+Xhuma supports three operational triggering states for the dm+d cache warmer:
+1. **Manual Container Apps Job Trigger:** Default configuration across all targets (`dmd_cache_warm_enabled = true`, `dmd_cache_schedule_enabled = false`, `dmd_cache_native_schedule_enabled = false`). The job is executed on-demand via `az containerapp job start`.
+2. **Native Container Apps Job Cron Scheduling:** Low-dependency resilience and fallback option (`dmd_cache_native_schedule_enabled = true`, `dmd_cache_native_cron_expression = "<UTC cron>"`). The Container Apps platform directly executes the job on schedule without requiring external orchestrator or Azure RBAC custom role dependencies. **Native Container Apps cron expressions are evaluated in UTC.**
+3. **Azure Logic App Scheduler:** Comprehensive managed orchestration path (`dmd_cache_schedule_enabled = true`). Provides timezone-aware UK local recurrence (`GMT Standard Time`), asynchronous execution polling, stateful completion tracking, and Azure Monitor failure alerting. Requires custom RBAC permissions (`Microsoft.Authorization/roleDefinitions/write` and `roleAssignments/write`).
+
+**Operational Safety Invariants & Current State:**
+- **Mutual Exclusivity:** Native Container Apps scheduling and Logic App scheduling are strictly mutually exclusive. Enabling both (`dmd_cache_native_schedule_enabled = true` and `dmd_cache_schedule_enabled = true`) violates Terraform preconditions and check assertions, failing closed.
+- **Resilience / Fallback Role:** Native scheduling serves as an operational resilience path when Logic App RBAC provisioning is unavailable or blocked. It does not replace the Logic App implementation where full timezone recurrence and alerting are required.
+- **Accepted Live INT Drift:** In the live INT environment (`rg-xhuma-int`), operator intervention temporarily updated `xhuma-app-int-dmd-warm` from `triggerType = Manual` to `triggerType = Schedule` (`cronExpression = "0 4 * * 1"`, UTC) following successful manual commissioning. This represents **accepted temporary drift**. Do not perform ad-hoc Terraform apply or manual state editing solely to eliminate this drift. The drift will be reconciled cleanly in a future controlled promotion stack (`dev` -> `int` -> `main`).
+- **Action Group Secret Prerequisite:** The workflow wires `DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON` directly to `TF_VAR_dmd_cache_alert_action_group_ids` with a safe `[]` fallback during Terraform planning.
 - **Manual Commissioning Requirement:** Automated recurrence is designed for ongoing renewal, not initial commissioning. Every target must be manually commissioned and verified using the sequence in Section 10.9 before unattended operation is accepted.
 
 ### 10.5 Proven Safety Invariants

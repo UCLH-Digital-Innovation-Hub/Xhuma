@@ -2202,15 +2202,14 @@ def test_terraform_int_and_prd_enable_warmer_and_keep_schedule_disabled():
 
 
 def test_terraform_container_app_job_is_manual_only():
-    """Verify Container Apps Job is configured for manual trigger only with zero automatic retries."""
+    """Verify Container Apps Job is configured for dynamic trigger selection defaulting to manual with zero automatic retries."""
     import pathlib
 
     main_tf = pathlib.Path("infra/main.tf").read_text()
-    assert "manual_trigger_config {" in main_tf
+    assert 'dynamic "manual_trigger_config"' in main_tf
     assert "replica_retry_limit          = 0" in main_tf
     assert 'args    = ["-m", "app.ops.dmd_cache", "warm"]' in main_tf
     assert "event_trigger_config" not in main_tf
-    assert "schedule_trigger_config" not in main_tf
 
 
 def test_terraform_container_app_job_registry_and_timeout_invariants():
@@ -2510,6 +2509,6 @@ def test_terraform_container_app_job_runtime_kv_resolution_invariants():
     )[0]
     assert 'service_endpoints    = ["Microsoft.KeyVault"]' in ca_subnet_section
 
-    # Job remains manual
-    assert "manual_trigger_config {" in job_section
+    # Job supports manual trigger by default
+    assert 'dynamic "manual_trigger_config"' in job_section
     assert "replica_retry_limit          = 0" in job_section
