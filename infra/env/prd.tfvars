@@ -34,6 +34,8 @@ nhs_relay_base_path    = "https://proxy.national.ncrs.nhs.uk"
 nhs_over_internet_path = ""
 dmd_base_url           = "https://ontology.nhs.uk/production2/fhir"
 
-# dm+d Cache Warmer (Standard target-local infrastructure in PRD; schedule deferred)
-dmd_cache_warm_enabled     = true
-dmd_cache_schedule_enabled = false
+# dm+d Cache Warmer and Weekly Schedule (Standard target-local infrastructure in PRD)
+dmd_cache_warm_enabled        = true
+dmd_cache_schedule_enabled    = true
+dmd_cache_warm_minute         = 0
+dmd_cache_schedule_start_time = "2026-10-19T05:00:00"
