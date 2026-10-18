@@ -13,16 +13,16 @@ The deployment stopped at plan stage. No Terraform apply or application deployme
 
 The PRD Terraform state incorrectly associated both shared Key Vault access-policy resources with:
 
-`xhuma-shared-kv-int`
+`<shared-key-vault-int>`
 
 The intended production shared Key Vault is:
 
-`xhuma-shared-kv-prd`
+`<shared-key-vault-prd>`
 
 The managed identities recorded in state were confirmed as:
 
-- App Service MI: `b11aa287-ae13-4e3b-a32b-ae912933b48b`
-- Locust MI: `8241d9f4-1f36-4325-b4a7-f64ccde99af6`
+- App Service MI: `<app-service-managed-identity-object-id>`
+- Locust MI: `<locust-managed-identity-object-id>`
 
 The App Service managed identity already had an access policy on the PRD shared Key Vault. The Locust managed identity did not.
 
@@ -36,7 +36,7 @@ The existing PRD App Service access policy was then imported into:
 
 Verification confirmed that this state resource now references:
 
-`xhuma-shared-kv-prd`
+`<shared-key-vault-prd>`
 
 The Locust shared policy remains absent from Terraform state so that Terraform can create the missing PRD policy normally on the next deployment plan.
 

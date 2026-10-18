@@ -256,10 +256,12 @@ jobs:
           # runtime pull identity must not vary according to the deployment actor
           TF_VAR_docker_registry_username: "${{ vars.GHCR_USERNAME }}"
           TF_VAR_docker_image: "${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
+          TF_VAR_dmd_cache_job_image: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
           TF_VAR_postgres_admin_password: "${{ secrets.POSTGRES_PASSWORD }}"
           TF_VAR_shared_resource_group_name: "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}"
           TF_VAR_shared_subscription_id: "${{ secrets.SHARED_SUBSCRIPTION_ID }}"
           TF_VAR_shared_key_vault_name: "${{ secrets.SHARED_KEY_VAULT_NAME }}"
+          TF_VAR_dmd_cache_alert_action_group_ids: ${{ secrets.DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON || '[]' }}
         run: |
           PLAN_FILE="${{ matrix.target.id }}-${GITHUB_SHA}-${GITHUB_RUN_ID}.tfplan"
 
@@ -332,11 +334,35 @@ jobs:
           if [ -n "$DESTRUCTIVE" ]; then
             # Convert newlines to commas for the message
             WARN_MSG=$(echo "$DESTRUCTIVE" | tr '\n' ',' | sed 's/,$//')
+            DESTRUCTIVE_DETAILS=$(terraform show -json "$PLAN_FILE" | jq -r '
+              [
+                .resource_changes[]?
+                | select(.change.actions | index("delete") or index("replace"))
+                | "\(.address)\nactions: \(.change.actions | tojson)\nreplace_paths:\(
+                    if ((.change.replace_paths // []) | length > 0) then
+                      "\n" + ([.change.replace_paths[] | "  - \(tojson)"] | join("\n"))
+                    else
+                      "\n  - []"
+                    end
+                  )"
+              ] | join("\n\n")
+            ')
+            echo "::group::Destructive Plan Diagnostics"
+            echo "$DESTRUCTIVE_DETAILS"
+            echo "::endgroup::"
             if [ "${{ matrix.target.require_existing_state }}" == "true" ]; then
               echo "::error::Migration Guard: The plan contains destructive actions (delete/replace) for an environment requiring existing state adoption. Affected resources: $WARN_MSG"
+              echo "### Migration Guard Failure: Destructive Plan Detected" >> $GITHUB_STEP_SUMMARY
+              echo '```text' >> $GITHUB_STEP_SUMMARY
+              echo "$DESTRUCTIVE_DETAILS" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
               exit 1
             else
               echo "::warning::The plan contains destructive actions (delete/replace) for the following resources: $WARN_MSG"
+              echo "### Destructive Plan Warning" >> $GITHUB_STEP_SUMMARY
+              echo '```text' >> $GITHUB_STEP_SUMMARY
+              echo "$DESTRUCTIVE_DETAILS" >> $GITHUB_STEP_SUMMARY
+              echo '```' >> $GITHUB_STEP_SUMMARY
             fi
           fi
 
@@ -483,6 +509,36 @@ jobs:
         run: |
           terraform apply -input=false -auto-approve "$PLAN_FILE"
 
+      - name: Extract Target Terraform Outputs
+        working-directory: ./infra
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          TF_OUTPUTS_JSON=$(terraform output -json)
+          WARM_ENABLED=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_warm_enabled.value // false')
+          CA_SUBNET_ID=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_ca_subnet_id.value // empty')
+          JOB_NAME=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_job_name.value // empty')
+          JOB_IMAGE=$(echo "$TF_OUTPUTS_JSON" | jq -r '.dmd_cache_job_image.value // empty')
+
+          if [ "$WARM_ENABLED" == "true" ]; then
+            if [ -z "$CA_SUBNET_ID" ]; then
+              echo "::error::Target has dmd_cache_warm_enabled=true but dmd_cache_ca_subnet_id output is null/missing!"
+              exit 1
+            fi
+            if [ -z "$JOB_NAME" ]; then
+              echo "::error::Target has dmd_cache_warm_enabled=true but dmd_cache_job_name output is null/missing!"
+              exit 1
+            fi
+          fi
+
+          echo "WARM_ENABLED=$WARM_ENABLED" >> $GITHUB_ENV
+          echo "CA_SUBNET_ID=$CA_SUBNET_ID" >> $GITHUB_ENV
+          echo "JOB_NAME=$JOB_NAME" >> $GITHUB_ENV
+          echo "JOB_IMAGE=$JOB_IMAGE" >> $GITHUB_ENV
+
       - name: Reconcile Shared Infrastructure - Plan
         working-directory: ./infra/shared
         env:
@@ -490,23 +546,31 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
-          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
+          APP_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
         run: |
           LIVE_NETWORK_ACLS=$(az keyvault show --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" --resource-group "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" --query "properties.networkAcls" -o json)
+
+          TARGET_SUBNETS=("$APP_SUBNET_ID")
+          if [ -n "$CA_SUBNET_ID" ]; then
+            TARGET_SUBNETS+=("$CA_SUBNET_ID")
+          fi
+          TARGET_SUBNETS_JSON=$(printf '%s\n' "${TARGET_SUBNETS[@]}" | jq -R . | jq -s .)
+          TARGET_SUBNET_IDS=$(IFS=,; echo "${TARGET_SUBNETS[*]}")
+          echo "TARGET_SUBNET_IDS=$TARGET_SUBNET_IDS" >> $GITHUB_ENV
 
           # Generate ephemeral tfvars
           jq -n \
             --arg rg "${{ secrets.SHARED_RESOURCE_GROUP_NAME }}" \
             --arg kv "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
             --arg tenant "${{ secrets.AZURE_TENANT_ID }}" \
-            --arg target_subnet "$TARGET_SUBNET_ID" \
+            --argjson target_subnets "$TARGET_SUBNETS_JSON" \
             --argjson acls "$LIVE_NETWORK_ACLS" \
             '{
               shared_resource_group_name: $rg,
               shared_key_vault_name: $kv,
               tenant_id: $tenant,
               approved_ip_rules: [($acls.ipRules[]?.value // empty)],
-              approved_subnet_ids: ([($acls.virtualNetworkRules[]?.id // empty), $target_subnet] | map(ascii_downcase) | unique)
+              approved_subnet_ids: ([($acls.virtualNetworkRules[]?.id // empty)] + $target_subnets | map(ascii_downcase) | unique)
             }' > /tmp/shared-reconcile.tfvars.json
           chmod 600 /tmp/shared-reconcile.tfvars.json
 
@@ -517,7 +581,7 @@ jobs:
           set -e
           if [ $TF_EXIT -ne 0 ]; then
             echo "::error::Shared plan failed"
-            python ../../scripts/deploy/filter_tf_error.py $TF_EXIT shared_plan_output.json
+            python "$GITHUB_WORKSPACE/scripts/deploy/filter_tf_error.py" $TF_EXIT shared_plan_output.json
             exit $TF_EXIT
           fi
 
@@ -526,10 +590,8 @@ jobs:
 
       - name: Guard Shared Infrastructure Plan
         working-directory: ./infra/shared
-        env:
-          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
         run: |
-          python ../../scripts/deploy/guard_shared_plan.py shared_plan.json "$TARGET_SUBNET_ID" "${{ matrix.target.id }}" "${{ matrix.target.shared_backend_file }}"
+          python "$GITHUB_WORKSPACE/scripts/deploy/guard_shared_plan.py" shared_plan.json "$TARGET_SUBNET_IDS" "${{ matrix.target.id }}" "${{ matrix.target.shared_backend_file }}"
           if [ $? -ne 0 ]; then
             echo "::error::Shared infrastructure guard rejected the plan."
             exit 1
@@ -551,7 +613,6 @@ jobs:
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.SHARED_SUBSCRIPTION_ID }}
-          TARGET_SUBNET_ID: "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ matrix.target.resource_group }}/providers/Microsoft.Network/virtualNetworks/${{ matrix.target.app_service_name }}-vnet/subnets/app-subnet"
         run: |
           az keyvault network-rule list \
             --name "${{ secrets.SHARED_KEY_VAULT_NAME }}" \
@@ -559,13 +620,40 @@ jobs:
             --subscription "${{ secrets.SHARED_SUBSCRIPTION_ID }}" \
             -o json > subnet_rules.json
 
-          TARGET_LOWER=$(echo "$TARGET_SUBNET_ID" | tr '[:upper:]' '[:lower:]')
-          FOUND=$(jq -r --arg tgt "$TARGET_LOWER" '.virtualNetworkRules[]?.id | ascii_downcase | select(. == $tgt)' subnet_rules.json)
-          if [ -z "$FOUND" ]; then
-             echo "::error::Post-apply verification failed: Target subnet $TARGET_SUBNET_ID is missing from the shared Key Vault network rules."
-             exit 1
+          IFS=',' read -ra SUBNETS <<< "$TARGET_SUBNET_IDS"
+          for SUB in "${SUBNETS[@]}"; do
+            SUB_LOWER=$(echo "$SUB" | tr '[:upper:]' '[:lower:]')
+            FOUND=$(jq -r --arg tgt "$SUB_LOWER" '.virtualNetworkRules[]?.id | ascii_downcase | select(. == $tgt)' subnet_rules.json)
+            if [ -z "$FOUND" ]; then
+               echo "::error::Post-apply verification failed: Expected subnet $SUB is missing from the shared Key Vault network rules."
+               exit 1
+            fi
+            echo "Verified subnet $SUB in shared Key Vault."
+          done
+
+      - name: Verify Container Apps Job Image
+        env:
+          EXPECTED_JOB_IMAGE: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build.outputs.digest }}"
+        run: |
+          if [ -n "$JOB_NAME" ]; then
+            echo "Verifying Container Apps Job image configuration for $JOB_NAME..."
+            CURRENT_IMAGE=$(az containerapp job show \
+              --name "$JOB_NAME" \
+              --resource-group "${{ matrix.target.resource_group }}" \
+              --query "properties.template.containers[0].image" \
+              -o tsv)
+            if [ -z "$CURRENT_IMAGE" ]; then
+              echo "::error::Failed to read live Container Apps Job image for $JOB_NAME"
+              exit 1
+            fi
+            if [ "$CURRENT_IMAGE" != "$EXPECTED_JOB_IMAGE" ]; then
+              echo "::error::Container Apps Job image mismatch! Expected $EXPECTED_JOB_IMAGE, got $CURRENT_IMAGE"
+              exit 1
+            fi
+            echo "Container Apps Job image verified: $CURRENT_IMAGE"
+          else
+            echo "dmd_cache_job_name is empty/null for ${{ matrix.target.id }}; skipping job image verification."
           fi
-          echo "Target subnet successfully verified in shared Key Vault."
 
       - name: Refresh and Verify App Service Key Vault References
         env:

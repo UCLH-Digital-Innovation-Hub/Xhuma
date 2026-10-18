@@ -1,0 +1,254 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Azure/azure-resource-manager-schemas/master/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "title": "Xhuma Operational Diagnostics Query Pack Snapshot",
+    "description": "Sanitised snapshot of the 20 standard KQL diagnostic queries in the xhuma-operational-diagnostics Query Pack. This file serves as a documentation and reference snapshot; it is not yet the active Terraform source of truth.",
+    "queryPackName": "xhuma-operational-diagnostics",
+    "resourceType": "Microsoft.OperationalInsights/queryPacks",
+    "scope": "Shared Xhuma Azure services scope",
+    "totalQueries": 20
+  },
+  "queries": [
+    {
+      "id": "xhuma-overview-pipeline-stage-performance",
+      "displayName": "Xhuma | Overview | Pipeline stage performance",
+      "category": "Overview",
+      "description": "Aggregates execution latency and invocation counts across primary request pipeline stages (pds.lookup, sds.trace, sds.endpoint, gpconnect.http, fhir.decode, fhir.models, fhir.index, ccda.convert, ccda.serialize, audit.persist), providing a high-level latency breakdown.",
+      "body": "dependencies\n| where name startswith \"xhuma.\"\n| extend stage = tostring(split(name, \".\")[1])\n| summarize\n    CallCount = count(),\n    AvgDurationMs = round(avg(duration), 2),\n    P50Ms = round(percentile(duration, 50), 2),\n    P95Ms = round(percentile(duration, 95), 2),\n    MaxDurationMs = round(max(duration), 2)\n  by name, success\n| order by CallCount desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "overview",
+        "level": "pipeline"
+      }
+    },
+    {
+      "id": "xhuma-soap-xds-request-activity",
+      "displayName": "Xhuma | SOAP XDS | Request activity",
+      "category": "SOAP/XDS",
+      "description": "Counts recent ITI endpoint activity across /SOAP/iti55, /SOAP/iti38, and /SOAP/iti39. Counts recent ITI endpoint activity; does not currently return message IDs, SOAP action or HTTP status.",
+      "body": "requests\n| where url contains \"/SOAP/iti\" or name contains \"/SOAP/iti\"\n| extend endpoint = tostring(split(url, \"?\")[0])\n| summarize\n    RequestCount = count(),\n    SuccessCount = countif(success == true),\n    FailureCount = countif(success == false),\n    AvgDurationMs = round(avg(duration), 2)\n  by endpoint, bin(timestamp, 5m)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "soap",
+        "standard": "ihe-xds"
+      }
+    },
+    {
+      "id": "xhuma-gpconnect-pipeline-stages",
+      "displayName": "Xhuma | GP Connect | Pipeline stages",
+      "category": "GP Connect",
+      "description": "Traces individual steps within GP Connect processing (gpconnect.http, fhir.decode, fhir.models, fhir.index, ccda.convert).",
+      "body": "dependencies\n| where name in (\"xhuma.gpconnect.http\", \"xhuma.fhir.decode\", \"xhuma.fhir.models\", \"xhuma.fhir.index\", \"xhuma.ccda.convert\")\n| project timestamp, operation_Id, name, duration, success, resultCode, customDimensions\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "gpconnect",
+        "pipeline": "fhir2ccda"
+      }
+    },
+    {
+      "id": "xhuma-gpconnect-upstream-latency-trend",
+      "displayName": "Xhuma | GP Connect | Upstream latency trend",
+      "category": "GP Connect",
+      "description": "Reports p50, p95, and maximum response times of the upstream GP Connect API over time. Reports p50, p95 and maximum timing where implemented; does not report p99.",
+      "body": "dependencies\n| where name == \"xhuma.gpconnect.http\"\n| summarize\n    p50 = round(percentile(duration, 50), 2),\n    p95 = round(percentile(duration, 95), 2),\n    max_duration = round(max(duration), 2),\n    CallCount = count()\n  by bin(timestamp, 15m)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "gpconnect",
+        "metric": "latency"
+      }
+    },
+    {
+      "id": "xhuma-gpconnect-upstream-status",
+      "displayName": "Xhuma | GP Connect | Upstream status",
+      "category": "GP Connect",
+      "description": "Summarises HTTP status codes returned by upstream GP practice endpoints, distinguishing client errors (4xx) from remote server errors (5xx).",
+      "body": "dependencies\n| where name == \"xhuma.gpconnect.http\"\n| summarize\n    CallCount = count(),\n    AvgDurationMs = round(avg(duration), 2)\n  by resultCode, success, bin(timestamp, 1h)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "gpconnect",
+        "metric": "status-code"
+      }
+    },
+    {
+      "id": "xhuma-gpconnect-end-to-end-operation-breakdown",
+      "displayName": "Xhuma | GP Connect | End-to-end operation breakdown",
+      "category": "GP Connect",
+      "description": "Sums and compares instrumented stage durations under a shared operation ID. Represents the sum of instrumented pipeline stages, not necessarily complete wall-clock request latency.",
+      "body": "dependencies\n| where name startswith \"xhuma.\"\n| summarize\n    TotalInstrumentedMs = sum(duration),\n    StageCount = count(),\n    Stages = make_set(name)\n  by operation_Id\n| order by TotalInstrumentedMs desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "gpconnect",
+        "metric": "duration-breakdown"
+      }
+    },
+    {
+      "id": "xhuma-pds-sds-stage-health",
+      "displayName": "Xhuma | PDS SDS | Stage health",
+      "category": "PDS/SDS",
+      "description": "Reports calls, failure count, and latency for Spine Directory Service (SDS) routing queries and Personal Demographics Service (PDS) patient verification calls. Does not project full response-code distributions.",
+      "body": "dependencies\n| where name in (\"xhuma.pds.lookup\", \"xhuma.sds.trace\", \"xhuma.sds.endpoint\", \"xhuma.sds.self\")\n| summarize\n    Calls = count(),\n    Failures = countif(success == false),\n    AvgDurationMs = round(avg(duration), 2),\n    MaxDurationMs = round(max(duration), 2)\n  by name, bin(timestamp, 30m)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "pds-sds",
+        "metric": "health"
+      }
+    },
+    {
+      "id": "xhuma-relay-connection-lifecycle",
+      "displayName": "Xhuma | Relay | Connection lifecycle",
+      "category": "Relay",
+      "description": "Reports structured relay lifecycle events from application and hub logs (connect, disconnect, route registration); does not prove TLS negotiation.",
+      "body": "traces\n| where message contains \"relay\" or customDimensions.component == \"relay\"\n| project timestamp, message, severityLevel, customDimensions\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "relay",
+        "lifecycle": "events"
+      }
+    },
+    {
+      "id": "xhuma-relay-upstream-diagnostics",
+      "displayName": "Xhuma | Relay | Upstream diagnostics",
+      "category": "Relay",
+      "description": "Tracks payload forwarding through the internal proxy/relay to upstream endpoints, reporting relay transport status (transport=relay).",
+      "body": "dependencies\n| where name == \"xhuma.gpconnect.http\" and customDimensions.transport == \"relay\"\n| project timestamp, operation_Id, duration, success, resultCode, customDimensions\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "relay",
+        "diagnostics": "transport"
+      }
+    },
+    {
+      "id": "xhuma-dmd-cache-hit-miss-summary",
+      "displayName": "Xhuma | dm+d | Cache hit/miss summary",
+      "category": "dm+d",
+      "description": "Measures Redis cache hit ratio for dm+d concept lookups (cache=terminology and cache=terminology.resolved) during medication conversion.",
+      "body": "customMetrics\n| where name == \"xhuma.cache.lookups\" and (customDimensions.cache startswith \"terminology\")\n| summarize\n    Hits = sumif(value, customDimensions.outcome == \"hit\"),\n    Misses = sumif(value, customDimensions.outcome == \"miss\")\n  by tostring(customDimensions.cache), bin(timestamp, 1h)\n| extend Total = Hits + Misses\n| extend HitRatePercent = round(100.0 * Hits / Total, 2)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "dmd",
+        "metric": "cache-hit-rate"
+      }
+    },
+    {
+      "id": "xhuma-dmd-recent-resolved-lookups",
+      "displayName": "Xhuma | dm+d | Recent resolved lookups",
+      "category": "dm+d",
+      "description": "Reports timestamp, operation ID, cache-hit property, duration and custom dimensions for recent resolved dm+d lookups; does not expose drug codes, dose mappings or clinical terminology payloads.",
+      "body": "dependencies\n| where name == \"xhuma.terminology.resolved.cache.read\"\n| project timestamp, operation_Id, duration, success, customDimensions\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "dmd",
+        "metric": "lookup-latency"
+      }
+    },
+    {
+      "id": "xhuma-dmd-terminology-fallback-activity",
+      "displayName": "Xhuma | dm+d | Terminology fallback activity",
+      "category": "dm+d",
+      "description": "Identifies requests where local dm+d cache misses forced fallback HTTP queries to the NHS Terminology Server (xhuma.terminology.http).",
+      "body": "dependencies\n| where name == \"xhuma.terminology.http\"\n| project timestamp, operation_Id, duration, success, resultCode, customDimensions\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "dmd",
+        "metric": "fallback-http"
+      }
+    },
+    {
+      "id": "xhuma-cache-document-hits-and-misses",
+      "displayName": "Xhuma | Cache | Document hits and misses",
+      "category": "Cache",
+      "description": "Represents ITI-38 document pointer/cache lookup behaviour (cache=document); does not represent ITI-39 document retrieval or regeneration.",
+      "body": "customMetrics\n| where name == \"xhuma.cache.lookups\" and customDimensions.cache == \"document\"\n| summarize\n    Hits = sumif(value, customDimensions.outcome == \"hit\"),\n    Misses = sumif(value, customDimensions.outcome == \"miss\")\n  by bin(timestamp, 1h)\n| extend Total = Hits + Misses\n| extend HitRatePercent = round(100.0 * Hits / Total, 2)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "cache",
+        "transaction": "iti-38"
+      }
+    },
+    {
+      "id": "xhuma-cache-document-lifecycle-summary",
+      "displayName": "Xhuma | Cache | Document lifecycle summary",
+      "category": "Cache",
+      "description": "Compares document pointer/read (document.cache.read) and retrieval cache (document.cache.retrieve) instrumentation; does not expose TTL expiry or memory allocation.",
+      "body": "dependencies\n| where name in (\"xhuma.document.cache.read\", \"xhuma.document.cache.retrieve\", \"xhuma.ccda.cache.write\")\n| summarize\n    Ops = count(),\n    AvgDurationMs = round(avg(duration), 2),\n    Failures = countif(success == false)\n  by name, bin(timestamp, 1h)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "cache",
+        "metric": "lifecycle-summary"
+      }
+    },
+    {
+      "id": "xhuma-cache-all-cache-hit-rates",
+      "displayName": "Xhuma | Cache | All cache hit rates",
+      "category": "Cache",
+      "description": "Covers the instrumented document, retrieval, and terminology cache spans included by its KQL; does not cover PDS or SDS cache spans unless specifically instrumented.",
+      "body": "customMetrics\n| where name == \"xhuma.cache.lookups\"\n| summarize\n    Hits = sumif(value, customDimensions.outcome == \"hit\"),\n    Misses = sumif(value, customDimensions.outcome == \"miss\")\n  by tostring(customDimensions.cache), bin(timestamp, 1h)\n| extend Total = Hits + Misses\n| extend HitRatePercent = round(100.0 * Hits / Total, 2)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "cache",
+        "metric": "cross-cache-hit-rates"
+      }
+    },
+    {
+      "id": "xhuma-audit-persistence-health",
+      "displayName": "Xhuma | Audit | Persistence health",
+      "category": "Audit",
+      "description": "Reports attempts, failures, and latency for PostgreSQL audit persistence (xhuma.audit.persist); does not directly prove connection-pool exhaustion.",
+      "body": "dependencies\n| where name == \"xhuma.audit.persist\"\n| summarize\n    Attempts = count(),\n    Failures = countif(success == false),\n    AvgDurationMs = round(avg(duration), 2),\n    MaxDurationMs = round(max(duration), 2)\n  by bin(timestamp, 15m)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "audit",
+        "metric": "persistence-latency"
+      }
+    },
+    {
+      "id": "xhuma-security-mtls-diagnostics",
+      "displayName": "Xhuma | Security | mTLS diagnostics",
+      "category": "Security/mTLS",
+      "description": "Reports validation, configuration, and rejection traces logged by the mTLS middleware; does not provide a complete record of every TLS handshake.",
+      "body": "traces\n| where message contains \"Epic CA Verification\" or message contains \"mTLS\"\n| project timestamp, message, severityLevel, customDimensions\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "security",
+        "layer": "mtls"
+      }
+    },
+    {
+      "id": "xhuma-performance-slow-pipeline-stages",
+      "displayName": "Xhuma | Performance | Slow pipeline stages",
+      "category": "Performance",
+      "description": "Surfaces pipeline operations exceeding defined latency thresholds (threshold is 250 ms, not 1500 ms).",
+      "body": "dependencies\n| where name startswith \"xhuma.\" and duration > 250\n| project timestamp, operation_Id, name, duration, success, customDimensions\n| order by duration desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "performance",
+        "filter": "slow-spans"
+      }
+    },
+    {
+      "id": "xhuma-errors-failed-pipeline-stages",
+      "displayName": "Xhuma | Errors | Failed pipeline stages",
+      "category": "Errors",
+      "description": "Lists pipeline stages that recorded an error or failure outcome (success == false or stage.outcome == \"error\").",
+      "body": "dependencies\n| where name startswith \"xhuma.\" and success == false\n| project timestamp, operation_Id, name, duration, resultCode, customDimensions\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "errors",
+        "filter": "failed-spans"
+      }
+    },
+    {
+      "id": "xhuma-errors-application-errors-and-exceptions",
+      "displayName": "Xhuma | Errors | Application errors and exceptions",
+      "category": "Errors",
+      "description": "Reports error traces, unhandled exceptions, and internal server error logs; does not guarantee complete traceback bodies.",
+      "body": "union\n  (exceptions | project timestamp, operation_Id, problemId, type, outerMessage, severityLevel = 3),\n  (traces | where severityLevel >= 3 | project timestamp, operation_Id, problemId = \"\", type = \"TraceError\", outerMessage = message, severityLevel)\n| order by timestamp desc",
+      "tags": {
+        "workload": "xhuma",
+        "category": "errors",
+        "filter": "exceptions-and-traces"
+      }
+    }
+  ]
+}
