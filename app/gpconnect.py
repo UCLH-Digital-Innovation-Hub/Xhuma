@@ -21,7 +21,7 @@ from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
 from .gp_connect_config import GP_CONNECT_PARAMETERS
 from .logging import record_application_failure
-from .pds.pds import lookup_patient, lookup_self_issuer, sds_trace
+from .pds.pds import SDSUpstreamError, lookup_patient, lookup_self_issuer, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
@@ -217,6 +217,11 @@ async def _fetch_gpconnect_record(
         raise
     except Exception as e:
         msg = f"SDS Trace failed for ODS code {gp_ods}"
+        detail = {"stage": "sds_trace", "exception_type": type(e).__name__}
+        if isinstance(e, SDSUpstreamError):
+            detail["reason"] = e.reason
+            detail["upstream_status"] = e.status_code
+            detail["attempts"] = e.attempts
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -224,11 +229,16 @@ async def _fetch_gpconnect_record(
             action="sds_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"stage": "sds_trace", "exception_type": type(e).__name__},
+            detail=detail,
         )
         safe_error = RuntimeError(msg)
         record_application_failure(safe_error)
-        logging.error(f"{msg} (exception_type: {type(e).__name__})")
+        if isinstance(e, SDSUpstreamError):
+            logging.error(
+                f"{msg} (exception_type={type(e).__name__}, reason={e.reason}, status={e.status_code}, attempts={e.attempts})"
+            )
+        else:
+            logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
@@ -289,6 +299,11 @@ async def _fetch_gpconnect_record(
         raise
     except Exception as e:
         msg = f"SDS Endpoint resolution failed for ODS code {gp_ods}"
+        detail = {"stage": "sds_endpoint", "exception_type": type(e).__name__}
+        if isinstance(e, SDSUpstreamError):
+            detail["reason"] = e.reason
+            detail["upstream_status"] = e.status_code
+            detail["attempts"] = e.attempts
         await attempt_audit(
             request=request,
             nhs_number=str(nhsno),
@@ -296,11 +311,16 @@ async def _fetch_gpconnect_record(
             action="fhir_endpoint_trace",
             outcome=AuditOutcome.fail,
             error_code="502",
-            detail={"stage": "sds_endpoint", "exception_type": type(e).__name__},
+            detail=detail,
         )
         safe_error = RuntimeError(msg)
         record_application_failure(safe_error)
-        logging.error(f"{msg} (exception_type: {type(e).__name__})")
+        if isinstance(e, SDSUpstreamError):
+            logging.error(
+                f"{msg} (exception_type={type(e).__name__}, reason={e.reason}, status={e.status_code}, attempts={e.attempts})"
+            )
+        else:
+            logging.error(f"{msg} (exception_type: {type(e).__name__})")
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(msg + "\n")
