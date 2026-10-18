@@ -1,5 +1,7 @@
+import importlib
 import json
 import logging
+import xml.etree.ElementTree as ET
 from datetime import timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -155,7 +157,9 @@ async def test_self_lookup_failure_is_audited_without_downstream_request(mock_se
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
-            assert json.loads(response.body) == {"success": False, "error": "SDS consumer issuer lookup failed"}
+            assert json.loads(response.body)["success"] is False
+            assert json.loads(response.body)["error"].startswith("SDS consumer issuer lookup failed")
+            assert "step:" in json.loads(response.body)["error"]
         assert audit.await_args.kwargs["action"] == "sds_self_lookup"
         assert audit.await_args.kwargs["outcome"] == AuditOutcome.fail
         assert audit.await_args.kwargs["detail"] == {
@@ -230,8 +234,100 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 
     assert result.status_code == 502
     assert body["success"] is False
-    assert body["error"] == "SDS Trace failed for ODS code E82665"
+    assert body["error"].startswith("SDS Trace failed for ODS code E82665")
+    assert "step:" in body["error"]
     assert "SDS unavailable" not in body["error"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [403, 404, 429, 500, 503])
+@pytest.mark.parametrize("failed_lookup", ["device", "endpoint", "self"])
+@pytest.mark.parametrize("wire", ["json", "soap"])
+async def test_sds_http_failure_reaches_caller(mock_self_issuer, monkeypatch, status, failed_lookup, wire):
+    pds = importlib.import_module("app.pds.pds")
+    iti38 = importlib.import_module("app.soap.responses.iti_38")
+    api_key = "private-nhs-api-credential"
+    monkeypatch.setenv("NHS_API_KEY", api_key)
+    monkeypatch.setenv("XHUMA_ODS_CODE", "Z6G1Z")
+    if failed_lookup == "self":
+        mock_self_issuer.side_effect = pds.lookup_self_issuer
+    patient = load_pds(9690937278)
+    patient["generalPractitioner"][0]["identifier"]["value"] = "H81058"
+    responses = []
+    if failed_lookup != "device":
+        responses.append(Response(200, json=fake_sds_device_trace()))
+    if failed_lookup == "self":
+        responses.append(Response(200, json=fake_sds_endpoint_trace()))
+    provider_detail = "endpoint <unavailable> & retry " + "x" * 256 + "SDS_PROVIDER_DIAGNOSTIC_END"
+    responses.append(
+        Response(
+            status,
+            json={
+                "error": "SDS_PROVIDER_UNAVAILABLE",
+                "message": api_key,
+                "diagnostics": provider_detail,
+            },
+        )
+    )
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=patient),
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.soap.responses.iti_38.redis_client", autospec=True) as soap_cache,
+        patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock),
+    ):
+        cache.get.return_value = None
+        soap_cache.get.return_value = None
+        client = AsyncMock()
+        client.get.side_effect = responses
+        factory.return_value.__aenter__.return_value = client
+        if wire == "json":
+            response = await gpconnect(9690937278, saml, request=get_mock_request())
+            assert response.status_code == status
+            body = json.loads(response.body)
+            assert body["success"] is False
+            error = body["error"]
+        else:
+            xml = await iti38.iti_38_response(get_mock_request(), 9690937278, "ceid", "queryid", saml)
+            error_node = ET.fromstring(xml).find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0}RegistryError")
+            assert error_node is not None
+            assert error_node.attrib["errorCode"] == "XDSRegistryError"
+            error = error_node.attrib["codeContext"]
+        assert f"HTTP {status}" in error
+        assert "SDS_PROVIDER_UNAVAILABLE" in error
+        assert provider_detail in error
+        assert "request_id:" in error
+        assert api_key not in error
+        assert audit.await_args.kwargs["error_code"] == str(status)
+        assert "SDS_PROVIDER_UNAVAILABLE" not in str(audit.await_args.kwargs)
+        client.post.assert_not_awaited()
+        # Only the successful preceding lookups are cached, never the failed response.
+        assert cache.setex.await_count == len(responses) - 1
+
+
+@pytest.mark.asyncio
+async def test_serialization_failure_returns_caller_error_with_step():
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock),
+        patch("app.gpconnect.create_nhs_ssl_context"),
+        patch("app.gpconnect.httpx.AsyncClient") as factory,
+        patch("app.gpconnect.convert_bundle", new_callable=AsyncMock, return_value={"ClinicalDocument": {}}),
+        patch("app.gpconnect.base64_xml", side_effect=ValueError("PRIVATE_INTERNAL_ERROR")),
+    ):
+        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        factory.return_value.__aenter__.return_value.post.return_value = Response(
+            200, json={"resourceType": "Bundle", "type": "searchset", "entry": []}
+        )
+        response = await gpconnect(9690937278, saml, request=get_mock_request())
+    assert response.status_code == 500
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert "ccda_serialize.base64_xml" in body["error"]
+    assert "ValueError" in body["error"]
+    assert "PRIVATE_INTERNAL_ERROR" not in body["error"]
 
 
 @pytest.mark.asyncio
@@ -266,7 +362,9 @@ async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path,
 
     safe_message = "Unable to parse SDS trace response"
     assert response.status_code == 500
-    assert json.loads(response.body) == {"success": False, "error": safe_message}
+    assert json.loads(response.body)["success"] is False
+    assert json.loads(response.body)["error"].startswith(safe_message)
+    assert "step:" in json.loads(response.body)["error"]
     assert upstream_secret not in response.body.decode()
 
     telemetry.assert_called_once()
@@ -324,7 +422,8 @@ async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
         assert response.status_code == 502
         body = json.loads(response.body)
         assert body["success"] is False
-        assert body["error"] == "SDS Endpoint resolution failed for ODS code E82665"
+        assert body["error"].startswith("SDS Endpoint resolution failed for ODS code E82665")
+        assert "step:" in body["error"]
         endpoint_audits = [
             call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
         ]
@@ -370,7 +469,8 @@ async def test_endpoint_audit_failures_are_distinguished(mock_self_issuer, step,
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
-            assert json.loads(response.body)["error"] == "SDS Endpoint resolution failed for ODS code E82665"
+            assert json.loads(response.body)["error"].startswith("SDS Endpoint resolution failed for ODS code E82665")
+            assert "step:" in json.loads(response.body)["error"]
             assert audit.await_args.kwargs["detail"] == {
                 "step": "sds_endpoint." + step,
                 "exception_type": "RuntimeError",
@@ -438,7 +538,8 @@ async def test_endpoint_lookup_failure_is_audited_without_downstream_request(moc
         else:
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
-            assert json.loads(response.body)["error"] == "SDS Endpoint resolution failed for ODS code E82665"
+            assert json.loads(response.body)["error"].startswith("SDS Endpoint resolution failed for ODS code E82665")
+            assert "step:" in json.loads(response.body)["error"]
             assert "SDS unavailable" not in json.loads(response.body)["error"]
 
         endpoint_audits = [
@@ -533,7 +634,9 @@ async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
         response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
         assert response.status_code == 502
         body = json.loads(response.body)
-        assert body == {"success": False, "error": "FHIR bundle malformed"}
+        assert body["success"] is False
+        assert body["error"].startswith("FHIR bundle malformed")
+        assert "step:" in body["error"]
         telemetry.assert_called_once()
         event = audit.call_args.kwargs
         assert event["action"] == "validate_fhir_bundle"
@@ -658,7 +761,9 @@ async def test_validate_fhir_bundle_data_minimisation(
 
     assert result.status_code == 502
     body = json.loads(result.body)
-    assert body == {"success": False, "error": "FHIR bundle malformed"}
+    assert body["success"] is False
+    assert body["error"].startswith("FHIR bundle malformed")
+    assert "step:" in body["error"]
 
     audit_calls = mock_attempt_audit.call_args_list
     validate_fhir_call = [call for call in audit_calls if call.kwargs.get("action") == "validate_fhir_bundle"]
@@ -707,10 +812,9 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
             body = json.loads(response.body)
-            assert body == {
-                "success": False,
-                "error": "SDS Trace failed for ODS code E82665",
-            }
+            assert body["success"] is False
+            assert body["error"].startswith("SDS Trace failed for ODS code E82665")
+            assert "step:" in body["error"]
             assert upstream_secret not in response.body.decode()
 
             mock_record_failure.assert_called_once()
@@ -771,10 +875,9 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
             body = json.loads(response.body)
-            assert body == {
-                "success": False,
-                "error": "SDS Endpoint resolution failed for ODS code E82665",
-            }
+            assert body["success"] is False
+            assert body["error"].startswith("SDS Endpoint resolution failed for ODS code E82665")
+            assert "step:" in body["error"]
             assert upstream_secret not in response.body.decode()
 
             mock_record_failure.assert_called_once()
@@ -842,10 +945,9 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
             assert response.status_code == 502
             body = json.loads(response.body)
-            assert body == {
-                "success": False,
-                "error": "Unable to read GP ODS from PDS response",
-            }
+            assert body["success"] is False
+            assert body["error"].startswith("Unable to read GP ODS from PDS response")
+            assert "step:" in body["error"]
             assert upstream_secret not in response.body.decode()
 
             mock_record_failure.assert_called_once()

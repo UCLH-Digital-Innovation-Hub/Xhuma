@@ -27,8 +27,8 @@ SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
 GP_CONNECT_INTERACTION_ID = "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
 
 
-def _sanitize_diagnostic(text: str) -> str:
-    """Safely bounds and sanitizes diagnostic strings from upstream responses."""
+def _sanitize_diagnostic(text: str, max_length: int | None = 200) -> str:
+    """Redact upstream diagnostics, optionally bounding their length."""
     if not isinstance(text, str):
         text = str(text)
     import re
@@ -42,7 +42,7 @@ def _sanitize_diagnostic(text: str) -> str:
         r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", "[REDACTED_UUID]", text
     )
 
-    return text.replace("\n", " ").replace("\r", "")[:200]
+    return text.replace("\n", " ").replace("\r", "")[:max_length]
 
 
 # router = fastapi.APIRouter(prefix="/pds")
@@ -360,10 +360,37 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
         "apikey": nhs_api_key,
     }
     with measure("sds.http"):
-        async with httpx.AsyncClient() as client:
-            r = await client.get(url, headers=headers, params=parameters)
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get(url, headers=headers, params=parameters)
+        except httpx.RequestError as e:
+            status_code = 504 if isinstance(e, httpx.TimeoutException) else 502
+            msg = (
+                f"SDS {suffix} request failed for ODS code {ods}: {type(e).__name__} "
+                f"(request_id: {headers['X-Request-ID']})"
+            )
+            logging.error(msg)
+            raise fastapi.HTTPException(status_code=status_code, detail=msg) from None
         if r.status_code != 200:
-            raise Exception(f"{r.status_code}: {r.text}")
+            response_detail = _sanitize_diagnostic(r.text.replace(nhs_api_key, "[REDACTED_API_KEY]"), max_length=None)
+            logging.error(
+                "SDS HTTP failure | Resource: %s | ODS: %s | Status: %s | "
+                "ReqID: %s | UpstreamReqID: %s | CorrID: %s | Response: %s",
+                suffix,
+                ods,
+                r.status_code,
+                headers["X-Request-ID"],
+                r.headers.get("x-request-id", ""),
+                r.headers.get("x-correlation-id", ""),
+                response_detail[:200],
+            )
+            raise fastapi.HTTPException(
+                status_code=r.status_code,
+                detail=(
+                    f"SDS {suffix} HTTP {r.status_code} failure for ODS code {ods}: {response_detail} "
+                    f"(request_id: {headers['X-Request-ID']})"
+                ),
+            )
 
     with measure("sds.response.decode"):
         trace = json.loads(r.text)

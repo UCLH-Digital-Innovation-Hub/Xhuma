@@ -155,8 +155,11 @@ async def _fetch_gpconnect_record(
                         "xds_error_code": "XDSUnknownPatientId",
                     },
                 )
-            return JSONResponse(status_code=502, content={"success": False, "error": "PDS lookup upstream failure"})
+            return JSONResponse(
+                status_code=e.status_code, content={"success": False, "error": f"PDS lookup failed: {e.detail}"}
+            )
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = "PDS lookup failed"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
@@ -164,7 +167,8 @@ async def _fetch_gpconnect_record(
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            return JSONResponse(status_code=502, content={"success": False, "error": msg})
+            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         # 3) Security/U flag
         step = "check_restriction.security_extraction"
@@ -206,6 +210,7 @@ async def _fetch_gpconnect_record(
         except AuditFailureException:
             raise
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = "Unable to read GP ODS from PDS response"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
@@ -219,10 +224,11 @@ async def _fetch_gpconnect_record(
                 saml=saml_attrs,
                 action="resolve_gp_ods",
                 outcome=AuditOutcome.fail,
-                error_code="502",
+                error_code=str(status_code),
                 detail={"step": step, "exception_type": type(e).__name__},
             )
-            return JSONResponse(status_code=502, content={"success": False, "error": msg})
+            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         try:
             step = "sds_trace.sds_lookup"
@@ -240,6 +246,7 @@ async def _fetch_gpconnect_record(
         except AuditFailureException:
             raise
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = f"SDS Trace failed for ODS code {gp_ods}"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
@@ -253,10 +260,11 @@ async def _fetch_gpconnect_record(
                 saml=saml_attrs,
                 action="sds_trace",
                 outcome=AuditOutcome.fail,
-                error_code="502",
+                error_code=str(status_code),
                 detail={"step": step, "exception_type": type(e).__name__},
             )
-            return JSONResponse(status_code=502, content={"success": False, "error": msg})
+            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         asid = None
         nhsmhsparty = None
@@ -272,6 +280,7 @@ async def _fetch_gpconnect_record(
         except AuditFailureException:
             raise
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 500
             msg = "Unable to parse SDS trace response"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
@@ -279,7 +288,8 @@ async def _fetch_gpconnect_record(
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            return JSONResponse(status_code=500, content={"success": False, "error": msg})
+            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         step = "resolve_asid_partykey.identity_validation"
         if not asid or not nhsmhsparty:
@@ -323,6 +333,7 @@ async def _fetch_gpconnect_record(
         except AuditFailureException:
             raise
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = f"SDS Endpoint resolution failed for ODS code {gp_ods}"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
@@ -336,10 +347,11 @@ async def _fetch_gpconnect_record(
                 saml=saml_attrs,
                 action="fhir_endpoint_trace",
                 outcome=AuditOutcome.fail,
-                error_code="502",
+                error_code=str(status_code),
                 detail={"step": step, "exception_type": type(e).__name__},
             )
-            return JSONResponse(status_code=502, content={"success": False, "error": msg})
+            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         # 6) Build request
         try:
@@ -360,6 +372,7 @@ async def _fetch_gpconnect_record(
         except AuditFailureException:
             raise
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 502
             diagnostic = f"SDS consumer issuer lookup failed (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
@@ -372,12 +385,11 @@ async def _fetch_gpconnect_record(
                 saml=saml_attrs,
                 action="sds_self_lookup",
                 outcome=AuditOutcome.fail,
-                error_code="502",
+                error_code=str(status_code),
                 detail={"step": step, "exception_type": type(e).__name__},
             )
-            return JSONResponse(
-                status_code=502, content={"success": False, "error": "SDS consumer issuer lookup failed"}
-            )
+            msg = "SDS consumer issuer lookup failed" + f": {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
         step = "gpconnect_request_build.headers"
         headers = {
             "Ssp-TraceID": str(uuid4()),
@@ -556,6 +568,7 @@ async def _fetch_gpconnect_record(
             return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = "Transport error"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
@@ -570,14 +583,15 @@ async def _fetch_gpconnect_record(
                 saml=saml_attrs,
                 action="gpconnect_request",
                 outcome=AuditOutcome.fail,
-                error_code="502",
+                error_code=str(status_code),
                 detail={
                     "step": step,
                     "transport": "relay" if USE_RELAY else "direct",
                     "exception_type": type(e).__name__,
                 },
             )
-            return JSONResponse(status_code=502, content={"success": False, "error": msg})
+            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         # 8) Non-200 handling
         step = "gpconnect_request.response_status"
@@ -699,6 +713,7 @@ async def _fetch_gpconnect_record(
         except AuditFailureException:
             raise
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = "FHIR bundle malformed"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
@@ -713,10 +728,11 @@ async def _fetch_gpconnect_record(
                 saml=saml_attrs,
                 action="validate_fhir_bundle",
                 outcome=AuditOutcome.fail,
-                error_code="502",
+                error_code=str(status_code),
                 detail={"step": step, "exception_type": type(e).__name__},
             )
-            return JSONResponse(status_code=502, content={"success": False, "error": "FHIR bundle malformed"})
+            msg = "FHIR bundle malformed" + f": {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         # index resources for resolution
         step = "fhir_index.resource_index"
@@ -750,6 +766,7 @@ async def _fetch_gpconnect_record(
         except AuditFailureException:
             raise
         except Exception as e:
+            status_code = e.status_code if isinstance(e, HTTPException) else 500
             msg = "Failed to convert FHIR Bundle to CCDA"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             record_application_failure(RuntimeError(diagnostic))
@@ -757,7 +774,8 @@ async def _fetch_gpconnect_record(
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            return JSONResponse(status_code=500, content={"success": False, "error": msg})
+            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         if log_dir:
             step = "ccda_serialize.xml_debug_file"
@@ -825,7 +843,9 @@ async def _fetch_gpconnect_record(
                 f.write(diagnostic + "\n")
         if isinstance(e, AuditFailureException):
             raise AuditFailureException("GP Connect audit persistence failed") from None
-        raise RuntimeError("GP Connect processing failed") from None
+        status_code = e.status_code if isinstance(e, HTTPException) else 500
+        msg = f"GP Connect failed at {step}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+        return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
 
 if __name__ == "__main__":

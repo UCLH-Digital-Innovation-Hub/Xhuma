@@ -245,10 +245,87 @@ async def test_sds_failure_does_not_cache():
         client = AsyncMock()
         client.get.return_value = httpx.Response(503, text="Unavailable")
         factory.return_value.__aenter__.return_value = client
-        with pytest.raises(Exception, match="503: Unavailable"):
+        with pytest.raises(HTTPException, match="SDS Device HTTP 503 failure") as caught:
             await sds_trace("A82038")
+        assert caught.value.status_code == 503
+        assert "Unavailable" in caught.value.detail
         cache.setex.assert_not_called()
         factory.return_value.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", [False, True], ids=["device", "endpoint"])
+@pytest.mark.parametrize("status", [403, 429, 500, 503])
+async def test_sds_http_failure_logs_status_and_request_ids_without_secrets(monkeypatch, caplog, endpoint, status):
+    api_key = "non-uuid-nhs-api-credential"
+    monkeypatch.setenv("NHS_API_KEY", api_key)
+    upstream_request_id = "11111111-2222-4333-8444-555555555555"
+    correlation_id = "66666666-7777-4888-8999-000000000000"
+    body_secret_uuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+    body = (
+        f"SERVICE_UNAVAILABLE NHS 9690937278 Bearer sensitive.signed.token key={api_key} "
+        f"secret={body_secret_uuid}\n" + "x" * 1000 + "END_OF_RESPONSE"
+    )
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+    ):
+        cache.get.return_value = None
+        client = AsyncMock()
+        client.get.return_value = httpx.Response(
+            status,
+            text=body,
+            headers={"x-request-id": upstream_request_id, "x-correlation-id": correlation_id},
+        )
+        factory.return_value.__aenter__.return_value = client
+        with pytest.raises(HTTPException) as caught:
+            await sds_trace("H81058", endpoint=endpoint, mhsparty="H81058-825269")
+        cache.setex.assert_not_called()
+        sent_request_id = client.get.await_args.kwargs["headers"]["X-Request-ID"]
+
+    resource = "Endpoint" if endpoint else "Device"
+    records = [record for record in caplog.records if "SDS HTTP failure" in record.getMessage()]
+    assert len(records) == 1
+    message = records[0].getMessage()
+    assert f"Resource: {resource} | ODS: H81058 | Status: {status}" in message
+    assert f"ReqID: {sent_request_id}" in message
+    assert f"UpstreamReqID: {upstream_request_id}" in message
+    assert f"CorrID: {correlation_id}" in message
+    assert "SERVICE_UNAVAILABLE" in message
+    assert "[REDACTED_API_KEY]" in message
+    assert "[REDACTED_NHSNO]" in message
+    assert "[REDACTED_TOKEN]" in message
+    assert len(message.split("Response: ", 1)[1]) <= 200
+    assert "\n" not in message
+    assert caught.value.status_code == status
+    assert caught.value.detail.startswith(f"SDS {resource} HTTP {status} failure for ODS code H81058:")
+    assert caught.value.detail.endswith(f"END_OF_RESPONSE (request_id: {sent_request_id})")
+    assert "END_OF_RESPONSE" not in caplog.text
+    for secret in (api_key, "9690937278", "sensitive.signed.token", body_secret_uuid):
+        assert secret not in caplog.text
+        assert secret not in str(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type,status", [(httpx.ReadTimeout, 504), (httpx.ConnectError, 502)])
+async def test_sds_transport_failure_has_caller_status_and_request_id(error_type, status, caplog):
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+    ):
+        cache.get.return_value = None
+        client = AsyncMock()
+        client.get.side_effect = error_type("PRIVATE_CONNECTION_CREDENTIAL")
+        factory.return_value.__aenter__.return_value = client
+        with pytest.raises(HTTPException) as caught:
+            await sds_trace("H81058", endpoint=True, mhsparty="H81058-825269")
+        sent_request_id = client.get.await_args.kwargs["headers"]["X-Request-ID"]
+        cache.setex.assert_not_called()
+    assert caught.value.status_code == status
+    assert error_type.__name__ in caught.value.detail
+    assert sent_request_id in caught.value.detail
+    assert "PRIVATE_CONNECTION_CREDENTIAL" not in str(caught.value)
+    assert "PRIVATE_CONNECTION_CREDENTIAL" not in caplog.text
 
 
 @pytest.mark.asyncio
