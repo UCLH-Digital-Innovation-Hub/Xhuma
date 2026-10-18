@@ -81,6 +81,15 @@ The shared Query Pack provides 20 standardised queries organised into functional
    Counts recent ITI endpoint activity across `/SOAP/iti55`, `/SOAP/iti38`, and `/SOAP/iti39`. It counts recent ITI endpoint activity; it does **not** currently return message IDs, SOAP action, or HTTP status.
 
 ### 3.3 GP Connect
+
+GP Connect tracks the current operation with a local `step` variable, such as `ccda_cache.pipeline_execute`. Audit details and diagnostic messages include that step; caught exceptions also include the original `exception_type`. Diagnostic log entries and Application Insights handled-exception messages exclude raw exception messages, patient identifiers, tokens, and upstream payloads. Audit failures still propagate through the fail-closed audit path.
+
+Caught failures are recorded before their failure audit is attempted, so an audit persistence error cannot hide the original operation failure. Unhandled processing errors and audit failures are rethrown with generic messages after recording the operation and original exception type, preventing upstream handlers from logging sensitive exception text.
+
+Non-200 responses from GP Connect retain the upstream HTTP status. For JSON FHIR `OperationOutcome` errors, the response includes `operation_outcome` with every issue's severity, issue code, coding system/version/code/display, details text, diagnostics, and location/expression fields when supplied. The `error` message includes the complete provider codes, displays and diagnostics, including SSP ASID and forwarding-authorisation failures, following the [NHS GP Connect error-handling guidance](https://digital.nhs.uk/services/gp-connect/develop-gp-connect-services/development/error-handling). ITI-38 returns that message in `RegistryError.codeContext` while retaining the XDS `XDSRegistryError` error code. Provider diagnostics are not truncated or copied into audit details, application logs, or Application Insights; non-FHIR and malformed responses retain the generic HTTP-status error.
+
+Step markers cover NHS number validation, PDS lookup and restriction checks, ODS and SDS identity extraction, endpoint resolution, issuer lookup and JWT creation, request construction, certificate and TLS setup, direct HTTP and relay operations, FHIR validation and indexing, CCDA conversion and serialization, and Redis pipeline writes. Existing `measure()` spans remain in place. SDS has separate spans for cache reads, cache decoding, HTTP requests, response decoding, and cache writes; a cache value being present does not prove that the client received confirmation of its write.
+
 3. **`Xhuma | GP Connect | Pipeline stages`**  
    Traces individual steps within GP Connect processing (`gpconnect.http`, `fhir.decode`, `fhir.models`, `fhir.index`, `ccda.convert`).
 4. **`Xhuma | GP Connect | Upstream latency trend`**  

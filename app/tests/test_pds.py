@@ -116,6 +116,54 @@ def test_cache_keys_are_deterministic():
 
 
 @pytest.mark.asyncio
+async def test_sds_cache_write_timeout_can_leave_valid_cached_endpoint(monkeypatch):
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from opentelemetry.trace import StatusCode
+
+    from app import telemetry
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(telemetry, "tracer", provider.get_tracer("test"))
+    trace = {"resourceType": "Bundle", "entry": [{"resource": {"address": "https://gp.example/fhir"}}]}
+    saved = {}
+    error = TimeoutError("SECRET_CACHE_CONNECTION_DETAILS")
+
+    async def write_then_timeout(key, ttl, value):
+        saved[key] = value
+        raise error
+
+    try:
+        with (
+            patch("app.pds.pds.redis_client", autospec=True) as cache,
+            patch("app.pds.pds.httpx.AsyncClient") as factory,
+        ):
+            cache.get.return_value = None
+            cache.setex.side_effect = write_then_timeout
+            client = AsyncMock()
+            client.get.return_value = httpx.Response(200, json=trace)
+            factory.return_value.__aenter__.return_value = client
+
+            with pytest.raises(TimeoutError) as caught:
+                await sds_trace("H81058", endpoint=True, mhsparty="H81058-825269")
+
+        assert caught.value is error
+        key = sds_cache_key("H81058", endpoint=True, partykey="H81058-825269")
+        assert json.loads(saved[key]) == trace
+        spans = {span.name: span for span in exporter.get_finished_spans()}
+        assert spans["xhuma.sds.cache.write"].status.status_code == StatusCode.ERROR
+        assert spans["xhuma.sds.http"].attributes["stage.outcome"] == "ok"
+        assert spans["xhuma.sds.response.decode"].attributes["stage.outcome"] == "ok"
+        assert all(not span.events for span in spans.values())
+        assert "SECRET_CACHE_CONNECTION_DETAILS" not in repr(spans)
+    finally:
+        provider.shutdown()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["pds_token", "sds_device", "sds_endpoint"])
 async def test_upstream_wait_yields_and_cancellation_closes_client(operation):
     """A paused upstream request must let other tasks run and remain cancellable."""

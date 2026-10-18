@@ -325,9 +325,10 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     record_cache("sds", bool(cached_trace))
     if cached_trace:
         logging.info("Cache hit for SDS query %s", cache_key)
-        if isinstance(cached_trace, bytes):
-            cached_trace = cached_trace.decode("utf-8")
-        return json.loads(cached_trace)
+        with measure("sds.cache.decode"):
+            if isinstance(cached_trace, bytes):
+                cached_trace = cached_trace.decode("utf-8")
+            return json.loads(cached_trace)
 
     logging.info("Cache miss for SDS query %s. Fetching from SDS API.", cache_key)
 
@@ -358,13 +359,16 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
         "accept": "application/fhir+json",
         "apikey": nhs_api_key,
     }
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url, headers=headers, params=parameters)
-    if r.status_code != 200:
-        raise Exception(f"{r.status_code}: {r.text}")
+    with measure("sds.http"):
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers=headers, params=parameters)
+        if r.status_code != 200:
+            raise Exception(f"{r.status_code}: {r.text}")
 
-    trace = json.loads(r.text)
-    await redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
+    with measure("sds.response.decode"):
+        trace = json.loads(r.text)
+    with measure("sds.cache.write"):
+        await redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
     return trace
 
 

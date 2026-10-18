@@ -93,7 +93,8 @@ async def iti_38_response(
             response = _failure_response("Unable to locate SCR for patient")
 
         if not r.get("success"):
-            logging.warning(f"gpconnect failed for patient: {r.get('error')}")
+            # Provider OperationOutcome diagnostics are returned to the caller only.
+            logging.warning("GP Connect document query failed")
             error_code = r.get("xds_error_code", "XDSRegistryError")
             error_text = r.get("error", "Unknown error")
             if error_code == "XDSUnknownPatientId":
