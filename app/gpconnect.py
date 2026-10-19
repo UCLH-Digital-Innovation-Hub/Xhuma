@@ -23,7 +23,7 @@ from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
 from .gp_connect_config import GP_CONNECT_PARAMETERS
 from .logging import record_application_failure
-from .pds.pds import lookup_patient, lookup_self_issuer, sds_trace
+from .pds.pds import SDSUpstreamError, lookup_patient, lookup_self_issuer, sds_trace
 from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
@@ -249,8 +249,16 @@ async def _fetch_gpconnect_record(
             raise
         except Exception as e:
             status_code = e.status_code if isinstance(e, HTTPException) else 502
+            detail = {"step": step, "exception_type": type(e).__name__}
+            if isinstance(e, SDSUpstreamError):
+                status_code = e.http_status_code
+                detail.update(reason=e.reason, upstream_status=e.status_code, attempts=e.attempts)
             msg = f"SDS Trace failed for ODS code {gp_ods}"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
+            if isinstance(e, SDSUpstreamError):
+                diagnostic += (
+                    f" (reason={e.reason}, status={e.status_code}, attempts={e.attempts}, request_id={e.request_id})"
+                )
             record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
@@ -263,9 +271,9 @@ async def _fetch_gpconnect_record(
                 action="sds_trace",
                 outcome=AuditOutcome.fail,
                 error_code=str(status_code),
-                detail={"step": step, "exception_type": type(e).__name__},
+                detail=detail,
             )
-            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            msg = f"{msg}: {e.detail}" if isinstance(e, (HTTPException, SDSUpstreamError)) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         asid = None
@@ -342,8 +350,16 @@ async def _fetch_gpconnect_record(
             raise
         except Exception as e:
             status_code = e.status_code if isinstance(e, HTTPException) else 502
+            detail = {"step": step, "exception_type": type(e).__name__}
+            if isinstance(e, SDSUpstreamError):
+                status_code = e.http_status_code
+                detail.update(reason=e.reason, upstream_status=e.status_code, attempts=e.attempts)
             msg = f"SDS Endpoint resolution failed for ODS code {gp_ods}"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
+            if isinstance(e, SDSUpstreamError):
+                diagnostic += (
+                    f" (reason={e.reason}, status={e.status_code}, attempts={e.attempts}, request_id={e.request_id})"
+                )
             record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
@@ -356,9 +372,9 @@ async def _fetch_gpconnect_record(
                 action="fhir_endpoint_trace",
                 outcome=AuditOutcome.fail,
                 error_code=str(status_code),
-                detail={"step": step, "exception_type": type(e).__name__},
+                detail=detail,
             )
-            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            msg = f"{msg}: {e.detail}" if isinstance(e, (HTTPException, SDSUpstreamError)) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
         # 6) Build request
@@ -381,7 +397,15 @@ async def _fetch_gpconnect_record(
             raise
         except Exception as e:
             status_code = e.status_code if isinstance(e, HTTPException) else 502
+            detail = {"step": step, "exception_type": type(e).__name__}
+            if isinstance(e, SDSUpstreamError):
+                status_code = e.http_status_code
+                detail.update(reason=e.reason, upstream_status=e.status_code, attempts=e.attempts)
             diagnostic = f"SDS consumer issuer lookup failed (step: {step}, exception_type: {type(e).__name__})"
+            if isinstance(e, SDSUpstreamError):
+                diagnostic += (
+                    f" (reason={e.reason}, status={e.status_code}, attempts={e.attempts}, request_id={e.request_id})"
+                )
             record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
@@ -394,9 +418,13 @@ async def _fetch_gpconnect_record(
                 action="sds_self_lookup",
                 outcome=AuditOutcome.fail,
                 error_code=str(status_code),
-                detail={"step": step, "exception_type": type(e).__name__},
+                detail=detail,
             )
-            msg = "SDS consumer issuer lookup failed" + f": {e.detail}" if isinstance(e, HTTPException) else diagnostic
+            msg = (
+                "SDS consumer issuer lookup failed" + f": {e.detail}"
+                if isinstance(e, (HTTPException, SDSUpstreamError))
+                else diagnostic
+            )
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
         step = "gpconnect_request_build.headers"
         headers = {

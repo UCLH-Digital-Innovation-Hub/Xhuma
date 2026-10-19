@@ -25,6 +25,45 @@ API_KEY = os.getenv("API_KEY")
 PDS_CACHE_HOURS = int(os.getenv("PDS_CACHE_HOURS", 24))
 SDS_CACHE_HOURS = int(os.getenv("SDS_CACHE_HOURS", 12))
 GP_CONNECT_INTERACTION_ID = "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
+SDS_TRANSIENT_STATUS_CODES = {408, 500, 502, 503, 504}
+SDS_RETRY_DELAYS = (0.25, 0.50)
+SDS_MAX_ATTEMPTS = 3
+
+
+class SDSUpstreamError(Exception):
+    """Safe structured exception for SDS upstream lookup failures."""
+
+    def __init__(
+        self,
+        status_code: int | None = None,
+        attempts: int = 1,
+        resource_type: str = "Device",
+        reason: str = "upstream_http_failure",
+        detail: str | None = None,
+        request_id: str | None = None,
+        http_status_code: int | None = None,
+    ):
+        self.status_code = status_code
+        self.attempts = attempts
+        self.resource_type = resource_type
+        self.reason = reason
+        self.request_id = request_id
+        self.http_status_code = http_status_code or (
+            status_code if status_code is not None and 400 <= status_code <= 599 else 502
+        )
+        super().__init__(
+            f"SDS {resource_type} upstream failure (status={status_code}, attempts={attempts}, reason={reason})"
+        )
+        # Keep caller-facing diagnostics out of exception strings and telemetry.
+        self.detail = detail or str(self)
+
+    def __repr__(self) -> str:
+        return (
+            f"SDSUpstreamError(status_code={self.status_code}, "
+            f"attempts={self.attempts}, "
+            f"resource_type='{self.resource_type}', "
+            f"reason='{self.reason}')"
+        )
 
 
 def _sanitize_diagnostic(text: str, max_length: int | None = 200) -> str:
@@ -355,48 +394,101 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
         )
     # print(parameters)
     headers = {
-        "X-Request-ID": str(uuid.uuid4()),
         "accept": "application/fhir+json",
         "apikey": nhs_api_key,
     }
-    with measure("sds.http"):
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get(url, headers=headers, params=parameters)
-        except httpx.RequestError as e:
-            status_code = 504 if isinstance(e, httpx.TimeoutException) else 502
-            msg = (
-                f"SDS {suffix} request failed for ODS code {ods}: {type(e).__name__} "
-                f"(request_id: {headers['X-Request-ID']})"
-            )
-            logging.error(msg)
-            raise fastapi.HTTPException(status_code=status_code, detail=msg) from None
-        if r.status_code != 200:
+
+    async with httpx.AsyncClient() as client:
+        for attempt in range(1, SDS_MAX_ATTEMPTS + 1):
+            request_headers = {
+                **headers,
+                "X-Request-ID": str(uuid.uuid4()),
+            }
+            try:
+                with measure("sds.http", resource_type=suffix, attempt=attempt) as span:
+                    r = await client.get(url, headers=request_headers, params=parameters)
+                    span.set_attribute("http_status_code", r.status_code)
+                    span.set_attribute("http_success", r.status_code == 200)
+            except httpx.TransportError as exc:
+                if attempt < SDS_MAX_ATTEMPTS:
+                    delay = SDS_RETRY_DELAYS[attempt - 1]
+                    logging.warning(
+                        "SDS %s lookup transient transport error on attempt %d: %s. Retrying...",
+                        suffix,
+                        attempt,
+                        type(exc).__name__,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                msg = (
+                    f"SDS {suffix} request failed for ODS code {ods}: {type(exc).__name__} "
+                    f"(request_id: {request_headers['X-Request-ID']})"
+                )
+                logging.error("%s (attempts: %s)", msg, attempt)
+                raise SDSUpstreamError(
+                    status_code=None,
+                    attempts=attempt,
+                    resource_type=suffix,
+                    reason="transport_error",
+                    detail=msg,
+                    request_id=request_headers["X-Request-ID"],
+                    http_status_code=504 if isinstance(exc, httpx.TimeoutException) else 502,
+                ) from None
+
+            if r.status_code == 200:
+                try:
+                    with measure("sds.response.decode"):
+                        trace = json.loads(r.text)
+                except ValueError:
+                    raise SDSUpstreamError(
+                        status_code=r.status_code,
+                        attempts=attempt,
+                        resource_type=suffix,
+                        reason="malformed_json",
+                        detail=(
+                            f"SDS {suffix} returned malformed JSON for ODS code {ods} "
+                            f"(request_id: {request_headers['X-Request-ID']})"
+                        ),
+                        request_id=request_headers["X-Request-ID"],
+                    ) from None
+                with measure("sds.cache.write"):
+                    await redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
+                return trace
+
+            if r.status_code in SDS_TRANSIENT_STATUS_CODES and attempt < SDS_MAX_ATTEMPTS:
+                delay = SDS_RETRY_DELAYS[attempt - 1]
+                logging.warning(
+                    "SDS %s lookup transient HTTP %s on attempt %d. Retrying...",
+                    suffix,
+                    r.status_code,
+                    attempt,
+                )
+                await asyncio.sleep(delay)
+                continue
+
             response_detail = _sanitize_diagnostic(r.text.replace(nhs_api_key, "[REDACTED_API_KEY]"), max_length=None)
             logging.error(
                 "SDS HTTP failure | Resource: %s | ODS: %s | Status: %s | "
-                "ReqID: %s | UpstreamReqID: %s | CorrID: %s | Response: %s",
+                "ReqID: %s | UpstreamReqID: %s | CorrID: %s | Attempts: %s",
                 suffix,
                 ods,
                 r.status_code,
-                headers["X-Request-ID"],
+                request_headers["X-Request-ID"],
                 r.headers.get("x-request-id", ""),
                 r.headers.get("x-correlation-id", ""),
-                response_detail[:200],
+                attempt,
             )
-            raise fastapi.HTTPException(
+            raise SDSUpstreamError(
                 status_code=r.status_code,
+                attempts=attempt,
+                resource_type=suffix,
+                reason="upstream_http_failure",
                 detail=(
                     f"SDS {suffix} HTTP {r.status_code} failure for ODS code {ods}: {response_detail} "
-                    f"(request_id: {headers['X-Request-ID']})"
+                    f"(request_id: {request_headers['X-Request-ID']})"
                 ),
+                request_id=request_headers["X-Request-ID"],
             )
-
-    with measure("sds.response.decode"):
-        trace = json.loads(r.text)
-    with measure("sds.cache.write"):
-        await redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
-    return trace
 
 
 async def lookup_self_device() -> dict:

@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from app.pds.pds import lookup_patient, pds_cache_key, sds_cache_key, sds_trace
+from app.pds.pds import SDSUpstreamError, lookup_patient, pds_cache_key, sds_cache_key, sds_trace
 from app.tests.fixtures.saml_attributes import saml
 
 
@@ -240,15 +240,25 @@ async def test_token_timeout_is_audited_and_does_not_cache():
 
 @pytest.mark.asyncio
 async def test_sds_failure_does_not_cache():
-    with patch("app.pds.pds.redis_client", autospec=True) as cache, patch("app.pds.pds.httpx.AsyncClient") as factory:
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+    ):
         cache.get.return_value = None
         client = AsyncMock()
         client.get.return_value = httpx.Response(503, text="Unavailable")
         factory.return_value.__aenter__.return_value = client
-        with pytest.raises(HTTPException, match="SDS Device HTTP 503 failure") as caught:
+        with pytest.raises(SDSUpstreamError) as exc:
             await sds_trace("A82038")
-        assert caught.value.status_code == 503
-        assert "Unavailable" in caught.value.detail
+        assert exc.value.status_code == 503
+        assert exc.value.attempts == 3
+        assert exc.value.resource_type == "Device"
+        assert exc.value.reason == "upstream_http_failure"
+        assert "Unavailable" not in str(exc.value)
+        assert "Unavailable" in exc.value.detail
+        assert client.get.await_count == 3
+        assert [call.args[0] for call in mock_sleep.await_args_list] == [0.25, 0.50]
         cache.setex.assert_not_called()
         factory.return_value.__aexit__.assert_awaited_once()
 
@@ -269,6 +279,7 @@ async def test_sds_http_failure_logs_status_and_request_ids_without_secrets(monk
     with (
         patch("app.pds.pds.redis_client", autospec=True) as cache,
         patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.asyncio.sleep", new_callable=AsyncMock),
     ):
         cache.get.return_value = None
         client = AsyncMock()
@@ -278,7 +289,7 @@ async def test_sds_http_failure_logs_status_and_request_ids_without_secrets(monk
             headers={"x-request-id": upstream_request_id, "x-correlation-id": correlation_id},
         )
         factory.return_value.__aenter__.return_value = client
-        with pytest.raises(HTTPException) as caught:
+        with pytest.raises(SDSUpstreamError) as caught:
             await sds_trace("H81058", endpoint=endpoint, mhsparty="H81058-825269")
         cache.setex.assert_not_called()
         sent_request_id = client.get.await_args.kwargs["headers"]["X-Request-ID"]
@@ -291,11 +302,13 @@ async def test_sds_http_failure_logs_status_and_request_ids_without_secrets(monk
     assert f"ReqID: {sent_request_id}" in message
     assert f"UpstreamReqID: {upstream_request_id}" in message
     assert f"CorrID: {correlation_id}" in message
-    assert "SERVICE_UNAVAILABLE" in message
-    assert "[REDACTED_API_KEY]" in message
-    assert "[REDACTED_NHSNO]" in message
-    assert "[REDACTED_TOKEN]" in message
-    assert len(message.split("Response: ", 1)[1]) <= 200
+    attempts = 3 if status in (500, 503) else 1
+    assert f"Attempts: {attempts}" in message
+    assert client.get.await_count == attempts
+    assert "SERVICE_UNAVAILABLE" not in caplog.text
+    assert "[REDACTED_API_KEY]" in caught.value.detail
+    assert "[REDACTED_NHSNO]" in caught.value.detail
+    assert "[REDACTED_TOKEN]" in caught.value.detail
     assert "\n" not in message
     assert caught.value.status_code == status
     assert caught.value.detail.startswith(f"SDS {resource} HTTP {status} failure for ODS code H81058:")
@@ -304,6 +317,7 @@ async def test_sds_http_failure_logs_status_and_request_ids_without_secrets(monk
     for secret in (api_key, "9690937278", "sensitive.signed.token", body_secret_uuid):
         assert secret not in caplog.text
         assert secret not in str(caught.value)
+        assert secret not in caught.value.detail
 
 
 @pytest.mark.asyncio
@@ -312,16 +326,19 @@ async def test_sds_transport_failure_has_caller_status_and_request_id(error_type
     with (
         patch("app.pds.pds.redis_client", autospec=True) as cache,
         patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.asyncio.sleep", new_callable=AsyncMock),
     ):
         cache.get.return_value = None
         client = AsyncMock()
         client.get.side_effect = error_type("PRIVATE_CONNECTION_CREDENTIAL")
         factory.return_value.__aenter__.return_value = client
-        with pytest.raises(HTTPException) as caught:
+        with pytest.raises(SDSUpstreamError) as caught:
             await sds_trace("H81058", endpoint=True, mhsparty="H81058-825269")
         sent_request_id = client.get.await_args.kwargs["headers"]["X-Request-ID"]
         cache.setex.assert_not_called()
-    assert caught.value.status_code == status
+    assert caught.value.http_status_code == status
+    assert caught.value.status_code is None
+    assert caught.value.attempts == 3
     assert error_type.__name__ in caught.value.detail
     assert sent_request_id in caught.value.detail
     assert "PRIVATE_CONNECTION_CREDENTIAL" not in str(caught.value)
@@ -355,29 +372,34 @@ def test_nhs_api_environment_selection():
 
     import app.pds.pds
 
-    # Test dev
-    os.environ["ENV"] = "dev"
-    importlib.reload(app.pds.pds)
-    assert app.pds.pds.BASE_PATH == "https://dev.api.service.nhs.uk/"
-
-    # Test int
-    os.environ["ENV"] = "int"
-    importlib.reload(app.pds.pds)
-    assert app.pds.pds.BASE_PATH == "https://int.api.service.nhs.uk/"
-
-    # Test prod
-    os.environ["ENV"] = "prod"
-    importlib.reload(app.pds.pds)
-    assert app.pds.pds.BASE_PATH == "https://api.service.nhs.uk/"
-
-    # Test unknown raises
-    os.environ["ENV"] = "unknown"
-    with pytest.raises(ValueError, match="Unknown or unsupported environment: unknown"):
+    orig_dict = dict(app.pds.pds.__dict__)
+    orig_env = os.environ.get("ENV")
+    try:
+        # Test dev
+        os.environ["ENV"] = "dev"
         importlib.reload(app.pds.pds)
+        assert app.pds.pds.BASE_PATH == "https://dev.api.service.nhs.uk/"
 
-    # Restore to avoid side effects
-    os.environ["ENV"] = "dev"
-    importlib.reload(app.pds.pds)
+        # Test int
+        os.environ["ENV"] = "int"
+        importlib.reload(app.pds.pds)
+        assert app.pds.pds.BASE_PATH == "https://int.api.service.nhs.uk/"
+
+        # Test prod
+        os.environ["ENV"] = "prod"
+        importlib.reload(app.pds.pds)
+        assert app.pds.pds.BASE_PATH == "https://api.service.nhs.uk/"
+
+        # Test unknown raises
+        os.environ["ENV"] = "unknown"
+        with pytest.raises(ValueError, match="Unknown or unsupported environment: unknown"):
+            importlib.reload(app.pds.pds)
+    finally:
+        if orig_env is not None:
+            os.environ["ENV"] = orig_env
+        else:
+            os.environ.pop("ENV", None)
+        app.pds.pds.__dict__.update(orig_dict)
 
 
 @pytest.mark.asyncio

@@ -269,10 +269,14 @@ async def test_sds_http_failure_reaches_caller(mock_self_issuer, monkeypatch, st
             },
         )
     )
+    successful_lookups = len(responses) - 1
+    attempts = 3 if status in pds.SDS_TRANSIENT_STATUS_CODES else 1
+    responses.extend([responses[-1]] * (attempts - 1))
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=patient),
         patch("app.pds.pds.redis_client", autospec=True) as cache,
         patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.asyncio.sleep", new_callable=AsyncMock),
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.soap.responses.iti_38.redis_client", autospec=True) as soap_cache,
         patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock),
@@ -303,7 +307,9 @@ async def test_sds_http_failure_reaches_caller(mock_self_issuer, monkeypatch, st
         assert "SDS_PROVIDER_UNAVAILABLE" not in str(audit.await_args.kwargs)
         client.post.assert_not_awaited()
         # Only the successful preceding lookups are cached, never the failed response.
-        assert cache.setex.await_count == len(responses) - 1
+        assert cache.setex.await_count == successful_lookups
+        assert client.get.await_count == successful_lookups + attempts
+        assert audit.await_args.kwargs["detail"]["attempts"] == attempts
 
 
 @pytest.mark.asyncio
