@@ -62,6 +62,7 @@ docs/
 ├── clinical-mapping/                          # Clinical transformation semantics and rules
 │   ├── allergy_mapping.md                     # AllergyIntolerance to CCDA Alerts section mapping
 │   ├── dm+d_mapping.md                        # Medication dose syntax and dm+d terminology resolution
+│   ├── freetext_mapping.md                    # Canonical free-text dosage mapping and fallback rules
 │   ├── investigation_grouping.md              # Diagnostic report and observation grouping semantics
 │   └── date_handling.md                       # Precision handling for clinical date and timestamp conversion
 │
