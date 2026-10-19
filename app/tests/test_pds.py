@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from app.pds.pds import lookup_patient, pds_cache_key, sds_cache_key, sds_trace
+from app.pds.pds import SDSUpstreamError, lookup_patient, pds_cache_key, sds_cache_key, sds_trace
 from app.tests.fixtures.saml_attributes import saml
 
 
@@ -192,13 +192,24 @@ async def test_token_timeout_is_audited_and_does_not_cache():
 
 @pytest.mark.asyncio
 async def test_sds_failure_does_not_cache():
-    with patch("app.pds.pds.redis_client", autospec=True) as cache, patch("app.pds.pds.httpx.AsyncClient") as factory:
+    with (
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+    ):
         cache.get.return_value = None
         client = AsyncMock()
         client.get.return_value = httpx.Response(503, text="Unavailable")
         factory.return_value.__aenter__.return_value = client
-        with pytest.raises(Exception, match="503: Unavailable"):
+        with pytest.raises(SDSUpstreamError) as exc:
             await sds_trace("A82038")
+        assert exc.value.status_code == 503
+        assert exc.value.attempts == 3
+        assert exc.value.resource_type == "Device"
+        assert exc.value.reason == "upstream_http_failure"
+        assert "Unavailable" not in str(exc.value)
+        assert client.get.await_count == 3
+        assert [call.args[0] for call in mock_sleep.await_args_list] == [0.25, 0.50]
         cache.setex.assert_not_called()
         factory.return_value.__aexit__.assert_awaited_once()
 
@@ -230,29 +241,34 @@ def test_nhs_api_environment_selection():
 
     import app.pds.pds
 
-    # Test dev
-    os.environ["ENV"] = "dev"
-    importlib.reload(app.pds.pds)
-    assert app.pds.pds.BASE_PATH == "https://dev.api.service.nhs.uk/"
-
-    # Test int
-    os.environ["ENV"] = "int"
-    importlib.reload(app.pds.pds)
-    assert app.pds.pds.BASE_PATH == "https://int.api.service.nhs.uk/"
-
-    # Test prod
-    os.environ["ENV"] = "prod"
-    importlib.reload(app.pds.pds)
-    assert app.pds.pds.BASE_PATH == "https://api.service.nhs.uk/"
-
-    # Test unknown raises
-    os.environ["ENV"] = "unknown"
-    with pytest.raises(ValueError, match="Unknown or unsupported environment: unknown"):
+    orig_dict = dict(app.pds.pds.__dict__)
+    orig_env = os.environ.get("ENV")
+    try:
+        # Test dev
+        os.environ["ENV"] = "dev"
         importlib.reload(app.pds.pds)
+        assert app.pds.pds.BASE_PATH == "https://dev.api.service.nhs.uk/"
 
-    # Restore to avoid side effects
-    os.environ["ENV"] = "dev"
-    importlib.reload(app.pds.pds)
+        # Test int
+        os.environ["ENV"] = "int"
+        importlib.reload(app.pds.pds)
+        assert app.pds.pds.BASE_PATH == "https://int.api.service.nhs.uk/"
+
+        # Test prod
+        os.environ["ENV"] = "prod"
+        importlib.reload(app.pds.pds)
+        assert app.pds.pds.BASE_PATH == "https://api.service.nhs.uk/"
+
+        # Test unknown raises
+        os.environ["ENV"] = "unknown"
+        with pytest.raises(ValueError, match="Unknown or unsupported environment: unknown"):
+            importlib.reload(app.pds.pds)
+    finally:
+        if orig_env is not None:
+            os.environ["ENV"] = orig_env
+        else:
+            os.environ.pop("ENV", None)
+        app.pds.pds.__dict__.update(orig_dict)
 
 
 @pytest.mark.asyncio
