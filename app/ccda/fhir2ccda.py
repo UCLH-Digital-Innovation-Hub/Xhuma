@@ -385,9 +385,9 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 rows = [i.row for i in items if i.row is not None]
                 table_rows = [create_row(row) for row in rows]
 
-                # if mediations sort rows by status then name of medication
-                if list.title == "Medications and medical devices":
-                    table_rows.sort(key=lambda x: (x["td"][2], x["td"][4]))
+                # Sort medication rows by start date, newest first, with undated rows last.
+                if list.title in ("Medications and medical devices", "Active Medications", "Past Medications"):
+                    table_rows.sort(key=lambda x: "-".join(reversed(x["td"][0].split("/"))), reverse=True)
 
                 comp["section"]["entry"] = entries
 
