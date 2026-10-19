@@ -280,7 +280,11 @@ async def _fetch_gpconnect_record(
         nhsmhsparty = None
         step = "resolve_asid_partykey.device_extraction"
         try:
-            if isinstance(asid_trace, dict) and asid_trace.get("resourceType") == "Bundle" and not asid_trace.get("entry"):
+            if (
+                isinstance(asid_trace, dict)
+                and asid_trace.get("resourceType") == "Bundle"
+                and not asid_trace.get("entry")
+            ):
                 step = "resolve_asid_partykey.entry_validation"
                 msg = f"Unable to resolve GP Connect Structured Record FHIR endpoint in SDS for ODS code {gp_ods}"
                 diagnostic = f"{msg} (step: {step})"
