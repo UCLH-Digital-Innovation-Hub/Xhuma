@@ -16,107 +16,21 @@ from .entries import allergy, immunization_entry, medication, observation_entry,
 from .entries.allergy import allergy_onset_sort_key
 from .entries.investigation_grouping import build_investigation_graph
 from .entries.results import investigation
-from .helpers import fhir_date_is_after, fhir_to_cda_timestamp, select_patient_name, templateId
+from .header import document_header
+from .helpers import fhir_date_is_after, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.1.15.html
-    lists = [entry.resource for entry in bundle.entry if isinstance(entry.resource, fhirlist.List)]
+    lists = [entry.resource for entry in bundle.entry or [] if isinstance(entry.resource, fhirlist.List)]
 
-    subject = [entry.resource for entry in bundle.entry if isinstance(entry.resource, patient.Patient)]
+    subjects = [entry.resource for entry in bundle.entry or [] if isinstance(entry.resource, patient.Patient)]
+    if len(subjects) != 1:
+        raise ValueError(f"Expected exactly one Patient in the FHIR bundle; received {len(subjects)}")
+    subject = next(iter(subjects))
 
-    ccda = {}
-    ccda["ClinicalDocument"] = {
-        "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-        "@xmlns": "urn:hl7-org:v3",
-        "@xmlns:voc": "urn:hl7-org:v3/voc",
-        "@xmlns:sdtc": "urn:hl7-org:sdtc",
-        "realmCode": {"@code": "GB"},
-        "typeId": {"@root": "2.16.840.1.113883.1.3", "@extension": "POCD_HD000040"},
-    }
-    ccda["ClinicalDocument"]["templateId"] = templateId("2.16.840.1.113883.10.20.22.1.2", "2015-08-01")
-
-    # code
-    ccda["ClinicalDocument"]["code"] = {
-        "@code": "34133-9",
-        "@codeSystem": "2.16.840.1.113883.6.1",
-    }
-
-    # document level effective time, use local time
-    ccda["ClinicalDocument"]["effectiveTime"] = {"@value": datetime.datetime.now().strftime("%Y%m%d%H%M%S")}
-
-    ccda["ClinicalDocument"]["title"] = {"#text": "GP Connect: Access Record Structured"}
-
-    # patient
-    # TODO refine address parsing as may have multiple
-
-    selected_name = select_patient_name(subject[0].name)
-
-    patient_dict = {
-        "patientRole": {
-            "id": {
-                "@extension": subject[0].identifier[0].value,
-                "@root": "2.16.840.1.113883.2.1.4.1",
-            },
-            "patient": {
-                "name": {
-                    "@use": "L",
-                    "given": {"#text": " ".join(selected_name.given)},
-                    "family": {"#text": selected_name.family},
-                },
-                "birthTime": {"@value": fhir_to_cda_timestamp(subject[0].birthDate)},
-            },
-        }
-    }
-
-    if subject[0].address:
-        patient_dict["patientRole"]["addr"] = {
-            "@use": "HP",
-            "streetAddressLine": [x for x in subject[0].address[0].line],
-            "city": {"#text": subject[0].address[0].city},
-            "postalCode": {"#text": subject[0].address[0].postalCode},
-        }
-
-    gp_organization = subject[0].managingOrganization.reference
-    gp = index[gp_organization]
-
-    patient_dict["patientRole"]["providerOrganization"] = {
-        "id": {"@root": gp.identifier[0].system, "@extension": gp.identifier[0].value},
-        "name": {"#text": gp.name},
-        "addr": {
-            "streetAddressLine": [x for x in gp.address[0].line],
-            "city": {"#text": gp.address[0].city},
-            "postalCode": {"#text": gp.address[0].postalCode},
-        },
-    }
-
-    ccda["ClinicalDocument"]["recordTarget"] = patient_dict
-
-    # author
-    ccda["ClinicalDocument"]["author"] = {
-        "time": {"@value": datetime.date.today().strftime("%Y%m%d")},
-        "assignedAuthor": {
-            "addr": {"@nullFlavor": "NA"},
-            "telecom": {"@nullFlavor": "NA"},
-            "assignedAuthoringDevice": {
-                "manufacturerModelName": {"#text": "Xhuma"},
-                "softwareName": {"#text": "Xhuma v0.1"},
-            },
-        },
-    }
-
-    # documentationOf
-    ccda["ClinicalDocument"]["documentationOf"] = {
-        "serviceEvent": {
-            "@classCode": "PCPR",
-            "effectiveTime": {
-                "low": {
-                    "@value": fhir_to_cda_timestamp(subject[0].birthDate),
-                },
-                "high": {"@value": datetime.date.today().strftime("%Y%m%d")},
-            },
-        }
-    }
+    generated_at = datetime.datetime.now()
+    ccda = {"ClinicalDocument": document_header(subject, index, generated_at=generated_at).to_xml_dict()}
 
     # vital signs doesn't appear in the SCR therefore crate blank list to generate xml
     # vital_signs = fhirlist.List()

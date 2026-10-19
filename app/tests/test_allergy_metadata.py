@@ -78,7 +78,7 @@ def test_display_only_asserter_is_an_unidentified_informant():
     result = allergy(resource(asserter={"display": "Patient's mother"}))
     informant = get_observation(result)["informant"][0]
     assert "assignedEntity" not in informant
-    assert informant["relatedEntity"]["relatedPerson"]["name"] == "Patient's mother"
+    assert informant["relatedEntity"]["relatedPerson"]["name"] == [{"#text": "Patient's mother"}]
     with pytest.raises(ValueError):
         AllergyInformant()
 
@@ -88,7 +88,7 @@ def test_patient_can_be_the_asserter_and_recorder_can_be_display_only():
     entry = resource(asserter={"reference": "Patient/test"}, recorder={"display": "Dr Recorder"})
     result = allergy(entry, {"Patient/test": patient})
     obs = get_observation(result)
-    assert obs["informant"][0]["assignedEntity"]["assignedPerson"]["name"] == "Test Patient"
+    assert obs["informant"][0]["assignedEntity"]["assignedPerson"]["name"] == [{"#text": "Test Patient"}]
     assert obs["author"][0]["assignedAuthor"]["id"][0]["@nullFlavor"] == "UNK"
     assert AllergyEntry.model_validate(result.entry).model_dump(by_alias=True, exclude_none=True) == result.entry
 
