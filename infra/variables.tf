@@ -71,7 +71,7 @@ variable "shared_key_vault_name" {
 
 variable "app_version" {
   type    = string
-  default = "1.0.0"
+  default = "1.0.1"
 }
 
 variable "device_id" {
