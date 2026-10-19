@@ -143,7 +143,8 @@ async def _fetch_gpconnect_record(
             raise
         except HTTPException as e:
             diagnostic = f"PDS lookup failed (HTTP {e.status_code}) (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
+            if e.status_code != 404:
+                record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -198,7 +199,6 @@ async def _fetch_gpconnect_record(
                 detail={"step": step},
             )
             diagnostic = f"Patient is restricted (step: {step})"
-            record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -280,6 +280,22 @@ async def _fetch_gpconnect_record(
         nhsmhsparty = None
         step = "resolve_asid_partykey.device_extraction"
         try:
+            if isinstance(asid_trace, dict) and asid_trace.get("resourceType") == "Bundle" and not asid_trace.get("entry"):
+                step = "resolve_asid_partykey.entry_validation"
+                msg = f"Unable to resolve GP Connect Structured Record FHIR endpoint in SDS for ODS code {gp_ods}"
+                diagnostic = f"{msg} (step: {step})"
+                logging.info(diagnostic)
+                await attempt_audit(
+                    request=request,
+                    nhs_number=str(nhsno),
+                    saml=saml_attrs,
+                    action="resolve_asid_partykey",
+                    outcome=AuditOutcome.fail,
+                    error_code="502",
+                    detail={"step": step, "reason": "no_gp_connect_structured_record_route"},
+                )
+                return JSONResponse(status_code=502, content={"success": False, "error": msg})
+
             identifiers = asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
             step = "resolve_asid_partykey.identifier_extraction"
             for item in identifiers:
@@ -298,6 +314,15 @@ async def _fetch_gpconnect_record(
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
+            await attempt_audit(
+                request=request,
+                nhs_number=str(nhsno),
+                saml=saml_attrs,
+                action="resolve_asid_partykey",
+                outcome=AuditOutcome.fail,
+                error_code=str(status_code),
+                detail={"step": step, "exception_type": type(e).__name__},
+            )
             msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 

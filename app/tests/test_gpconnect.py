@@ -240,6 +240,57 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("audit_fails", [False, True])
+@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
+@patch("app.gpconnect.record_application_failure")
+async def test_gpconnect_zero_entries_sds_device_bundle(
+    mock_record_failure,
+    mock_lookup_patient,
+    mock_sds_trace,
+    mock_attempt_audit,
+    audit_fails,
+):
+    fake_pds = load_pds(9690937278)
+    fake_pds["generalPractitioner"][0]["identifier"]["value"] = "W93019"
+    mock_lookup_patient.return_value = fake_pds
+    mock_sds_trace.return_value = {"resourceType": "Bundle", "type": "searchset", "total": 0, "entry": []}
+
+    if audit_fails:
+
+        async def fail_on_resolve_asid_partykey(*args, **kwargs):
+            if kwargs.get("action") == "resolve_asid_partykey":
+                raise AuditFailureException("Audit persistence failed")
+            return None
+
+        mock_attempt_audit.side_effect = fail_on_resolve_asid_partykey
+        with pytest.raises(AuditFailureException):
+            await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+    else:
+        result = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+        body = json.loads(result.body)
+
+        assert result.status_code == 502
+        assert body["success"] is False
+        assert "Unable to resolve GP Connect Structured Record FHIR endpoint in SDS for ODS code" in body["error"]
+        assert "W93019" in body["error"]
+        assert "malformed" not in body["error"]
+        assert "Unable to parse" not in body["error"]
+        mock_record_failure.assert_not_called()
+
+        audits = [
+            call.kwargs
+            for call in mock_attempt_audit.await_args_list
+            if call.kwargs["action"] == "resolve_asid_partykey"
+        ]
+        assert len(audits) == 1
+        assert audits[0]["outcome"] == AuditOutcome.fail
+        assert audits[0]["error_code"] == "502"
+        assert audits[0]["detail"]["reason"] == "no_gp_connect_structured_record_route"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [403, 404, 429, 500, 503])
 @pytest.mark.parametrize("failed_lookup", ["device", "endpoint", "self"])
 @pytest.mark.parametrize("wire", ["json", "soap"])
