@@ -187,15 +187,25 @@ async def test_redis_publication_audit_failure_interaction(
                 "entry": [
                     {
                         "resource": {
+                            "address": "test-url",
+                            "identifier": [
+                                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "123"},
+                            ],
+                        }
+                    }
+                ]
+            },
+            {
+                "entry": [
+                    {
+                        "resource": {
                             "identifier": [
                                 {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "123"},
-                                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "123"},
                             ]
                         }
                     }
                 ]
             },
-            {"entry": [{"resource": {"address": "test-url"}}]},
         ]
         with patch("app.gpconnect.httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.post.return_value = MagicMock(
