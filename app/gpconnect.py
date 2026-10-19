@@ -12,6 +12,8 @@ import xmltodict
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fhirclient.models import bundle
+from fhirclient.models.fhirabstractbase import FHIRValidationError
+from fhirclient.models.operationoutcome import OperationOutcome
 from opentelemetry.propagate import inject
 
 from .audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
@@ -603,71 +605,21 @@ async def _fetch_gpconnect_record(
         step = "gpconnect_request.response_status"
         if resp.status_code != 200:
             msg = f"Error from GP Connect endpoint {resp.status_code}"
-            error_content = {"success": False, "error": msg}
             try:
-                outcome = resp.json()
-            except (ValueError, UnicodeDecodeError):
-                outcome = None
-            if (
-                isinstance(outcome, dict)
-                and outcome.get("resourceType") == "OperationOutcome"
-                and isinstance(outcome.get("issue"), list)
-            ):
-                issues = []
-                summaries = []
-                for issue in outcome["issue"]:
-                    if not isinstance(issue, dict):
-                        continue
-                    projected = {
-                        key: issue[key]
-                        for key in ("severity", "code", "diagnostics")
-                        if isinstance(issue.get(key), str)
-                    }
-                    parts = []
-                    if projected.get("code"):
-                        parts.append(projected["code"])
-                    details = issue.get("details")
-                    if isinstance(details, dict):
-                        projected_details = {}
-                        if isinstance(details.get("text"), str):
-                            projected_details["text"] = details["text"]
-                            parts.append(details["text"])
-                        if isinstance(details.get("coding"), list):
-                            codings = []
-                            for coding in details["coding"]:
-                                if not isinstance(coding, dict):
-                                    continue
-                                projected_coding = {
-                                    key: coding[key]
-                                    for key in ("system", "version", "code", "display")
-                                    if isinstance(coding.get(key), str)
-                                }
-                                if projected_coding:
-                                    codings.append(projected_coding)
-                                    parts.extend(
-                                        projected_coding[key]
-                                        for key in ("code", "display")
-                                        if projected_coding.get(key)
-                                    )
-                            if codings:
-                                projected_details["coding"] = codings
-                        if projected_details:
-                            projected["details"] = projected_details
-                    for key in ("location", "expression"):
-                        if isinstance(issue.get(key), list):
-                            projected[key] = [value for value in issue[key] if isinstance(value, str)]
-                    if projected.get("diagnostics"):
-                        parts.append(projected["diagnostics"])
-                    if projected:
-                        issues.append(projected)
-                    if parts:
-                        summaries.append("; ".join(dict.fromkeys(parts)))
-                if issues:
-                    error_content["operation_outcome"] = {"resourceType": "OperationOutcome", "issue": issues}
-                    if isinstance(outcome.get("id"), str):
-                        error_content["operation_outcome"]["id"] = outcome["id"]
-                if summaries:
-                    error_content["error"] += ": " + " | ".join(summaries)
+                payload = resp.json()
+                if isinstance(payload, dict) and payload.get("resourceType") == "OperationOutcome":
+                    outcome = OperationOutcome(payload)
+                    displays = [
+                        " ".join(coding.display.split())
+                        for issue in outcome.issue or []
+                        if issue.details
+                        for coding in issue.details.coding or []
+                        if coding.display and coding.display.strip()
+                    ]
+                    if displays:
+                        msg += ": " + " | ".join(dict.fromkeys(displays))
+            except (ValueError, UnicodeDecodeError, FHIRValidationError):
+                pass
             diagnostic = f"{msg} (step: {step})"
             record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
@@ -684,7 +636,7 @@ async def _fetch_gpconnect_record(
                 error_code=str(resp.status_code),
                 detail={"step": step, "transport": "relay" if USE_RELAY else "direct"},
             )
-            return JSONResponse(status_code=resp.status_code, content=error_content)
+            return JSONResponse(status_code=resp.status_code, content={"success": False, "error": msg})
 
         # audit successful response
         step = "gpconnect_request.success_audit"

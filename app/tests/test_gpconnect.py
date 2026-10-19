@@ -307,6 +307,115 @@ async def test_sds_http_failure_reaches_caller(mock_self_issuer, monkeypatch, st
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("wire", ["json", "soap"])
+@pytest.mark.parametrize(
+    ("status", "displays", "expected"),
+    [
+        (403, ["Patient has not provided consent to share data"], "Patient has not provided consent to share data"),
+        (403, ["ASID_CHECK_FAILED_MESSAGESENDER_100000000001"], "ASID_CHECK_FAILED_MESSAGESENDER_100000000001"),
+        (404, ["Patient not found"], "Patient not found"),
+        (500, ["Internal server error"], "Internal server error"),
+        (
+            422,
+            ["Invalid parameter", "Reference not found", "Invalid parameter"],
+            "Invalid parameter | Reference not found",
+        ),
+        (403, [" Access\ndenied\r\n"], "Access denied"),
+        (403, ["", "  "], ""),
+    ],
+)
+async def test_gpconnect_error_display_reaches_caller_and_logs(status, displays, expected, wire, tmp_path, caplog):
+    payload = {
+        "resourceType": "OperationOutcome",
+        "issue": [
+            {
+                "severity": "error",
+                "code": "processing",
+                "details": {"coding": [{"code": "PROVIDER_ERROR_CODE", "display": display}]},
+                "diagnostics": "PRIVATE_PROVIDER_DIAGNOSTICS",
+            }
+            for display in displays
+        ],
+    }
+    with (
+        patch("app.gpconnect.USE_RELAY", False),
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.create_nhs_ssl_context"),
+        patch("app.gpconnect.httpx.AsyncClient") as factory,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure") as telemetry,
+        patch("app.soap.responses.iti_38.redis_client", autospec=True) as soap_cache,
+        patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock),
+    ):
+        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        factory.return_value.__aenter__.return_value.post = AsyncMock(return_value=Response(status, json=payload))
+        soap_cache.get.return_value = None
+        if wire == "json":
+            response = await _fetch_gpconnect_record(
+                9690937278, saml, log_dir=str(tmp_path), request=get_mock_request()
+            )
+            assert response.status_code == status
+            body = json.loads(response.body)
+            assert set(body) == {"success", "error"}
+            assert body["success"] is False
+            error = body["error"]
+        else:
+            iti38 = importlib.import_module("app.soap.responses.iti_38")
+            xml = await iti38.iti_38_response(get_mock_request(), 9690937278, "ceid", "queryid", saml)
+            error_node = ET.fromstring(xml).find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0}RegistryError")
+            assert error_node is not None
+            assert error_node.attrib["errorCode"] == "XDSRegistryError"
+            error = error_node.attrib["codeContext"]
+
+    msg = f"Error from GP Connect endpoint {status}" + (f": {expected}" if expected else "")
+    assert error == msg
+    diagnostic = f"{msg} (step: gpconnect_request.response_status)"
+    assert diagnostic in caplog.text
+    telemetry.assert_called_once()
+    assert str(telemetry.call_args.args[0]) == diagnostic
+    if wire == "json":
+        assert (tmp_path / "error.log").read_text() == diagnostic + "\n"
+    assert "PRIVATE_PROVIDER_DIAGNOSTICS" not in error + caplog.text
+    assert "PROVIDER_ERROR_CODE" not in error + caplog.text
+    assert audit.await_args.kwargs["error_code"] == str(status)
+    assert audit.await_args.kwargs["outcome"] == AuditOutcome.fail
+    assert audit.await_args.kwargs["detail"]["step"] == "gpconnect_request.response_status"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "<html>Bad gateway</html>",
+        "null",
+        "[]",
+        '{"resourceType":"Bundle"}',
+        '{"resourceType":"OperationOutcome"}',
+        '{"resourceType":"OperationOutcome","issue":[null]}',
+        '{"resourceType":"OperationOutcome","issue":[{"severity":"error","code":"forbidden",'
+        '"details":{"coding":[{"display":123}]}}]}',
+    ],
+)
+async def test_gpconnect_malformed_error_retains_upstream_status(payload):
+    with (
+        patch("app.gpconnect.USE_RELAY", False),
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.create_nhs_ssl_context"),
+        patch("app.gpconnect.httpx.AsyncClient") as factory,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+    ):
+        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        factory.return_value.__aenter__.return_value.post = AsyncMock(return_value=Response(503, text=payload))
+        response = await gpconnect(9690937278, saml, request=get_mock_request())
+
+    assert response.status_code == 503
+    assert json.loads(response.body) == {"success": False, "error": "Error from GP Connect endpoint 503"}
+    assert audit.await_args.kwargs["error_code"] == "503"
+
+
+@pytest.mark.asyncio
 async def test_serialization_failure_returns_caller_error_with_step():
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
