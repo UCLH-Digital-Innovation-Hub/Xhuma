@@ -153,7 +153,7 @@ async def _fetch_gpconnect_record(
                     status_code=404,
                     content={
                         "success": False,
-                        "error": "Patient not found on PDS",
+                        "error": e.detail,
                         "xds_error_code": "XDSUnknownPatientId",
                     },
                 )

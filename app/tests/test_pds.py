@@ -764,13 +764,24 @@ async def test_pds_diagnostic_sanitization(caplog, monkeypatch):
         )
         resp_error = MagicMock()
         resp_error.status_code = 500
-        resp_error.json.return_value = {"issue": [{"diagnostics": sensitive_text}]}
+        resp_error.json.return_value = {
+            "resourceType": "OperationOutcome",
+            "issue": [
+                {
+                    "severity": "error",
+                    "code": "processing",
+                    "details": {"coding": [{"display": sensitive_text}]},
+                    "diagnostics": "PRIVATE_PROVIDER_DIAGNOSTICS",
+                }
+            ],
+        }
         client.get.return_value = resp_error
 
         with pytest.raises(fastapi.HTTPException) as excinfo:
             await lookup_patient(12345, saml=MagicMock())
         assert excinfo.value.status_code == 502
-        assert excinfo.value.detail == "PDS lookup upstream failure"
+        assert excinfo.value.detail.startswith("PDS lookup upstream failure: Detailed error:")
+        assert "PRIVATE_PROVIDER_DIAGNOSTICS" not in excinfo.value.detail
 
         # Verify sanitization stripped newlines and redacted sensitive info
         log_records = [r for r in caplog.records if "PDS API Failure" in r.message]
@@ -784,6 +795,7 @@ async def test_pds_diagnostic_sanitization(caplog, monkeypatch):
         assert "Bearer [REDACTED_TOKEN]" in msg
         assert "a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d" not in msg
         assert "[REDACTED_UUID]" in msg
+        assert "PRIVATE_PROVIDER_DIAGNOSTICS" not in caplog.text
 
 
 @pytest.mark.asyncio
