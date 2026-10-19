@@ -11,7 +11,7 @@ def get_mock_request():
 
 
 @pytest.mark.asyncio
-async def test_gpconnect_env_prod_missing_relay_fails_closed(monkeypatch, mock_self_issuer):
+async def test_gpconnect_env_prod_missing_relay_fails_closed(monkeypatch, mock_self_issuer, caplog):
     monkeypatch.setenv("ENV", "prod")
     monkeypatch.setenv("USE_RELAY", "1")
     monkeypatch.delenv("NHS_RELAY_BASE_PATH", raising=False)
@@ -77,4 +77,4 @@ async def test_gpconnect_env_prod_missing_relay_fails_closed(monkeypatch, mock_s
         assert result.status_code == 502
         body = json.loads(result.body)
         assert "Transport error" in body["error"]
-        assert "NHS_RELAY_BASE_PATH not configured for production. Failing closed." in body["error"]
+        assert "step: gpconnect_request.transport_configuration, exception_type: ValueError" in caplog.text

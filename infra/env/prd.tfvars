@@ -14,7 +14,7 @@ device_id           = "1"
 xhuma_ods_code      = "Z6G1Z"
 xhuma_mhs_party_key = "Z6G1Z-838808"
 env                 = "prod"
-app_version         = "0.9.2"
+app_version         = "1.0.1"
 require_mtls        = "true"
 
 allowed_hosts = "*"
@@ -33,3 +33,7 @@ ccda_expiry_hours      = "4"
 nhs_relay_base_path    = "https://proxy.national.ncrs.nhs.uk"
 nhs_over_internet_path = ""
 dmd_base_url           = "https://ontology.nhs.uk/production2/fhir"
+
+# dm+d Cache Warmer (Standard target-local infrastructure in PRD; schedule deferred)
+dmd_cache_warm_enabled     = true
+dmd_cache_schedule_enabled = false
