@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 import fastapi
 import httpx
+from fhirclient.models.fhirabstractbase import FHIRValidationError
+from fhirclient.models.operationoutcome import OperationOutcome
 
 from app.audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
 from app.audit.models import AuditOutcome, SAMLAttributes
@@ -39,14 +41,23 @@ class SDSUpstreamError(Exception):
         attempts: int = 1,
         resource_type: str = "Device",
         reason: str = "upstream_http_failure",
+        detail: str | None = None,
+        request_id: str | None = None,
+        http_status_code: int | None = None,
     ):
         self.status_code = status_code
         self.attempts = attempts
         self.resource_type = resource_type
         self.reason = reason
+        self.request_id = request_id
+        self.http_status_code = http_status_code or (
+            status_code if status_code is not None and 400 <= status_code <= 599 else 502
+        )
         super().__init__(
             f"SDS {resource_type} upstream failure (status={status_code}, attempts={attempts}, reason={reason})"
         )
+        # Keep caller-facing diagnostics out of exception strings and telemetry.
+        self.detail = detail or str(self)
 
     def __repr__(self) -> str:
         return (
@@ -57,8 +68,8 @@ class SDSUpstreamError(Exception):
         )
 
 
-def _sanitize_diagnostic(text: str) -> str:
-    """Safely bounds and sanitizes diagnostic strings from upstream responses."""
+def _sanitize_diagnostic(text: str, max_length: int | None = 200) -> str:
+    """Redact upstream diagnostics, optionally bounding their length."""
     if not isinstance(text, str):
         text = str(text)
     import re
@@ -72,7 +83,29 @@ def _sanitize_diagnostic(text: str) -> str:
         r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b", "[REDACTED_UUID]", text
     )
 
-    return text.replace("\n", " ").replace("\r", "")[:200]
+    return text.replace("\n", " ").replace("\r", "")[:max_length]
+
+
+def _operation_outcome_display(payload: object) -> str:
+    """Extract redacted display text from a FHIR error resource."""
+    if not isinstance(payload, dict) or payload.get("resourceType") != "OperationOutcome":
+        return ""
+    try:
+        outcome = OperationOutcome(payload)
+    except FHIRValidationError:
+        return ""
+    displays = [
+        " ".join(coding.display.split())
+        for issue in outcome.issue or []
+        if issue.details
+        for coding in issue.details.coding or []
+        if coding.display and coding.display.strip()
+    ]
+    text = " | ".join(dict.fromkeys(displays))
+    api_key = os.getenv("NHS_API_KEY", "").strip()
+    if api_key:
+        text = text.replace(api_key, "[REDACTED_API_KEY]")
+    return _sanitize_diagnostic(text, max_length=None)
 
 
 # router = fastapi.APIRouter(prefix="/pds")
@@ -166,18 +199,21 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
 
         try:
             response_dict = r.json()
-        except Exception:
+        except (ValueError, UnicodeDecodeError):
+            response_dict = {}
+        if not isinstance(response_dict, dict):
             response_dict = {}
 
         if r.status_code != 200 or "access_token" not in response_dict:
-            err_code = (
-                response_dict.get("issue", [{}])[0].get("details", {}).get("coding", [{}])[0].get("code", "unknown")
-            )
-            err_desc = _sanitize_diagnostic(response_dict.get("issue", [{}])[0].get("diagnostics", "Unknown error"))
+            display = _operation_outcome_display(response_dict)
+            err_code = "unknown"
+            err_desc = display or "Unknown error"
 
             if "error" in response_dict:
                 err_code = str(response_dict.get("error"))[:50]
-                err_desc = _sanitize_diagnostic(response_dict.get("error_description", err_desc))
+                err_desc = _sanitize_diagnostic(
+                    str(response_dict.get("error_description", err_desc)).replace(nhs_api_key, "[REDACTED_API_KEY]")
+                )
 
             req_id = r.headers.get("x-request-id", "")
             corr_id = r.headers.get("x-correlation-id", "")
@@ -189,9 +225,14 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             )
             logging.error(safe_log)
 
-            if r.status_code in (401, 403):
-                raise fastapi.HTTPException(status_code=502, detail="NHS API Authentication or Entitlement Failed")
-            raise fastapi.HTTPException(status_code=502, detail="Upstream NHS API Availability Failure")
+            msg = (
+                "NHS API Authentication or Entitlement Failed"
+                if r.status_code in (401, 403)
+                else "Upstream NHS API Availability Failure"
+            )
+            if display:
+                msg += f": {display}"
+            raise fastapi.HTTPException(status_code=502, detail=msg)
 
         nhs_token = response_dict["access_token"]
 
@@ -217,7 +258,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             saml=saml,
             action="pds_token_fetch",
             outcome=AuditOutcome.fail,
-            detail={"exception": e.detail},
+            detail={"exception": type(e).__name__},
             error_code=str(e.status_code),
         )
         raise
@@ -251,33 +292,30 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
                 error_data = {}
                 try:
                     error_data = r.json()
-                except Exception:
+                except (ValueError, UnicodeDecodeError):
                     pass
 
-                err_code = (
-                    error_data.get("issue", [{}])[0].get("details", {}).get("coding", [{}])[0].get("code", "unknown")
-                )
-                err_desc = _sanitize_diagnostic(error_data.get("issue", [{}])[0].get("diagnostics", "Unknown error"))
-
-                if "error" in error_data:
-                    err_code = str(error_data.get("error"))[:50]
-                    err_desc = _sanitize_diagnostic(error_data.get("error_description", err_desc))
+                display = _operation_outcome_display(error_data)
 
                 req_id = r.headers.get("x-request-id", "")
                 corr_id = r.headers.get("x-correlation-id", "")
 
                 safe_log = (
                     f"PDS API Failure | Status: {r.status_code} | "
-                    f"Code: {err_code} | Desc: {err_desc} | "
+                    f"Display: {display or 'Unknown error'} | "
                     f"ReqID: {req_id} | CorrID: {corr_id}"
                 )
                 logging.error(safe_log)
 
                 if r.status_code == 404:
-                    raise fastapi.HTTPException(status_code=404, detail="Patient not found on PDS")
-                if r.status_code in (401, 403):
-                    raise fastapi.HTTPException(status_code=502, detail="PDS Entitlement or Token Failure")
-                raise fastapi.HTTPException(status_code=502, detail="PDS lookup upstream failure")
+                    msg = "Patient not found on PDS"
+                elif r.status_code in (401, 403):
+                    msg = "PDS Entitlement or Token Failure"
+                else:
+                    msg = "PDS lookup upstream failure"
+                if display:
+                    msg += f": {display}"
+                raise fastapi.HTTPException(status_code=404 if r.status_code == 404 else 502, detail=msg)
 
             patient_dict = r.json()
     except AuditFailureException:
@@ -289,7 +327,7 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
             saml=saml,
             action="pds_lookup",
             outcome=AuditOutcome.fail,
-            detail={"cache_hit": False, "status_code": e.status_code, "detail": e.detail},
+            detail={"cache_hit": False, "status_code": e.status_code, "exception": type(e).__name__},
             error_code=str(e.status_code),
         )
         raise
@@ -355,9 +393,10 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     record_cache("sds", bool(cached_trace))
     if cached_trace:
         logging.info("Cache hit for SDS query %s", cache_key)
-        if isinstance(cached_trace, bytes):
-            cached_trace = cached_trace.decode("utf-8")
-        return json.loads(cached_trace)
+        with measure("sds.cache.decode"):
+            if isinstance(cached_trace, bytes):
+                cached_trace = cached_trace.decode("utf-8")
+            return json.loads(cached_trace)
 
     logging.info("Cache miss for SDS query %s. Fetching from SDS API.", cache_key)
 
@@ -410,24 +449,39 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
                     )
                     await asyncio.sleep(delay)
                     continue
+                msg = (
+                    f"SDS {suffix} request failed for ODS code {ods}: {type(exc).__name__} "
+                    f"(request_id: {request_headers['X-Request-ID']})"
+                )
+                logging.error("%s (attempts: %s)", msg, attempt)
                 raise SDSUpstreamError(
                     status_code=None,
                     attempts=attempt,
                     resource_type=suffix,
                     reason="transport_error",
+                    detail=msg,
+                    request_id=request_headers["X-Request-ID"],
+                    http_status_code=504 if isinstance(exc, httpx.TimeoutException) else 502,
                 ) from None
 
             if r.status_code == 200:
                 try:
-                    trace = json.loads(r.text)
-                except Exception:
+                    with measure("sds.response.decode"):
+                        trace = json.loads(r.text)
+                except ValueError:
                     raise SDSUpstreamError(
                         status_code=r.status_code,
                         attempts=attempt,
                         resource_type=suffix,
                         reason="malformed_json",
+                        detail=(
+                            f"SDS {suffix} returned malformed JSON for ODS code {ods} "
+                            f"(request_id: {request_headers['X-Request-ID']})"
+                        ),
+                        request_id=request_headers["X-Request-ID"],
                     ) from None
-                await redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
+                with measure("sds.cache.write"):
+                    await redis_client.setex(cache_key, SDS_CACHE_HOURS * 60 * 60, json.dumps(trace))
                 return trace
 
             if r.status_code in SDS_TRANSIENT_STATUS_CODES and attempt < SDS_MAX_ATTEMPTS:
@@ -441,11 +495,39 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
                 await asyncio.sleep(delay)
                 continue
 
+            try:
+                payload = r.json()
+            except (ValueError, UnicodeDecodeError):
+                payload = None
+            display = _operation_outcome_display(payload)
+            if isinstance(payload, dict) and payload.get("resourceType") == "OperationOutcome":
+                response_detail = display or "Unknown error"
+            else:
+                response_detail = _sanitize_diagnostic(
+                    r.text.replace(nhs_api_key, "[REDACTED_API_KEY]"), max_length=None
+                )
+            logging.error(
+                "SDS HTTP failure | Resource: %s | ODS: %s | Status: %s | "
+                "ReqID: %s | UpstreamReqID: %s | CorrID: %s | Attempts: %s | Display: %s",
+                suffix,
+                ods,
+                r.status_code,
+                request_headers["X-Request-ID"],
+                r.headers.get("x-request-id", ""),
+                r.headers.get("x-correlation-id", ""),
+                attempt,
+                display or "Unknown error",
+            )
             raise SDSUpstreamError(
                 status_code=r.status_code,
                 attempts=attempt,
                 resource_type=suffix,
                 reason="upstream_http_failure",
+                detail=(
+                    f"SDS {suffix} HTTP {r.status_code} failure for ODS code {ods}: {response_detail} "
+                    f"(request_id: {request_headers['X-Request-ID']})"
+                ),
+                request_id=request_headers["X-Request-ID"],
             )
 
 
