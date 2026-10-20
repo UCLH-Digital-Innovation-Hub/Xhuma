@@ -1,11 +1,9 @@
 import asyncio
 import datetime
-import json
 import logging
 import os
 from copy import copy
 
-import xmltodict
 from fhirclient.models import bundle, patient
 from fhirclient.models import list as fhirlist
 
@@ -31,11 +29,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     generated_at = datetime.datetime.now()
     ccda = {"ClinicalDocument": document_header(subject, index, generated_at=generated_at).to_xml_dict()}
-
-    # vital signs doesn't appear in the SCR therefore crate blank list to generate xml
-    # vital_signs = fhirlist.List()
-    # vital_signs.title = "Vital Signs"
-    # lists.append(vital_signs)s
 
     investigation_graph = None
 
@@ -91,10 +84,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "Active Medications",
             "Past Medications",
             "Problems",
-            # "Vital Signs",
-            # "Investigations and results",
         ]
-        # print(list.title)
         # check if list is one of the desired ones
         if list.title in sections:
             comp = {}
@@ -238,9 +228,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     dict: dictionary with appropriate headers for the section to generate xml correctly
                 """
 
-                headers = []
-                for header in section_setup[title]["section_headers"]:
-                    headers.append({header})
                 return {"tr": {"th": section_setup[title]["section_headers"]}}
 
             def create_row(entry_data) -> dict:
@@ -252,9 +239,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 Returns:
                     dict: _description_
                 """
-                # row = []
-                # for data in entry_data:
-                #     row.append({data})
                 return {"td": entry_data}
 
             if not list.entry:
@@ -286,11 +270,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 comp["section"]["entry"] = []
                 rows = []
                 references = [index[entry.item.reference] for entry in list.entry]
-                # print(f"processing entries for {list.title}")
-                # print(section_setup[list.title]["section_headers"])
                 headers = create_headers(list.title)
 
-                # items = section_setup[list.title]["parser"](references)
                 parser = section_setup[list.title]["parser"]
                 items = parser(references)
                 if asyncio.iscoroutine(items):  # or: inspect.isawaitable(items)
@@ -344,10 +325,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "text": "",  # Will be populated with table
             }
 
-            # organizer_with_table = asyncio.gather(
-            #     *[investigation(entry, index) for entry in list.entry]
-            # )
-            # print(organizer_with_table)
             # Provider completeness warnings apply even when no reports are returned.
             warnings = [note.text for note in list.note or [] if note.text]
             if not list.entry:
@@ -387,7 +364,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         today = datetime.date.today()
 
         for med in medications.entry:
-            # print(med)
             referenced_med = index[med.item.reference]
             effective_period = getattr(referenced_med, "effectivePeriod", None)
             effective_end = getattr(effective_period, "end", None)
@@ -399,8 +375,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 future_meds += 1
             else:
                 past.append(med)
-        # print(f"split medications into {len(active)} active and {len(past)} past")
-        # print(active)
         return active, past, future_meds
 
     def clone_list(original, new_title, new_entries):
@@ -411,14 +385,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         new_list.entry = new_entries
         return new_list
 
-    # bundle_components = [await create_section(list) for list in lists]
-    # bundle_components = [x for x in bundle_components if x is not None]
     bundle_components = []
     for list_obj in lists:
         if list_obj.title == "Medications and medical devices":
             try:
                 active, past, future_meds = split_medications(list_obj)
-                # print(f"active medications: {len(active)}, past medications: {len(past)}")
                 active_section = await create_section(clone_list(list_obj, "Active Medications", active))
 
                 if future_meds > 0:
@@ -498,36 +469,3 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     ccda["ClinicalDocument"]["component"]["structuredBody"]["component"] = bundle_components
 
     return ccda
-
-
-if __name__ == "__main__":
-    # Example usage
-    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
-        structured_dosage_bundle = json.load(f)
-
-    comment_index = None
-    for j, i in enumerate(structured_dosage_bundle["entry"]):
-        if "fhir_comments" in i.keys():
-            comment_index = j
-    if comment_index is not None:
-        structured_dosage_bundle["entry"].pop(comment_index)
-    fhir_bundle = bundle.Bundle(structured_dosage_bundle)
-
-    fhir_bundle = bundle.Bundle(structured_dosage_bundle)
-
-    # index resources to allow for resolution
-    bundle_index = {}
-    for entry in fhir_bundle.entry:
-        try:
-            address = f"{entry.resource.resource_type}/{entry.resource.id}"
-            bundle_index[address] = entry.resource
-        except Exception:
-            logging.error(f"Could not index resource {entry.resource} with id {entry.resource.id}")
-
-    # ccda = await convert_bundle(fhir_bundle, bundle_index)
-    ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))
-    # pprint.pprint(ccda)
-    with open("output.xml", "w") as output:
-        xml = xmltodict.unparse(ccda, pretty=True)
-        xml = xml.replace("&lt;br /&gt;", "<br/>").replace("&lt;br&gt;", "<br/>")
-        output.write(xml)

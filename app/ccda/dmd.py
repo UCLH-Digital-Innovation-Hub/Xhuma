@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import pprint
 
 import httpx
 
@@ -312,21 +311,3 @@ async def dmd_lookup(concept_id: int | str) -> DMDConcept:
 
     # 2. No active release: safe existing on-demand fallback
     return await _resolve_dmd_concept(int(concept_id), release=None)
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    # Example usage
-    async def main():
-        # token = await get_terminology_token()
-        # print(f"Access Token: {token}")
-
-        concept_id = 38893711000001104  # Replace with a valid SNOMED concept ID
-        # properties = ["*"]  # Fetch all properties
-        # full_properties = await get_dmd_concept(concept_id, properties=properties)
-        # pprint.pprint(full_properties)
-        concept_term = await dmd_lookup(concept_id)
-        pprint.pprint(concept_term)
-
-    asyncio.run(main())

@@ -1,5 +1,4 @@
 import json
-import pprint
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -310,7 +309,6 @@ def test_event_timing_warning_uses_fhir_event_timing_valueset(repeat, expected):
 
 
 # write tests to check if the pydantic models are working correctly
-# @patch("app.ccda.entries.medication.referenced_med", return_value=med)
 @pytest.mark.asyncio
 async def test_substance_administration():
     """
@@ -326,14 +324,12 @@ async def test_substance_administration():
     assert substance_administration.row[0] == "22/05/2024"
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
-    # print(substance_administration)
 
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
     assert len(substance_administration["id"]) == 1
     # assert effective time list contains low
     assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20240522000000+0100"
-    # assert substance_administration.id[0].root is not None
 
 
 @pytest.mark.asyncio
@@ -363,13 +359,9 @@ async def test_structured_dosage(mock_dmd_lookup):
     medication_list = []
     for list in fhir_bundle.entry:
         if isinstance(list.resource, fhirlist.List):
-            # print(entry.resource.title)
             if list.resource.title == "Medications and medical devices":
-                # pprint.pprint(list.resource.as_json())
                 for entry in list.resource.entry:
-                    # pprint.pprint(entry.as_json())
                     referenced_item = bundle_index[entry.item.reference]
-                    # pprint.pprint(referenced_item.as_json())
 
                     entry_with_row = await medication_entry(
                         referenced_item,
@@ -379,7 +371,6 @@ async def test_structured_dosage(mock_dmd_lookup):
                     medication_list.append(entry_data)
 
                     assert entry_data["substanceAdministration"]["@classCode"] == "SBADM"
-    # print(medication_list)
     assert len(medication_list) == 27
 
 
@@ -401,7 +392,6 @@ async def test_structured_detail(mock_dmd_lookup):
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
 
-    pprint.pprint(substance_administration)
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
     assert (
@@ -539,7 +529,6 @@ async def test_new_structured_detail(mock_dmd_lookup):
         for relationship in substance_administration["entryRelationship"]
     )
 
-    pprint.pprint(substance_administration)
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
     assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"

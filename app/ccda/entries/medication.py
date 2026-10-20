@@ -143,11 +143,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
         if warning:
             misc_notes.append(warning)
-    # request = index[entry.basedOn[0].reference]
-    # dosage_instructions = request.dosageInstruction
-    # for dose in dosage_instructions:
-    #     print(dose.as_json())
-    # print(dosage_instructions.as_json())
     substance_administration = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
         id=[
@@ -175,20 +170,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
     )
     # if dose quantiy is in dosage
     if dosages[0].doseQuantity:
-        # assumption that all structuered dosage will be snomed
-        # substance_administration.doseQuantity = {
-        #     "value": {
-        #         "@xsi:type": "PQ",
-        #         "@nullFlavor": "OTH",
-        #         "translation": {
-        #             "@value": dosages[0].doseQuantity.value,
-        #             "@code": dosages[0].doseQuantity.code,
-        #             "@codeSystemName": dosages[0].doseQuantity.system,
-        #             "@codeSystem": "2.16.840.1.113883.6.96",
-        #             "originalText": dosages[0].doseQuantity.unit,
-        #         },
-        #     },
-        # }
         # TODO: Build a PQ/IVL_PQ instance (including typed translations) rather
         # than assigning a dict; test_meds/test_prn_meds emit Pydantic serializer
         # warnings for doseQuantity. Preserve the subsequent dose-conversion logic.
@@ -275,7 +256,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 }
             except Exception as e:
                 logging.error(f"Error processing maxDosePerPeriod: {e}")
-                pass
 
     #   check if route is in dosage
     if dosages[0].method:
@@ -342,7 +322,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
     # check if snomed code is in cache and if so add to med name
     snomed_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
-    # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
     unit = (
         substance_administration.doseQuantity.get("@unit", "").lower() if substance_administration.doseQuantity else ""
@@ -368,7 +347,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                         warning_text = (
                             f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
                         )
-                        # print(warning_text)
                         misc_notes.append(warning_text)
 
                 elif len(dosages) > 1:
@@ -383,16 +361,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                             substance_administration.routeCode.displayName = dmd_data.route.displayName
                             substance_administration.routeCode.code = dmd_data.route.code
                             substance_administration.routeCode.codeSystem = "2.16.840.1.113883.6.96"
-                            # substance_administration.routeCode.codeSystem = (
-                            #     "2.16.840.1.113883.3.26.1.1"
-                            # )
                             substance_administration.routeCode.codeSystemName = dmd_data.route.codeSystemName
-                            # route_translation = CD()
-                            # route_translation["@code"] = dmd_data.route.code
-                            # route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
-                            # substance_administration.routeCode.translation = (
-                            #     route_translation
-                            # )
                             # add a warning note about the route being automatically mapped
                             warning_text = (
                                 f'Xhuma: Route inferred as {dmd_data.route.displayName} from dm+d because the GP source value was "Take"; '
@@ -403,7 +372,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
             except Exception as e:
                 logging.error(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
                 print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
-                pass
 
         if "- unit of product usage" in unit:
             # strip overly verbose snomed unit description to just unit
@@ -416,7 +384,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
     prescription_information = []
     if entry.extension:
         for ext in entry.extension:
-            # print(ext.url)
             if ext.url == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1":
                 prescribing_agency = ext.valueCodeableConcept.coding[0].display
                 prescription_information.append(prescribing_agency)
@@ -436,7 +403,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 ext.url
                 == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
             ):
-                # print("Medication repeat information extension found")
                 repeats_allowed = None
                 repeats_issued = None
                 for i in ext.extension:
@@ -448,10 +414,8 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
                     if i.url == "numberOfRepeatPrescriptionsAllowed":
                         repeats_allowed = val
-                        # print(repeats_allowed)
                     elif i.url == "numberOfRepeatPrescriptionsIssued":
                         repeats_issued = val
-                        # print(f"Repeats Issued:{repeats_issued}")
                 if repeats_allowed is not None and repeats_issued is not None:
                     remaining_repeats = repeats_allowed - repeats_issued
                     prescription_information.append(
@@ -485,7 +449,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
     # add br tags to prescription information with a join
     prescription_information = "<br />".join(prescription_information) if prescription_information else ""
-    # prescription_information = [f"{info} <br />" for info in prescription_information]
 
     patient_instructions = "Patient Instructions: " + "<br />".join(patient_instr_list) if patient_instr_list else ""
     text_instructions = " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
@@ -523,17 +486,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
             supply_order.substanceAdministration.repeatNumber = IVL_INT(value=remaining_repeats)
         substance_administration.entryRelationship.append(supply_order)
 
-    # entry_row = [
-    #     readable_date(low_time[0]) if low_time else "",
-    #     readable_date(high_time[0]) if high_time else "",
-    #     entry.status if entry.status else "unknown",
-    #     prescription_type if "prescription_type" in locals() else "",
-    #     med_name,
-    #     f"{text_instructions}<br />{patient_instructions}",
-    #     {"BR": misc_notes_text},
-    #     prescribing_agency if "prescribing_agency" in locals() else "",
-    #     last_issued_date if "last_issued_date" in locals() else "",
-    # ]
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
         readable_date(high_time[0]) if high_time else "",
