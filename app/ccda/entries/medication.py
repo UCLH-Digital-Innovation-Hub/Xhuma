@@ -371,7 +371,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
             except Exception as e:
                 logging.error(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
-                print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
 
         if "- unit of product usage" in unit:
             # strip overly verbose snomed unit description to just unit
