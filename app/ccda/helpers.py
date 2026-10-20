@@ -221,7 +221,9 @@ def organization_to_author(
             for telecom in organization.telecom
         ]
     if organization.address:
-        author.address = [addr.as_json() for addr in organization.address]
+        from .demographics import postal_addresses
+
+        author.address = postal_addresses(organization.address)
 
     org = AuthorParticipation(assignedAuthor=author)
 

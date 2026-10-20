@@ -14,7 +14,7 @@ device_id           = "1"
 xhuma_ods_code      = "Z6G1Z"
 xhuma_mhs_party_key = "Z6G1Z-838808"
 env                 = "prod"
-app_version         = "1.0.1"
+app_version         = "1.0.2"
 require_mtls        = "true"
 
 allowed_hosts = "*"
