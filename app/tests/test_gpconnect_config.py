@@ -50,27 +50,31 @@ async def test_ccda_expiry_configuration_parsing(
     async def mock_sds_trace(*args, **kwargs):
         if kwargs.get("endpoint"):
             return {
+                "resourceType": "Bundle",
                 "entry": [
                     {
                         "resource": {
+                            "resourceType": "Endpoint",
                             "address": "test-url",
                             "identifier": [
                                 {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "123"},
                             ],
                         }
                     }
-                ]
+                ],
             }
         return {
+            "resourceType": "Bundle",
             "entry": [
                 {
                     "resource": {
+                        "resourceType": "Device",
                         "identifier": [
                             {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "123"},
-                        ]
+                        ],
                     }
                 }
-            ]
+            ],
         }
 
     mock_sds.side_effect = mock_sds_trace

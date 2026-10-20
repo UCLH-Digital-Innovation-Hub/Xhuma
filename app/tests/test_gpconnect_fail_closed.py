@@ -48,27 +48,31 @@ async def test_gpconnect_env_prod_missing_relay_fails_closed(monkeypatch, mock_s
             # Valid SDS endpoint and device trace
             mock_sds.side_effect = [
                 {
+                    "resourceType": "Bundle",
                     "entry": [
                         {
                             "resource": {
+                                "resourceType": "Endpoint",
                                 "address": "https://endpoint.nhs.uk",
                                 "identifier": [
                                     {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "222"},
                                 ],
                             }
                         }
-                    ]
+                    ],
                 },
                 {
+                    "resourceType": "Bundle",
                     "entry": [
                         {
                             "resource": {
+                                "resourceType": "Device",
                                 "identifier": [
                                     {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "111"},
-                                ]
+                                ],
                             }
                         }
-                    ]
+                    ],
                 },
             ]
 

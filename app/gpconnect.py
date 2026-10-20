@@ -205,7 +205,7 @@ async def _fetch_gpconnect_record(
                     f.write(diagnostic + "\n")
             return JSONResponse(status_code=403, content={"success": False, "error": msg})
 
-        # 4) Resolve ODS → ASID + PartyKey
+        # 3) Resolve GP ODS
         step = "resolve_gp_ods.ods_extraction"
         try:
             gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
@@ -232,9 +232,10 @@ async def _fetch_gpconnect_record(
             msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
-        # 4) Endpoint lookup
+        # 4) Resolve provider Endpoint and MHS Party Key
         fhir_endpoint_url = None
         nhsmhsparty = None
+        party_keys = []
         step = "sds_endpoint.sds_lookup"
         try:
             with measure("sds.endpoint"):
@@ -243,7 +244,7 @@ async def _fetch_gpconnect_record(
             if (
                 isinstance(endpoint_trace, dict)
                 and endpoint_trace.get("resourceType") == "Bundle"
-                and not endpoint_trace.get("entry")
+                and endpoint_trace.get("entry") == []
             ):
                 step = "sds_endpoint.entry_validation"
                 msg = f"Unable to resolve GP Connect Structured Record FHIR endpoint in SDS for ODS code {gp_ods}"
@@ -261,14 +262,47 @@ async def _fetch_gpconnect_record(
                 return JSONResponse(status_code=502, content={"success": False, "error": msg})
 
             step = "sds_endpoint.response_validation"
-            if not endpoint_trace or not endpoint_trace.get("entry"):
+            if (
+                not isinstance(endpoint_trace, dict)
+                or endpoint_trace.get("resourceType") != "Bundle"
+                or not isinstance(endpoint_trace.get("entry"), list)
+                or not endpoint_trace.get("entry")
+            ):
                 raise HTTPException(
                     status_code=502,
                     detail=f"SDS Endpoint lookup returned no entries for ODS code {gp_ods}",
                 )
 
+            entries = endpoint_trace["entry"]
+            if len(entries) > 1:
+                step = "sds_endpoint.entry_validation"
+                msg = f"Ambiguous SDS Endpoint response for ODS code {gp_ods}"
+                diagnostic = f"{msg} (step: {step})"
+                record_application_failure(RuntimeError(diagnostic))
+                logging.error(diagnostic)
+                if log_dir:
+                    with open(os.path.join(log_dir, "error.log"), "a") as f:
+                        f.write(diagnostic + "\n")
+                await attempt_audit(
+                    request=request,
+                    nhs_number=str(nhsno),
+                    saml=saml_attrs,
+                    action="fhir_endpoint_trace",
+                    outcome=AuditOutcome.fail,
+                    error_code="502",
+                    detail={"step": step, "reason": "ambiguous_endpoint_entries"},
+                )
+                return JSONResponse(status_code=502, content={"success": False, "error": msg})
+
             step = "sds_endpoint.address_extraction"
-            endpoint_resource = endpoint_trace["entry"][0]["resource"]
+            entry = entries[0]
+            endpoint_resource = entry["resource"]
+            if (
+                isinstance(endpoint_resource, dict)
+                and endpoint_resource.get("resourceType")
+                and endpoint_resource.get("resourceType") != "Endpoint"
+            ):
+                raise ValueError(f"Unable to find FHIR endpoint for ODS code {gp_ods}")
             fhir_endpoint_url = endpoint_resource["address"]
             step = "sds_endpoint.address_validation"
             if not isinstance(fhir_endpoint_url, str) or not fhir_endpoint_url.strip():
@@ -280,7 +314,9 @@ async def _fetch_gpconnect_record(
                 dict.fromkeys(
                     item.get("value")
                     for item in identifiers
-                    if item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey" and item.get("value")
+                    if isinstance(item, dict)
+                    and item.get("system") == "https://fhir.nhs.uk/Id/nhsMhsPartyKey"
+                    and item.get("value")
                 )
             )
             step = "sds_endpoint.partykey_validation"
@@ -307,6 +343,11 @@ async def _fetch_gpconnect_record(
             if isinstance(e, SDSUpstreamError):
                 status_code = e.http_status_code
                 detail.update(reason=e.reason, upstream_status=e.status_code, attempts=e.attempts)
+            if step == "sds_endpoint.partykey_validation":
+                if not party_keys:
+                    detail["reason"] = "missing_nhs_mhs_party_key"
+                elif len(party_keys) > 1:
+                    detail["reason"] = "ambiguous_nhs_mhs_party_key"
             msg = f"SDS Endpoint resolution failed for ODS code {gp_ods}"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
             if isinstance(e, SDSUpstreamError):
@@ -330,7 +371,7 @@ async def _fetch_gpconnect_record(
             msg = f"{msg}: {e.detail}" if isinstance(e, (HTTPException, SDSUpstreamError)) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
-        # 5) Device lookup
+        # 5) Resolve provider Device and ASID
         asid = None
         try:
             step = "sds_trace.sds_lookup"
@@ -378,13 +419,74 @@ async def _fetch_gpconnect_record(
 
         step = "resolve_asid_partykey.device_extraction"
         try:
-            identifiers = asid_trace.get("entry", [{}])[0].get("resource", {}).get("identifier", [])
+            if not isinstance(asid_trace, dict) or asid_trace.get("resourceType") != "Bundle":
+                raise ValueError(f"Expected a FHIR Bundle resource from SDS Device lookup for ODS code {gp_ods}")
+
+            raw_entries = asid_trace.get("entry")
+            if not isinstance(raw_entries, list):
+                raise ValueError(f"Expected entry list in SDS Device lookup for ODS code {gp_ods}")
+
+            device_entries = raw_entries
+            if not device_entries:
+                step = "resolve_asid_partykey.identity_validation"
+                msg = f"Unable to find ASID for ODS code {gp_ods}"
+                diagnostic = f"{msg} (step: {step})"
+                record_application_failure(RuntimeError(diagnostic))
+                logging.error(diagnostic)
+                if log_dir:
+                    with open(os.path.join(log_dir, "error.log"), "a") as f:
+                        f.write(diagnostic + "\n")
+                await attempt_audit(
+                    request=request,
+                    nhs_number=str(nhsno),
+                    saml=saml_attrs,
+                    action="resolve_asid_partykey",
+                    outcome=AuditOutcome.fail,
+                    error_code="500",
+                    detail={"step": step, "message": msg},
+                )
+                return JSONResponse(status_code=500, content={"success": False, "error": msg})
+
+            if len(device_entries) > 1:
+                step = "resolve_asid_partykey.device_validation"
+                msg = f"Ambiguous SDS Device response for ODS code {gp_ods}"
+                diagnostic = f"{msg} (step: {step})"
+                record_application_failure(RuntimeError(diagnostic))
+                logging.error(diagnostic)
+                if log_dir:
+                    with open(os.path.join(log_dir, "error.log"), "a") as f:
+                        f.write(diagnostic + "\n")
+                await attempt_audit(
+                    request=request,
+                    nhs_number=str(nhsno),
+                    saml=saml_attrs,
+                    action="resolve_asid_partykey",
+                    outcome=AuditOutcome.fail,
+                    error_code="500",
+                    detail={"step": step, "message": msg, "reason": "ambiguous_device_entries"},
+                )
+                return JSONResponse(status_code=500, content={"success": False, "error": msg})
+
+            entry = device_entries[0]
+            if not isinstance(entry, dict):
+                raise TypeError(f"Invalid entry in SDS Device response for ODS code {gp_ods}")
+            device_resource = entry.get("resource")
+            if not isinstance(device_resource, dict):
+                raise AttributeError(f"Invalid resource in SDS Device response for ODS code {gp_ods}")
+            if device_resource.get("resourceType") and device_resource.get("resourceType") != "Device":
+                raise ValueError(f"Invalid FHIR resourceType in SDS Device response for ODS code {gp_ods}")
+
             step = "resolve_asid_partykey.identifier_extraction"
+            identifiers = device_resource.get("identifier")
+            if identifiers is None:
+                raise TypeError("Device identifier list is None")
             asids = list(
                 dict.fromkeys(
                     item.get("value")
                     for item in identifiers
-                    if item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID" and item.get("value")
+                    if isinstance(item, dict)
+                    and item.get("system") == "https://fhir.nhs.uk/Id/nhsSpineASID"
+                    and item.get("value")
                 )
             )
             step = "resolve_asid_partykey.identity_validation"
