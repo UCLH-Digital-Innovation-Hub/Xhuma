@@ -15,7 +15,7 @@ from app.audit.models import AuditOutcome
 from app.gpconnect import _fetch_gpconnect_record
 from app.pds.pds import SDSUpstreamError, sds_cache_key, sds_trace
 from app.tests.fixtures.saml_attributes import saml
-from app.tests.test_gpconnect import fake_sds_device_trace, get_mock_request, load_pds
+from app.tests.test_gpconnect import fake_sds_endpoint_trace, get_mock_request, load_pds
 
 
 @pytest.mark.asyncio
@@ -402,10 +402,9 @@ async def test_gpconnect_endpoint_sds_upstream_failure_audits_safe_fields(caplog
         patch("app.gpconnect.record_application_failure"),
         caplog.at_level(logging.DEBUG),
     ):
-        mock_sds.side_effect = [
-            fake_sds_device_trace(),
-            SDSUpstreamError(status_code=503, attempts=3, resource_type="Endpoint", reason="upstream_http_failure"),
-        ]
+        mock_sds.side_effect = SDSUpstreamError(
+            status_code=503, attempts=3, resource_type="Endpoint", reason="upstream_http_failure"
+        )
 
         response = await _fetch_gpconnect_record(9690937278, saml, request=get_mock_request())
 
@@ -450,9 +449,10 @@ async def test_gpconnect_device_sds_upstream_failure_audits_safe_fields(caplog):
         patch("app.gpconnect.record_application_failure"),
         caplog.at_level(logging.DEBUG),
     ):
-        mock_sds.side_effect = SDSUpstreamError(
-            status_code=503, attempts=3, resource_type="Device", reason="upstream_http_failure"
-        )
+        mock_sds.side_effect = [
+            fake_sds_endpoint_trace(),
+            SDSUpstreamError(status_code=503, attempts=3, resource_type="Device", reason="upstream_http_failure"),
+        ]
 
         response = await _fetch_gpconnect_record(9690937278, saml, request=get_mock_request())
 

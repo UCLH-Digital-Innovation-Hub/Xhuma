@@ -30,9 +30,11 @@ def get_mock_request():
 
 def fake_sds_device_trace():
     return {
+        "resourceType": "Bundle",
         "entry": [
             {
                 "resource": {
+                    "resourceType": "Device",
                     "identifier": [
                         {
                             "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
@@ -42,15 +44,31 @@ def fake_sds_device_trace():
                             "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
                             "value": "FAKE-PARTY-KEY",
                         },
-                    ]
+                    ],
                 }
             }
-        ]
+        ],
     }
 
 
 def fake_sds_endpoint_trace():
-    return {"entry": [{"resource": {"address": "fake-gpconnect-endpoint"}}]}
+    return {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Endpoint",
+                    "address": "fake-gpconnect-endpoint",
+                    "identifier": [
+                        {
+                            "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                            "value": "FAKE-PARTY-KEY",
+                        }
+                    ],
+                }
+            }
+        ],
+    }
 
 
 @pytest.mark.asyncio
@@ -83,11 +101,11 @@ async def test_gpconnect_with_nhs_data(
     mock_lookup_patient.return_value = fake_pds
 
     # gpconnect calls sds_trace twice:
-    # 1. Device trace
-    # 2. Endpoint trace
+    # 1. Endpoint trace
+    # 2. Device trace
     mock_sds_trace.side_effect = [
-        fake_sds_device_trace(),
         fake_sds_endpoint_trace(),
+        fake_sds_device_trace(),
     ]
 
     mock_response = Response(
@@ -114,6 +132,11 @@ async def test_gpconnect_with_nhs_data(
         nhsno, request=mock_lookup_patient.call_args.kwargs["request"], saml=saml
     )
     assert mock_sds_trace.call_count == 2
+    gp_ods = fake_pds["generalPractitioner"][0]["identifier"]["value"]
+    assert mock_sds_trace.call_args_list[0].args == (gp_ods,)
+    assert mock_sds_trace.call_args_list[0].kwargs == {"endpoint": True}
+    assert mock_sds_trace.call_args_list[1].args == (gp_ods,)
+    assert mock_sds_trace.call_args_list[1].kwargs == {"mhsparty": "FAKE-PARTY-KEY"}
     mock_client.post.assert_called_once()
     sent_headers = mock_client.post.call_args.kwargs["headers"]
     claims = jwt.decode(sent_headers["Authorization"].removeprefix("Bearer "), options={"verify_signature": False})
@@ -144,7 +167,7 @@ async def test_self_lookup_failure_is_audited_without_downstream_request(mock_se
         patch("app.gpconnect.httpx.AsyncClient") as client,
         patch("app.gpconnect.redis_client.pipeline") as cache,
     ):
-        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        sds.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
         if audit_fails:
 
             async def fail_audit(**kwargs):
@@ -234,7 +257,7 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 
     assert result.status_code == 502
     assert body["success"] is False
-    assert body["error"].startswith("SDS Trace failed for ODS code E82665")
+    assert body["error"].startswith("SDS Endpoint resolution failed for ODS code E82665")
     assert "step:" in body["error"]
     assert "SDS unavailable" not in body["error"]
 
@@ -245,7 +268,7 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 @patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 @patch("app.gpconnect.record_application_failure")
-async def test_gpconnect_zero_entries_sds_device_bundle(
+async def test_gpconnect_zero_entries_sds_endpoint_bundle(
     mock_record_failure,
     mock_lookup_patient,
     mock_sds_trace,
@@ -259,12 +282,12 @@ async def test_gpconnect_zero_entries_sds_device_bundle(
 
     if audit_fails:
 
-        async def fail_on_resolve_asid_partykey(*args, **kwargs):
-            if kwargs.get("action") == "resolve_asid_partykey":
+        async def fail_on_fhir_endpoint_trace(*args, **kwargs):
+            if kwargs.get("action") == "fhir_endpoint_trace":
                 raise AuditFailureException("Audit persistence failed")
             return None
 
-        mock_attempt_audit.side_effect = fail_on_resolve_asid_partykey
+        mock_attempt_audit.side_effect = fail_on_fhir_endpoint_trace
         with pytest.raises(AuditFailureException):
             await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
     else:
@@ -280,9 +303,7 @@ async def test_gpconnect_zero_entries_sds_device_bundle(
         mock_record_failure.assert_not_called()
 
         audits = [
-            call.kwargs
-            for call in mock_attempt_audit.await_args_list
-            if call.kwargs["action"] == "resolve_asid_partykey"
+            call.kwargs for call in mock_attempt_audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
         ]
         assert len(audits) == 1
         assert audits[0]["outcome"] == AuditOutcome.fail
@@ -305,10 +326,10 @@ async def test_sds_http_failure_reaches_caller(mock_self_issuer, monkeypatch, st
     patient = load_pds(9690937278)
     patient["generalPractitioner"][0]["identifier"]["value"] = "H81058"
     responses = []
-    if failed_lookup != "device":
-        responses.append(Response(200, json=fake_sds_device_trace()))
-    if failed_lookup == "self":
+    if failed_lookup != "endpoint":
         responses.append(Response(200, json=fake_sds_endpoint_trace()))
+    if failed_lookup == "self":
+        responses.append(Response(200, json=fake_sds_device_trace()))
     provider_detail = "endpoint <unavailable> & retry " + "x" * 256 + "SDS_PROVIDER_DIAGNOSTIC_END"
     responses.append(
         Response(
@@ -405,7 +426,7 @@ async def test_gpconnect_error_display_reaches_caller_and_logs(status, displays,
         patch("app.soap.responses.iti_38.redis_client", autospec=True) as soap_cache,
         patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock),
     ):
-        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        sds.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
         factory.return_value.__aenter__.return_value.post = AsyncMock(return_value=Response(status, json=payload))
         soap_cache.get.return_value = None
         if wire == "json":
@@ -463,7 +484,7 @@ async def test_gpconnect_malformed_error_retains_upstream_status(payload):
         patch("app.gpconnect.httpx.AsyncClient") as factory,
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
     ):
-        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        sds.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
         factory.return_value.__aenter__.return_value.post = AsyncMock(return_value=Response(503, text=payload))
         response = await gpconnect(9690937278, saml, request=get_mock_request())
 
@@ -483,7 +504,7 @@ async def test_serialization_failure_returns_caller_error_with_step():
         patch("app.gpconnect.convert_bundle", new_callable=AsyncMock, return_value={"ClinicalDocument": {}}),
         patch("app.gpconnect.base64_xml", side_effect=ValueError("PRIVATE_INTERNAL_ERROR")),
     ):
-        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        sds.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
         factory.return_value.__aenter__.return_value.post.return_value = Response(
             200, json={"resourceType": "Bundle", "type": "searchset", "entry": []}
         )
@@ -500,9 +521,12 @@ async def test_serialization_failure_returns_caller_error_with_step():
 @pytest.mark.parametrize(
     ("device_trace", "exception_type"),
     [
-        pytest.param({"entry": []}, "IndexError", id="empty-entry"),
-        pytest.param({"entry": [{"resource": None}]}, "AttributeError", id="null-resource"),
-        pytest.param({"entry": [{"resource": {"identifier": None}}]}, "TypeError", id="null-identifiers"),
+        pytest.param({"resourceType": "Bundle", "entry": [{"resource": None}]}, "AttributeError", id="null-resource"),
+        pytest.param(
+            {"resourceType": "Bundle", "entry": [{"resource": {"identifier": None}}]},
+            "TypeError",
+            id="null-identifiers",
+        ),
         pytest.param("sensitive-identifier", "RuntimeError", id="sensitive-identifier"),
     ],
 )
@@ -515,15 +539,26 @@ async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path,
             raise upstream_error
 
     if device_trace == "sensitive-identifier":
-        device_trace = {"entry": [{"resource": {"identifier": [SensitiveIdentifier()]}}]}
+        device_trace = {
+            "resourceType": "Bundle",
+            "entry": [
+                {
+                    "resource": {
+                        "resourceType": "Device",
+                        "identifier": [SensitiveIdentifier()],
+                    }
+                }
+            ],
+        }
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock, return_value=device_trace) as sds,
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.gpconnect.record_application_failure") as telemetry,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
+        sds.side_effect = [fake_sds_endpoint_trace(), device_trace]
         response = await _fetch_gpconnect_record(9690937278, saml, log_dir=str(tmp_path), request=get_mock_request())
 
     safe_message = "Unable to parse SDS trace response"
@@ -547,8 +582,15 @@ async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path,
     assert upstream_secret not in caplog.text
     assert all(record.exc_info is None for record in caplog.records)
     assert all(upstream_secret not in str(call.kwargs) for call in audit.await_args_list)
-    sds.assert_awaited_once()
-    assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
+    assert sds.await_count == 2
+    assert any(
+        call.kwargs["action"] == "fhir_endpoint_trace" and call.kwargs["outcome"] == AuditOutcome.ok
+        for call in audit.await_args_list
+    )
+    assert any(
+        call.kwargs["action"] == "resolve_asid_partykey" and call.kwargs["outcome"] == AuditOutcome.fail
+        for call in audit.await_args_list
+    )
     mock_self_issuer.assert_not_awaited()
     client.assert_not_called()
 
@@ -560,17 +602,24 @@ async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path,
     [
         pytest.param(None, "HTTPException", id="null-response"),
         pytest.param({}, "HTTPException", id="missing-entry"),
-        pytest.param({"entry": None}, "HTTPException", id="null-entry"),
+        pytest.param({"resourceType": "Bundle", "entry": None}, "HTTPException", id="null-entry"),
         pytest.param({"entry": []}, "HTTPException", id="empty-entry"),
-        pytest.param({"resourceType": "Bundle", "total": 0}, "HTTPException", id="zero-matches"),
-        pytest.param({"entry": [None]}, "TypeError", id="null-first-entry"),
-        pytest.param({"entry": [{}]}, "KeyError", id="missing-resource"),
-        pytest.param({"entry": [{"resource": None}]}, "TypeError", id="null-resource"),
-        pytest.param({"entry": [{"resource": {}}]}, "KeyError", id="missing-address"),
-        pytest.param({"entry": [{"resource": {"address": None}}]}, "ValueError", id="null-address"),
-        pytest.param({"entry": [{"resource": {"address": ""}}]}, "ValueError", id="empty-address"),
-        pytest.param({"entry": [{"resource": {"address": " \t\n"}}]}, "ValueError", id="blank-address"),
-        pytest.param({"entry": [{"resource": {"address": 123}}]}, "ValueError", id="nonstring-address"),
+        pytest.param({"resourceType": "Bundle", "entry": [None]}, "TypeError", id="null-first-entry"),
+        pytest.param({"resourceType": "Bundle", "entry": [{}]}, "KeyError", id="missing-resource"),
+        pytest.param({"resourceType": "Bundle", "entry": [{"resource": None}]}, "TypeError", id="null-resource"),
+        pytest.param({"resourceType": "Bundle", "entry": [{"resource": {}}]}, "KeyError", id="missing-address"),
+        pytest.param(
+            {"resourceType": "Bundle", "entry": [{"resource": {"address": None}}]}, "ValueError", id="null-address"
+        ),
+        pytest.param(
+            {"resourceType": "Bundle", "entry": [{"resource": {"address": ""}}]}, "ValueError", id="empty-address"
+        ),
+        pytest.param(
+            {"resourceType": "Bundle", "entry": [{"resource": {"address": " \t\n"}}]}, "ValueError", id="blank-address"
+        ),
+        pytest.param(
+            {"resourceType": "Bundle", "entry": [{"resource": {"address": 123}}]}, "ValueError", id="nonstring-address"
+        ),
     ],
 )
 async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
@@ -585,7 +634,7 @@ async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
         patch("app.soap.responses.iti_38.redis_client", autospec=True) as soap_cache,
         patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock),
     ):
-        sds.side_effect = [fake_sds_device_trace(), endpoint_trace]
+        sds.side_effect = [endpoint_trace]
         soap_cache.get.return_value = None
         if wire == "json":
             response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
@@ -618,6 +667,8 @@ async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
             "step": "sds_endpoint." + step,
             "exception_type": exception_type,
         }
+        sds.assert_awaited_once()
+        assert not any(call.kwargs["action"] == "sds_trace" for call in audit.await_args_list)
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
 
@@ -641,7 +692,7 @@ async def test_endpoint_audit_failures_are_distinguished(mock_self_issuer, step,
         patch("app.gpconnect.record_application_failure") as telemetry,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        sds.side_effect = [fake_sds_endpoint_trace()]
         if step == "audit_failure":
             with pytest.raises(AuditFailureException):
                 await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
@@ -664,38 +715,300 @@ async def test_endpoint_audit_failures_are_distinguished(mock_self_issuer, step,
             assert secret not in diagnostic
             assert f"step: sds_endpoint.{step}" in caplog.text
         assert secret not in caplog.text
+        assert sds.await_count == 1
+        assert not any(call.kwargs["action"] == "sds_trace" for call in audit.await_args_list)
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_endpoint_trace_uses_first_entry_address():
+async def test_multiple_endpoint_entries_fail_closed(mock_self_issuer, caplog):
     first_address = "https://first-gpconnect-endpoint.example/fhir"
+    second_address = "https://second-gpconnect-endpoint.example/fhir"
+    party_key_1 = "PARTY-KEY-SECRET-1"
+    party_key_2 = "PARTY-KEY-SECRET-2"
+    nhs_no = 9690937278
     endpoint_trace = {
+        "resourceType": "Bundle",
         "entry": [
-            {"resource": {"address": first_address}},
-            {"resource": {"address": "https://second-gpconnect-endpoint.example/fhir"}},
-        ]
+            {
+                "resource": {
+                    "resourceType": "Endpoint",
+                    "address": first_address,
+                    "identifier": [
+                        {
+                            "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                            "value": party_key_1,
+                        }
+                    ],
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Endpoint",
+                    "address": second_address,
+                    "identifier": [
+                        {
+                            "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                            "value": party_key_2,
+                        }
+                    ],
+                }
+            },
+        ],
     }
 
     with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(nhs_no)),
         patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock),
-        patch("app.gpconnect.create_nhs_ssl_context"),
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure") as telemetry,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+        caplog.at_level(logging.DEBUG),
+    ):
+        sds.side_effect = [endpoint_trace]
+
+        response = await gpconnect(nhs_no, saml_attrs=saml, request=get_mock_request())
+
+    assert response.status_code == 502
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert body["error"] == "Ambiguous SDS Endpoint response for ODS code E82665"
+
+    assert sds.call_count == 1
+    endpoint_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"]
+    assert len(endpoint_audits) == 1
+    assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
+    assert endpoint_audits[0]["error_code"] == "502"
+    assert endpoint_audits[0]["detail"]["reason"] == "ambiguous_endpoint_entries"
+
+    assert not any(call.kwargs["action"] == "sds_trace" for call in audit.await_args_list)
+    assert not any(call.kwargs["action"] == "resolve_asid_partykey" for call in audit.await_args_list)
+    mock_self_issuer.assert_not_awaited()
+    client.assert_not_called()
+
+    telemetry.assert_called_once()
+    diagnostic = str(telemetry.call_args.args[0])
+    assert "Ambiguous SDS Endpoint response for ODS code E82665" in diagnostic
+
+    for sensitive in (first_address, second_address, party_key_1, party_key_2, str(nhs_no)):
+        assert sensitive not in diagnostic
+        assert sensitive not in response.body.decode()
+        assert sensitive not in caplog.text
+        assert sensitive not in str(endpoint_audits[0]["detail"])
+
+
+@pytest.mark.asyncio
+async def test_multiple_device_entries_fail_closed(mock_self_issuer, caplog):
+    party_key = "FAKE-PARTY-KEY-99"
+    asid_1 = "200000000001"
+    asid_2 = "200000000002"
+    nhs_no = 9690937278
+    endpoint_trace = {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Endpoint",
+                    "address": "https://gpconnect.example/fhir",
+                    "identifier": [
+                        {
+                            "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                            "value": party_key,
+                        }
+                    ],
+                }
+            }
+        ],
+    }
+    device_bundle = {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Device",
+                    "identifier": [
+                        {
+                            "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
+                            "value": asid_1,
+                        }
+                    ],
+                }
+            },
+            {
+                "resource": {
+                    "resourceType": "Device",
+                    "identifier": [
+                        {
+                            "system": "https://fhir.nhs.uk/Id/nhsSpineASID",
+                            "value": asid_2,
+                        }
+                    ],
+                }
+            },
+        ],
+    }
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(nhs_no)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure") as telemetry,
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+        caplog.at_level(logging.DEBUG),
+    ):
+        sds.side_effect = [endpoint_trace, device_bundle]
+
+        response = await gpconnect(nhs_no, saml_attrs=saml, request=get_mock_request())
+
+    assert response.status_code == 500
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert body["error"] == "Ambiguous SDS Device response for ODS code E82665"
+
+    assert sds.call_count == 2
+    assert sds.call_args_list[0].kwargs == {"endpoint": True}
+    assert sds.call_args_list[1].kwargs == {"mhsparty": party_key}
+
+    endpoint_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"]
+    assert len(endpoint_audits) == 1
+    assert endpoint_audits[0]["outcome"] == AuditOutcome.ok
+
+    identity_audits = [
+        call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
+    ]
+    assert len(identity_audits) == 1
+    assert identity_audits[0]["outcome"] == AuditOutcome.fail
+    assert identity_audits[0]["error_code"] == "500"
+    assert identity_audits[0]["detail"]["reason"] == "ambiguous_device_entries"
+
+    mock_self_issuer.assert_not_awaited()
+    client.assert_not_called()
+
+    telemetry.assert_called_once()
+    diagnostic = str(telemetry.call_args.args[0])
+    assert "Ambiguous SDS Device response for ODS code E82665" in diagnostic
+
+    for sensitive in (asid_1, asid_2, party_key, str(nhs_no)):
+        assert sensitive not in diagnostic
+        assert sensitive not in response.body.decode()
+        assert sensitive not in caplog.text
+        assert sensitive not in str(identity_audits[0]["detail"])
+
+
+@pytest.mark.asyncio
+async def test_zero_device_entries_fails_closed(mock_self_issuer):
+    party_key = "FAKE-PARTY-KEY-99"
+    nhs_no = 9690937278
+    endpoint_trace = {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Endpoint",
+                    "address": "https://gpconnect.example/fhir",
+                    "identifier": [
+                        {
+                            "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                            "value": party_key,
+                        }
+                    ],
+                }
+            }
+        ],
+    }
+    empty_device_bundle = {
+        "resourceType": "Bundle",
+        "entry": [],
+    }
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(nhs_no)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure"),
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [fake_sds_device_trace(), endpoint_trace]
-        post = client.return_value.__aenter__.return_value.post
-        post.return_value = Response(503, content="Service unavailable")
+        sds.side_effect = [endpoint_trace, empty_device_bundle]
 
-        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+        response = await gpconnect(nhs_no, saml_attrs=saml, request=get_mock_request())
 
-    assert response.status_code == 503
-    post.assert_awaited_once()
-    token = post.call_args.kwargs["headers"]["Authorization"].removeprefix("Bearer ")
-    claims = jwt.decode(token, options={"verify_signature": False})
-    assert claims["aud"] == first_address
+    assert response.status_code == 500
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert body["error"] == "Unable to find ASID for ODS code E82665"
+
+    assert sds.call_count == 2
+    assert sds.call_args_list[0].kwargs == {"endpoint": True}
+    assert sds.call_args_list[1].kwargs == {"mhsparty": party_key}
+
+    identity_audits = [
+        call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
+    ]
+    assert len(identity_audits) == 1
+    assert identity_audits[0]["outcome"] == AuditOutcome.fail
+    assert identity_audits[0]["error_code"] == "500"
+
+    mock_self_issuer.assert_not_awaited()
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "malformed_device",
+    [
+        None,
+        {},
+        {"resourceType": "Device"},
+        {"resourceType": "Bundle", "entry": None},
+    ],
+)
+async def test_non_bundle_device_response_fails_closed(mock_self_issuer, malformed_device):
+    party_key = "FAKE-PARTY-KEY-99"
+    nhs_no = 9690937278
+    endpoint_trace = {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Endpoint",
+                    "address": "https://gpconnect.example/fhir",
+                    "identifier": [
+                        {
+                            "system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey",
+                            "value": party_key,
+                        }
+                    ],
+                }
+            }
+        ],
+    }
+
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(nhs_no)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure"),
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [endpoint_trace, malformed_device]
+
+        response = await gpconnect(nhs_no, saml_attrs=saml, request=get_mock_request())
+
+    assert response.status_code == 500
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert "Unable to parse SDS trace response" in body["error"]
+
+    identity_audits = [
+        call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
+    ]
+    assert len(identity_audits) == 1
+    assert identity_audits[0]["outcome"] == AuditOutcome.fail
+    assert identity_audits[0]["error_code"] == "500"
+
+    mock_self_issuer.assert_not_awaited()
+    client.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -708,7 +1021,7 @@ async def test_endpoint_lookup_failure_is_audited_without_downstream_request(moc
         patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [fake_sds_device_trace(), RuntimeError("SDS unavailable")]
+        sds.side_effect = [RuntimeError("SDS unavailable")]
         if audit_fails:
 
             async def fail_endpoint_audit(**kwargs):
@@ -732,6 +1045,8 @@ async def test_endpoint_lookup_failure_is_audited_without_downstream_request(moc
         assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
         assert endpoint_audits[0]["error_code"] == "502"
         assert endpoint_audits[0]["detail"] == {"step": "sds_endpoint.sds_lookup", "exception_type": "RuntimeError"}
+        assert sds.call_count == 1
+        assert not any(call.kwargs["action"] == "sds_trace" for call in audit.await_args_list)
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
 
@@ -754,7 +1069,7 @@ async def test_gpconnect_readerror_audits_failure(
 
     fake_pds = load_pds(9690937278)
     mock_lookup_patient.return_value = fake_pds
-    mock_sds_trace.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+    mock_sds_trace.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
 
     mock_client = AsyncMock()
     mock_client.post.side_effect = httpx.ReadError("server closed connection before responding")
@@ -798,7 +1113,7 @@ async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock) as pds,
     ):
         pds.return_value = load_pds(9690937278)
-        sds.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+        sds.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
         client.return_value.__aenter__.return_value.post = AsyncMock(return_value=Response(200, content=payload))
         if audit_fails:
 
@@ -850,7 +1165,7 @@ async def test_gpconnect_non200_data_minimisation(
 
     fake_pds = load_pds(9690937278)
     mock_lookup_patient.return_value = fake_pds
-    mock_sds_trace.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+    mock_sds_trace.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
 
     synthetic_body = "SYNTHETIC_DOWNSTREAM_BODY_MUST_NOT_BE_AUDITED"
     mock_client = AsyncMock()
@@ -888,7 +1203,7 @@ async def test_gpconnect_transport_exception_data_minimisation(
 
     fake_pds = load_pds(9690937278)
     mock_lookup_patient.return_value = fake_pds
-    mock_sds_trace.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+    mock_sds_trace.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
 
     synthetic_body = "SYNTHETIC_SENSITIVE_EXCEPTION_TEXT"
     mock_client = AsyncMock()
@@ -933,7 +1248,7 @@ async def test_validate_fhir_bundle_data_minimisation(
 
     fake_pds = load_pds(9690937278)
     mock_lookup_patient.return_value = fake_pds
-    mock_sds_trace.side_effect = [fake_sds_device_trace(), fake_sds_endpoint_trace()]
+    mock_sds_trace.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
 
     synthetic_body = "SYNTHETIC_FHIR_CONTENT_MUST_NOT_BE_AUDITED"
     mock_client = AsyncMock()
@@ -977,7 +1292,7 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
         patch("app.gpconnect.record_application_failure") as mock_record_failure,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [upstream_error]
+        sds.side_effect = [fake_sds_endpoint_trace(), upstream_error]
 
         if audit_fails:
 
@@ -1011,6 +1326,12 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
             assert recorded_exception is not upstream_error
 
         # Audit verification
+        endpoint_audits = [
+            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
+        ]
+        assert len(endpoint_audits) == 1
+        assert endpoint_audits[0]["outcome"] == AuditOutcome.ok
+
         device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
         assert len(device_audits) == 1
         assert device_audits[0]["outcome"] == AuditOutcome.fail
@@ -1019,9 +1340,8 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
         for arg in device_audits[0].values():
             assert upstream_secret not in str(arg)
 
-        # Device failure prevents Endpoint lookup
-        assert sds.call_count == 1
-        assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
+        # Device failure prevents downstream GP Connect request
+        assert sds.call_count == 2
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
 
@@ -1040,7 +1360,7 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
         patch("app.gpconnect.record_application_failure") as mock_record_failure,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [fake_sds_device_trace(), upstream_error]
+        sds.side_effect = [upstream_error]
 
         if audit_fails:
 
@@ -1085,7 +1405,9 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
         for arg in endpoint_audits[0].values():
             assert upstream_secret not in str(arg)
 
-        # Downstream request never attempted
+        # Endpoint failure stops before Device lookup
+        assert sds.call_count == 1
+        assert not any(call.kwargs["action"] == "sds_trace" for call in audit.await_args_list)
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
 
@@ -1163,7 +1485,7 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
 async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(mock_self_issuer, audit_fails):
 
     upstream_secret = "SECRET_UPSTREAM_BODY"
-    safe_message = "Unable to find ASID or nhsMhsPartyKey for ODS code E82665"
+    safe_message = "Unable to find ASID for ODS code E82665"
     malformed_device = {
         "resourceType": "Bundle",
         "entry": [
@@ -1188,7 +1510,7 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
         patch("app.gpconnect.record_application_failure") as mock_record_failure,
         patch("app.gpconnect.httpx.AsyncClient") as client,
     ):
-        sds.side_effect = [malformed_device]
+        sds.side_effect = [fake_sds_endpoint_trace(), malformed_device]
 
         if audit_fails:
 
@@ -1215,12 +1537,19 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
             mock_record_failure.assert_called_once()
             assert "step: resolve_asid_partykey.identity_validation" in str(mock_record_failure.call_args.args[0])
 
-        # Stage 1 succeeded
+        # Stage 1 succeeded (Endpoint)
+        endpoint_audits = [
+            call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"
+        ]
+        assert len(endpoint_audits) == 1
+        assert endpoint_audits[0]["outcome"] == AuditOutcome.ok
+
+        # Stage 2 succeeded (Device trace)
         device_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "sds_trace"]
         assert len(device_audits) == 1
         assert device_audits[0]["outcome"] == AuditOutcome.ok
 
-        # Stage 2 failed
+        # Stage 3 failed (Device identity validation)
         identity_audits = [
             call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
         ]
@@ -1234,11 +1563,140 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
         for arg in identity_audits[0].values():
             assert upstream_secret not in str(arg)
 
-        # Stage 3 never attempted
-        assert sds.call_count == 1
-        assert not any(call.kwargs["action"] == "fhir_endpoint_trace" for call in audit.await_args_list)
+        # GP Connect downstream request never attempted
+        assert sds.call_count == 2
         mock_self_issuer.assert_not_awaited()
         client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_gpconnect_missing_party_key_fails_closed(mock_self_issuer):
+    """Endpoint resource without nhsMhsPartyKey must fail closed with 502."""
+    endpoint_without_party_key = {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Endpoint",
+                    "address": "fake-endpoint-address",
+                    "identifier": [{"system": "https://fhir.nhs.uk/Id/other", "value": "other"}],
+                }
+            }
+        ],
+    }
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure"),
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [endpoint_without_party_key]
+        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+    assert response.status_code == 502
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert "SDS Endpoint resolution failed for ODS code E82665" in body["error"]
+    assert "step: sds_endpoint.partykey_validation" in body["error"]
+    assert sds.call_count == 1
+    endpoint_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"]
+    assert len(endpoint_audits) == 1
+    assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
+    assert endpoint_audits[0]["error_code"] == "502"
+    assert endpoint_audits[0]["detail"]["step"] == "sds_endpoint.partykey_validation"
+    assert endpoint_audits[0]["detail"]["reason"] == "missing_nhs_mhs_party_key"
+    assert not any(call.kwargs["action"] == "sds_trace" for call in audit.await_args_list)
+    mock_self_issuer.assert_not_awaited()
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_gpconnect_ambiguous_party_key_fails_closed(mock_self_issuer):
+    """Endpoint resource with multiple nhsMhsPartyKey values must fail closed with 502."""
+    endpoint_with_ambiguous_party_key = {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Endpoint",
+                    "address": "fake-endpoint-address",
+                    "identifier": [
+                        {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "KEY-1"},
+                        {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "KEY-2"},
+                    ],
+                }
+            }
+        ],
+    }
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure"),
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [endpoint_with_ambiguous_party_key]
+        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+    assert response.status_code == 502
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert "SDS Endpoint resolution failed for ODS code E82665" in body["error"]
+    assert "step: sds_endpoint.partykey_validation" in body["error"]
+    assert sds.call_count == 1
+    endpoint_audits = [call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "fhir_endpoint_trace"]
+    assert len(endpoint_audits) == 1
+    assert endpoint_audits[0]["outcome"] == AuditOutcome.fail
+    assert endpoint_audits[0]["error_code"] == "502"
+    assert endpoint_audits[0]["detail"]["step"] == "sds_endpoint.partykey_validation"
+    assert endpoint_audits[0]["detail"]["reason"] == "ambiguous_nhs_mhs_party_key"
+    assert not any(call.kwargs["action"] == "sds_trace" for call in audit.await_args_list)
+    mock_self_issuer.assert_not_awaited()
+    client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_gpconnect_ambiguous_asid_fails_closed(mock_self_issuer):
+    """Device resource with multiple nhsSpineASID values must fail closed with 500."""
+    device_with_ambiguous_asid = {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Device",
+                    "identifier": [
+                        {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "ASID-1"},
+                        {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "ASID-2"},
+                    ],
+                }
+            }
+        ],
+    }
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure"),
+        patch("app.gpconnect.httpx.AsyncClient") as client,
+    ):
+        sds.side_effect = [fake_sds_endpoint_trace(), device_with_ambiguous_asid]
+        response = await gpconnect(9690937278, saml_attrs=saml, request=get_mock_request())
+
+    assert response.status_code == 500
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert body["error"] == "Ambiguous ASID for ODS code E82665"
+    assert sds.call_count == 2
+    identity_audits = [
+        call.kwargs for call in audit.await_args_list if call.kwargs["action"] == "resolve_asid_partykey"
+    ]
+    assert len(identity_audits) == 1
+    assert identity_audits[0]["outcome"] == AuditOutcome.fail
+    assert identity_audits[0]["error_code"] == "500"
+    assert identity_audits[0]["detail"]["step"] == "resolve_asid_partykey.identity_validation"
+    mock_self_issuer.assert_not_awaited()
+    client.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1246,26 +1704,25 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
     "failure_stage,sds_mock",
     [
         ("resolve_gp_ods", None),
-        ("sds_trace", [RuntimeError("upstream device failure")]),
+        ("sds_endpoint", [RuntimeError("upstream endpoint failure")]),
+        ("sds_trace", [fake_sds_endpoint_trace(), RuntimeError("upstream device failure")]),
         (
             "resolve_asid_partykey",
             [
+                fake_sds_endpoint_trace(),
                 {
                     "resourceType": "Bundle",
                     "entry": [
                         {
                             "resource": {
                                 "resourceType": "Device",
-                                "identifier": [
-                                    {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "200000000000"}
-                                ],
+                                "identifier": [{"system": "https://fhir.nhs.uk/Id/other", "value": "other"}],
                             }
                         }
                     ],
-                }
+                },
             ],
         ),
-        ("sds_endpoint", [fake_sds_device_trace(), RuntimeError("upstream endpoint failure")]),
     ],
 )
 async def test_raw_nhs_number_absent_from_application_logging(mock_self_issuer, failure_stage, sds_mock, caplog):
