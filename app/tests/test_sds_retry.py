@@ -15,7 +15,7 @@ from app.audit.models import AuditOutcome
 from app.gpconnect import _fetch_gpconnect_record
 from app.pds.pds import SDSUpstreamError, sds_cache_key, sds_trace
 from app.tests.fixtures.saml_attributes import saml
-from app.tests.test_gpconnect import fake_sds_device_trace, get_mock_request, load_pds
+from app.tests.test_gpconnect import fake_sds_endpoint_trace, get_mock_request, load_pds
 
 
 @pytest.mark.asyncio
@@ -349,6 +349,49 @@ async def test_security_regression_sentinel_secret_never_leaked(caplog):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "status", "reason", "attempts", "message"),
+    [
+        (httpx.ReadTimeout("PRIVATE_TRANSPORT_DETAIL"), 504, "transport_error", 3, "ReadTimeout"),
+        (httpx.ConnectError("PRIVATE_TRANSPORT_DETAIL"), 502, "transport_error", 3, "ConnectError"),
+        (httpx.Response(200, text="PRIVATE_MALFORMED_JSON"), 502, "malformed_json", 1, "malformed JSON"),
+    ],
+)
+async def test_sds_transport_and_decode_failures_reach_gpconnect_caller(
+    failure, status, reason, attempts, message, caplog
+):
+    with (
+        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.pds.pds.redis_client", autospec=True) as cache,
+        patch("app.pds.pds.httpx.AsyncClient") as factory,
+        patch("app.pds.pds.asyncio.sleep", new_callable=AsyncMock),
+        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.gpconnect.record_application_failure"),
+    ):
+        cache.get.return_value = None
+        client = AsyncMock()
+        if isinstance(failure, Exception):
+            client.get.side_effect = failure
+        else:
+            client.get.return_value = failure
+        factory.return_value.__aenter__.return_value = client
+        response = await _fetch_gpconnect_record(9690937278, saml, request=get_mock_request())
+
+    assert response.status_code == status
+    body = json.loads(response.body)
+    assert body["success"] is False
+    assert message in body["error"]
+    assert "request_id:" in body["error"]
+    assert client.get.await_count == attempts
+    client.post.assert_not_awaited()
+    cache.setex.assert_not_called()
+    assert audit.await_args.kwargs["error_code"] == str(status)
+    assert audit.await_args.kwargs["detail"]["reason"] == reason
+    assert audit.await_args.kwargs["detail"]["attempts"] == attempts
+    assert "PRIVATE_" not in response.body.decode() + caplog.text + str(audit.await_args.kwargs)
+
+
+@pytest.mark.asyncio
 async def test_gpconnect_endpoint_sds_upstream_failure_audits_safe_fields(caplog):
     """GP Connect endpoint lookup failure with SDSUpstreamError records safe structured audit detail with 3 attempts."""
     sentinel = "UPSTREAM_SECRET_BODY_503"
@@ -359,18 +402,18 @@ async def test_gpconnect_endpoint_sds_upstream_failure_audits_safe_fields(caplog
         patch("app.gpconnect.record_application_failure"),
         caplog.at_level(logging.DEBUG),
     ):
-        mock_sds.side_effect = [
-            fake_sds_device_trace(),
-            SDSUpstreamError(status_code=503, attempts=3, resource_type="Endpoint", reason="upstream_http_failure"),
-        ]
+        mock_sds.side_effect = SDSUpstreamError(
+            status_code=503, attempts=3, resource_type="Endpoint", reason="upstream_http_failure"
+        )
 
         response = await _fetch_gpconnect_record(9690937278, saml, request=get_mock_request())
 
-        assert response.status_code == 502
+        assert response.status_code == 503
         body = json.loads(response.body)
         assert body == {
             "success": False,
-            "error": "SDS Endpoint resolution failed for ODS code E82665",
+            "error": "SDS Endpoint resolution failed for ODS code E82665: "
+            "SDS Endpoint upstream failure (status=503, attempts=3, reason=upstream_http_failure)",
         }
         assert sentinel not in response.body.decode()
 
@@ -381,9 +424,9 @@ async def test_gpconnect_endpoint_sds_upstream_failure_audits_safe_fields(caplog
         assert len(endpoint_audits) == 1
         audit_call = endpoint_audits[0]
         assert audit_call["outcome"] == AuditOutcome.fail
-        assert audit_call["error_code"] == "502"
+        assert audit_call["error_code"] == "503"
         assert audit_call["detail"] == {
-            "stage": "sds_endpoint",
+            "step": "sds_endpoint.sds_lookup",
             "exception_type": "SDSUpstreamError",
             "reason": "upstream_http_failure",
             "upstream_status": 503,
@@ -391,7 +434,8 @@ async def test_gpconnect_endpoint_sds_upstream_failure_audits_safe_fields(caplog
         }
         assert sentinel not in str(audit_call)
         assert sentinel not in caplog.text
-        assert "exception_type=SDSUpstreamError, reason=upstream_http_failure, status=503, attempts=3" in caplog.text
+        assert "exception_type: SDSUpstreamError" in caplog.text
+        assert "reason=upstream_http_failure, status=503, attempts=3" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -405,17 +449,19 @@ async def test_gpconnect_device_sds_upstream_failure_audits_safe_fields(caplog):
         patch("app.gpconnect.record_application_failure"),
         caplog.at_level(logging.DEBUG),
     ):
-        mock_sds.side_effect = SDSUpstreamError(
-            status_code=503, attempts=3, resource_type="Device", reason="upstream_http_failure"
-        )
+        mock_sds.side_effect = [
+            fake_sds_endpoint_trace(),
+            SDSUpstreamError(status_code=503, attempts=3, resource_type="Device", reason="upstream_http_failure"),
+        ]
 
         response = await _fetch_gpconnect_record(9690937278, saml, request=get_mock_request())
 
-        assert response.status_code == 502
+        assert response.status_code == 503
         body = json.loads(response.body)
         assert body == {
             "success": False,
-            "error": "SDS Trace failed for ODS code E82665",
+            "error": "SDS Trace failed for ODS code E82665: "
+            "SDS Device upstream failure (status=503, attempts=3, reason=upstream_http_failure)",
         }
         assert sentinel not in response.body.decode()
 
@@ -423,9 +469,9 @@ async def test_gpconnect_device_sds_upstream_failure_audits_safe_fields(caplog):
         assert len(device_audits) == 1
         audit_call = device_audits[0]
         assert audit_call["outcome"] == AuditOutcome.fail
-        assert audit_call["error_code"] == "502"
+        assert audit_call["error_code"] == "503"
         assert audit_call["detail"] == {
-            "stage": "sds_trace",
+            "step": "sds_trace.sds_lookup",
             "exception_type": "SDSUpstreamError",
             "reason": "upstream_http_failure",
             "upstream_status": 503,
@@ -433,4 +479,5 @@ async def test_gpconnect_device_sds_upstream_failure_audits_safe_fields(caplog):
         }
         assert sentinel not in str(audit_call)
         assert sentinel not in caplog.text
-        assert "exception_type=SDSUpstreamError, reason=upstream_http_failure, status=503, attempts=3" in caplog.text
+        assert "exception_type: SDSUpstreamError" in caplog.text
+        assert "reason=upstream_http_failure, status=503, attempts=3" in caplog.text

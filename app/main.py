@@ -49,6 +49,7 @@ from .security import fix_pem_formatting, get_jwk_keyset, verify_api_key
 from .settings import USE_RELAY
 from .soap import soap
 from .telemetry import monitor_event_loop
+from .version import VERSION
 
 # Generate or retrieve registry ID from environment
 REGISTRY_ID = os.getenv("REGISTRY_ID", str(uuid4()))
@@ -188,7 +189,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Xhuma",
     description="A stateless middleware service for GP Connect to CCDA conversion",
-    version="1.0.1",
+    version=VERSION,
     lifespan=lifespan,
 )
 # Instrument FastAPI app, HTTPX client, and Logging for Azure Application Insights

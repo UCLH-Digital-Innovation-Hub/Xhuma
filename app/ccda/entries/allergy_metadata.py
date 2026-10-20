@@ -10,6 +10,7 @@ from ..models.allergy import (
     AllergyInformant,
     AllergyRelatedEntity,
 )
+from ..models.demographics import PersonName
 
 
 def reference_details(reference, index, owner):
@@ -101,7 +102,9 @@ def source_informant(reference, index, owner):
             assignedEntity=AllergyAssignedEntity(id=identifiers, assignedPerson=_person(label, reference))
         ), label
     if label:
-        return AllergyInformant(relatedEntity=AllergyRelatedEntity(relatedPerson=Person(name=label))), label
+        return AllergyInformant(
+            relatedEntity=AllergyRelatedEntity(relatedPerson=Person(name=[PersonName(text=label)]))
+        ), label
     return None, None
 
 
@@ -113,4 +116,4 @@ def _person(label, reference):
     """
     identifier = getattr(reference, "identifier", None)
     fallbacks = (getattr(reference, "reference", None), getattr(identifier, "value", None))
-    return Person(name=label) if label and label not in fallbacks else None
+    return Person(name=[PersonName(text=label)]) if label and label not in fallbacks else None
