@@ -190,8 +190,6 @@ async def test_prn_medication_statement():
     substance_administration = await medication_entry(prn_statement, index_dict)
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
-    # Print the CCDA entry for debugging purposes
-    # pprint.pprint(substance_administration)
 
     # Check that the entry is not None
     assert substance_administration is not None
