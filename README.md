@@ -191,6 +191,24 @@ PostgreSQL stores clinical audit records and must be available for clinical requ
 
 Direct GP Connect calls also require `keys/nhs_certs/client_cert.pem`, `client_key.pem` and `nhs_bundle.pem`. Compose mounts the `keys/` directory read-only. For deployed certificate and secret management, follow the [Operator's Manual](docs/operations/operators_manual.md).
 
+### NHS client certificate files
+
+Use [generate_nhs_client_files.py](scripts/generate_nhs_client_files.py) with the existing private key used for the CSR and the NHS-issued client certificate. It downloads the latest published G2 CA certificates from the official NHS links and verifies the key match, chain signatures, TLS client purpose and validity dates before writing files. Production is the default; use `--environment int` for integration.
+
+The script requires the project's Python dependencies and the `openssl` command. It accepts unencrypted PEM or DER private keys and X.509 or PKCS#7 certificate files in PEM or DER format.
+
+For a certificate saved in Downloads under the same basename as its CSR key:
+
+```bash
+python scripts/generate_nhs_client_files.py \
+  keys/nhs_certs/GPC-Z6G1Z.uclhinnovationhub.nhs.uk.key \
+  --cert ~/Downloads/GPC-Z6G1Z.uclhinnovationhub.nhs.uk.txt
+```
+
+The certificate basename must match the key's basename, including when `--cert` points to another directory. Without `--cert`, the script searches beside the key for a certificate with that basename and a `.crt`, `.cer`, `.pem`, `.txt`, `.p7b` or `.p7c` extension. The default output folder is `KEY_PARENT/KEY_STEM`; the example creates `keys/nhs_certs/GPC-Z6G1Z.uclhinnovationhub.nhs.uk/`. Use `--output-root DIR` to change its parent directory while keeping that folder name, and `--overwrite` to replace existing output files.
+
+The folder contains `client_key.pem` (the existing CSR key), `client_cert.pem` (client certificate followed by its issuing intermediate), `nhs_bundle.pem` (intermediate followed by root CA) and `thumbprints.json` (certificate thumbprints and file hashes). The generated folder and files use mode `0777` for container access. Mount the key-named output folder at `/code/keys/nhs_certs` in the application container so the files match the direct GP Connect caller's `keys/nhs_certs/` paths.
+
 ### Terminology services
 
 If medication conversion requires live dm+d lookups, register for an [NHS Terminology Server system-to-system account](https://digital.nhs.uk/services/terminology-server/how-to-access-the-terminology-server/request-a-system-to-system-account/content). The registration page includes the account request form. Configure the supplied client credentials as `DMD_CLIENT_ID` and `DMD_CLIENT_SECRET` in `.env` or your deployment's secret store. These credentials are separate from the NHS API key and are required when the application calls the Terminology Server.
