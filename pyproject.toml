@@ -3,7 +3,7 @@ name = "Xhuma"
 version = "1.0.3"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.143.3",
+    "fastapi>=0.146.0",
     "pyjwt>=2.15.1",
     "httpx",
     "xmltodict",
@@ -60,7 +60,7 @@ dev = [
     "ruff>=0.17.1",
     "locust",
     "pytest-cov>=7.1.0",
-    "schemathesis>=4.31.1",
+    "schemathesis>=4.32.0",
     "hypothesis>=6.170.1",
     "pytest-sugar>=1.1.1",
 ]
