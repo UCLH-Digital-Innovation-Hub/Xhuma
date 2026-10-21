@@ -6,21 +6,18 @@ from fastapi.responses import JSONResponse
 from fhirclient.models.fhirabstractbase import FHIRValidationError as FHIRValidationError
 
 from . import logging as application_logging
-from .audit import audit
 from .audit.audit import AuditFailureException
 from .audit.audit import attempt_audit as attempt_audit
-from .audit.models import AuditOutcome, SAMLAttributes
-from .ccda.helpers import validateNHSnumber
+from .audit.models import SAMLAttributes
 from .gp_connect_config import GP_CONNECT_PARAMETERS
 from .gpconnect_stages.document import process_document
+from .gpconnect_stages.patient import resolve_patient
 from .gpconnect_stages.request import fetch_record, prepare_request
 from .gpconnect_stages.routing import resolve_provider
 from .gpconnect_stages.transport import create_nhs_ssl_context as create_nhs_ssl_context
 from .gpconnect_stages.transport import get_nhs_cert_paths as get_nhs_cert_paths
 from .gpconnect_stages.types import DiagnosticStep
-from .pds.pds import lookup_patient
 from .settings import USE_RELAY
-from .telemetry import measure
 
 router = APIRouter()
 
@@ -53,117 +50,19 @@ async def _fetch_gpconnect_record(
 ) -> JSONResponse:
     step = "validate_nhs_number.validate"
     try:
-        # 1) Validate NHS number
-        if validateNHSnumber(nhsno) is False:
-            msg = f"{nhsno} is not a valid NHS number"
-            await audit.attempt_audit(
-                request=request,
-                nhs_number=str(nhsno),
-                saml=saml_attrs,
-                action="validate_nhs_number",
-                outcome=AuditOutcome.fail,
-                error_code="400",
-                detail={"step": step},
-            )
-            return JSONResponse(status_code=400, content={"success": False, "error": msg})
-
-        # 2) PDS lookup
+        patient_step = DiagnosticStep(step)
         try:
-            step = "pds_lookup.lookup_patient"
-            with measure("pds.lookup"):
-                pds_search = await lookup_patient(nhsno, request=request, saml=saml_attrs)
-        except AuditFailureException:
-            raise
-        except HTTPException as e:
-            diagnostic = f"PDS lookup failed (HTTP {e.status_code}) (step: {step}, exception_type: {type(e).__name__})"
-            if e.status_code != 404:
-                application_logging.record_application_failure(RuntimeError(diagnostic))
-            logging.error(diagnostic)
-            if log_dir:
-                with open(os.path.join(log_dir, "error.log"), "a") as f:
-                    f.write(diagnostic + "\n")
-            if e.status_code == 404:
-                return JSONResponse(
-                    status_code=404,
-                    content={
-                        "success": False,
-                        "error": e.detail,
-                        "xds_error_code": "XDSUnknownPatientId",
-                    },
-                )
-            return JSONResponse(
-                status_code=e.status_code, content={"success": False, "error": f"PDS lookup failed: {e.detail}"}
-            )
-        except Exception as e:
-            status_code = e.status_code if isinstance(e, HTTPException) else 502
-            msg = "PDS lookup failed"
-            diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            application_logging.record_application_failure(RuntimeError(diagnostic))
-            logging.error(diagnostic)
-            if log_dir:
-                with open(os.path.join(log_dir, "error.log"), "a") as f:
-                    f.write(diagnostic + "\n")
-            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
-            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
-
-        # 3) Security/U flag
-        step = "check_restriction.security_extraction"
-        try:
-            security_code = pds_search["meta"]["security"][0]["code"]
-        except Exception as e:
-            diagnostic = f"Unable to read PDS security metadata (step: {step}, exception_type: {type(e).__name__})"
-            application_logging.record_application_failure(RuntimeError(diagnostic))
-            logging.error(diagnostic)
-            if log_dir:
-                with open(os.path.join(log_dir, "error.log"), "a") as f:
-                    f.write(diagnostic + "\n")
-            security_code = None
-
-        if security_code != "U":
-            step = "check_restriction.restriction_check"
-            msg = "Patient is not unrestricted, access to GP Connect is not permitted"
-            await audit.attempt_audit(
+            gp_ods = await resolve_patient(
+                nhsno,
+                saml_attrs,
                 request=request,
-                nhs_number=str(nhsno),
-                saml=saml_attrs,
-                action="check_restriction",
-                outcome=AuditOutcome.deny,
-                error_code="403",
-                detail={"step": step},
+                log_dir=log_dir,
+                step=patient_step,
             )
-            diagnostic = f"Patient is restricted (step: {step})"
-            logging.error(diagnostic)
-            if log_dir:
-                with open(os.path.join(log_dir, "error.log"), "a") as f:
-                    f.write(diagnostic + "\n")
-            return JSONResponse(status_code=403, content={"success": False, "error": msg})
-
-        # 4) Resolve GP ODS
-        step = "resolve_gp_ods.ods_extraction"
-        try:
-            gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
-        except AuditFailureException:
-            raise
-        except Exception as e:
-            status_code = e.status_code if isinstance(e, HTTPException) else 502
-            msg = "Unable to read GP ODS from PDS response"
-            diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            application_logging.record_application_failure(RuntimeError(diagnostic))
-            logging.error(diagnostic)
-            if log_dir:
-                with open(os.path.join(log_dir, "error.log"), "a") as f:
-                    f.write(diagnostic + "\n")
-            await audit.attempt_audit(
-                request=request,
-                nhs_number=str(nhsno),
-                saml=saml_attrs,
-                action="resolve_gp_ods",
-                outcome=AuditOutcome.fail,
-                error_code=str(status_code),
-                detail={"step": step, "exception_type": type(e).__name__},
-            )
-            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
-            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
+        finally:
+            step = patient_step.value
+        if isinstance(gp_ods, Response):
+            return gp_ods
 
         routing_step = DiagnosticStep(step)
         try:

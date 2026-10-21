@@ -25,7 +25,7 @@ def isolate_startup_io():
 
 
 @pytest.mark.asyncio
-@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock)
 @patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect_stages.document.redis_client.pipeline")
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
