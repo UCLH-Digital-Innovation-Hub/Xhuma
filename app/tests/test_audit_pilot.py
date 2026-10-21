@@ -168,7 +168,7 @@ async def test_gpconnect_restricted_patient_denial(mock_lookup, mock_attempt_aud
 
 
 @pytest.mark.asyncio
-@patch("app.gpconnect.create_nhs_ssl_context")
+@patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
 @patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.redis_client.pipeline")
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
@@ -211,7 +211,7 @@ async def test_redis_publication_audit_failure_interaction(
                 ],
             },
         ]
-        with patch("app.gpconnect.httpx.AsyncClient") as mock_client:
+        with patch("app.gpconnect_stages.transport.httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.post.return_value = MagicMock(
                 status_code=200, text='{"resourceType": "Bundle", "type": "searchset", "entry": []}'
             )

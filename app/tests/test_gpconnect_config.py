@@ -28,8 +28,8 @@ def isolate_startup_io():
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 @patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.redis_client.pipeline")
-@patch("app.gpconnect.create_nhs_ssl_context")
-@patch("app.gpconnect.httpx.AsyncClient")
+@patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
+@patch("app.gpconnect_stages.transport.httpx.AsyncClient")
 @patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
 async def test_ccda_expiry_configuration_parsing(
     mock_audit, mock_client, mock_ssl, mock_pipeline, mock_sds, mock_lookup
