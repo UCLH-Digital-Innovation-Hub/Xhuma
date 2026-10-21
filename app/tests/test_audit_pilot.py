@@ -156,7 +156,7 @@ async def test_iti39_destination_denial(mock_extract_saml, mock_attempt_audit, c
 
 
 @pytest.mark.asyncio
-@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_restricted_patient_denial(mock_lookup, mock_attempt_audit):
     mock_lookup.return_value = {"meta": {"security": [{"code": "R"}]}}
@@ -169,8 +169,8 @@ async def test_gpconnect_restricted_patient_denial(mock_lookup, mock_attempt_aud
 
 @pytest.mark.asyncio
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
-@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
-@patch("app.gpconnect.redis_client.pipeline")
+@patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.document.redis_client.pipeline")
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_redis_publication_audit_failure_interaction(
     mock_lookup, mock_pipeline, mock_attempt_audit, mock_ssl, mock_self_issuer
@@ -215,9 +215,9 @@ async def test_redis_publication_audit_failure_interaction(
             mock_client.return_value.__aenter__.return_value.post.return_value = MagicMock(
                 status_code=200, text='{"resourceType": "Bundle", "type": "searchset", "entry": []}'
             )
-            with patch("app.gpconnect.convert_bundle", new_callable=AsyncMock) as mock_convert:
+            with patch("app.gpconnect_stages.document.convert_bundle", new_callable=AsyncMock) as mock_convert:
                 mock_convert.return_value = {"ClinicalDocument": "test"}
-                with patch("app.gpconnect.base64_xml") as mock_base64:
+                with patch("app.gpconnect_stages.document.base64_xml") as mock_base64:
                     mock_base64.return_value = "base64"
 
                     # Make audit fail on store_ccda
