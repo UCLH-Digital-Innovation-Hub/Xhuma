@@ -2844,3 +2844,116 @@ async def test_transport_overlapping_requests_keep_failure_steps_local(observed_
     ]
     assert len({a["request_id"] for a in failures}) == 2
     assert not p.published
+
+
+@pytest.mark.asyncio
+async def test_document_first_comment_and_index_identity(observed_pipeline, monkeypatch, caplog):
+    p = observed_pipeline
+    entries = [{"fhir_comments": ["first"]}, {"fhir_comments": ["second"]}]
+    p.http_response = Response(200, json={"resourceType": "Bundle", "type": "collection", "entry": entries})
+    first = SimpleNamespace(resource_type="Patient", id="same")
+    last = SimpleNamespace(resource_type="Patient", id="same")
+    partial = SimpleNamespace(resource_type="Patient", id="partial")
+    model = SimpleNamespace(
+        entry=[
+            SimpleNamespace(resource=first, fullUrl="urn:first"),
+            SimpleNamespace(resource=last, fullUrl="urn:shared"),
+            SimpleNamespace(resource=first, fullUrl="urn:shared"),
+            SimpleNamespace(resource=partial),  # Reference insertion survives missing fullUrl.
+            SimpleNamespace(resource=None),
+        ]
+    )
+
+    # The third entry overwrites both reference and fullUrl; objects are not copied.
+    def build(payload):
+        assert payload["entry"] == [entries[1]]
+        return model
+
+    async def convert(actual, index):
+        assert actual is model
+        assert index == {"Patient/same": first, "Patient/partial": partial, "urn:first": first, "urn:shared": first}
+        assert all(index[key] is first for key in ("Patient/same", "urn:first", "urn:shared"))
+        return {"ClinicalDocument": {}}
+
+    monkeypatch.setattr(p.gp, "bundle", SimpleNamespace(Bundle=build))
+    monkeypatch.setattr(p.gp, "convert_bundle", convert)
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == 200
+    assert (
+        caplog.text.count("Skipping FHIR resource (step: fhir_index.resource_index, exception_type: AttributeError)")
+        == 2
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "boundary,step",
+    [
+        ("redis.enter", "pipeline_open"),
+        ("redis.setex", "queue_patient_document"),
+        ("redis.hset", "queue_document_content"),
+        ("redis.expire", "queue_document_expiry"),
+    ],
+)
+async def test_document_publication_queue_failure(observed_pipeline, boundary, step):
+    p = observed_pipeline
+    p.failures[boundary] = RuntimeError("synthetic failure")
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == 500
+    assert (
+        json.loads(response.body)["error"]
+        == f"GP Connect failed (step: ccda_cache.{step}, exception_type: RuntimeError)"
+    )
+    assert p.audits[-1]["action"] == "store_ccda"
+    assert p.audits[-1]["outcome"] == AuditOutcome.ok
+    assert "redis.execute" not in p.events
+    assert not p.published
+
+
+@pytest.mark.asyncio
+async def test_document_conversion_http_exception(observed_pipeline):
+    p = observed_pipeline
+    p.failures["convert"] = HTTPException(409, "synthetic conversion detail")
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == 409
+    assert json.loads(response.body)["error"] == "Failed to convert FHIR Bundle to CCDA: synthetic conversion detail"
+    assert p.audits[-1]["action"] == "gpconnect_request"
+    assert p.audits[-1]["outcome"] == AuditOutcome.ok
+    assert not p.published
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("xml_fails", [False, True])
+async def test_document_debug_file_order(observed_pipeline, monkeypatch, tmp_path, xml_fails):
+    p = observed_pipeline
+    directory = tmp_path / "debug"
+    directory.mkdir()
+    real_open = open
+
+    def debug_open(path, *args, **kwargs):
+        name = Path(path).name
+        p.note(f"file:{name}")
+        if name.endswith(".xml") and xml_fails:
+            raise OSError("synthetic write failure")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(p.gp, "open", debug_open, raising=False)
+    response = await p.gp._fetch_gpconnect_record(p.nhs, p.saml, log_dir=str(directory), request=p.request)
+    assert p.events.index("inject") < p.events.index("file:request_headers.json") < p.events.index("http.post")
+    assert (
+        p.events.index("http.response")
+        < p.events.index("file:200_response.json")
+        < p.events.index("audit:gpconnect_request:ok")
+    )
+    assert p.events.index("convert") < p.events.index(f"file:{p.nhs}.xml")
+    if xml_fails:
+        assert response.status_code == 500
+        assert (
+            json.loads(response.body)["error"]
+            == "GP Connect failed (step: ccda_serialize.xml_debug_file, exception_type: OSError)"
+        )
+        assert "serialize" not in p.events
+        assert not p.published
+    else:
+        assert response.status_code == 200
+        assert p.events.index(f"file:{p.nhs}.xml") < p.events.index("serialize")
