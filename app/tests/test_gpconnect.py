@@ -3113,3 +3113,40 @@ async def test_request_construction_failures(observed_pipeline, monkeypatch, bou
     assert p.audits[-1]["action"] == last_action
     assert p.audits[-1]["outcome"] == (AuditOutcome.fail if boundary == "jwt" else AuditOutcome.ok)
     assert "http.post" not in p.events
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ods", [None, "", " padded-ods ", 17])
+async def test_patient_first_entries_and_unvalidated_ods(observed_pipeline, monkeypatch, ods):
+    p = observed_pipeline
+    p.patient["meta"]["security"] = [{"code": "U"}, {"code": "R"}]
+    p.patient["generalPractitioner"] = [{"identifier": {"value": ods}}, {"identifier": {"value": "ignored"}}]
+    sds = AsyncMock(side_effect=HTTPException(503, "synthetic stop"))
+    monkeypatch.setattr(p.routing, "sds_trace", sds)
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == 503
+    sds.assert_awaited_once_with(ods, endpoint=True)
+    assert [(a["action"], a["outcome"].value) for a in p.audits] == [
+        ("pds_lookup", "ok"),
+        ("fhir_endpoint_trace", "fail"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_patient_first_security_code_controls_denial(observed_pipeline):
+    p = observed_pipeline
+    p.patient["meta"]["security"] = [{"code": "R"}, {"code": "U"}]
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == 403
+    assert p.events == ["nhs.validate", "pds", "audit:pds_lookup:ok", "audit:check_restriction:deny", "json.response"]
+
+
+@pytest.mark.asyncio
+async def test_patient_cache_hit_audit_failure_stops_routing(observed_pipeline, caplog):
+    p = observed_pipeline
+    p.fail_audit = "pds_lookup"
+    with pytest.raises(AuditFailureException, match="^GP Connect audit persistence failed$"):
+        await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert p.events == ["nhs.validate", "pds", "audit:pds_lookup:ok"]
+    assert "GP Connect failed (step: pds_lookup.lookup_patient, exception_type: AuditFailureException)" in caplog.text
+    assert not p.published
