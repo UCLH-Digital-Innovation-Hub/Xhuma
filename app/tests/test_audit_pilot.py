@@ -157,7 +157,7 @@ async def test_iti39_destination_denial(mock_extract_saml, mock_attempt_audit, c
 
 @pytest.mark.asyncio
 @patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
-@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_restricted_patient_denial(mock_lookup, mock_attempt_audit):
     mock_lookup.return_value = {"meta": {"security": [{"code": "R"}]}}
 
@@ -171,7 +171,7 @@ async def test_gpconnect_restricted_patient_denial(mock_lookup, mock_attempt_aud
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
 @patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect_stages.document.redis_client.pipeline")
-@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock)
 async def test_redis_publication_audit_failure_interaction(
     mock_lookup, mock_pipeline, mock_attempt_audit, mock_ssl, mock_self_issuer
 ):
