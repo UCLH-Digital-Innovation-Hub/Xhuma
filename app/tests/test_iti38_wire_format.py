@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from app.audit.models import SAMLAttributes
 from app.ccda.models.datatypes import CD
@@ -99,3 +100,35 @@ async def test_iti38_success_wire_format(mock_request, mock_saml):
         extrinsic = obj_list.find("rim:ExtrinsicObject", namespaces)
         assert extrinsic is not None
         assert extrinsic.attrib.get("id") == "test-doc-id"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pds_status,error_code", [(404, "XDSUnknownPatientId"), (502, "XDSRegistryError")])
+async def test_iti38_preserves_pds_patient_not_found(mock_request, mock_saml, pds_status, error_code):
+    with (
+        patch("app.soap.responses.iti_38.redis_client.get", return_value=None),
+        patch(
+            "app.gpconnect.lookup_patient", side_effect=HTTPException(pds_status, "PDS Entitlement or Token Failure")
+        ),
+        patch("app.soap.responses.iti_38.attempt_audit") as audit,
+    ):
+        xml = await iti_38_response(
+            mock_request,
+            9690937278,
+            "ceid",
+            "queryid",
+            mock_saml,
+            message_id="urn:uuid:synthetic-message",
+        )
+    root = ET.fromstring(xml)
+    error = root.find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0}RegistryError")
+    assert error is not None
+    assert error.attrib["errorCode"] == error_code
+    if pds_status == 404:
+        assert "9690937278" in error.attrib["codeContext"]
+    if pds_status == 404:
+        assert "PDS Entitlement or Token Failure" not in xml
+    else:
+        assert "PDS Entitlement or Token Failure" in error.attrib["codeContext"]
+    assert root.findtext(".//{http://www.w3.org/2005/08/addressing}RelatesTo") == "urn:uuid:synthetic-message"
+    assert audit.await_args.kwargs["outcome"].value == "fail"

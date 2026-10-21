@@ -20,7 +20,7 @@ xhuma_ods_code      = "Z6G1Z"
 xhuma_mhs_party_key = "Z6G1Z-838808"
 # prod enables production runtime checks and uses the explicit proxy bases below.
 env                 = "prod"
-app_version         = "0.9.2"
+app_version         = "1.0.2"
 require_mtls        = "true"
 
 # Wildcards permit all hosts/origins; application mTLS enforcement remains enabled.
@@ -46,3 +46,7 @@ nhs_relay_base_path    = "https://proxy.national.ncrs.nhs.uk"
 nhs_over_internet_path = ""
 # Production uses the production2 terminology endpoint rather than the default production1.
 dmd_base_url           = "https://ontology.nhs.uk/production2/fhir"
+
+# dm+d Cache Warmer (Standard target-local infrastructure in PRD; schedule deferred)
+dmd_cache_warm_enabled     = true
+dmd_cache_schedule_enabled = false

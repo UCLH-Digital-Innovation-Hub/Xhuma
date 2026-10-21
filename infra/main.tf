@@ -109,6 +109,23 @@ resource "azurerm_subnet" "locust_subnet" {
   }
 }
 
+resource "azurerm_subnet" "ca_subnet" {
+  count                = var.dmd_cache_warm_enabled ? 1 : 0
+  name                 = "ca-subnet"
+  resource_group_name  = data.azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.1.5.0/27"]
+  service_endpoints    = ["Microsoft.KeyVault"]
+
+  delegation {
+    name = "ca-delegation"
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
+
 # Load-test containers attach this reusable identity to read test credentials
 # from Key Vault using the access policies defined later in this file.
 resource "azurerm_user_assigned_identity" "locust_mi" {
@@ -521,4 +538,514 @@ resource "azurerm_postgresql_flexible_server_configuration" "log_min_duration_st
   name      = "log_min_duration_statement"
   server_id = azurerm_postgresql_flexible_server.postgres.id
   value     = "-1"
+}
+
+# --- Target-Local dm+d Cache Warmer Infrastructure ---
+
+locals {
+  dmd_job_replica_timeout_seconds = 1800
+  dmd_logic_poll_timeout_seconds  = 2100
+  dmd_lock_ttl_seconds            = 2700
+}
+
+resource "azurerm_container_app_environment" "cae" {
+  count                          = var.dmd_cache_warm_enabled ? 1 : 0
+  name                           = "${var.app_service_name}-cae"
+  location                       = data.azurerm_resource_group.rg.location
+  resource_group_name            = data.azurerm_resource_group.rg.name
+  infrastructure_subnet_id       = azurerm_subnet.ca_subnet[0].id
+  log_analytics_workspace_id     = azurerm_log_analytics_workspace.law.id
+  internal_load_balancer_enabled = false
+
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+  }
+
+  # AzureRM/Azure normalise the Consumption profile after creation, and Azure
+  # generates the infrastructure resource-group name behind the scenes. Neither
+  # value is an operator-controlled configuration input; ignoring them prevents
+  # false destroy/recreate plans on subsequent runs while first creation still
+  # uses the declared Consumption profile.
+  lifecycle {
+    ignore_changes = [
+      workload_profile,
+      infrastructure_resource_group_name,
+      tags["CostCenter"],
+    ]
+  }
+}
+
+resource "azurerm_user_assigned_identity" "dmd_job_mi" {
+  count               = var.dmd_cache_warm_enabled ? 1 : 0
+  name                = "${var.app_service_name}-dmd-job-mi"
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
+}
+
+resource "azurerm_key_vault_access_policy" "dmd_job_shared_policy" {
+  count        = var.dmd_cache_warm_enabled ? 1 : 0
+  provider     = azurerm.shared
+  key_vault_id = data.azurerm_key_vault.shared_kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_user_assigned_identity.dmd_job_mi[0].principal_id
+
+  secret_permissions = ["Get"]
+}
+
+resource "azurerm_container_app_job" "dmd_warm" {
+  count                        = var.dmd_cache_warm_enabled ? 1 : 0
+  name                         = "${var.app_service_name}-dmd-warm"
+  location                     = data.azurerm_resource_group.rg.location
+  resource_group_name          = data.azurerm_resource_group.rg.name
+  container_app_environment_id = azurerm_container_app_environment.cae[0].id
+  replica_timeout_in_seconds   = local.dmd_job_replica_timeout_seconds
+  replica_retry_limit          = 0
+
+  manual_trigger_config {
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.dmd_job_mi[0].id]
+  }
+
+  secret {
+    name  = "redis-password"
+    value = azurerm_redis_cache.redis.primary_access_key
+  }
+
+  secret {
+    name  = "registry-password"
+    value = var.docker_registry_password
+  }
+
+  registry {
+    server               = split("/", coalesce(var.dmd_cache_job_image, var.docker_image))[0]
+    username             = var.docker_registry_username
+    password_secret_name = "registry-password"
+  }
+
+  template {
+    container {
+      name   = "dmd-warmer"
+      image  = var.dmd_cache_job_image != null ? var.dmd_cache_job_image : ""
+      cpu    = 0.5
+      memory = "1Gi"
+
+      command = ["/code/.venv/bin/python"]
+      args    = ["-m", "app.ops.dmd_cache", "warm"]
+
+      env {
+        name  = "DMD_BASE_URL"
+        value = var.dmd_base_url
+      }
+      env {
+        name  = "KEY_VAULT_URL"
+        value = data.azurerm_key_vault.shared_kv.vault_uri
+      }
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.dmd_job_mi[0].client_id
+      }
+      env {
+        name  = "REDIS_HOST"
+        value = azurerm_redis_cache.redis.hostname
+      }
+      env {
+        name  = "REDIS_PORT"
+        value = tostring(azurerm_redis_cache.redis.ssl_port)
+      }
+      env {
+        name  = "REDIS_SSL"
+        value = "true"
+      }
+      env {
+        name        = "REDIS_PASSWORD"
+        secret_name = "redis-password"
+      }
+      env {
+        name  = "DMD_LOCK_TTL"
+        value = tostring(local.dmd_lock_ttl_seconds)
+      }
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.dmd_cache_job_image != null && can(regex("^ghcr\\.io/uclh-digital-innovation-hub/xhuma@sha256:[0-9a-f]{64}$", var.dmd_cache_job_image))
+      error_message = "dmd_cache_job_image is required and must be an immutable sha256 digest (ghcr.io/uclh-digital-innovation-hub/xhuma@sha256:<64 hex chars>) when dmd_cache_warm_enabled is true."
+    }
+    precondition {
+      condition     = local.dmd_job_replica_timeout_seconds < local.dmd_logic_poll_timeout_seconds && local.dmd_logic_poll_timeout_seconds < local.dmd_lock_ttl_seconds
+      error_message = "Timeout invariant violated: replica timeout (1800s) must be < poll timeout (2100s) < lock TTL (2700s)."
+    }
+    ignore_changes = [tags["CostCenter"]]
+  }
+}
+
+resource "azurerm_logic_app_workflow" "dmd_warm" {
+  count               = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name                = "${var.app_service_name}-dmd-warm-la"
+  location            = data.azurerm_resource_group.rg.location
+  resource_group_name = data.azurerm_resource_group.rg.name
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.dmd_cache_warm_enabled
+      error_message = "dmd_cache_schedule_enabled requires dmd_cache_warm_enabled to be true."
+    }
+    precondition {
+      condition     = var.dmd_cache_schedule_start_time != null
+      error_message = "dmd_cache_schedule_start_time is required when dmd_cache_schedule_enabled is true."
+    }
+    precondition {
+      condition     = length(var.dmd_cache_alert_action_group_ids) > 0
+      error_message = "At least one alert action group ID is required in dmd_cache_alert_action_group_ids when dmd_cache_schedule_enabled is true."
+    }
+    ignore_changes = [tags["CostCenter"]]
+  }
+}
+
+resource "azurerm_logic_app_trigger_custom" "dmd_warm" {
+  count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name         = "weekly-dmd-warm-recurrence"
+  logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
+
+  depends_on = [
+    azurerm_logic_app_action_custom.check_status,
+    azurerm_role_assignment.logic_app_job_operator,
+  ]
+
+  body = jsonencode({
+    type = "Recurrence"
+    recurrence = {
+      frequency = "Week"
+      interval  = 1
+      timeZone  = "GMT Standard Time"
+      startTime = var.dmd_cache_schedule_start_time
+      schedule = {
+        hours    = [5]
+        minutes  = [var.dmd_cache_warm_minute]
+        weekDays = ["Monday"]
+      }
+    }
+  })
+}
+
+resource "azurerm_logic_app_action_custom" "start_job" {
+  count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name         = "Start_Warmer_Job"
+  logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
+
+  body = jsonencode({
+    type = "Http"
+    inputs = {
+      method = "POST"
+      uri    = "https://management.azure.com/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${data.azurerm_resource_group.rg.name}/providers/Microsoft.App/jobs/${azurerm_container_app_job.dmd_warm[0].name}/start?api-version=2024-03-01"
+      headers = {
+        "Content-Type" = "application/json"
+      }
+      body = {}
+      authentication = {
+        type     = "ManagedServiceIdentity"
+        audience = "https://management.azure.com"
+      }
+    }
+  })
+}
+
+resource "azurerm_logic_app_action_custom" "poll_async_start" {
+  count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name         = "Poll_Async_Start_If_202"
+  logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
+
+  depends_on = [
+    azurerm_logic_app_action_custom.start_job,
+  ]
+
+  body = jsonencode({
+    type = "If"
+    runAfter = {
+      "Start_Warmer_Job" = ["Succeeded"]
+    }
+    expression = {
+      or = [
+        {
+          equals = [
+            "@outputs('Start_Warmer_Job')?['statusCode']",
+            202
+          ]
+        },
+        {
+          equals = [
+            "@empty(body('Start_Warmer_Job')?['name'])",
+            true
+          ]
+        }
+      ]
+    }
+    actions = {
+      "Poll_Location_Until_Ready" = {
+        type       = "Until"
+        expression = "@not(equals(outputs('Get_Async_Operation')?['statusCode'], 202))"
+        limit = {
+          count   = 20
+          timeout = "PT5M"
+        }
+        actions = {
+          "Delay_Async_Poll" = {
+            type = "Wait"
+            inputs = {
+              interval = {
+                count = 5
+                unit  = "Second"
+              }
+            }
+          }
+          "Get_Async_Operation" = {
+            type = "Http"
+            runAfter = {
+              "Delay_Async_Poll" = ["Succeeded"]
+            }
+            inputs = {
+              method = "GET"
+              uri    = "@outputs('Start_Warmer_Job')?['headers']?['Location']"
+              authentication = {
+                type     = "ManagedServiceIdentity"
+                audience = "https://management.azure.com"
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+}
+
+resource "azurerm_logic_app_action_custom" "poll_execution" {
+  count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name         = "Poll_Execution_Until_Terminal"
+  logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
+
+  depends_on = [
+    azurerm_logic_app_action_custom.poll_async_start,
+  ]
+
+  body = jsonencode({
+    type       = "Until"
+    expression = "@or(equals(body('Get_Execution_Status')?['properties']?['status'], 'Succeeded'), equals(body('Get_Execution_Status')?['properties']?['status'], 'Failed'), equals(body('Get_Execution_Status')?['properties']?['status'], 'Stopped'))"
+    limit = {
+      count   = 70
+      timeout = "PT35M"
+    }
+    runAfter = {
+      "Poll_Async_Start_If_202" = ["Succeeded"]
+    }
+    actions = {
+      "Delay_Polling" = {
+        type = "Wait"
+        inputs = {
+          interval = {
+            count = 30
+            unit  = "Second"
+          }
+        }
+      }
+      "Get_Execution_Status" = {
+        type = "Http"
+        runAfter = {
+          "Delay_Polling" = ["Succeeded"]
+        }
+        inputs = {
+          method = "GET"
+          uri    = "https://management.azure.com/subscriptions/${data.azurerm_client_config.current.subscription_id}/resourceGroups/${data.azurerm_resource_group.rg.name}/providers/Microsoft.App/jobs/${azurerm_container_app_job.dmd_warm[0].name}/executions/@{coalesce(body('Start_Warmer_Job')?['name'], body('Get_Async_Operation')?['name'], last(split(body('Get_Async_Operation')?['id'], '/')), last(split(outputs('Start_Warmer_Job')?['headers']?['Location'], '/')))}?api-version=2024-03-01"
+          authentication = {
+            type     = "ManagedServiceIdentity"
+            audience = "https://management.azure.com"
+          }
+        }
+      }
+    }
+  })
+}
+
+resource "azurerm_logic_app_action_custom" "check_status" {
+  count        = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name         = "Check_Job_Terminal_Status"
+  logic_app_id = azurerm_logic_app_workflow.dmd_warm[0].id
+
+  depends_on = [
+    azurerm_logic_app_action_custom.poll_execution,
+  ]
+
+  body = jsonencode({
+    type = "If"
+    runAfter = {
+      "Poll_Execution_Until_Terminal" = ["Succeeded"]
+    }
+    expression = {
+      and = [
+        {
+          equals = [
+            "@body('Get_Execution_Status')?['properties']?['status']",
+            "Succeeded"
+          ]
+        }
+      ]
+    }
+    actions = {
+      "Terminate_Success" = {
+        type = "Terminate"
+        inputs = {
+          runStatus = "Succeeded"
+        }
+      }
+    }
+    else = {
+      actions = {
+        "Terminate_Failure" = {
+          type = "Terminate"
+          inputs = {
+            runStatus = "Failed"
+            runError = {
+              code    = "DmdWarmExecutionFailed"
+              message = "Container Apps Job dmd-warm execution did not terminate with Succeeded status"
+            }
+          }
+        }
+      }
+    }
+  })
+}
+
+resource "azurerm_role_definition" "dmd_job_operator" {
+  count       = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name        = "${var.app_service_name}-dmd-job-operator"
+  scope       = data.azurerm_resource_group.rg.id
+  description = "Allows starting and polling the dm+d cache warmer job and its async operations"
+
+  permissions {
+    actions = [
+      "Microsoft.App/jobs/read",
+      "Microsoft.App/jobs/start/action",
+      "Microsoft.App/jobs/executions/read",
+      "Microsoft.App/jobs/execution/read",
+      "Microsoft.App/locations/containerappsjoboperationstatuses/read",
+      "Microsoft.App/locations/containerappsjoboperationresults/read",
+      "Microsoft.App/managedEnvironments/read",
+    ]
+    not_actions = []
+  }
+
+  assignable_scopes = [
+    data.azurerm_resource_group.rg.id
+  ]
+}
+
+resource "azurerm_role_assignment" "logic_app_job_operator" {
+  count              = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  scope              = data.azurerm_resource_group.rg.id
+  role_definition_id = azurerm_role_definition.dmd_job_operator[0].role_definition_resource_id
+  principal_id       = azurerm_logic_app_workflow.dmd_warm[0].identity[0].principal_id
+
+  principal_type                   = "ServicePrincipal"
+  skip_service_principal_aad_check = true
+}
+
+resource "azurerm_monitor_metric_alert" "la_runs_failed" {
+  count               = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name                = "${var.app_service_name}-dmd-warm-runs-failed"
+  resource_group_name = data.azurerm_resource_group.rg.name
+  scopes              = [azurerm_logic_app_workflow.dmd_warm[0].id]
+  description         = "Alert when dm+d cache warmer Logic App workflow run fails"
+  severity            = 1
+  frequency           = "PT15M"
+  window_size         = "PT1H"
+
+  criteria {
+    metric_namespace = "Microsoft.Logic/workflows"
+    metric_name      = "RunsFailed"
+    aggregation      = "Total"
+    operator         = "GreaterThan"
+    threshold        = 0
+  }
+
+  dynamic "action" {
+    for_each = var.dmd_cache_alert_action_group_ids
+    content {
+      action_group_id = action.value
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
+}
+
+resource "azurerm_monitor_metric_alert" "la_triggers_failed" {
+  count               = var.dmd_cache_warm_enabled && var.dmd_cache_schedule_enabled ? 1 : 0
+  name                = "${var.app_service_name}-dmd-warm-triggers-failed"
+  resource_group_name = data.azurerm_resource_group.rg.name
+  scopes              = [azurerm_logic_app_workflow.dmd_warm[0].id]
+  description         = "Alert when dm+d cache warmer Logic App trigger fails"
+  severity            = 1
+  frequency           = "PT15M"
+  window_size         = "PT1H"
+
+  criteria {
+    metric_namespace = "Microsoft.Logic/workflows"
+    metric_name      = "TriggersFailed"
+    aggregation      = "Total"
+    operator         = "GreaterThan"
+    threshold        = 0
+  }
+
+  dynamic "action" {
+    for_each = var.dmd_cache_alert_action_group_ids
+    content {
+      action_group_id = action.value
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [tags["CostCenter"]]
+  }
+}
+
+check "dmd_cache_invariants" {
+  assert {
+    condition     = !var.dmd_cache_schedule_enabled || var.dmd_cache_warm_enabled
+    error_message = "dmd_cache_schedule_enabled requires dmd_cache_warm_enabled to be true."
+  }
+
+  assert {
+    condition     = !var.dmd_cache_schedule_enabled || var.dmd_cache_schedule_start_time != null
+    error_message = "dmd_cache_schedule_start_time is required when dmd_cache_schedule_enabled is true."
+  }
+
+  assert {
+    condition     = !var.dmd_cache_schedule_enabled || length(var.dmd_cache_alert_action_group_ids) > 0
+    error_message = "At least one alert action group ID is required in dmd_cache_alert_action_group_ids when dmd_cache_schedule_enabled is true."
+  }
+
+  assert {
+    condition     = !var.dmd_cache_warm_enabled || var.dmd_cache_job_image != null
+    error_message = "dmd_cache_job_image is required when dmd_cache_warm_enabled is true."
+  }
+
+  assert {
+    condition     = local.dmd_job_replica_timeout_seconds < local.dmd_logic_poll_timeout_seconds && local.dmd_logic_poll_timeout_seconds < local.dmd_lock_ttl_seconds
+    error_message = "Timeout invariant violated: replica timeout (1800s) must be < poll timeout (2100s) < lock TTL (2700s)."
+  }
 }

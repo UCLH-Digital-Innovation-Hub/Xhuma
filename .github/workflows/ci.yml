@@ -94,13 +94,47 @@ jobs:
         if: always()
         uses: coverallsapp/github-action@v2
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           format: cobertura
           file: coverage.xml
 
       - name: Fail if tests failed
         if: steps.tests.outputs.exit_code != 0
         run: exit 1
+
+  dependabot-container:
+    name: Dependabot container journey
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install test driver dependencies
+        run: uv sync --locked --dev
+
+      - name: Build production image and run ITI-55 → ITI-38 → ITI-39
+        run: bash scripts/container_smoke/run.sh
+
+      - name: Upload container diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependabot-container-diagnostics
+          path: container-smoke-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
 
   fuzzing:
     name: Fuzzing

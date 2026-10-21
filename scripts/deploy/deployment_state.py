@@ -1,7 +1,7 @@
-"""Target-specific deployment checkpoints in the existing state container.
+"""Run-specific workload apply receipts in the existing state container.
 
-Provider caches and tfplans expire independently of these durable checkpoints.
-Azure failures propagate: only a confirmed missing blob is a cache miss.
+Saved plans expire independently of these durable receipts.
+Azure failures propagate: only a confirmed missing blob means apply is pending.
 """
 
 import argparse
@@ -150,55 +150,29 @@ def emit(key, value):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=["detect", "record-infra", "workload-status", "record-workload"])
+    parser.add_argument("action", choices=["workload-status", "record-workload"])
     parser.add_argument("--target", required=True)
-    parser.add_argument("--force", action="store_true")
     parser.add_argument("--manifest", default="infra/manifest.json")
     args = parser.parse_args()
     target = target_config(args.target)
     store = BlobStore(target)
-    expected = identity(target)
-    input_hash = infra_fingerprint(target)
-    marker = f"deployments/{target['id']}/infra-success.json"
-    run_number = int(os.environ["GITHUB_RUN_NUMBER"])
-    latest = store.read(marker)
-    if latest is not None:
-        validate_record(latest, expected)
-        if latest.get("workflow_run_number", 0) > run_number:
-            raise ValueError("A newer run has already reconciled this target; start a new run for a rollback")
-    if args.action == "detect":
-        record = latest
-        emit("infra_needed", args.force or record is None or record.get("input_hash") != input_hash)
-        emit("input_hash", input_hash)
-    elif args.action == "record-infra":
-        store.write(
-            marker,
-            dict(
-                expected,
-                input_hash=input_hash,
-                source_commit_sha=os.environ["GITHUB_SHA"],
-                workflow_run_id=os.environ["GITHUB_RUN_ID"],
-                workflow_run_number=run_number,
-            ),
-        )
+    manifest = json.loads((ROOT / args.manifest).read_text())
+    receipt = dict(
+        identity(target),
+        workflow_run_id=os.environ["GITHUB_RUN_ID"],
+        source_commit_sha=os.environ["GITHUB_SHA"],
+        input_hash=infra_fingerprint(target),
+        plan_sha256=manifest["plan_sha256"],
+        candidate_image_digest=manifest["candidate_image_digest"],
+    )
+    name = f"deployments/{target['id']}/runs/{os.environ['GITHUB_RUN_ID']}/workload-applied.json"
+    if args.action == "workload-status":
+        record = store.read(name)
+        if record is not None:
+            validate_record(record, receipt)
+        emit("already_applied", record is not None)
     else:
-        manifest = json.loads((ROOT / args.manifest).read_text())
-        receipt = dict(
-            expected,
-            workflow_run_id=os.environ["GITHUB_RUN_ID"],
-            source_commit_sha=os.environ["GITHUB_SHA"],
-            input_hash=input_hash,
-            plan_sha256=manifest["plan_sha256"],
-            candidate_image_digest=manifest["candidate_image_digest"],
-        )
-        name = f"deployments/{target['id']}/runs/{os.environ['GITHUB_RUN_ID']}/workload-applied.json"
-        if args.action == "workload-status":
-            record = store.read(name)
-            if record is not None:
-                validate_record(record, receipt)
-            emit("already_applied", record is not None)
-        else:
-            store.write(name, receipt, overwrite=False)
+        store.write(name, receipt, overwrite=False)
 
 
 if __name__ == "__main__":

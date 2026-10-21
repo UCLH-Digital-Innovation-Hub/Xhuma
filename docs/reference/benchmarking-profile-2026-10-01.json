@@ -1,0 +1,173 @@
+{
+  "date": "2026-10-01",
+  "scope": "Offline CPU pipeline; external I/O and real terminology lookups excluded. These separate runs are not an A/B test of telemetry overhead.",
+  "initial_reprofile": [
+    {
+      "fixture": "9690937472.json",
+      "resources": 133,
+      "base64_KiB": 130,
+      "stages_ms": {
+        "json": 2.02,
+        "models": 34.03,
+        "index": 0.08,
+        "convert": 7.53,
+        "xml_base64": 14.39
+      },
+      "total_ms": 58.61,
+      "peak_python_MiB": 2.37
+    },
+    {
+      "fixture": "9692136744.json",
+      "resources": 478,
+      "base64_KiB": 829,
+      "stages_ms": {
+        "json": 7.21,
+        "models": 85.4,
+        "index": 0.27,
+        "convert": 48.48,
+        "xml_base64": 72.34
+      },
+      "total_ms": 214.07,
+      "peak_python_MiB": 10.46
+    },
+    {
+      "fixture": "9692140466.json",
+      "resources": 113,
+      "base64_KiB": 174,
+      "stages_ms": {
+        "json": 1.37,
+        "models": 20.7,
+        "index": 0.06,
+        "convert": 8.73,
+        "xml_base64": 15.45
+      },
+      "total_ms": 46.72,
+      "peak_python_MiB": 2.09
+    },
+    {
+      "fixture": "investigations/9465700088.json",
+      "resources": 452,
+      "base64_KiB": 586,
+      "stages_ms": {
+        "json": 5.94,
+        "models": 89.18,
+        "index": 0.26,
+        "convert": 48.28,
+        "xml_base64": 56.57
+      },
+      "total_ms": 201.11,
+      "peak_python_MiB": 9.06
+    },
+    {
+      "fixture": "investigations/9692136744.json",
+      "resources": 244,
+      "base64_KiB": 424,
+      "stages_ms": {
+        "json": 2.21,
+        "models": 42.91,
+        "index": 0.14,
+        "convert": 24.89,
+        "xml_base64": 38.21
+      },
+      "total_ms": 108.9,
+      "peak_python_MiB": 5.34
+    }
+  ],
+  "final_instrumented_reprofile": {
+    "python": "3.14.7",
+    "repetitions": 7,
+    "terminology": "stubbed; network disabled",
+    "rows": [
+      {
+        "fixture": "9690937472.json",
+        "resources": 133,
+        "base64_KiB": 130,
+        "stages_ms": {
+          "json": 2.91,
+          "models": 47.16,
+          "index": 0.09,
+          "convert": 11.71,
+          "xml_base64": 22.22
+        },
+        "total_ms": 86.95,
+        "peak_python_MiB": 2.37,
+        "concurrent": {
+          "batch_of_four_ms": 441.79,
+          "max_heartbeat_gap_ms": 334.06
+        }
+      },
+      {
+        "fixture": "9692136744.json",
+        "resources": 478,
+        "base64_KiB": 829,
+        "stages_ms": {
+          "json": 8.03,
+          "models": 127.53,
+          "index": 0.31,
+          "convert": 66.92,
+          "xml_base64": 129.74
+        },
+        "total_ms": 351.81,
+        "peak_python_MiB": 10.46,
+        "concurrent": {
+          "batch_of_four_ms": 1236.77,
+          "max_heartbeat_gap_ms": 627.41
+        }
+      },
+      {
+        "fixture": "9692140466.json",
+        "resources": 113,
+        "base64_KiB": 174,
+        "stages_ms": {
+          "json": 1.44,
+          "models": 26.38,
+          "index": 0.07,
+          "convert": 11.18,
+          "xml_base64": 19.81
+        },
+        "total_ms": 59.56,
+        "peak_python_MiB": 2.09,
+        "concurrent": {
+          "batch_of_four_ms": 258.91,
+          "max_heartbeat_gap_ms": 140.04
+        }
+      },
+      {
+        "fixture": "investigations/9465700088.json",
+        "resources": 452,
+        "base64_KiB": 586,
+        "stages_ms": {
+          "json": 5.92,
+          "models": 89.65,
+          "index": 0.25,
+          "convert": 50.36,
+          "xml_base64": 56.63
+        },
+        "total_ms": 204.29,
+        "peak_python_MiB": 8.97,
+        "concurrent": {
+          "batch_of_four_ms": 865.71,
+          "max_heartbeat_gap_ms": 865.76
+        }
+      },
+      {
+        "fixture": "investigations/9692136744.json",
+        "resources": 244,
+        "base64_KiB": 424,
+        "stages_ms": {
+          "json": 2.41,
+          "models": 44.11,
+          "index": 0.18,
+          "convert": 29.58,
+          "xml_base64": 42.81
+        },
+        "total_ms": 123.87,
+        "peak_python_MiB": 5.34,
+        "concurrent": {
+          "batch_of_four_ms": 475.0,
+          "max_heartbeat_gap_ms": 475.06
+        }
+      }
+    ]
+  }
+}

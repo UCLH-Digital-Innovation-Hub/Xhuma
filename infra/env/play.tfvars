@@ -8,16 +8,17 @@ redis_name           = "xhuma-redis-play"
 postgres_server_name = "xhuma-psql-play"
 
 
-# Rehearsal NHS identities. Redis sizing and GP Connect section flags use the
-# defaults in variables.tf (Standard C1 and all sections enabled).
-# Omitting xhuma_mhs_party_key lets the application discover it through SDS.
+# Rehearsal NHS identities. Redis sizing uses the Standard C1 default.
+# GP Connect clinical sections are enabled explicitly below.
+# Use the commissioned Play NHS identity and MHS party key explicitly.
 org_code                 = "RRV00"
 org_asid                 = "200000002574"
 device_id                = "1"
-xhuma_ods_code           = "Z6G1Z"
+xhuma_ods_code           = "RRV00"
+xhuma_mhs_party_key      = "RRV00-824607"
 # The play target runs in int mode, using built-in integration GP Connect endpoints.
 env                      = "int" # Non-production
-app_version              = "0.9.2"
+app_version              = "1.0.2"
 # Generated CCDA documents remain cached in Redis for four hours.
 ccda_expiry_hours        = "4"
 # Wildcards permit all hosts/origins; application mTLS enforcement remains enabled.
@@ -34,3 +35,7 @@ gp_connect_include_medication     = "true"
 gp_connect_include_problems       = "true"
 gp_connect_include_investigations = "true"
 gp_connect_include_immunisations  = "true"
+
+# dm+d Cache Warmer (Manual infrastructure in Play only; scheduler remains disabled)
+dmd_cache_warm_enabled     = true
+dmd_cache_schedule_enabled = false

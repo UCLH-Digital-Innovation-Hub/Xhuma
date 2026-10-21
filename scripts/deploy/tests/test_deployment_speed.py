@@ -1,10 +1,9 @@
-"""Exercise release decisions and retry failures without accessing Azure or GHCR."""
+"""Exercise saved-plan and apply-retry safeguards without accessing Azure."""
 
 import importlib
 import json
 import subprocess
 import sys
-import urllib.error
 from pathlib import Path
 
 import pytest
@@ -13,7 +12,6 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 state = importlib.import_module("deployment_state")
 plans = importlib.import_module("saved_plan")
-images = importlib.import_module("release_image")
 DIGEST = "sha256:" + "a" * 64
 
 
@@ -66,7 +64,6 @@ def context(tmp_path, monkeypatch):
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_SHA": "b" * 40,
         "GITHUB_RUN_ID": "123",
-        "GITHUB_RUN_NUMBER": "10",
         "ARM_SUBSCRIPTION_ID": "sub",
         "ARM_TENANT_ID": "tenant",
         "IMAGE_NAME": "org/repo",
@@ -114,58 +111,104 @@ def context(tmp_path, monkeypatch):
     return tmp_path, target, blobs, commit, invoke
 
 
-def test_app_and_other_target_changes_do_not_require_infra(context):
-    root, target, _, commit, invoke = context
-    invoke(state, "record-infra")
-    original = state.infra_fingerprint(target)
-    (root / "app/main.py").write_text("app change")
-    (root / "infra/env/prd.tfvars").write_text("prd only")
-    commit()
-    assert state.infra_fingerprint(target) == original
-    invoke(state, "detect")
-    assert "infra_needed=false" in (root / "output").read_text()
-
-
-def test_failed_infra_followed_by_app_commit_remains_pending(context):
-    root, _, _, commit, invoke = context
-    invoke(state, "record-infra")
-    (root / "infra/main.tf").write_text("pending infrastructure")
-    commit()
-    (root / "app/main.py").write_text("subsequent app change")
-    commit()
-    invoke(state, "detect")
-    assert "infra_needed=true" in (root / "output").read_text()
-
-
-def test_missing_checkpoint_requires_infra_and_wrong_identity_fails(context):
-    root, _, blobs, _, invoke = context
-    invoke(state, "detect")
-    assert "infra_needed=true" in (root / "output").read_text()
-    blobs["tfstate", "deployments/play/infra-success.json"] = b'{"target_id":"prd"}'
-    with pytest.raises(ValueError, match="checkpoint mismatch"):
-        invoke(state, "detect")
-
-
-def test_checkpoint_storage_error_propagates(context, monkeypatch):
+def test_receipt_storage_error_propagates(context, monkeypatch):
     class Broken:
         def __init__(self, _):
             raise RuntimeError("access denied")
 
     monkeypatch.setattr(state, "BlobStore", Broken)
     with pytest.raises(RuntimeError, match="access denied"):
-        context[-1](state, "detect")
+        context[-1](state, "workload-status")
 
 
-def test_apply_receipt_is_bound_to_original_plan(context):
-    root, _, _, _, invoke = context
+@pytest.fixture
+def workload(context):
+    root, _, _, _, _ = context
+    (root / "infra/manifest.json").write_text(json.dumps({"plan_sha256": "a" * 64, "candidate_image_digest": DIGEST}))
+    return context
+
+
+def test_missing_receipt_requires_workload_apply(workload):
+    root, _, _, _, invoke = workload
+    invoke(state, "workload-status")
+    assert (root / "output").read_text() == "already_applied=false\n"
+
+
+def test_apply_receipt_is_scoped_to_one_run(workload, monkeypatch):
+    root, _, blobs, _, invoke = workload
+    invoke(state, "record-workload")
+    assert set(blobs) == {("tfstate", "deployments/play/runs/123/workload-applied.json")}
+    monkeypatch.setenv("GITHUB_RUN_ID", "124")
+    invoke(state, "workload-status")
+    assert (root / "output").read_text() == "already_applied=false\n"
+
+
+@pytest.mark.parametrize(
+    ("variable", "value", "field"),
+    [
+        ("GITHUB_REPOSITORY", "other/repo", "repository"),
+        ("GITHUB_SHA", "c" * 40, "source_commit_sha"),
+        ("ARM_SUBSCRIPTION_ID", "other-sub", "azure_subscription_id"),
+        ("ARM_TENANT_ID", "other-tenant", "azure_tenant_id"),
+    ],
+)
+def test_apply_receipt_rejects_changed_identity(workload, monkeypatch, variable, value, field):
+    invoke = workload[-1]
+    invoke(state, "record-workload")
+    monkeypatch.setenv(variable, value)
+    with pytest.raises(ValueError, match=field):
+        invoke(state, "workload-status")
+
+
+def test_apply_receipt_rejects_changed_infrastructure_inputs(workload):
+    root, _, _, commit, invoke = workload
+    invoke(state, "record-workload")
+    (root / "infra/main.tf").write_text("changed infrastructure")
+    commit()
+    with pytest.raises(ValueError, match="input_hash"):
+        invoke(state, "workload-status")
+
+
+def test_apply_receipt_is_bound_to_original_plan(workload):
+    root, _, _, _, invoke = workload
     manifest = root / "infra/manifest.json"
-    manifest.write_text(json.dumps({"plan_sha256": "a" * 64, "candidate_image_digest": DIGEST}))
     invoke(state, "record-workload")
     invoke(state, "workload-status")
     assert "already_applied=true" in (root / "output").read_text()
     manifest.write_text(json.dumps({"plan_sha256": "b" * 64, "candidate_image_digest": DIGEST}))
     with pytest.raises(ValueError, match="plan_sha256"):
         invoke(state, "workload-status")
+
+
+def test_apply_receipt_rejects_changed_image(workload):
+    root, _, _, _, invoke = workload
+    invoke(state, "record-workload")
+    (root / "infra/manifest.json").write_text(
+        json.dumps({"plan_sha256": "a" * 64, "candidate_image_digest": "sha256:" + "c" * 64})
+    )
+    with pytest.raises(ValueError, match="candidate_image_digest"):
+        invoke(state, "workload-status")
+
+
+def test_apply_receipt_read_failure_is_not_treated_as_missing(workload, monkeypatch):
+    class BrokenRead(state.BlobStore):
+        def read(self, name, container=None):
+            raise RuntimeError("read denied")
+
+    monkeypatch.setattr(state, "BlobStore", BrokenRead)
+    with pytest.raises(RuntimeError, match="read denied"):
+        workload[-1](state, "workload-status")
+
+
+def test_apply_receipt_write_failure_propagates(workload, monkeypatch):
+    class BrokenWrite(state.BlobStore):
+        def write(self, name, record, overwrite=True):
+            raise RuntimeError("write denied")
+
+    monkeypatch.setattr(state, "BlobStore", BrokenWrite)
+    with pytest.raises(RuntimeError, match="write denied"):
+        workload[-1](state, "record-workload")
+    assert not workload[2]
 
 
 @pytest.fixture
@@ -236,84 +279,19 @@ def test_saved_plan_cannot_change_candidate_image(planned, monkeypatch):
         invoke(plans, "plan")
 
 
-def test_force_rebuild_still_reuses_original_run_image(context, monkeypatch):
-    monkeypatch.setenv("FORCE_REBUILD", "true")
-    monkeypatch.setattr(images, "fingerprint", lambda *args: "fingerprint")
-    calls = []
-
-    def registry(image, tag):
-        calls.append(tag)
-        return DIGEST
-
-    monkeypatch.setattr(images, "registry_digest", registry)
-    monkeypatch.setattr(sys, "argv", ["image", "resolve"])
-    images.main()
-    assert calls == ["run-123"]
-    assert DIGEST in (context[0] / "output").read_text()
-
-
-def test_unchanged_app_uses_input_tag(context, monkeypatch):
-    monkeypatch.setattr(images, "fingerprint", lambda *args: "fingerprint")
-    calls = []
-
-    def registry(image, tag):
-        calls.append(tag)
-        return DIGEST if tag.startswith("input-") else ""
-
-    monkeypatch.setattr(images, "registry_digest", registry)
-    monkeypatch.setattr(sys, "argv", ["image", "resolve"])
-    images.main()
-    assert calls == ["run-123", "input-fingerprint"]
-
-
-def test_registry_auth_failure_is_not_cache_miss(monkeypatch):
-    def forbidden(*args, **kwargs):
-        raise urllib.error.HTTPError("https://ghcr.io/", 403, "Forbidden", None, None)
-
-    monkeypatch.setattr(images.urllib.request, "urlopen", forbidden)
-    with pytest.raises(RuntimeError, match="HTTP 403"):
-        images.request_json("https://ghcr.io/", missing_ok=True)
-
-
-def test_release_gate_and_skipped_infrastructure_wiring():
+def test_release_gate_and_unconditional_infrastructure_wiring():
     parent = yaml.safe_load(Path(".github/workflows/matrix-deploy.yml").read_text())["jobs"]
     child = yaml.safe_load(Path(".github/workflows/deploy-target.yml").read_text())["jobs"]
     assert "needs" not in parent["build"]
     assert set(parent["rollout"]["needs"]) == {"ci", "build", "prepare-targets"}
     assert parent["rollout"]["with"]["digest"] == "${{ needs.build.outputs.digest }}"
-    assert "needs.infra-apply.result == 'skipped'" in child["deploy"]["if"]
-    assert "needs.infra-plan.result == 'success'" in child["deploy"]["if"]
-    assert child["infra-apply"]["if"] == "needs.infra-plan.outputs.infra_needed == 'true'"
+    assert parent["build"]["outputs"]["digest"] == "${{ steps.build.outputs.digest }}"
+    assert "if" not in child["infra-plan"]
+    assert "if" not in child["infra-apply"]
+    assert "if" not in child["deploy"]
+    assert set(child["infra-apply"]["needs"]) == {"infra-plan"}
+    assert set(child["deploy"]["needs"]) == {"infra-apply"}
+    plan_step = next(step for step in child["infra-plan"]["steps"] if step.get("name") == "Terraform Plan")
+    assert "if" not in plan_step
     apply_names = [s.get("name") for s in child["infra-apply"]["steps"]]
     assert apply_names.index("Terraform Init") < apply_names.index("Download and Verify Plan")
-
-
-def test_older_run_cannot_overwrite_newer_checkpoint(context, monkeypatch):
-    _, _, _, _, invoke = context
-    invoke(state, "record-infra")
-    monkeypatch.setenv("GITHUB_RUN_NUMBER", "9")
-    with pytest.raises(ValueError, match="newer run"):
-        invoke(state, "detect")
-
-
-def test_force_infra_overrides_matching_checkpoint(context, monkeypatch):
-    root, _, _, _, invoke = context
-    invoke(state, "record-infra")
-    monkeypatch.setattr(sys, "argv", ["state", "detect", "--target", "play", "--force"])
-    state.main()
-    assert "infra_needed=true" in (root / "output").read_text()
-
-
-def test_saved_release_record_wins_over_registry(context, monkeypatch):
-    root, _, _, _, _ = context
-    monkeypatch.setattr(images, "fingerprint", lambda *args: "fingerprint")
-    monkeypatch.setattr(sys, "argv", ["image", "record"])
-    images.main()
-    monkeypatch.setattr(images, "registry_digest", lambda *args: pytest.fail("must use original record"))
-    monkeypatch.setattr(sys, "argv", ["image", "resolve"])
-    images.main()
-    record = json.loads((root / "release-image.json").read_text())
-    record["workflow_run_id"] = "different-run"
-    (root / "release-image.json").write_text(json.dumps(record))
-    with pytest.raises(ValueError, match="does not match"):
-        images.main()

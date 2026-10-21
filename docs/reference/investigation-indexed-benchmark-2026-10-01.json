@@ -1,0 +1,130 @@
+{
+  "python": "3.14.7",
+  "repetitions": 9,
+  "baseline_sha256": "f10459fb678ca98b4bae734d03f2722e4ad3b50c2404a5199d36a5f91b8b5fac",
+  "current_sha256": "2cc890b3fb92b25478813603643ce55a7e932a94b0df047e99fdccc3edd5dc00",
+  "fixture": "app/tests/fixtures/bundles/investigations/9465700088.json",
+  "scope": "One shared build plus all report groupings; parsed independent fixture copies; excludes parsing, rendering and external I/O. Memory is a separate tracemalloc run, excluding parsed resources.",
+  "rows": [
+    {
+      "resources": 452,
+      "reports": 34,
+      "source_edges": 408,
+      "before": {
+        "build_ms": 0.602,
+        "group_ms": 6.361,
+        "total_ms": 7.103,
+        "graph_retained_KiB": 77.53,
+        "build_peak_KiB": 124.66,
+        "total_peak_KiB": 124.66
+      },
+      "after": {
+        "build_ms": 1.619,
+        "group_ms": 1.332,
+        "total_ms": 3.061,
+        "graph_retained_KiB": 170.85,
+        "build_peak_KiB": 289.23,
+        "total_peak_KiB": 289.23
+      },
+      "speedup": 2.32
+    },
+    {
+      "resources": 904,
+      "reports": 68,
+      "source_edges": 816,
+      "before": {
+        "build_ms": 1.011,
+        "group_ms": 16.527,
+        "total_ms": 17.503,
+        "graph_retained_KiB": 152.99,
+        "build_peak_KiB": 246.38,
+        "total_peak_KiB": 246.38
+      },
+      "after": {
+        "build_ms": 2.526,
+        "group_ms": 1.873,
+        "total_ms": 4.454,
+        "graph_retained_KiB": 346.78,
+        "build_peak_KiB": 602.12,
+        "total_peak_KiB": 602.12
+      },
+      "speedup": 3.93
+    },
+    {
+      "resources": 1808,
+      "reports": 136,
+      "source_edges": 1632,
+      "before": {
+        "build_ms": 2.295,
+        "group_ms": 66.778,
+        "total_ms": 69.273,
+        "graph_retained_KiB": 304.38,
+        "build_peak_KiB": 491.45,
+        "total_peak_KiB": 491.45
+      },
+      "after": {
+        "build_ms": 6.403,
+        "group_ms": 4.781,
+        "total_ms": 10.568,
+        "graph_retained_KiB": 686.8,
+        "build_peak_KiB": 1169.31,
+        "total_peak_KiB": 1169.31
+      },
+      "speedup": 6.55
+    },
+    {
+      "resources": 3616,
+      "reports": 272,
+      "source_edges": 3264,
+      "before": {
+        "build_ms": 4.172,
+        "group_ms": 251.657,
+        "total_ms": 256.693,
+        "graph_retained_KiB": 606.9,
+        "build_peak_KiB": 981.23,
+        "total_peak_KiB": 981.23
+      },
+      "after": {
+        "build_ms": 11.629,
+        "group_ms": 7.431,
+        "total_ms": 19.022,
+        "graph_retained_KiB": 1390.56,
+        "build_peak_KiB": 2424.23,
+        "total_peak_KiB": 2424.23
+      },
+      "speedup": 13.49
+    }
+  ],
+  "flat_fixture_check": {
+    "python": "3.14.7",
+    "repetitions": 15,
+    "baseline_sha256": "f10459fb678ca98b4bae734d03f2722e4ad3b50c2404a5199d36a5f91b8b5fac",
+    "current_sha256": "2cc890b3fb92b25478813603643ce55a7e932a94b0df047e99fdccc3edd5dc00",
+    "fixture": "app/tests/fixtures/bundles/investigations/9692136744.json",
+    "scope": "One shared build plus all report groupings; parsed independent fixture copies; excludes parsing, rendering and external I/O. Memory is a separate tracemalloc run, excluding parsed resources.",
+    "rows": [
+      {
+        "resources": 244,
+        "reports": 32,
+        "source_edges": 0,
+        "before": {
+          "build_ms": 0.323,
+          "group_ms": 0.141,
+          "total_ms": 0.463,
+          "graph_retained_KiB": 72.24,
+          "build_peak_KiB": 139.0,
+          "total_peak_KiB": 139.0
+        },
+        "after": {
+          "build_ms": 0.472,
+          "group_ms": 0.347,
+          "total_ms": 0.822,
+          "graph_retained_KiB": 75.01,
+          "build_peak_KiB": 142.81,
+          "total_peak_KiB": 142.81
+        },
+        "speedup": 0.56
+      }
+    ]
+  }
+}

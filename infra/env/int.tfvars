@@ -20,7 +20,7 @@ xhuma_ods_code      = "RRV00"
 xhuma_mhs_party_key = "RRV00-824607"
 # int selects the application's built-in integration GP Connect endpoints.
 env                 = "int"
-app_version         = "0.9.2"
+app_version         = "1.0.2"
 
 # Wildcards permit all hosts/origins; application mTLS enforcement remains enabled.
 allowed_hosts = "*"
@@ -40,3 +40,7 @@ gp_connect_include_immunisations  = "false"
 
 # Generated CCDA documents remain cached in Redis for four hours.
 ccda_expiry_hours = "4"
+
+# dm+d Cache Warmer (Standard target-local infrastructure in INT; schedule deferred)
+dmd_cache_warm_enabled     = true
+dmd_cache_schedule_enabled = false

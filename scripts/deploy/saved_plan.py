@@ -18,11 +18,31 @@ def terraform_json(plan):
 def guard_plan(plan, target):
     if plan.get("variables", {}).get("docker_image", {}).get("value") != os.environ["TF_VAR_docker_image"]:
         raise ValueError("Saved plan uses a different image; start a new release run")
+    job_image = os.environ.get("TF_VAR_dmd_cache_job_image")
+    if job_image is not None and plan.get("variables", {}).get("dmd_cache_job_image", {}).get("value") != job_image:
+        raise ValueError("Saved plan uses a different dm+d cache job image; start a new release run")
     destructive = [
-        r["address"] for r in plan.get("resource_changes", []) if "delete" in r.get("change", {}).get("actions", [])
+        r
+        for r in plan.get("resource_changes", [])
+        if any(action in ("delete", "replace") for action in r.get("change", {}).get("actions", []))
     ]
-    if destructive and target.get("require_existing_state"):
-        raise ValueError("Migration guard rejected destructive actions: " + ", ".join(destructive))
+    if destructive:
+        details = "\n\n".join(
+            f"{r['address']}\nactions: {json.dumps(r['change']['actions'], separators=(',', ':'))}\nreplace_paths:\n"
+            + "\n".join(
+                "  - " + json.dumps(path, separators=(",", ":")) for path in r["change"].get("replace_paths") or [[]]
+            )
+            for r in destructive
+        )
+        adopted = target.get("require_existing_state")
+        heading = "Migration Guard Failure: Destructive Plan Detected" if adopted else "Destructive Plan Warning"
+        if summary_path := os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(summary_path, "a") as summary:
+                summary.write(f"### {heading}\n```text\n{details}\n```\n")
+        if adopted:
+            raise ValueError("Migration guard rejected destructive actions (delete/replace):\n" + details)
+        print("::warning::The plan contains destructive actions (delete/replace)")
+        print(details)
     return [
         f"{', '.join(r['change']['actions'])} {r['address']}"
         for r in plan.get("resource_changes", [])
