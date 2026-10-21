@@ -1,31 +1,28 @@
 import json
 import logging
 import os
-import time
-from datetime import timedelta
 from uuid import uuid4
 
 import httpx
-import xmltodict
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from fhirclient.models import bundle
-from fhirclient.models.fhirabstractbase import FHIRValidationError
+from fhirclient.models.fhirabstractbase import FHIRValidationError as FHIRValidationError
 from fhirclient.models.operationoutcome import OperationOutcome
 from opentelemetry.propagate import inject
 
-from .audit.audit import AuditFailureException, attempt_audit
+from . import logging as application_logging
+from .audit import audit
+from .audit.audit import AuditFailureException
+from .audit.audit import attempt_audit as attempt_audit
 from .audit.models import AuditOutcome, SAMLAttributes
-from .ccda.convert_mime import base64_xml
-from .ccda.fhir2ccda import convert_bundle
 from .ccda.helpers import validateNHSnumber
 from .gp_connect_config import GP_CONNECT_PARAMETERS
-from .gpconnect_stages.transport import DiagnosticStep, send_request
+from .gpconnect_stages.document import process_document
 from .gpconnect_stages.transport import create_nhs_ssl_context as create_nhs_ssl_context
 from .gpconnect_stages.transport import get_nhs_cert_paths as get_nhs_cert_paths
-from .logging import record_application_failure
+from .gpconnect_stages.transport import send_request
+from .gpconnect_stages.types import DiagnosticStep
 from .pds.pds import SDSUpstreamError, lookup_patient, lookup_self_issuer, sds_trace
-from .redis_connect import redis_client
 from .security import create_jwt
 from .settings import USE_RELAY
 from .telemetry import measure
@@ -64,7 +61,7 @@ async def _fetch_gpconnect_record(
         # 1) Validate NHS number
         if validateNHSnumber(nhsno) is False:
             msg = f"{nhsno} is not a valid NHS number"
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -85,7 +82,7 @@ async def _fetch_gpconnect_record(
         except HTTPException as e:
             diagnostic = f"PDS lookup failed (HTTP {e.status_code}) (step: {step}, exception_type: {type(e).__name__})"
             if e.status_code != 404:
-                record_application_failure(RuntimeError(diagnostic))
+                application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -106,7 +103,7 @@ async def _fetch_gpconnect_record(
             status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = "PDS lookup failed"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -120,7 +117,7 @@ async def _fetch_gpconnect_record(
             security_code = pds_search["meta"]["security"][0]["code"]
         except Exception as e:
             diagnostic = f"Unable to read PDS security metadata (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
@@ -130,7 +127,7 @@ async def _fetch_gpconnect_record(
         if security_code != "U":
             step = "check_restriction.restriction_check"
             msg = "Patient is not unrestricted, access to GP Connect is not permitted"
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -156,12 +153,12 @@ async def _fetch_gpconnect_record(
             status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = "Unable to read GP ODS from PDS response"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -191,7 +188,7 @@ async def _fetch_gpconnect_record(
                 msg = f"Unable to resolve GP Connect Structured Record FHIR endpoint in SDS for ODS code {gp_ods}"
                 diagnostic = f"{msg} (step: {step})"
                 logging.info(diagnostic)
-                await attempt_audit(
+                await audit.attempt_audit(
                     request=request,
                     nhs_number=str(nhsno),
                     saml=saml_attrs,
@@ -219,12 +216,12 @@ async def _fetch_gpconnect_record(
                 step = "sds_endpoint.entry_validation"
                 msg = f"Ambiguous SDS Endpoint response for ODS code {gp_ods}"
                 diagnostic = f"{msg} (step: {step})"
-                record_application_failure(RuntimeError(diagnostic))
+                application_logging.record_application_failure(RuntimeError(diagnostic))
                 logging.error(diagnostic)
                 if log_dir:
                     with open(os.path.join(log_dir, "error.log"), "a") as f:
                         f.write(diagnostic + "\n")
-                await attempt_audit(
+                await audit.attempt_audit(
                     request=request,
                     nhs_number=str(nhsno),
                     saml=saml_attrs,
@@ -268,7 +265,7 @@ async def _fetch_gpconnect_record(
             nhsmhsparty = party_keys[0]
 
             step = "sds_endpoint.success_audit"
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -295,12 +292,12 @@ async def _fetch_gpconnect_record(
                 diagnostic += (
                     f" (reason={e.reason}, status={e.status_code}, attempts={e.attempts}, request_id={e.request_id})"
                 )
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -319,7 +316,7 @@ async def _fetch_gpconnect_record(
             with measure("sds.trace"):
                 asid_trace = await sds_trace(gp_ods, mhsparty=nhsmhsparty)
             step = "sds_trace.success_audit"
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -341,12 +338,12 @@ async def _fetch_gpconnect_record(
                 diagnostic += (
                     f" (reason={e.reason}, status={e.status_code}, attempts={e.attempts}, request_id={e.request_id})"
                 )
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -372,12 +369,12 @@ async def _fetch_gpconnect_record(
                 step = "resolve_asid_partykey.identity_validation"
                 msg = f"Unable to find ASID for ODS code {gp_ods}"
                 diagnostic = f"{msg} (step: {step})"
-                record_application_failure(RuntimeError(diagnostic))
+                application_logging.record_application_failure(RuntimeError(diagnostic))
                 logging.error(diagnostic)
                 if log_dir:
                     with open(os.path.join(log_dir, "error.log"), "a") as f:
                         f.write(diagnostic + "\n")
-                await attempt_audit(
+                await audit.attempt_audit(
                     request=request,
                     nhs_number=str(nhsno),
                     saml=saml_attrs,
@@ -392,12 +389,12 @@ async def _fetch_gpconnect_record(
                 step = "resolve_asid_partykey.device_validation"
                 msg = f"Ambiguous SDS Device response for ODS code {gp_ods}"
                 diagnostic = f"{msg} (step: {step})"
-                record_application_failure(RuntimeError(diagnostic))
+                application_logging.record_application_failure(RuntimeError(diagnostic))
                 logging.error(diagnostic)
                 if log_dir:
                     with open(os.path.join(log_dir, "error.log"), "a") as f:
                         f.write(diagnostic + "\n")
-                await attempt_audit(
+                await audit.attempt_audit(
                     request=request,
                     nhs_number=str(nhsno),
                     saml=saml_attrs,
@@ -434,12 +431,12 @@ async def _fetch_gpconnect_record(
             if not asids:
                 msg = f"Unable to find ASID for ODS code {gp_ods}"
                 diagnostic = f"{msg} (step: {step})"
-                record_application_failure(RuntimeError(diagnostic))
+                application_logging.record_application_failure(RuntimeError(diagnostic))
                 logging.error(diagnostic)
                 if log_dir:
                     with open(os.path.join(log_dir, "error.log"), "a") as f:
                         f.write(diagnostic + "\n")
-                await attempt_audit(
+                await audit.attempt_audit(
                     request=request,
                     nhs_number=str(nhsno),
                     saml=saml_attrs,
@@ -452,12 +449,12 @@ async def _fetch_gpconnect_record(
             if len(asids) > 1:
                 msg = f"Ambiguous ASID for ODS code {gp_ods}"
                 diagnostic = f"{msg} (step: {step})"
-                record_application_failure(RuntimeError(diagnostic))
+                application_logging.record_application_failure(RuntimeError(diagnostic))
                 logging.error(diagnostic)
                 if log_dir:
                     with open(os.path.join(log_dir, "error.log"), "a") as f:
                         f.write(diagnostic + "\n")
-                await attempt_audit(
+                await audit.attempt_audit(
                     request=request,
                     nhs_number=str(nhsno),
                     saml=saml_attrs,
@@ -474,12 +471,12 @@ async def _fetch_gpconnect_record(
             status_code = e.status_code if isinstance(e, HTTPException) else 500
             msg = "Unable to parse SDS trace response"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -499,7 +496,7 @@ async def _fetch_gpconnect_record(
             step = "sds_self_lookup.jwt_creation"
             token = create_jwt(saml_attrs, audience=f"{fhir_endpoint_url}", issuer=issuer)
             step = "sds_self_lookup.success_audit"
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -520,12 +517,12 @@ async def _fetch_gpconnect_record(
                 diagnostic += (
                     f" (reason={e.reason}, status={e.status_code}, attempts={e.attempts}, request_id={e.request_id})"
                 )
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 nhs_number=str(nhsno),
                 saml=saml_attrs,
@@ -608,12 +605,12 @@ async def _fetch_gpconnect_record(
         except httpx.ReadError as e:
             msg = "ReadError: server closed connection before responding"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 request_id=headers.get("Ssp-TraceID"),
                 nhs_number=str(nhsno),
@@ -633,12 +630,12 @@ async def _fetch_gpconnect_record(
             status_code = e.status_code if isinstance(e, HTTPException) else 502
             msg = "Transport error"
             diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 request_id=headers.get("Ssp-TraceID"),
                 nhs_number=str(nhsno),
@@ -675,12 +672,12 @@ async def _fetch_gpconnect_record(
             except (ValueError, UnicodeDecodeError, FHIRValidationError):
                 pass
             diagnostic = f"{msg} (step: {step})"
-            record_application_failure(RuntimeError(diagnostic))
+            application_logging.record_application_failure(RuntimeError(diagnostic))
             logging.error(diagnostic)
             if log_dir:
                 with open(os.path.join(log_dir, "error.log"), "a") as f:
                     f.write(diagnostic + "\n")
-            await attempt_audit(
+            await audit.attempt_audit(
                 request=request,
                 request_id=headers.get("Ssp-TraceID"),
                 nhs_number=str(nhsno),
@@ -694,7 +691,7 @@ async def _fetch_gpconnect_record(
 
         # audit successful response
         step = "gpconnect_request.success_audit"
-        await attempt_audit(
+        await audit.attempt_audit(
             request=request,
             request_id=headers.get("Ssp-TraceID"),
             nhs_number=str(nhsno),
@@ -704,151 +701,28 @@ async def _fetch_gpconnect_record(
             detail={"step": step},
         )
 
-        # 10) Validate the entire upstream payload before conversion or caching.
-        step = "validate_fhir_bundle.response_content"
+        document_step = DiagnosticStep(step)
         try:
-            step = "validate_fhir_bundle.json_decode"
-            with measure("fhir.decode", input_bytes=len(resp.content)):
-                scr_bundle = json.loads(resp.text)
-            step = "validate_fhir_bundle.resource_type"
-            if not isinstance(scr_bundle, dict) or scr_bundle.get("resourceType") != "Bundle":
-                raise ValueError("Expected a FHIR Bundle resource")
-            # Retain the existing compatibility handling for standalone comment entries.
-            step = "validate_fhir_bundle.comment_entries"
-            for j, entry in enumerate(scr_bundle.get("entry", [])):
-                if "fhir_comments" in entry:
-                    scr_bundle["entry"].pop(j)
-                    break
-            step = "validate_fhir_bundle.fhir_models"
-            with measure("fhir.models", resource_count=len(scr_bundle.get("entry", []))):
-                fhir_bundle = bundle.Bundle(scr_bundle)
-        except AuditFailureException:
-            raise
-        except Exception as e:
-            status_code = e.status_code if isinstance(e, HTTPException) else 502
-            msg = "FHIR bundle malformed"
-            diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
-            logging.error(diagnostic)
-            if log_dir:
-                with open(os.path.join(log_dir, "error.log"), "a") as f:
-                    f.write(diagnostic + "\n")
-            await attempt_audit(
+            document_result = await process_document(
+                resp,
+                nhsno,
+                saml_attrs,
+                ssp_trace_id=headers.get("Ssp-TraceID"),
                 request=request,
-                request_id=headers.get("Ssp-TraceID"),
-                nhs_number=str(nhsno),
-                saml=saml_attrs,
-                action="validate_fhir_bundle",
-                outcome=AuditOutcome.fail,
-                error_code=str(status_code),
-                detail={"step": step, "exception_type": type(e).__name__},
+                log_dir=log_dir,
+                step=document_step,
             )
-            msg = "FHIR bundle malformed" + f": {e.detail}" if isinstance(e, HTTPException) else diagnostic
-            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
-
-        # index resources for resolution
-        step = "fhir_index.resource_index"
-        with measure("fhir.index", resource_count=len(fhir_bundle.entry or [])):
-            bundle_index = {}
-            for entry in fhir_bundle.entry or []:
-                try:
-                    addr = f"{entry.resource.resource_type}/{entry.resource.id}"
-                    bundle_index[addr] = entry.resource
-                    if entry.fullUrl:
-                        bundle_index[entry.fullUrl] = entry.resource
-                except Exception as e:
-                    # Preserve compatibility with entries that cannot be indexed.
-                    logging.warning(
-                        "Skipping FHIR resource (step: fhir_index.resource_index, exception_type: %s)",
-                        type(e).__name__,
-                    )
-
-        step = "ccda_convert.start_timer"
-        start_time = time.perf_counter()
-        try:
-            step = "ccda_convert.convert_bundle"
-            with measure(
-                "ccda.convert", span_name="FHIR2CCDA.convert_bundle", resource_count=len(fhir_bundle.entry or [])
-            ):
-                xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
-
-            step = "ccda_convert.duration"
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            logging.info(f"FHIR2CCDA conversion completed in {duration_ms:.2f}ms")
-        except AuditFailureException:
-            raise
-        except Exception as e:
-            status_code = e.status_code if isinstance(e, HTTPException) else 500
-            msg = "Failed to convert FHIR Bundle to CCDA"
-            diagnostic = f"{msg} (step: {step}, exception_type: {type(e).__name__})"
-            record_application_failure(RuntimeError(diagnostic))
-            logging.error(diagnostic)
-            if log_dir:
-                with open(os.path.join(log_dir, "error.log"), "a") as f:
-                    f.write(diagnostic + "\n")
-            msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
-            return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
-
-        if log_dir:
-            step = "ccda_serialize.xml_debug_file"
-            # CodeQL static analysis requires explicit integer casting to drop path traversal taint
-            safe_nhsno = str(int(nhsno))
-            with open(os.path.join(log_dir, f"{safe_nhsno}.xml"), "w") as output:
-                output.write(xmltodict.unparse(xml_ccda, pretty=True))
-
-        step = "ccda_serialize.base64_xml"
-        with measure("ccda.serialize") as span:
-            xop = base64_xml(xml_ccda)
-            step = "ccda_serialize.document_size"
-            span.set_attribute("document.base64_bytes", len(xop))
-        step = "store_ccda.document_id"
-        doc_uuid = str(uuid4())
-        step = "store_ccda.success_audit"
-        await attempt_audit(
-            request=request,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="store_ccda",
-            outcome=AuditOutcome.ok,
-            document_id=doc_uuid,
-            detail={"step": step},
-        )
-
-        step = "ccda_cache.expiry_configuration"
-        if request and hasattr(request, "app") and hasattr(request.app.state, "ccda_expiry_hours"):
-            expiry_hours = request.app.state.ccda_expiry_hours
-        else:
-            expiry_hours = float(os.getenv("CCDA_EXPIRY_HOURS", "4"))
-
-        step = "ccda_cache.cache_ttl"
-        cache_ttl = timedelta(hours=expiry_hours)
-
-        # Use a pipeline to write all keys atomically with a consistent TTL
-        step = "ccda_cache.pipeline_open"
-        async with redis_client.pipeline() as pipe:
-            step = "ccda_cache.queue_patient_document"
-            pipe.setex(str(nhsno), cache_ttl, doc_uuid)
-            document_key = f"document:{doc_uuid}"
-            step = "ccda_cache.queue_document_content"
-            pipe.hset(document_key, mapping={"nhs_number": str(nhsno), "content": xop})
-            step = "ccda_cache.queue_document_expiry"
-            pipe.expire(document_key, cache_ttl)
-            step = "ccda_cache.pipeline_execute"
-            with measure("ccda.cache.write", document_bytes=len(xop)):
-                await pipe.execute()
-            step = "ccda_cache.pipeline_close"
-
-        # only write the xml if dev
-        if os.getenv("ENV", "prod").lower() in ("dev", "local"):
-            step = "ccda_serialize.local_xml_file"
-            with open(f"{int(nhsno)!s}.xml", "w") as output:
-                output.write(xmltodict.unparse(xml_ccda, pretty=True))
+        finally:
+            step = document_step.value
+        if isinstance(document_result, Response):
+            return document_result
+        doc_uuid = document_result
 
         step = "gpconnect_response.json_response"
         return JSONResponse(status_code=200, content={"success": True, "document_id": doc_uuid})
     except Exception as e:
         diagnostic = f"GP Connect failed (step: {step}, exception_type: {type(e).__name__})"
-        record_application_failure(RuntimeError(diagnostic))
+        application_logging.record_application_failure(RuntimeError(diagnostic))
         logging.error(diagnostic)
         if log_dir:
             with open(os.path.join(log_dir, "error.log"), "a") as f:

@@ -3,20 +3,13 @@
 import json
 import os
 import ssl
-from dataclasses import dataclass
 from uuid import uuid4
 
 import httpx
 from fastapi import HTTPException, Request
 
 from ..telemetry import measure
-
-
-@dataclass
-class DiagnosticStep:
-    """Request-local last operation, retained even when transport raises or is cancelled."""
-
-    value: str
+from .types import DiagnosticStep as DiagnosticStep
 
 
 def get_nhs_cert_paths():
