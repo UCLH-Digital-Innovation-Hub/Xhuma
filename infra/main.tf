@@ -1,15 +1,25 @@
+# This root manages one deployment target; infra/shared manages the shared vault
+# in separate state. These sections describe responsibilities, while Terraform
+# uses resource references and depends_on to determine creation order.
+# CostCenter tags are managed externally and preserved by lifecycle rules below.
+
+# 1. Look up the existing target resource group and deployment identity.
 data "azurerm_resource_group" "rg" {
   name = var.resource_group_name
 }
 
 data "azurerm_client_config" "current" {}
 
+# Read the shared vault through its subscription-specific provider. This root
+# owns the target identities' access policies, but not the shared vault itself.
 data "azurerm_key_vault" "shared_kv" {
   provider            = azurerm.shared
   name                = var.shared_key_vault_name
   resource_group_name = var.shared_resource_group_name
 }
 
+# 2. Create the target-local vault for operational secrets such as epic-ca-cert.
+# Operators populate secret values separately; this root creates only the vault.
 resource "azurerm_key_vault" "local_kv" {
   name                        = "${var.app_service_name}-kv"
   location                    = data.azurerm_resource_group.rg.location
@@ -26,6 +36,8 @@ resource "azurerm_key_vault" "local_kv" {
   }
 }
 
+# 3. Separate app integration, PostgreSQL, private endpoints and load-test runners
+# into dedicated subnets within the target's virtual network.
 resource "azurerm_virtual_network" "vnet" {
   name                = "${var.app_service_name}-vnet"
   location            = data.azurerm_resource_group.rg.location
@@ -37,6 +49,9 @@ resource "azurerm_virtual_network" "vnet" {
   }
 }
 
+# App Service uses this delegated subnet to reach private dependencies. The Key
+# Vault service endpoint allows shared-vault firewall rules to identify the subnet;
+# the deployment workflow adds it to the shared vault's approved subnet list.
 resource "azurerm_subnet" "app_subnet" {
   name                 = "app-subnet"
   resource_group_name  = data.azurerm_resource_group.rg.name
@@ -52,6 +67,8 @@ resource "azurerm_subnet" "app_subnet" {
   }
 }
 
+# PostgreSQL Flexible Server runs in its own delegated subnet, retaining the
+# Storage service endpoint already configured on existing deployments.
 resource "azurerm_subnet" "db_subnet" {
   name                 = "db-subnet"
   resource_group_name  = data.azurerm_resource_group.rg.name
@@ -68,6 +85,7 @@ resource "azurerm_subnet" "db_subnet" {
   service_endpoints = ["Microsoft.Storage"]
 }
 
+# Redis's private endpoint gets an address in this separate, undelegated subnet.
 resource "azurerm_subnet" "pe_subnet" {
   name                 = "pe-subnet"
   resource_group_name  = data.azurerm_resource_group.rg.name
@@ -75,6 +93,8 @@ resource "azurerm_subnet" "pe_subnet" {
   address_prefixes     = ["10.1.3.0/24"]
 }
 
+# Reserve a delegated subnet for ephemeral Azure Container Instances created by
+# the load-test workflow; Terraform does not create the benchmark containers.
 resource "azurerm_subnet" "locust_subnet" {
   name                 = "locust-subnet"
   resource_group_name  = data.azurerm_resource_group.rg.name
@@ -106,6 +126,8 @@ resource "azurerm_subnet" "ca_subnet" {
   }
 }
 
+# Load-test containers attach this reusable identity to read test credentials
+# from Key Vault using the access policies defined later in this file.
 resource "azurerm_user_assigned_identity" "locust_mi" {
   location            = data.azurerm_resource_group.rg.location
   name                = "${var.app_service_name}-locust-mi"
@@ -116,6 +138,8 @@ resource "azurerm_user_assigned_identity" "locust_mi" {
   }
 }
 
+# 4. Link private DNS zones to the target VNet so clients can resolve the private
+# PostgreSQL server and Redis endpoint using their service hostnames.
 resource "azurerm_private_dns_zone" "pg_dns" {
   name                = "privatelink.postgres.database.azure.com"
   resource_group_name = data.azurerm_resource_group.rg.name
@@ -156,6 +180,8 @@ resource "azurerm_private_dns_zone_virtual_network_link" "redis_dns_link" {
   }
 }
 
+# 5. Provision Linux App Service capacity and a shared telemetry destination for
+# application traces and PostgreSQL diagnostics within this target.
 resource "azurerm_service_plan" "plan" {
   name                = "${var.app_service_name}-plan"
   resource_group_name = data.azurerm_resource_group.rg.name
@@ -168,6 +194,7 @@ resource "azurerm_service_plan" "plan" {
   }
 }
 
+# Retain collected logs for 30 days; Application Insights uses this workspace.
 resource "azurerm_log_analytics_workspace" "law" {
   name                = "${var.app_service_name}-law"
   location            = data.azurerm_resource_group.rg.location
@@ -192,6 +219,8 @@ resource "azurerm_application_insights" "appinsights" {
   }
 }
 
+# 6. Provision the private backing services: Redis for caching and PostgreSQL
+# for audit storage. Both have public network access disabled.
 resource "azurerm_redis_cache" "redis" {
   name                          = var.redis_name
   location                      = data.azurerm_resource_group.rg.location
@@ -214,6 +243,7 @@ resource "azurerm_redis_cache" "redis" {
   }
 }
 
+# Connect Redis to the VNet and register its private address in the Redis DNS zone.
 resource "azurerm_private_endpoint" "redis_pe" {
   name                = "${var.redis_name}-pe"
   location            = data.azurerm_resource_group.rg.location
@@ -237,6 +267,7 @@ resource "azurerm_private_endpoint" "redis_pe" {
   }
 }
 
+# PostgreSQL uses delegated-subnet integration rather than a private endpoint.
 resource "azurerm_postgresql_flexible_server" "postgres" {
   name                          = var.postgres_server_name
   resource_group_name           = data.azurerm_resource_group.rg.name
@@ -251,9 +282,11 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
   private_dns_zone_id           = azurerm_private_dns_zone.pg_dns.id
   public_network_access_enabled = false
 
+  # Wait for VNet DNS linkage as well as the referenced zone and subnet.
   depends_on = [azurerm_private_dns_zone_virtual_network_link.pg_dns_link]
 
   lifecycle {
+    # Preserve Azure-selected availability zones and the externally managed tag.
     ignore_changes = [
       zone,
       high_availability.0.standby_availability_zone,
@@ -262,6 +295,7 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
   }
 }
 
+# Create the application database; application schema migrations run separately.
 resource "azurerm_postgresql_flexible_server_database" "xhuma_db" {
   name      = "xhuma"
   server_id = azurerm_postgresql_flexible_server.postgres.id
@@ -269,6 +303,8 @@ resource "azurerm_postgresql_flexible_server_database" "xhuma_db" {
   collation = "en_US.utf8"
 }
 
+# 7. Configure the container host, VNet integration and runtime settings. Its
+# system-assigned identity resolves Key Vault references once access is granted.
 resource "azurerm_linux_web_app" "app" {
   name                      = var.app_service_name
   resource_group_name       = data.azurerm_resource_group.rg.name
@@ -281,6 +317,8 @@ resource "azurerm_linux_web_app" "app" {
   }
 
   lifecycle {
+    # The release workflow updates the image after provisioning. Preserve that
+    # image, the legacy route-all setting and externally managed integration tags.
     ignore_changes = [
       site_config[0].application_stack[0].docker_image_name,
       app_settings["WEBSITE_VNET_ROUTE_ALL"],
@@ -302,6 +340,7 @@ resource "azurerm_linux_web_app" "app" {
     # Enable WebSockets for the Relay
     websockets_enabled     = true
     use_32_bit_worker      = true # Typically false for production but B1 is small
+    # Route outbound traffic through VNet integration to private dependencies.
     vnet_route_all_enabled = true
 
     ip_restriction {
@@ -320,14 +359,16 @@ resource "azurerm_linux_web_app" "app" {
     }
   }
 
-  # Enable mTLS: Optional allows public endpoints/health checks while passing the cert to the app
+  # Forward client certificates when supplied; REQUIRE_MTLS below controls
+  # enforcement in the application while Azure keeps certificate mode optional.
   client_certificate_enabled = true
   client_certificate_mode    = "Optional"
 
   app_settings = {
     "WEBSITES_ENABLE_APP_SERVICE_STORAGE" = "false"
 
-    # App Config (Key Vault References)
+    # App Service resolves these references to existing secrets using its identity.
+    # Shared credentials live centrally; the Epic CA belongs to this target's vault.
     "API_KEY"           = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=api-key)"
     "NHS_API_KEY"       = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=nhs-api-key)"
     "KEY_VAULT_URL"     = data.azurerm_key_vault.shared_kv.vault_uri
@@ -341,11 +382,12 @@ resource "azurerm_linux_web_app" "app" {
     "NHS_CLIENT_KEY"  = var.nhs_over_internet_path != "" ? "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=xhuma-nhs-client-key)" : null
     "NHS_BUNDLE"      = var.nhs_over_internet_path != "" ? "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=xhuma-nhs-bundle)" : null
 
-    # New Security Mitigations
+    # Trust settings for client certificates, SAML assertions and reply-to domains.
     "MTLS_TRUSTED_THUMBPRINTS" = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=mtls-trusted-thumbprints)"
     "SAML_TRUSTED_ISSUER"      = "@Microsoft.KeyVault(VaultName=${var.shared_key_vault_name};SecretName=saml-trusted-issuer)"
     "ALLOWED_REPLY_TO_DOMAINS" = ".nhs.uk"
 
+    # Document registry identity and Redis TLS connection settings.
     "REGISTRY_ID"    = var.registry_id
     "REDIS_HOST"     = azurerm_redis_cache.redis.hostname
     "REDIS_PORT"     = azurerm_redis_cache.redis.ssl_port
@@ -378,7 +420,7 @@ resource "azurerm_linux_web_app" "app" {
     "OTEL_SERVICE_NAME"                     = "xhuma"
     "OTEL_METRIC_EXPORT_INTERVAL_MS"        = var.otel_metric_export_interval_ms
 
-    # Business Logic
+    # GP Connect organisation/device identity, runtime environment and cache lifetime.
     "ORG_CODE"            = var.org_code
     "ENV"                 = var.env
     "CCDA_EXPIRY_HOURS"   = var.ccda_expiry_hours
@@ -388,20 +430,26 @@ resource "azurerm_linux_web_app" "app" {
     "XHUMA_ODS_CODE"      = var.xhuma_ods_code
     "XHUMA_MHS_PARTY_KEY" = var.xhuma_mhs_party_key
 
+    # Select the clinical sections requested from GP Connect for this target.
     "GP_CONNECT_INCLUDE_ALLERGIES"      = var.gp_connect_include_allergies
     "GP_CONNECT_INCLUDE_MEDICATION"     = var.gp_connect_include_medication
     "GP_CONNECT_INCLUDE_PROBLEMS"       = var.gp_connect_include_problems
     "GP_CONNECT_INCLUDE_INVESTIGATIONS" = var.gp_connect_include_investigations
     "GP_CONNECT_INCLUDE_IMMUNISATIONS"  = var.gp_connect_include_immunisations
 
-    # Security
+    # Application-level origin, host and client-certificate checks.
     "CORS_ORIGINS"  = var.cors_origins
     "ALLOWED_HOSTS" = var.allowed_hosts
     "REQUIRE_MTLS"  = var.require_mtls
   }
 }
 
-# Access Policy for Local Vault
+# 8. Grant the app and load-test identities read access after they exist. The
+# target state owns these policies even on the shared vault; infra/shared ignores
+# policy changes so reconciling its firewall preserves each target's permissions.
+# Network access is handled separately by the shared vault's subnet allowlist.
+
+# App identity: read target-local secrets and certificates, including the Epic CA.
 resource "azurerm_key_vault_access_policy" "app_local_policy" {
   key_vault_id = azurerm_key_vault.local_kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
@@ -411,7 +459,7 @@ resource "azurerm_key_vault_access_policy" "app_local_policy" {
   certificate_permissions = ["Get", "List"]
 }
 
-# Access Policy for Shared Vault
+# App identity: resolve shared settings and access the shared vault at runtime.
 resource "azurerm_key_vault_access_policy" "app_shared_policy" {
   provider     = azurerm.shared
   key_vault_id = data.azurerm_key_vault.shared_kv.id
@@ -422,7 +470,7 @@ resource "azurerm_key_vault_access_policy" "app_shared_policy" {
   certificate_permissions = ["Get", "List"]
 }
 
-# Locust MI Access Policy for Local Vault
+# Load-test identity: read target-local test credentials and certificates.
 resource "azurerm_key_vault_access_policy" "locust_local_policy" {
   key_vault_id = azurerm_key_vault.local_kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
@@ -432,7 +480,7 @@ resource "azurerm_key_vault_access_policy" "locust_local_policy" {
   certificate_permissions = ["Get", "List"]
 }
 
-# Locust MI Access Policy for Shared Vault
+# Load-test identity: read shared test credentials and certificates.
 resource "azurerm_key_vault_access_policy" "locust_shared_policy" {
   provider     = azurerm.shared
   key_vault_id = data.azurerm_key_vault.shared_kv.id
@@ -443,7 +491,8 @@ resource "azurerm_key_vault_access_policy" "locust_shared_policy" {
   certificate_permissions = ["Get", "List"]
 }
 
-# --- PostgreSQL Audit Logging Configuration ---
+# 9. Send PostgreSQL logs and metrics to Log Analytics. Enable connection,
+# disconnection and checkpoint events, and log schema-changing SQL statements.
 
 resource "azurerm_monitor_diagnostic_setting" "postgres_diag" {
   name                       = "postgres-audit-logs"
@@ -484,6 +533,7 @@ resource "azurerm_postgresql_flexible_server_configuration" "log_statement" {
   value     = "ddl"
 }
 
+# Disable duration-based statement logging; DDL logging remains enabled above.
 resource "azurerm_postgresql_flexible_server_configuration" "log_min_duration_statement" {
   name      = "log_min_duration_statement"
   server_id = azurerm_postgresql_flexible_server.postgres.id

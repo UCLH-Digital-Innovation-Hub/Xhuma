@@ -133,6 +133,11 @@ Only after the plan is fully understood.
 
 Apply consumes the saved, reviewed immutable plan rather than silently generating a different one.
 
+To retry a failure, use **Re-run failed jobs**. A recorded successful workload
+apply is skipped while shared-vault reconciliation and verification resume.
+Start a new workflow run if the saved plan is stale or expired, or a rebuilt image
+has a different digest. See [retry behaviour](../deployment_speed.md#retry-a-failed-deployment).
+
 ![Play Infrastructure Apply Success](../assets/play-infra-apply-success.png)
 *Figure 5 — Successful infrastructure Apply job completing after strict plan review.*
 

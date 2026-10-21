@@ -150,6 +150,10 @@ Deployments rely on GitHub Environments to provide controlled stages between Pla
 
 **Actual Deployment Sequence from `matrix-deploy.yml`:**
 
+CI, build/scan and target selection start concurrently. Every target's reusable
+`deploy-target.yml` workflow waits for all three to succeed. Each new run builds
+an image and runs Terraform for its selected targets.
+
 1. **CI & Tests (`ci`):** Executes Ruff linting, formatting checks, and pytest suite with coverage.
 2. **Build & Scan (`build`):** Builds the container image, tags it with the source commit SHA, and scans it using Trivy for `HIGH` and `CRITICAL` vulnerabilities. Outputs the immutable image digest.
 3. **Target Selection (`prepare-targets`):** Validates `infra/targets.json` against schema and determines the active matrix targets for the triggered branch.
@@ -259,7 +263,7 @@ jq -r '
 ![Play Infrastructure Apply Success](../assets/play-infra-apply-success.png)
 *Figure 6 — Successful infrastructure Apply job completing after manual approval.*
 
-1. **Plan Retries & Expiry**: If the apply step fails, it can be retried and will re-download the exact same reviewed plan blob securely. Plans expire automatically after 7 days in Blob Storage. If a plan is no longer valid, a new workflow run must be triggered.
+1. **Plan Retries & Expiry**: Use **Re-run failed jobs** to retain the successful build output and re-download the original reviewed plan and manifest. A successful workload apply receipt lets retries skip that apply and resume shared-vault reconciliation and verification. Plans expire automatically after 7 days in Blob Storage. If a plan is stale, expired, or mismatched, start a new workflow run. Rerunning all jobs rebuilds the image; a changed digest cannot reuse the original plan. See [retry behaviour](../deployment_speed.md#retry-a-failed-deployment).
 2. **Image Deployment**: The pipeline deploys the exact scanned Docker image digest verified during the build stage. This step executes under the target application deployment environment.
 
 ![Play Deploy Digest](../assets/play-deploy-digest.png)

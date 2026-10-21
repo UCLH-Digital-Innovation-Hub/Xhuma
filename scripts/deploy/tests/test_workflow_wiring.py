@@ -58,7 +58,7 @@ def test_matrix_deploy_listens_to_main():
 
 
 def test_matrix_deploy_backend_path_exists():
-    workflow = load_workflow("matrix-deploy.yml")
+    workflow = load_workflow("deploy-target.yml")
     infra_plan_job = workflow["jobs"]["infra-plan"]
 
     bootstrap_step = None
@@ -69,26 +69,17 @@ def test_matrix_deploy_backend_path_exists():
 
     assert bootstrap_step is not None
     # We check that the step does not use infra/${{ matrix.target.backend_file }}
-    assert bootstrap_step["env"].get("XHUMA_BACKEND_FILE") == "${{ matrix.target.backend_file }}"
+    assert bootstrap_step["env"].get("XHUMA_BACKEND_FILE") == "${{ fromJSON(inputs.target).backend_file }}"
 
 
 def test_consumed_job_outputs_have_needs():
     workflow = load_workflow("matrix-deploy.yml")
-    infra_apply_job = workflow["jobs"]["infra-apply"]
-
-    # It consumes digest from build
-    # Check that 'build' is in the needs list
-    assert "build" in infra_apply_job.get("needs", [])
-
-    # Check that digest is used
-    deploy_step = None
-    for step in infra_apply_job["steps"]:
-        if step.get("name") == "Download and Verify Plan":
-            deploy_step = step
-            break
-
-    assert deploy_step is not None
-    assert "${{ needs.build.outputs.digest }}" in deploy_step.get("run", "")
+    rollout = workflow["jobs"]["rollout"]
+    assert "build" in rollout["needs"]
+    assert rollout["with"]["digest"] == "${{ needs.build.outputs.digest }}"
+    target = load_workflow("deploy-target.yml")
+    inputs = (target.get(True) or target["on"])["workflow_call"]["inputs"]
+    assert inputs["digest"]["required"] is True
 
 
 def get_selected_targets(branch):
@@ -137,8 +128,8 @@ def test_shared_backend_file_selection():
 
 
 def test_warmer_wiring_in_workflow():
-    """Verify matrix-deploy.yml uses Terraform outputs as single source of truth for warmer."""
-    workflow = load_workflow("matrix-deploy.yml")
+    """Verify deployment uses Terraform outputs as single source of truth for warmer."""
+    workflow = load_workflow("deploy-target.yml")
     infra_apply_job = workflow["jobs"]["infra-apply"]
     steps = {step.get("name"): step for step in infra_apply_job["steps"]}
 
@@ -230,9 +221,9 @@ def test_warmer_enabled_missing_output_fails_closed():
         validate_outputs()
 
 
-def test_migration_guard_workflow_syntax_and_fail_closed():
-    """Verify matrix-deploy.yml Migration Guard extracts replace_paths and fails closed."""
-    workflow = load_workflow("matrix-deploy.yml")
+def test_migration_guard_workflow_uses_saved_plan_helper():
+    """Planning and apply both validate the original plan through the same helper."""
+    workflow = load_workflow("deploy-target.yml")
     infra_plan_job = workflow["jobs"]["infra-plan"]
     plan_step = None
     for step in infra_plan_job["steps"]:
@@ -241,18 +232,10 @@ def test_migration_guard_workflow_syntax_and_fail_closed():
             break
 
     assert plan_step is not None
-    run_script = plan_step["run"]
-
-    # Must check for delete or replace actions
-    assert 'select(.change.actions | index("delete") or index("replace"))' in run_script
-    # Must extract replace_paths
-    assert ".change.replace_paths" in run_script
-    # Must fail closed if require_existing_state is true
-    assert 'if [ "${{ matrix.target.require_existing_state }}" == "true" ]; then' in run_script
-    assert "exit 1" in run_script
-    # Must NOT access before or after values in the diagnostic extraction
-    assert ".change.before" not in run_script
-    assert ".change.after" not in run_script
+    assert 'python scripts/deploy/saved_plan.py plan --target "$TARGET_ID"' in plan_step["run"]
+    apply_steps = workflow["jobs"]["infra-apply"]["steps"]
+    download_step = next(step for step in apply_steps if step.get("name") == "Download and Verify Plan")
+    assert 'python scripts/deploy/saved_plan.py download --target "$TARGET_ID"' in download_step["run"]
 
 
 def test_migration_guard_jq_replace_paths_diagnostics(tmp_path):
@@ -330,7 +313,7 @@ def test_migration_guard_jq_replace_paths_diagnostics(tmp_path):
 
 
 def test_dmd_action_group_workflow_wiring():
-    workflow_path = ".github/workflows/matrix-deploy.yml"
+    workflow_path = ".github/workflows/deploy-target.yml"
     with open(workflow_path, "r") as f:
         content = f.read()
     workflow = yaml.safe_load(content)
