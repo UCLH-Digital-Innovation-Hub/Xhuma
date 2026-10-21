@@ -2997,3 +2997,116 @@ async def test_routing_permissive_identifiers_and_address(observed_pipeline, mon
         ("fhir_endpoint_trace", "ok"),
         ("sds_trace", "ok"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_request_consumer_chain_and_unsigned_claims(observed_pipeline, monkeypatch):
+    p = observed_pipeline
+    pds = importlib.import_module("app.pds.pds")
+    monkeypatch.setenv("XHUMA_ODS_CODE", " synthetic-manufacturer ")
+    monkeypatch.setenv("ORG_CODE", " synthetic-care ")
+    monkeypatch.setenv("XHUMA_MHS_PARTY_KEY", "synthetic-party")
+    device = {
+        "resourceType": "Device",
+        "identifier": [
+            {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "synthetic-consumer-asid"},
+            {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "synthetic-party"},
+        ],
+    }
+    endpoint = {
+        "resourceType": "Endpoint",
+        "status": "active",
+        "address": "https://consumer.example.invalid/spine",
+        "identifier": [device["identifier"][1]],
+    }
+    sds = AsyncMock(
+        side_effect=[
+            {"resourceType": "Bundle", "entry": [{"resource": device}]},
+            {"resourceType": "Bundle", "entry": [{"resource": endpoint}, {"resource": endpoint}]},
+        ]
+    )
+    monkeypatch.setattr(pds, "sds_trace", sds)
+    monkeypatch.setattr(p.gp, "lookup_self_issuer", pds.lookup_self_issuer)
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == 200
+    assert [(c.args, c.kwargs) for c in sds.await_args_list] == [
+        (("SYNTHETIC-CARE",), {"manufacturer_ods": "SYNTHETIC-MANUFACTURER"}),
+        (("SYNTHETIC-MANUFACTURER",), {"endpoint": True, "mhsparty": "synthetic-party", "interaction_id": None}),
+    ]
+    token = p.sent.headers["Authorization"].removeprefix("Bearer ")
+    assert jwt.get_unverified_header(token) == {"alg": "none", "typ": "JWT"}
+    claims = jwt.decode(token, options={"verify_signature": False})
+    assert claims["iss"] == endpoint["address"]
+    assert claims["aud"] == "fake-gpconnect-endpoint"
+    assert claims["sub"] == p.saml.subject_id
+    assert claims["exp"] - claims["iat"] == 300
+    assert claims["reason_for_request"] == "directcare"
+    assert claims["requested_scope"] == "patient/*.read"
+    assert claims["requesting_organization"]["name"] == p.saml.organization
+    assert claims["requesting_organization"]["identifier"][1]["value"] == p.saml.organization_id
+    assert claims["requesting_practitioner"]["name"] == [{"family": "Synthetic", "given": ["Clinician"]}]
+    assert claims["requesting_practitioner"]["identifier"][-1] == {
+        "system": "synthetic-system",
+        "value": "synthetic-role",
+    }
+    assert [i["value"] for i in claims["requesting_practitioner"]["identifier"][:2]] == ["UNK", "UNK"]
+    assert "purpose_of_use" not in claims
+    assert p.sent.headers["Ssp-From"] == "synthetic-consumer-asid"
+    assert (
+        p.sent.headers["Ssp-InteractionID"]
+        == "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1"
+    )
+    assert p.sent.headers["accept"] == p.sent.headers["Content-Type"] == "application/fhir+json"
+    assert p.sent.headers["Ssp-TraceID"] != json.loads(response.body)["document_id"]
+
+
+@pytest.mark.asyncio
+async def test_request_reads_facade_parameters_after_identity_lookup(observed_pipeline, monkeypatch):
+    p = observed_pipeline
+    replacement = [{"name": "synthetic-refresh", "valueBoolean": True}]
+
+    async def issuer():
+        monkeypatch.setattr(p.gp, "GP_CONNECT_PARAMETERS", replacement)
+        return "https://consumer.example.invalid/spine"
+
+    monkeypatch.setattr(p.gp, "lookup_self_issuer", issuer)
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == 200
+    assert p.sent.body == {
+        "resourceType": "Parameters",
+        "parameter": [
+            {
+                "name": "patientNHSNumber",
+                "valueIdentifier": {"system": "https://fhir.nhs.uk/Id/nhs-number", "value": p.nhs},
+            },
+            *replacement,
+        ],
+    }
+    assert p.sent.body["parameter"][1] is replacement[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "boundary,step,status,last_action",
+    [
+        ("jwt", "sds_self_lookup.jwt_creation", 502, "sds_self_lookup"),
+        ("headers", "gpconnect_request_build.headers", 500, "sds_self_lookup"),
+        ("inject", "gpconnect_request_build.trace_injection", 500, "sds_self_lookup"),
+    ],
+)
+async def test_request_construction_failures(observed_pipeline, monkeypatch, boundary, step, status, last_action):
+    p = observed_pipeline
+    if boundary == "headers":
+        # Supply a token so the environment failure is specifically at SSP headers.
+        monkeypatch.setattr(p.gp, "create_jwt", lambda *args, **kwargs: "synthetic-token")
+        monkeypatch.delenv("ORG_ASID")
+    else:
+        p.failures[boundary] = RuntimeError("synthetic failure")
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == status
+    prefix = "SDS consumer issuer lookup failed" if boundary == "jwt" else "GP Connect failed"
+    error_type = "KeyError" if boundary == "headers" else "RuntimeError"
+    assert json.loads(response.body)["error"] == f"{prefix} (step: {step}, exception_type: {error_type})"
+    assert p.audits[-1]["action"] == last_action
+    assert p.audits[-1]["outcome"] == (AuditOutcome.fail if boundary == "jwt" else AuditOutcome.ok)
+    assert "http.post" not in p.events
