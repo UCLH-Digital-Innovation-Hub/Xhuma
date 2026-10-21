@@ -17,3 +17,11 @@ class ProviderRoute:
 
     endpoint_url: str
     asid: Any
+
+
+@dataclass(frozen=True, repr=False)
+class OutboundRequest:
+    """Request-local headers and body, retaining their existing mutable dictionaries."""
+
+    headers: dict
+    body: dict

@@ -1783,6 +1783,7 @@ def observed_pipeline(monkeypatch, tmp_path):
     telemetry = importlib.import_module("app.telemetry")
     probe = SimpleNamespace(
         gp=gp,
+        request_stage=importlib.import_module("app.gpconnect_stages.request"),
         routing=importlib.import_module("app.gpconnect_stages.routing"),
         document=importlib.import_module("app.gpconnect_stages.document"),
         transport=importlib.import_module("app.gpconnect_stages.transport"),
@@ -1924,21 +1925,21 @@ def observed_pipeline(monkeypatch, tmp_path):
         return "https://consumer.example.invalid/spine"
 
     monkeypatch.setattr(probe.routing, "sds_trace", sds)
-    monkeypatch.setattr(gp, "lookup_self_issuer", issuer)
-    original_jwt = gp.create_jwt
+    monkeypatch.setattr(probe.request_stage, "lookup_self_issuer", issuer)
+    original_jwt = probe.request_stage.create_jwt
 
     def token(*args, **kwargs):
         note("jwt")
         return original_jwt(*args, **kwargs)
 
-    monkeypatch.setattr(gp, "create_jwt", token)
-    original_inject = gp.inject
+    monkeypatch.setattr(probe.request_stage, "create_jwt", token)
+    original_inject = probe.request_stage.inject
 
     def inject(headers):
         note("inject")
         original_inject(headers)
 
-    monkeypatch.setattr(gp, "inject", inject)
+    monkeypatch.setattr(probe.request_stage, "inject", inject)
 
     async def post(url, *, json, headers):
         note("http.post")
@@ -2005,6 +2006,7 @@ def observed_pipeline(monkeypatch, tmp_path):
         return original_response(*args, **kwargs)
 
     monkeypatch.setattr(gp, "JSONResponse", response)
+    monkeypatch.setattr(probe.request_stage, "JSONResponse", response)
     monkeypatch.setattr(probe.routing, "JSONResponse", response)
     monkeypatch.setattr(probe.document, "JSONResponse", response)
     try:
@@ -2946,6 +2948,7 @@ async def test_document_debug_file_order(observed_pipeline, monkeypatch, tmp_pat
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(p.gp, "open", debug_open, raising=False)
+    monkeypatch.setattr(p.request_stage, "open", debug_open, raising=False)
     monkeypatch.setattr(p.document, "open", debug_open, raising=False)
     response = await p.gp._fetch_gpconnect_record(p.nhs, p.saml, log_dir=str(directory), request=p.request)
     assert p.events.index("inject") < p.events.index("file:request_headers.json") < p.events.index("http.post")
@@ -3026,7 +3029,7 @@ async def test_request_consumer_chain_and_unsigned_claims(observed_pipeline, mon
         ]
     )
     monkeypatch.setattr(pds, "sds_trace", sds)
-    monkeypatch.setattr(p.gp, "lookup_self_issuer", pds.lookup_self_issuer)
+    monkeypatch.setattr(p.request_stage, "lookup_self_issuer", pds.lookup_self_issuer)
     response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
     assert response.status_code == 200
     assert [(c.args, c.kwargs) for c in sds.await_args_list] == [
@@ -3069,7 +3072,7 @@ async def test_request_reads_facade_parameters_after_identity_lookup(observed_pi
         monkeypatch.setattr(p.gp, "GP_CONNECT_PARAMETERS", replacement)
         return "https://consumer.example.invalid/spine"
 
-    monkeypatch.setattr(p.gp, "lookup_self_issuer", issuer)
+    monkeypatch.setattr(p.request_stage, "lookup_self_issuer", issuer)
     response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
     assert response.status_code == 200
     assert p.sent.body == {
@@ -3098,7 +3101,7 @@ async def test_request_construction_failures(observed_pipeline, monkeypatch, bou
     p = observed_pipeline
     if boundary == "headers":
         # Supply a token so the environment failure is specifically at SSP headers.
-        monkeypatch.setattr(p.gp, "create_jwt", lambda *args, **kwargs: "synthetic-token")
+        monkeypatch.setattr(p.request_stage, "create_jwt", lambda *args, **kwargs: "synthetic-token")
         monkeypatch.delenv("ORG_ASID")
     else:
         p.failures[boundary] = RuntimeError("synthetic failure")
