@@ -48,89 +48,74 @@ async def gpconnect(nhsno: int, saml_attrs: SAMLAttributes, request: Request = N
 async def _fetch_gpconnect_record(
     nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
 ) -> JSONResponse:
-    step = "validate_nhs_number.validate"
+    """Run the stages sequentially, retaining the original outer failure boundary."""
+    step = DiagnosticStep("validate_nhs_number.validate")
     try:
-        patient_step = DiagnosticStep(step)
-        try:
-            gp_ods = await resolve_patient(
-                nhsno,
-                saml_attrs,
-                request=request,
-                log_dir=log_dir,
-                step=patient_step,
-            )
-        finally:
-            step = patient_step.value
+        gp_ods = await resolve_patient(
+            nhsno,
+            saml_attrs,
+            request=request,
+            log_dir=log_dir,
+            step=step,
+        )
         if isinstance(gp_ods, Response):
             return gp_ods
 
-        routing_step = DiagnosticStep(step)
-        try:
-            route = await resolve_provider(
-                gp_ods,
-                nhsno,
-                saml_attrs,
-                request=request,
-                log_dir=log_dir,
-                step=routing_step,
-            )
-        finally:
-            step = routing_step.value
+        route = await resolve_provider(
+            gp_ods,
+            nhsno,
+            saml_attrs,
+            request=request,
+            log_dir=log_dir,
+            step=step,
+        )
         if isinstance(route, Response):
             return route
 
-        request_step = DiagnosticStep(step)
-        try:
-            outbound = await prepare_request(
-                route,
-                nhsno,
-                saml_attrs,
-                get_parameters=lambda: GP_CONNECT_PARAMETERS,
-                request=request,
-                log_dir=log_dir,
-                step=request_step,
-            )
-            if isinstance(outbound, Response):
-                return outbound
-            resp = await fetch_record(
-                route,
-                outbound,
-                nhsno,
-                saml_attrs,
-                relay_enabled=lambda: USE_RELAY,
-                environment=environment,
-                relay_base_path=RELAY_BASE_PATH,
-                over_internet_path=OVER_INTERNET_PATH,
-                request=request,
-                log_dir=log_dir,
-                step=request_step,
-            )
-        finally:
-            step = request_step.value
+        outbound = await prepare_request(
+            route,
+            nhsno,
+            saml_attrs,
+            get_parameters=lambda: GP_CONNECT_PARAMETERS,
+            request=request,
+            log_dir=log_dir,
+            step=step,
+        )
+        if isinstance(outbound, Response):
+            return outbound
+        resp = await fetch_record(
+            route,
+            outbound,
+            nhsno,
+            saml_attrs,
+            relay_enabled=lambda: USE_RELAY,
+            environment=environment,
+            relay_base_path=RELAY_BASE_PATH,
+            over_internet_path=OVER_INTERNET_PATH,
+            request=request,
+            log_dir=log_dir,
+            step=step,
+        )
         if isinstance(resp, Response):
             return resp
 
-        document_step = DiagnosticStep(step)
-        try:
-            document_result = await process_document(
-                resp,
-                nhsno,
-                saml_attrs,
-                ssp_trace_id=outbound.headers.get("Ssp-TraceID"),
-                request=request,
-                log_dir=log_dir,
-                step=document_step,
-            )
-        finally:
-            step = document_step.value
+        document_result = await process_document(
+            resp,
+            nhsno,
+            saml_attrs,
+            ssp_trace_id=outbound.headers.get("Ssp-TraceID"),
+            request=request,
+            log_dir=log_dir,
+            step=step,
+        )
         if isinstance(document_result, Response):
             return document_result
         doc_uuid = document_result
 
-        step = "gpconnect_response.json_response"
+        step.value = "gpconnect_response.json_response"
         return JSONResponse(status_code=200, content={"success": True, "document_id": doc_uuid})
     except Exception as e:
-        diagnostic = f"GP Connect failed (step: {step}, exception_type: {type(e).__name__})"
+        diagnostic = f"GP Connect failed (step: {step.value}, exception_type: {type(e).__name__})"
         application_logging.record_application_failure(RuntimeError(diagnostic))
         logging.error(diagnostic)
         if log_dir:
@@ -139,5 +124,5 @@ async def _fetch_gpconnect_record(
         if isinstance(e, AuditFailureException):
             raise AuditFailureException("GP Connect audit persistence failed") from None
         status_code = e.status_code if isinstance(e, HTTPException) else 500
-        msg = f"GP Connect failed at {step}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
+        msg = f"GP Connect failed at {step.value}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
         return JSONResponse(status_code=status_code, content={"success": False, "error": msg})

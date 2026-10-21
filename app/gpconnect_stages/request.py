@@ -148,23 +148,18 @@ async def fetch_record(
     # 8) Make request with a per-call client (avoid leaking across event loops)
     resp = None
     step.value = "gpconnect_request.transport_configuration"
-    transport_step = DiagnosticStep(step.value)
     try:
-        try:
-            resp = await send_request(
-                fhir_endpoint_url,
-                headers,
-                body,
-                request=request,
-                use_relay=relay_enabled(),
-                environment=environment,
-                relay_base_path=relay_base_path,
-                over_internet_path=over_internet_path,
-                step=transport_step,
-            )
-        finally:
-            # Preserve the last transport operation for the existing exception handlers.
-            step.value = transport_step.value
+        resp = await send_request(
+            fhir_endpoint_url,
+            headers,
+            body,
+            request=request,
+            use_relay=relay_enabled(),
+            environment=environment,
+            relay_base_path=relay_base_path,
+            over_internet_path=over_internet_path,
+            step=step,
+        )
 
         if log_dir:
             step.value = "gpconnect_request.response_debug_file"
