@@ -35,7 +35,7 @@ async def test_gpconnect_env_prod_missing_relay_fails_closed(monkeypatch, mock_s
                 "app.gpconnect.lookup_self_issuer", new_callable=AsyncMock, return_value="https://consumer.test/spine"
             ),
             patch("app.gpconnect.lookup_patient", new_callable=AsyncMock) as mock_lookup,
-            patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as mock_sds,
+            patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as mock_sds,
             patch("app.audit.audit.attempt_audit", new_callable=AsyncMock),
             patch("app.gpconnect.create_jwt", return_value="fake_jwt"),
         ):

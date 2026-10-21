@@ -181,7 +181,7 @@ async def test_redis_publication_audit_failure_interaction(
         "generalPractitioner": [{"identifier": {"value": "ods1"}}],
     }
 
-    with patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as mock_sds:
+    with patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as mock_sds:
         mock_sds.side_effect = [
             {
                 "resourceType": "Bundle",

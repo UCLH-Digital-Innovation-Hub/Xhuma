@@ -397,7 +397,7 @@ async def test_gpconnect_endpoint_sds_upstream_failure_audits_safe_fields(caplog
     sentinel = "UPSTREAM_SECRET_BODY_503"
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace") as mock_sds,
+        patch("app.gpconnect_stages.routing.sds_trace") as mock_sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as mock_audit,
         patch("app.logging.record_application_failure"),
         caplog.at_level(logging.DEBUG),
@@ -444,7 +444,7 @@ async def test_gpconnect_device_sds_upstream_failure_audits_safe_fields(caplog):
     sentinel = "UPSTREAM_SECRET_DEVICE_503"
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace") as mock_sds,
+        patch("app.gpconnect_stages.routing.sds_trace") as mock_sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as mock_audit,
         patch("app.logging.record_application_failure"),
         caplog.at_level(logging.DEBUG),
