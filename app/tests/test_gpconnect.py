@@ -91,7 +91,7 @@ def fake_sds_endpoint_trace():
 @patch("app.gpconnect_stages.document.redis_client.pipeline")
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
 @patch("app.gpconnect_stages.transport.httpx.AsyncClient")
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_with_nhs_data(
     mock_lookup_patient,
@@ -174,7 +174,7 @@ async def test_self_lookup_failure_is_audited_without_downstream_request(mock_se
     mock_self_issuer.side_effect = ValueError("SYNTHETIC_SENSITIVE_LOOKUP_ERROR")
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
         patch("app.gpconnect_stages.document.redis_client.pipeline") as cache,
@@ -252,7 +252,7 @@ async def test_gpconnect_returns_403_when_patient_restricted(mock_lookup_patient
 
 @pytest.mark.asyncio
 @patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_returns_502_when_sds_trace_fails(
     mock_lookup_patient,
@@ -277,7 +277,7 @@ async def test_gpconnect_returns_502_when_sds_trace_fails(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("audit_fails", [False, True])
 @patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 @patch("app.logging.record_application_failure")
 async def test_gpconnect_zero_entries_sds_endpoint_bundle(
@@ -430,7 +430,7 @@ async def test_gpconnect_error_display_reaches_caller_and_logs(status, displays,
     with (
         patch("app.gpconnect.USE_RELAY", False),
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.gpconnect_stages.transport.create_nhs_ssl_context"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as factory,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
@@ -491,7 +491,7 @@ async def test_gpconnect_malformed_error_retains_upstream_status(payload):
     with (
         patch("app.gpconnect.USE_RELAY", False),
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.gpconnect_stages.transport.create_nhs_ssl_context"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as factory,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
@@ -509,7 +509,7 @@ async def test_gpconnect_malformed_error_retains_upstream_status(payload):
 async def test_serialization_failure_returns_caller_error_with_step():
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock),
         patch("app.gpconnect_stages.transport.create_nhs_ssl_context"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as factory,
@@ -569,7 +569,7 @@ async def test_device_parse_failure_sanitises_output(mock_self_issuer, tmp_path,
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure") as telemetry,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -644,7 +644,7 @@ async def test_invalid_endpoint_trace_is_audited_without_downstream_request(
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
         patch("app.soap.responses.iti_38.redis_client", autospec=True) as soap_cache,
@@ -703,7 +703,7 @@ async def test_endpoint_audit_failures_are_distinguished(mock_self_issuer, step,
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock, side_effect=fail_audit) as audit,
         patch("app.logging.record_application_failure") as telemetry,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -776,7 +776,7 @@ async def test_multiple_endpoint_entries_fail_closed(mock_self_issuer, caplog):
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(nhs_no)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure") as telemetry,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -867,7 +867,7 @@ async def test_multiple_device_entries_fail_closed(mock_self_issuer, caplog):
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(nhs_no)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure") as telemetry,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -940,7 +940,7 @@ async def test_zero_device_entries_fails_closed(mock_self_issuer):
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(nhs_no)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1002,7 +1002,7 @@ async def test_non_bundle_device_response_fails_closed(mock_self_issuer, malform
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(nhs_no)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1033,7 +1033,7 @@ async def test_endpoint_lookup_failure_is_audited_without_downstream_request(moc
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
     ):
@@ -1072,7 +1072,7 @@ async def test_endpoint_lookup_failure_is_audited_without_downstream_request(moc
 @patch("app.logging.record_application_failure")
 @patch("app.gpconnect_stages.transport.httpx.AsyncClient")
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_readerror_audits_failure(
     mock_lookup_patient,
@@ -1125,7 +1125,7 @@ async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
         patch("app.gpconnect_stages.document.redis_client.pipeline") as cache,
         patch("app.gpconnect_stages.transport.create_nhs_ssl_context"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock) as pds,
     ):
         pds.return_value = load_pds(9690937278)
@@ -1173,7 +1173,7 @@ async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
 @patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect_stages.transport.httpx.AsyncClient")
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_non200_data_minimisation(
     mock_lookup_patient, mock_sds_trace, mock_create_nhs_ssl_context, mock_async_client, mock_attempt_audit
@@ -1211,7 +1211,7 @@ async def test_gpconnect_non200_data_minimisation(
 @patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
 @patch("app.gpconnect_stages.transport.httpx.AsyncClient")
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_gpconnect_transport_exception_data_minimisation(
     mock_lookup_patient, mock_sds_trace, mock_create_nhs_ssl_context, mock_async_client, mock_attempt_audit
@@ -1251,7 +1251,7 @@ async def test_gpconnect_transport_exception_data_minimisation(
 @patch("app.logging.record_application_failure")
 @patch("app.gpconnect_stages.transport.httpx.AsyncClient")
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
 @patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
 async def test_validate_fhir_bundle_data_minimisation(
     mock_lookup_patient,
@@ -1303,7 +1303,7 @@ async def test_sds_device_failure_does_not_expose_upstream_secret(mock_self_issu
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure") as mock_record_failure,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1371,7 +1371,7 @@ async def test_sds_endpoint_failure_does_not_expose_upstream_secret(mock_self_is
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure") as mock_record_failure,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1445,7 +1445,7 @@ async def test_resolve_gp_ods_failure_does_not_expose_upstream_secret(mock_self_
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=fake_pds),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure") as mock_record_failure,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1521,7 +1521,7 @@ async def test_resolve_asid_partykey_failure_does_not_expose_upstream_secret(moc
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure") as mock_record_failure,
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1602,7 +1602,7 @@ async def test_gpconnect_missing_party_key_fails_closed(mock_self_issuer):
     }
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1647,7 +1647,7 @@ async def test_gpconnect_ambiguous_party_key_fails_closed(mock_self_issuer):
     }
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1691,7 +1691,7 @@ async def test_gpconnect_ambiguous_asid_fails_closed(mock_self_issuer):
     }
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1750,7 +1750,7 @@ async def test_raw_nhs_number_absent_from_application_logging(mock_self_issuer, 
 
     with (
         patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=pds),
-        patch("app.gpconnect.sds_trace", new_callable=AsyncMock) as sds,
+        patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock) as sds,
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock),
         patch("app.logging.record_application_failure"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient"),
@@ -1783,6 +1783,7 @@ def observed_pipeline(monkeypatch, tmp_path):
     telemetry = importlib.import_module("app.telemetry")
     probe = SimpleNamespace(
         gp=gp,
+        routing=importlib.import_module("app.gpconnect_stages.routing"),
         document=importlib.import_module("app.gpconnect_stages.document"),
         transport=importlib.import_module("app.gpconnect_stages.transport"),
         nhs="9999999999",  # Fabricated checksum-valid identifier, never sent externally.
@@ -1922,7 +1923,7 @@ def observed_pipeline(monkeypatch, tmp_path):
         note("issuer")
         return "https://consumer.example.invalid/spine"
 
-    monkeypatch.setattr(gp, "sds_trace", sds)
+    monkeypatch.setattr(probe.routing, "sds_trace", sds)
     monkeypatch.setattr(gp, "lookup_self_issuer", issuer)
     original_jwt = gp.create_jwt
 
@@ -2004,6 +2005,7 @@ def observed_pipeline(monkeypatch, tmp_path):
         return original_response(*args, **kwargs)
 
     monkeypatch.setattr(gp, "JSONResponse", response)
+    monkeypatch.setattr(probe.routing, "JSONResponse", response)
     monkeypatch.setattr(probe.document, "JSONResponse", response)
     try:
         yield probe
@@ -2981,7 +2983,7 @@ async def test_routing_permissive_identifiers_and_address(observed_pipeline, mon
     for payload in (p.endpoint, p.device):
         payload.update(total=99, link=[{"relation": "next", "url": "https://unused.example.invalid"}])
     sds = AsyncMock(side_effect=[p.endpoint, p.device])
-    monkeypatch.setattr(p.gp, "sds_trace", sds)
+    monkeypatch.setattr(p.routing, "sds_trace", sds)
     response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
     assert response.status_code == 200
     assert [call.kwargs for call in sds.await_args_list] == [{"endpoint": True}, {"mhsparty": party}]
