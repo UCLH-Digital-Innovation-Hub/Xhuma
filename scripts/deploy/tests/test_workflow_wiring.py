@@ -20,6 +20,32 @@ def test_legacy_routes_retired():
     assert cd_wf is None, "legacy cd.yml must be retired"
 
 
+def test_dependabot_container_uses_unprivileged_pr_event():
+    workflow = load_workflow("ci.yml")
+    triggers = workflow.get(True) or workflow.get("on", {})
+    assert "dev" in triggers["pull_request"]["branches"]
+    assert "pull_request_target" not in triggers
+    job = workflow["jobs"]["dependabot-container"]
+    assert "github.event_name == 'pull_request'" in job["if"]
+    assert "github.event.pull_request.user.login == 'dependabot[bot]'" in job["if"]
+    assert job["permissions"] == {"contents": "read"}
+    assert "secrets." not in json.dumps(job)
+
+
+def test_container_journey_keeps_production_runtime_and_network_isolated():
+    with open("docker-compose.smoke.yml") as f:
+        stack = yaml.safe_load(f)
+    app = stack["services"]["xhuma"]
+    assert app["build"] == "."
+    assert "command" not in app
+    assert "entrypoint" not in app
+    assert all("/code" not in mount for mount in app["volumes"])
+    assert app["environment"]["ENV"] == "prod"
+    assert "AUDIT_FAIL_OPEN" not in app["environment"]
+    assert stack["networks"]["default"]["internal"] is True
+    assert all("ports" not in service for service in stack["services"].values())
+
+
 def test_matrix_deploy_listens_to_main():
     workflow = load_workflow("matrix-deploy.yml")
     assert workflow is not None
