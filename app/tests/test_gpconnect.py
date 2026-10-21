@@ -3152,3 +3152,41 @@ async def test_patient_cache_hit_audit_failure_stops_routing(observed_pipeline, 
     assert p.events == ["nhs.validate", "pds", "audit:pds_lookup:ok"]
     assert "GP Connect failed (step: pds_lookup.lookup_patient, exception_type: AuditFailureException)" in caplog.text
     assert not p.published
+
+
+@pytest.mark.asyncio
+async def test_pipeline_overlapping_misses_generate_independent_documents(observed_pipeline):
+    import asyncio
+
+    p = observed_pipeline
+    both_entered = asyncio.Event()
+    trace_ids = []
+
+    async def post(url, *, json, headers):
+        trace_ids.append(headers["Ssp-TraceID"])
+        if len(trace_ids) == 2:
+            both_entered.set()
+        await both_entered.wait()
+        return p.http_response
+
+    p.transport.httpx.AsyncClient.return_value.post.side_effect = post
+    responses = await asyncio.wait_for(
+        asyncio.gather(
+            p.gp.gpconnect(p.nhs, p.saml, request=p.request),
+            p.gp.gpconnect(p.nhs, p.saml, request=p.request),
+        ),
+        timeout=2,
+    )
+    assert [response.status_code for response in responses] == [200, 200]
+    documents = {json.loads(response.body)["document_id"] for response in responses}
+    assert len(documents) == len(set(trace_ids)) == 2
+    assert documents.isdisjoint(trace_ids)
+    pointers = [command for command in p.commands if command[0] == "setex"]
+    assert [command[1] for command in pointers] == [p.nhs, p.nhs]
+    assert {command[3] for command in pointers} == documents
+    assert {command[1] for command in p.commands if command[0] == "hset"} == {
+        f"document:{document}" for document in documents
+    }
+    stores = [event for event in p.persisted if event.event.action == "store_ccda"]
+    assert {event.event.data_refs.document_id for event in stores} == documents
+    assert all(event.event.outcome == AuditOutcome.ok for event in stores)
