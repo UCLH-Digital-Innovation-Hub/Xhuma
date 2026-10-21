@@ -2964,3 +2964,34 @@ async def test_document_debug_file_order(observed_pipeline, monkeypatch, tmp_pat
     else:
         assert response.status_code == 200
         assert p.events.index(f"file:{p.nhs}.xml") < p.events.index("serialize")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("party,asid", [("FAKE-PARTY-KEY", "200000000000"), (" party ", " asid "), (7, 9)])
+async def test_routing_permissive_identifiers_and_address(observed_pipeline, monkeypatch, party, asid):
+    p = observed_pipeline
+    endpoint = p.endpoint["entry"][0]["resource"]
+    device = p.device["entry"][0]["resource"]
+    del endpoint["resourceType"]
+    device["resourceType"] = ""
+    endpoint["address"] = "  relative-endpoint  "
+    endpoint["status"] = "inactive"
+    endpoint["identifier"] = [{"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": party}] * 2
+    device["identifier"] = [{"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": asid}] * 2
+    for payload in (p.endpoint, p.device):
+        payload.update(total=99, link=[{"relation": "next", "url": "https://unused.example.invalid"}])
+    sds = AsyncMock(side_effect=[p.endpoint, p.device])
+    monkeypatch.setattr(p.gp, "sds_trace", sds)
+    response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
+    assert response.status_code == 200
+    assert [call.kwargs for call in sds.await_args_list] == [{"endpoint": True}, {"mhsparty": party}]
+    assert p.sent.headers["Ssp-To"] == asid
+    assert p.sent.url == "https://proxy.example.invalid/  relative-endpoint  /Patient/$gpc.getstructuredrecord"
+    assert (
+        jwt.decode(p.sent.headers["Authorization"].split()[1], options={"verify_signature": False})["aud"]
+        == "  relative-endpoint  "
+    )
+    assert [(a["action"], a["outcome"].value) for a in p.audits][1:3] == [
+        ("fhir_endpoint_trace", "ok"),
+        ("sds_trace", "ok"),
+    ]
