@@ -62,11 +62,9 @@ async def build_audit_event(
     seq = await next_audit_sequence(session)
 
     evt = AuditEvent(
-        # audit_id=uuid.uuid4(),
         sequence=seq,
         subject_nhs_number=nhs_number,
         event_time=_utcnow(),
-        # service_name=os.getenv("OTEL_SERVICE_NAME", "xhuma"),
         organisation=os.getenv("ORG_CODE", "RRV00"),
         request_id=request_id or request.headers.get("x-request-id"),
         trace_id=_trace_id(),
@@ -81,7 +79,6 @@ async def build_audit_event(
             outcome=outcome,
             error_code=error_code,
             data_refs=EventDataRefs(
-                # subject_ref=subject_ref,
                 message_id=message_id,
                 document_id=document_id,
             ),

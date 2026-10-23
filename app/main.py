@@ -172,8 +172,6 @@ async def lifespan(app: FastAPI):
         meter_provider = MeterProvider(metric_readers=[reader])
         metrics.set_meter_provider(meter_provider)
 
-        # meter = metrics.get_meter("xhuma.business", "1.0.0")
-        # app.state.metrics = build_business_metrics(meter)
         loop_monitor = asyncio.create_task(monitor_event_loop())
         try:
             yield

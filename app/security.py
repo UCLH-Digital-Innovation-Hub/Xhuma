@@ -31,7 +31,6 @@ from .audit.models import SAMLAttributes
 
 logger = logging.getLogger(__name__)
 
-API_KEY = os.getenv("API_KEY")
 api_key_header_scheme = APIKeyHeader(name="X-API-Key", auto_error=True)
 
 
@@ -436,66 +435,11 @@ def create_jwt(
         },
     }
 
-    # audit_role = audit.role.model_dump(by_alias=True)
-    # audit_role.pop("@xsi:type", None)  # Remove XML type info for JWT payload
-    # audit_role.pop("nullFlavor", None)  # Remove null flavor if present
-
     audit_role = {
         "system": audit.role.codeSystemName if audit.role else "",
         "value": audit.role.code if audit.role else "",
     }
 
-    # print("Adding role to JWT payload:", audit_role)
-
     payload["requesting_practitioner"]["identifier"].append(audit_role)
 
-    # print("JWT PAYLOAD")
-    # print(payload)
-    # write payload to file for debugging
-    # with open("app/logs/int_troubleshooting/jwt_payload.json", "w") as f:
-    #     import json
-
-    #     json.dump(payload, f, indent=4)
     return jwt.encode(payload, key=None, algorithm="none", headers={"alg": "none", "typ": "JWT"})
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    from app.pds.pds import lookup_self_issuer
-
-    # Example usage
-    audit = {
-        "subject_id": "CONE, Stephen",
-        "organization": "UCLH - University College London Hospitals - TST",
-        "organization_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        "home_community_id": "urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100",
-        "role": {
-            "Role": {
-                "@xsi:type": "CE",
-                "@code": "224608005",
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "@codeSystemName": "SNOMED_CT",
-                "@displayName": "Administrative healthcare staff",
-                "@xmlns": "urn:hl7-org:v3",
-                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-            }
-        },
-        "purpose_of_use": {
-            "PurposeForUse": {
-                "@xsi:type": "CE",
-                "@code": "TREATMENT",
-                "@codeSystem": "2.16.840.1.113883.3.18.7.1",
-                "@codeSystemName": "nhin-purpose",
-                "@displayName": "Treatment",
-                "@xmlns": "urn:hl7-org:v3",
-                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-                "@xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
-            }
-        },
-        "resource_id": "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO",
-    }
-    print("RAW TOKEN")
-    token = create_jwt(SAMLAttributes.model_validate(audit), issuer=asyncio.run(lookup_self_issuer()))
-    print(token)
