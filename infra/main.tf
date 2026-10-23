@@ -556,9 +556,21 @@ resource "azurerm_container_app_job" "dmd_warm" {
   replica_timeout_in_seconds   = local.dmd_job_replica_timeout_seconds
   replica_retry_limit          = 0
 
-  manual_trigger_config {
-    parallelism              = 1
-    replica_completion_count = 1
+  dynamic "manual_trigger_config" {
+    for_each = var.dmd_cache_native_schedule_enabled ? [] : [1]
+    content {
+      parallelism              = 1
+      replica_completion_count = 1
+    }
+  }
+
+  dynamic "schedule_trigger_config" {
+    for_each = var.dmd_cache_native_schedule_enabled ? [1] : []
+    content {
+      cron_expression          = var.dmd_cache_native_cron_expression
+      parallelism              = 1
+      replica_completion_count = 1
+    }
   }
 
   identity {
@@ -636,6 +648,14 @@ resource "azurerm_container_app_job" "dmd_warm" {
       condition     = local.dmd_job_replica_timeout_seconds < local.dmd_logic_poll_timeout_seconds && local.dmd_logic_poll_timeout_seconds < local.dmd_lock_ttl_seconds
       error_message = "Timeout invariant violated: replica timeout (1800s) must be < poll timeout (2100s) < lock TTL (2700s)."
     }
+    precondition {
+      condition     = !var.dmd_cache_native_schedule_enabled || (var.dmd_cache_native_cron_expression != null && trimspace(var.dmd_cache_native_cron_expression) != "")
+      error_message = "dmd_cache_native_cron_expression is required and must not be empty when dmd_cache_native_schedule_enabled is true."
+    }
+    precondition {
+      condition     = !(var.dmd_cache_native_schedule_enabled && var.dmd_cache_schedule_enabled)
+      error_message = "Native Container Apps scheduling and Logic App scheduling are mutually exclusive. Enable only one scheduler mechanism."
+    }
     ignore_changes = [tags["CostCenter"]]
   }
 }
@@ -662,6 +682,10 @@ resource "azurerm_logic_app_workflow" "dmd_warm" {
     precondition {
       condition     = length(var.dmd_cache_alert_action_group_ids) > 0
       error_message = "At least one alert action group ID is required in dmd_cache_alert_action_group_ids when dmd_cache_schedule_enabled is true."
+    }
+    precondition {
+      condition     = !(var.dmd_cache_native_schedule_enabled && var.dmd_cache_schedule_enabled)
+      error_message = "Native Container Apps scheduling and Logic App scheduling are mutually exclusive. Enable only one scheduler mechanism."
     }
     ignore_changes = [tags["CostCenter"]]
   }
@@ -997,5 +1021,15 @@ check "dmd_cache_invariants" {
   assert {
     condition     = local.dmd_job_replica_timeout_seconds < local.dmd_logic_poll_timeout_seconds && local.dmd_logic_poll_timeout_seconds < local.dmd_lock_ttl_seconds
     error_message = "Timeout invariant violated: replica timeout (1800s) must be < poll timeout (2100s) < lock TTL (2700s)."
+  }
+
+  assert {
+    condition     = !var.dmd_cache_native_schedule_enabled || (var.dmd_cache_native_cron_expression != null && trimspace(var.dmd_cache_native_cron_expression) != "")
+    error_message = "dmd_cache_native_cron_expression is required and must not be empty when dmd_cache_native_schedule_enabled is true."
+  }
+
+  assert {
+    condition     = !(var.dmd_cache_native_schedule_enabled && var.dmd_cache_schedule_enabled)
+    error_message = "Native Container Apps scheduling and Logic App scheduling are mutually exclusive. Enable only one scheduler mechanism."
   }
 }
