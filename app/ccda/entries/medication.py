@@ -5,6 +5,7 @@ from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationrequest, medicationstatement
 
 from ..dmd import dmd_lookup
+from ..dosage_lookup import mapped_dosages
 from ..helpers import (
     cda_time_bound,
     clean_number,
@@ -106,6 +107,7 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
 async def medication(entry: medicationstatement.MedicationStatement, index: dict) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
+    dosages = mapped_dosages(entry.dosage)
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
     based_on_request: medicationrequest.MedicationRequest = index[entry.basedOn[0].reference]
     raw_notes = []
@@ -135,8 +137,8 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         if code.code == "196421000000109":
             misc_notes.append(f"Transfer degraded medication text: {referenced_med.code.text}")
 
-    multiple_dosages = len(entry.dosage) > 1
-    for index, dosage in enumerate(entry.dosage, start=1):
+    multiple_dosages = len(dosages) > 1
+    for index, dosage in enumerate(dosages, start=1):
         repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
         warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
         if warning:
@@ -172,18 +174,18 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         entryRelationship=[],
     )
     # if dose quantiy is in dosage
-    if entry.dosage[0].doseQuantity:
+    if dosages[0].doseQuantity:
         # assumption that all structuered dosage will be snomed
         # substance_administration.doseQuantity = {
         #     "value": {
         #         "@xsi:type": "PQ",
         #         "@nullFlavor": "OTH",
         #         "translation": {
-        #             "@value": entry.dosage[0].doseQuantity.value,
-        #             "@code": entry.dosage[0].doseQuantity.code,
-        #             "@codeSystemName": entry.dosage[0].doseQuantity.system,
+        #             "@value": dosages[0].doseQuantity.value,
+        #             "@code": dosages[0].doseQuantity.code,
+        #             "@codeSystemName": dosages[0].doseQuantity.system,
         #             "@codeSystem": "2.16.840.1.113883.6.96",
-        #             "originalText": entry.dosage[0].doseQuantity.unit,
+        #             "originalText": dosages[0].doseQuantity.unit,
         #         },
         #     },
         # }
@@ -192,23 +194,23 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         # warnings for doseQuantity. Preserve the subsequent dose-conversion logic.
         substance_administration.doseQuantity = {
             "@xsi:type": "PQ",
-            "@value": entry.dosage[0].doseQuantity.value,
+            "@value": dosages[0].doseQuantity.value,
         }
-        if entry.dosage[0].doseQuantity.unit:
-            substance_administration.doseQuantity["@unit"] = entry.dosage[0].doseQuantity.unit
+        if dosages[0].doseQuantity.unit:
+            substance_administration.doseQuantity["@unit"] = dosages[0].doseQuantity.unit
 
         # if there is a code add a translation
-        if entry.dosage[0].doseQuantity.code:
+        if dosages[0].doseQuantity.code:
             substance_administration.doseQuantity["translation"] = {
-                "@value": entry.dosage[0].doseQuantity.value,
-                "@code": entry.dosage[0].doseQuantity.code,
+                "@value": dosages[0].doseQuantity.value,
+                "@code": dosages[0].doseQuantity.code,
                 "@codeSystem": "2.16.840.1.113883.6.96",
-                "originalText": entry.dosage[0].doseQuantity.unit,
+                "originalText": dosages[0].doseQuantity.unit,
             }
     # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
     # check if dosage has as needed boolean of true
 
-    if entry.dosage[0].asNeededBoolean:
+    if dosages[0].asNeededBoolean:
         # populate precondition
         # TODO: Build a list of Precondition models rather than a single dict;
         # structured-dosage/PRN tests warn that precondition expects list[Precondition].
@@ -223,12 +225,12 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
             },
         }
         # if there is a asNeededCodeableConcept, use it
-        if entry.dosage[0].asNeededCodeableConcept:
+        if dosages[0].asNeededCodeableConcept:
             substance_administration.precondition["criterion"]["value"] = {
                 "@xsi:type": "CD",
-                "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
-                "@displayName": entry.dosage[0].asNeededCodeableConcept.coding[0].display,
-                "@codeSystemName": entry.dosage[0].asNeededCodeableConcept.coding[0].value,
+                "@code": dosages[0].asNeededCodeableConcept.coding[0].code,
+                "@displayName": dosages[0].asNeededCodeableConcept.coding[0].display,
+                "@codeSystemName": dosages[0].asNeededCodeableConcept.coding[0].value,
             }
         else:
             # if no asNeededCodeableConcept, use NI
@@ -237,8 +239,8 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 "@nullFlavor": "NI",
             }
 
-    if entry.dosage[0].timing:
-        repeat = entry.dosage[0].timing.repeat
+    if dosages[0].timing:
+        repeat = dosages[0].timing.repeat
         frequency = getattr(repeat, "frequency", None)
         frequency_max = getattr(repeat, "frequencyMax", None)
         pivl = PIVL_TS(
@@ -253,9 +255,9 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
         substance_administration.effectiveTime.append(pivl)
 
-    if entry.dosage[0].maxDosePerPeriod:
-        numerator = entry.dosage[0].maxDosePerPeriod.numerator
-        denominator = entry.dosage[0].maxDosePerPeriod.denominator
+    if dosages[0].maxDosePerPeriod:
+        numerator = dosages[0].maxDosePerPeriod.numerator
+        denominator = dosages[0].maxDosePerPeriod.denominator
         if numerator and denominator:
             try:
                 # TODO: Build an RTO_PQ_PQ model with PQ numerator/denominator;
@@ -276,13 +278,13 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 pass
 
     #   check if route is in dosage
-    if entry.dosage[0].method:
-        substance_administration.routeCode = code_with_translations(entry.dosage[0].method.coding)
+    if dosages[0].method:
+        substance_administration.routeCode = code_with_translations(dosages[0].method.coding)
 
     patient_instr_list = []
     text_instr_list = []
 
-    for i, dosage in enumerate(entry.dosage):
+    for i, dosage in enumerate(dosages):
         prefix = f"{i + 1}. " if multiple_dosages else ""
 
         if dosage.patientInstruction:
@@ -354,7 +356,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
             try:
                 dmd_data = await dmd_lookup(int(snomed_code))
                 # only process dose if a single dosage instruction
-                if len(entry.dosage) == 1:
+                if len(dosages) == 1:
                     if dmd_data.vpi and substance_administration.doseQuantity:
                         processed_dose = dmd_data.vpi.value * substance_administration.doseQuantity["@value"]
 
@@ -369,7 +371,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                         # print(warning_text)
                         misc_notes.append(warning_text)
 
-                elif len(entry.dosage) > 1:
+                elif len(dosages) > 1:
                     # multiple dosage instrutions so add warning to medication name instead of processing dose
                     warning_text = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
                     misc_notes.append(warning_text)
