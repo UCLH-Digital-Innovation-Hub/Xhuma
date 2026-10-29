@@ -79,7 +79,14 @@ def mapped_dosages(dosages: list[Dosage] | None) -> list[Dosage]:
     for dosage in dosages:
         mapping = lookup_dosage(dosage.text) if dosage.text else None
         if mapping is not None:
-            result.append(Dosage({**dosage.as_json(), **mapping}))
+            enriched = Dosage({**dosage.as_json(), **mapping})
+            enriched._freetext_mapped = True
+            result.append(enriched)
         else:
             result.append(dosage)
     return result
+
+
+def is_freetext_mapped(dosages: list[Dosage] | None) -> bool:
+    """Return True if any dosage was enriched via the canonical freetext mapping."""
+    return any(getattr(d, "_freetext_mapped", False) for d in (dosages or []))
