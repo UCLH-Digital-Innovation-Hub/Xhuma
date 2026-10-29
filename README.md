@@ -53,6 +53,7 @@ For detailed documentation, see:
 - [Data flow](docs/architecture/data_flow.md)
 - [Technical resources](docs/architecture/technical_resources.md)
 - [Structured dose mapping](docs/clinical-mapping/dm+d_mapping.md)
+- [Freetext mapping](docs/clinical-mapping/freetext_mapping.md)
 - [Observability & Diagnostics](docs/operations/observability.md)
 
 ## System flow
