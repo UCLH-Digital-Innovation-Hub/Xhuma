@@ -14,6 +14,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
+from app.ccda.models.demographics import (
+    DemographicCode,
+    DemographicTime,
+    PersonName,
+    PostalAddress,
+    ProviderOrganization,
+)
+
 HL7_INTERACTION_ROOT = "2.16.840.1.113883.1.18"
 NHS_NUMBER_ROOT = "2.16.840.1.113883.2.1.4.1"
 GP_ORGANIZATION_ROOT = "2.16.840.1.113883.2.1.4.3"
@@ -320,28 +328,13 @@ class Custodian(XmlModel):
     assigned_entity: AssignedEntity = Field(alias="assignedEntity")
 
 
-class PersonName(XmlModel):
-    given: TextElement
-    family: TextElement
-
-
 class PatientPerson(XmlModel):
     class_code: str = Field(default="PSN", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    name: PersonName
-    gender: CodeElement = Field(alias="administrativeGenderCode")
-    birth_time: ValueElement = Field(alias="birthTime")
-
-
-class ProviderIdentifier(XmlModel):
-    root: str = Field(default=GP_ORGANIZATION_ROOT, alias="@root")
-    identifier: Any = Field(alias="id")
-
-
-class ProviderOrganization(XmlModel):
-    class_code: str = Field(default="ORG", alias="@classCode")
-    determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    identifier: ProviderIdentifier = Field(alias="id")
+    name: list[PersonName] = Field(min_length=1)
+    gender: DemographicCode = Field(alias="administrativeGenderCode")
+    birth_time: DemographicTime = Field(alias="birthTime")
+    addresses: list[PostalAddress] = Field(default_factory=list, alias="addr")
 
 
 class Patient(XmlModel):
@@ -349,7 +342,7 @@ class Patient(XmlModel):
     identifiers: list[Identifier] = Field(alias="id")
     status_code: CodeElement = Field(default_factory=lambda: CodeElement(code="active"), alias="statusCode")
     patient_person: PatientPerson = Field(alias="patientPerson")
-    provider_organization: ProviderOrganization = Field(alias="providerOrganization")
+    provider_organization: ProviderOrganization | None = Field(default=None, alias="providerOrganization")
 
 
 class Subject1(XmlModel):

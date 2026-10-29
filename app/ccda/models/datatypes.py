@@ -8,6 +8,8 @@ from typing import Dict, List, Optional, Union
 
 from pydantic import AliasChoices, BaseModel, Field, field_serializer, model_validator
 
+from .demographics import PostalAddress as AD  # noqa: F401 - public CDA datatype
+
 # TODO: add Enums
 
 
@@ -70,23 +72,11 @@ class TEL(URL):
         "The address is specified as a URL qualified by time specification "
         "and use codes that help in deciding which address to use for a "
         "given time and purpose.",
+        alias="@xsi:type",
     )
     usablePeriod: Optional[List[SXCM_TS]] = None
     use: Optional[List[str]] = None
     value: Optional[str] = Field(alias="@value", default=None)
-
-
-class AD(ANY):
-    resource_type: str = Field(
-        "AD",
-        description="Mailing and home or office addresses. A sequence of address parts.",
-    )
-    use: Optional[str] = Field(alias="@use", default=None)
-    streetAddressLine: Optional[List[str]] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    postalCode: Optional[str] = None
-    country: Optional[str] = None
 
 
 class ED(BIN):
@@ -127,7 +117,8 @@ class II(ANY):
     assigningAuthorityName: Optional[str] = Field(alias="@assigningAuthorityName", default=None)
     displayable: Optional[bool] = None
     extension: Optional[str] = Field(alias="@extension", default=None)
-    root: Optional[str] = Field(alias="@root")
+    # An unidentified source may supply only nullFlavor, without a root.
+    root: Optional[str] = Field(alias="@root", default=None)
 
     model_config = {
         "populate_by_name": True,

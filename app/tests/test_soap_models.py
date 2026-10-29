@@ -181,7 +181,8 @@ async def test_iti55_response_uses_usual_name_and_preserves_xml_shape():
     assert response["interactionId"]["@extension"] == "PRPA_IN201306UV02"
     assert response["controlActProcess"]["queryByParameter"] == query
     name = response["controlActProcess"]["subject"]["registrationEvent"]["subject1"]["patient"]["patientPerson"]["name"]
-    assert name == {"given": "Ada", "family": "Lovelace"}
+    assert name[0] == {"given": "Ada", "family": "Lovelace"}
+    assert name[1] == {"given": "Augusta", "family": "King"}
 
 
 @pytest.mark.parametrize(
@@ -204,10 +205,14 @@ async def test_iti55_response_with_pds_fixture(fixture_name, given, family, gp_c
     person_xml = patient_xml["patientPerson"]
 
     assert patient_xml["id"][0]["@extension"] == patient["id"]
-    assert person_xml["name"] == {"given": given, "family": family}
+    assert person_xml["name"]["given"][0] == given
+    assert person_xml["name"]["family"] == family
+    selected = next(name for name in patient["name"] if name.get("use") == "usual")
+    assert person_xml["name"]["given"] == selected["given"]
+    assert person_xml["name"]["prefix"] == selected["prefix"][0]
     assert person_xml["administrativeGenderCode"]["@code"] == "M"
     assert person_xml["birthTime"]["@value"] == birth_time
-    assert patient_xml["providerOrganization"]["id"]["id"] == gp_code
+    assert patient_xml["providerOrganization"]["id"]["@extension"] == gp_code
 
 
 @pytest.mark.asyncio

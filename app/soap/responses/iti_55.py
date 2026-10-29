@@ -1,7 +1,15 @@
-import xmltodict
-from fhirclient.models.humanname import HumanName
+import logging
 
-from app.ccda.helpers import select_patient_name
+import xmltodict
+
+from app.ccda.demographics import (
+    ODS_ROOT,
+    demographic_time,
+    person_names,
+    postal_addresses,
+    provider_organization,
+)
+from app.ccda.models.demographics import DemographicCode
 
 from ..models import (
     Acknowledgement,
@@ -16,9 +24,6 @@ from ..models import (
     ITI55ResponseMessage,
     Patient,
     PatientPerson,
-    PersonName,
-    ProviderIdentifier,
-    ProviderOrganization,
     QueryAcknowledgement,
     RegistrationEvent,
     ResponseHeader,
@@ -26,8 +31,6 @@ from ..models import (
     Subject,
     Subject1,
     TargetMessage,
-    TextElement,
-    ValueElement,
 )
 from .constants import COMMUNITY_ID
 
@@ -35,9 +38,20 @@ from .constants import COMMUNITY_ID
 async def iti_55_response(message_id, patient, query):
     """Generate a successful ITI-55 patient discovery response."""
 
-    gp = patient["generalPractitioner"][0]
-    selected_name = select_patient_name([HumanName(name) for name in patient.get("name") or []])
-    gender = {"male": "M", "female": "F"}.get(patient["gender"], "UNK")
+    providers = []
+    for reference in patient.get("generalPractitioner") or []:
+        identifier = reference.get("identifier") or {}
+        # PDS supplies a GP organisation identifier without a system. The
+        # transaction's known ODS authority applies to these identifiers only.
+        if identifier and not identifier.get("system"):
+            identifier = {**identifier, "system": f"urn:oid:{ODS_ROOT}"}
+        providers.append(provider_organization({"identifier": [identifier], "name": reference.get("display")}))
+    # The HL7 v3 patient role has only one scoping provider organisation.
+    # Multiple GP references do not establish which organisation should scope it.
+    provider = next(iter(providers)) if len(providers) == 1 else None
+    if len(providers) > 1:
+        logging.warning("ITI-55 provider organisation omitted: multiple GP references supplied")
+    gender = {"male": "M", "female": "F", "other": "UN"}.get(patient.get("gender"))
     # The second identifier is the service's internal correlation identifier;
     # the first remains the nationally assigned NHS number.
     patient_ids = [
@@ -65,18 +79,12 @@ async def iti_55_response(message_id, patient, query):
                         patient=Patient(
                             identifiers=patient_ids,
                             patient_person=PatientPerson(
-                                name=PersonName(
-                                    given=TextElement(text=selected_name.given[0]),
-                                    family=TextElement(text=selected_name.family),
-                                ),
-                                gender=CodeElement(code=gender),
-                                birth_time=ValueElement(value=patient["birthDate"].replace("-", "")),
+                                name=person_names(patient.get("name")),
+                                gender=DemographicCode(code=gender) if gender else DemographicCode(nullFlavor="UNK"),
+                                birth_time=demographic_time(patient.get("birthDate")),
+                                addresses=postal_addresses(patient.get("address")),
                             ),
-                            provider_organization=ProviderOrganization(
-                                identifier=ProviderIdentifier(
-                                    identifier=gp["identifier"]["value"],
-                                )
-                            ),
+                            provider_organization=provider,
                         )
                     ),
                 )

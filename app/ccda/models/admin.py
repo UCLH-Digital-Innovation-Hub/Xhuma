@@ -3,6 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .datatypes import AD, CE, CS, II, PQ, TEL, TS
+from .demographics import PersonName
 
 
 class Organization(BaseModel):
@@ -11,6 +12,7 @@ class Organization(BaseModel):
     https://build.fhir.org/ig/HL7/CDA-core-2.0//StructureDefinition-Organization.html
     """
 
+    model_config = ConfigDict(populate_by_name=True)
     classcode: str = Field(default="ORG", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
     realmCode: CS | None = None
@@ -19,7 +21,7 @@ class Organization(BaseModel):
     id: list[II] | None = None
     name: list[str] | None = None
     telecom: list[TEL] | None = None
-    address: list[AD] | None = None
+    address: list[AD] | None = Field(default=None, alias="addr")
 
 
 class Person(BaseModel):
@@ -30,7 +32,7 @@ class Person(BaseModel):
 
     classcode: str = Field(default="PSN", alias="@classCode")
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
-    name: str | None = None
+    name: list[PersonName] | None = None
 
 
 class AuthoringDevice(BaseModel):
@@ -43,6 +45,7 @@ class AuthoringDevice(BaseModel):
     determiner_code: str = Field(default="INSTANCE", alias="@determinerCode")
     templateId: list[II] | None = None
     code: CE | None = None
+    manufacturerModelName: str | None = None
     softwareName: str | None = None
     softwareVersion: str | None = None
 
@@ -54,7 +57,7 @@ class AssignedEntity(BaseModel):
     classcode: str = Field(default="ASSIGNED", alias="@classCode")
     id: list[II]
     code: CE | None = None
-    address: list[AD] | None = None
+    address: list[AD] | None = Field(default=None, alias="addr")
     telecom: list[TEL] | None = None
     assignedPerson: Person | None = None
     representedOrganization: Organization | None = None
@@ -65,11 +68,11 @@ class AssignedAuthor(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
     classcode: str = Field(default="ASSIGNED", alias="@classCode")
-    context_control_code: str | None = Field(default="OP", alias="@contextControlCode")
+    context_control_code: str | None = Field(default=None, alias="@contextControlCode")
     templateId: list[II] | None = None
     id: list[II]
     code: CE | None = None
-    address: list[AD] | None = None
+    address: list[AD] | None = Field(default=None, alias="addr")
     telecom: list[TEL] | None = None
     assignedPerson: Person | None = None
     assignedAuthoringDevice: AuthoringDevice | None = None
