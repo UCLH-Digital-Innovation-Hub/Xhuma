@@ -36,9 +36,6 @@ def _assert_common_fields(saml):
     # Resource id should be unescaped (&amp; -> &)
     assert saml.resource_id == "9690937278^^^&2.16.840.1.113883.2.1.4.1&ISO"
 
-    # Computed extraction of NHS number
-    # assert saml.subject_nhs_number == "9690937278"
-
 
 def test_saml_iti39():
     saml_header = _parse(xml39)
@@ -60,17 +57,3 @@ def test_create_jwt():
 
     assert token is not None
     assert isinstance(token, str)
-
-
-# def test_subject_ref_computed_field(monkeypatch):
-#     """
-#     Computed subject_ref depends on AUDIT_SUBJECT_SECRET.
-#     """
-#     monkeypatch.setenv("AUDIT_SUBJECT_SECRET", "x" * 40)
-
-#     saml_header = _parse(xml38)
-#     saml = process_saml_attributes(saml_header["AttributeStatement"])
-
-#     # subject_ref should now be computed
-#     assert saml.subject_ref is not None
-#     assert saml.subject_ref.startswith("nhsref:v1:")

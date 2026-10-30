@@ -211,13 +211,8 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
         result_component.text = observation.comment
         comment_dict = {
             "@styleCode": "allIndent",
-            "content": [
-                # {"@styleCode": "cellHeader", "#text": "Comment:"},
-                # {"#text": observation.comment},
-                {"@styleCode": "cellHeader", "#text": observation.comment}
-            ],
+            "content": [{"@styleCode": "cellHeader", "#text": observation.comment}],
         }
-        # content.append(comment_dict)
         table_row.cells[3] = {"content": comment_dict}
 
     if result_component.statusCode.nullFlavor == "OTH":
@@ -260,7 +255,6 @@ async def investigation(
             for code in category.coding or []:
                 if code.system == "http://hl7.org/fhir/observation-category":
                     if code.code == "laboratory":
-                        # print("Category is laboratory")
                         # TODO: Supply the required id, observation code and
                         # statusCode, and the 2015-08-01 Result Observation
                         # template extension (CONF:1198-7137/7133/7134/32575).

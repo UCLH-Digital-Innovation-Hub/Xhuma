@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import os
@@ -16,7 +15,7 @@ from fhirclient.models.fhirabstractbase import FHIRValidationError
 from fhirclient.models.operationoutcome import OperationOutcome
 from opentelemetry.propagate import inject
 
-from .audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
+from .audit.audit import AuditFailureException, attempt_audit
 from .audit.models import AuditOutcome, SAMLAttributes
 from .ccda.convert_mime import base64_xml
 from .ccda.fhir2ccda import convert_bundle
@@ -29,15 +28,7 @@ from .security import create_jwt
 from .settings import USE_RELAY
 from .telemetry import measure
 
-# from app.metrics.metric_utils import classify_error, now
-
-
 router = APIRouter()
-
-# client = httpx.AsyncClient(
-#     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
-#     verify="keys/nhs_certs/nhs_bundle.pem",
-# )
 
 environment = os.getenv("ENV", "dev").lower()
 if environment in ["dev", "int"]:
@@ -88,25 +79,9 @@ def create_nhs_ssl_context(cert_path, key_path, ca_path):
     return ssl_context
 
 
-# Global client and ssl_context removed to prevent ImportErrors when keys are missing.
-# They were unused in the main logic (which uses _direct_http_call with its own context).
-
-# ssl_context = create_nhs_ssl_context(
-#     "keys/nhs_certs/client_cert.pem",
-#     "keys/nhs_certs/client_key.pem",
-#     "keys/nhs_certs/nhs_bundle.pem",
-# )
-
 logging.basicConfig(level=logging.INFO)
 httpx_logger = logging.getLogger("httpx")
 httpx_logger.setLevel(logging.WARNING)
-
-# client = httpx.AsyncClient(
-#     cert=("keys/nhs_certs/client_cert.pem", "keys/nhs_certs/client_key.pem"),
-#     verify=ssl_context,  # This fixes the silent failures!
-#     timeout=httpx.Timeout(30.0),
-#     http2=False,
-# )
 
 
 @router.get("/gpconnect/{nhsno}")
@@ -134,7 +109,7 @@ async def _fetch_gpconnect_record(
             )
             return JSONResponse(status_code=400, content={"success": False, "error": msg})
 
-        # 2) PDS lookup (consider caching in future)
+        # 2) PDS lookup
         try:
             step = "pds_lookup.lookup_patient"
             with measure("pds.lookup"):
@@ -205,7 +180,7 @@ async def _fetch_gpconnect_record(
                     f.write(diagnostic + "\n")
             return JSONResponse(status_code=403, content={"success": False, "error": msg})
 
-        # 3) Resolve GP ODS
+        # 4) Resolve GP ODS
         step = "resolve_gp_ods.ods_extraction"
         try:
             gp_ods = pds_search["generalPractitioner"][0]["identifier"]["value"]
@@ -232,7 +207,7 @@ async def _fetch_gpconnect_record(
             msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
-        # 4) Resolve provider Endpoint and MHS Party Key
+        # 5) Resolve provider Endpoint and MHS Party Key
         fhir_endpoint_url = None
         nhsmhsparty = None
         party_keys = []
@@ -371,7 +346,7 @@ async def _fetch_gpconnect_record(
             msg = f"{msg}: {e.detail}" if isinstance(e, (HTTPException, SDSUpstreamError)) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
-        # 5) Resolve provider Device and ASID
+        # 6) Resolve provider Device and ASID
         asid = None
         try:
             step = "sds_trace.sds_lookup"
@@ -550,7 +525,7 @@ async def _fetch_gpconnect_record(
             msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
-        # 6) Build request
+        # 7) Build request
         try:
             step = "sds_self_lookup.issuer_lookup"
             with measure("sds.self"):
@@ -651,8 +626,6 @@ async def _fetch_gpconnect_record(
             ) as session:
                 step = "gpconnect_request.http_post"
                 r = await session.post(url, json=body, headers=headers)
-                # print(f"Direct HTTP call response status: {r.status_code}")
-                # print(f"Direct HTTP call response text: {r.text}")
                 step = "gpconnect_request.http_client_close"
                 return r  # return a real httpx.Response
 
@@ -721,7 +694,7 @@ async def _fetch_gpconnect_record(
                 request=httpx.Request("POST", url),
             )
 
-        # 7) Make request with a per-call client (avoid leaking across event loops)
+        # 8) Make request with a per-call client (avoid leaking across event loops)
         resp = None
         step = "gpconnect_request.transport_configuration"
         try:
@@ -732,9 +705,6 @@ async def _fetch_gpconnect_record(
                 step = "gpconnect_request.relay_call"
                 with measure("gpconnect.http", transport="relay"):
                     resp = await _relay_call(url, headers, body)
-                # print(f"Relay response status: {status_code}")
-                # print(f"Relay response text: {resp_text}")
-                # resp = httpx.Response(status_code=status_code, content=resp_text)
 
             else:
                 if environment == "prod" and not OVER_INTERNET_PATH:
@@ -802,7 +772,7 @@ async def _fetch_gpconnect_record(
             msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
             return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
 
-        # 8) Non-200 handling
+        # 9) Non-200 handling
         step = "gpconnect_request.response_status"
         if resp.status_code != 200:
             msg = f"Error from GP Connect endpoint {resp.status_code}"
@@ -851,7 +821,7 @@ async def _fetch_gpconnect_record(
             detail={"step": step},
         )
 
-        # 9) Validate the entire upstream payload before conversion or caching.
+        # 10) Validate the entire upstream payload before conversion or caching.
         step = "validate_fhir_bundle.response_content"
         try:
             step = "validate_fhir_bundle.json_decode"
@@ -1005,13 +975,3 @@ async def _fetch_gpconnect_record(
         status_code = e.status_code if isinstance(e, HTTPException) else 500
         msg = f"GP Connect failed at {step}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
         return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
-
-
-if __name__ == "__main__":
-    xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
-    saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
-
-    result = asyncio.run(gpconnect(9692140466, saml))
-    # save bundle as json for inspection
-    with open("gpconnect_response.json", "w") as f:
-        json.dump(json.loads(result.body), f, indent=2)

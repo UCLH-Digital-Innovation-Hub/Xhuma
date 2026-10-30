@@ -2,6 +2,7 @@
 SOAP Handler Module
 
 This module implements SOAP message handling for IHE ITI transactions:
+- ITI-55: Cross Gateway Patient Discovery
 - ITI-38: Cross Gateway Query
 - ITI-39: Cross Gateway Retrieve
 
@@ -43,24 +44,6 @@ from .responses import (
 from .saml_helper import extract_saml_attributes
 
 
-def log_info(req_body, res_body, client_ip, method, url, status_code):
-    """
-    Logs request and response information including metadata.
-
-    Args:
-        req_body: The request body content
-        res_body: The response body content
-        client_ip: The client's IP address
-        method: The HTTP method used
-        url: The requested URL
-        status_code: The response status code
-    """
-    logging.info(f"Client IP: {client_ip}, Method: {method}, URL: {url}")
-    logging.info("Request Body: [REDACTED FOR PHI SECURITY]")
-    logging.info("Response Body: [REDACTED FOR PHI SECURITY]")
-    logging.info(f"Status Code: {status_code}")
-
-
 class LoggingRoute(APIRoute):
     """
     Custom route class that implements request logging.
@@ -94,18 +77,6 @@ router = APIRouter(prefix="/SOAP", route_class=LoggingRoute)
 logging.basicConfig(filename="info.log", level=logging.INFO)
 
 client = redis_connect  # Use the redis_connect instance directly
-
-# SOAP namespace definitions
-NAMESPACES = (
-    {
-        "http://www.w3.org/2003/05/soap-envelope": None,
-        "http://www.w3.org/2005/08/addressing": None,
-        "urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0": None,
-        "urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0": None,
-        "urn:ihe:iti:xds-b:2007": None,
-        "soap": None,
-    },
-)
 
 
 class SoapError(Exception):
@@ -349,7 +320,6 @@ async def iti38(request: Request):
                 else:
                     raise AttributeError("Invalid NHS number checksum")
             except (AttributeError, TypeError):
-                # print("No valid NHS number found in patient ID field")
                 logging.info("No valid NHS number found in patient ID field")
                 data = await iti_38_error(message_id or query_id, "Invalid NHS number format in request")
                 return Response(content=data, media_type="application/soap+xml")
