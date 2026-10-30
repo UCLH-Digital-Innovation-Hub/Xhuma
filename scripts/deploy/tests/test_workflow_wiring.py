@@ -352,3 +352,59 @@ def test_dmd_action_group_workflow_wiring():
     assert action_group_wiring == "${{ secrets.DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON || '[]' }}", (
         "Action group IDs must be wired directly from secret with safe [] fallback"
     )
+
+
+def test_prd_ingress_restriction_reconciliation_invariants():
+    """Verify PRD App Service main-site ingress restrictions, shared defaults, and SCM invariants."""
+    with open("infra/variables.tf", "r") as f:
+        variables_tf = f.read()
+    with open("infra/main.tf", "r") as f:
+        main_tf = f.read()
+    with open("infra/env/prd.tfvars", "r") as f:
+        prd_tfvars = f.read()
+    with open("infra/env/int.tfvars", "r") as f:
+        int_tfvars = f.read()
+    with open("infra/env/play.tfvars", "r") as f:
+        play_tfvars = f.read()
+
+    # 1. Shared/default ingress behaviour remains Allow
+    assert 'variable "ip_restriction_default_action"' in variables_tf
+    assert 'default     = "Allow"' in variables_tf
+    assert 'contains(["Allow", "Deny"], var.ip_restriction_default_action)' in variables_tf
+
+    # 2. Additional restrictions default to an empty list
+    assert 'variable "additional_ip_restrictions"' in variables_tf
+    assert "default = []" in variables_tf or "default     = []" in variables_tf
+
+    # 3. PRD configures main-site default Deny
+    assert 'ip_restriction_default_action = "Deny"' in prd_tfvars
+
+    # 4 & 5. PRD renders EpicHosting and GPConnectRelay correctly
+    assert 'name       = "EpicHosting"' in prd_tfvars
+    assert "priority   = 110" in prd_tfvars
+    assert 'ip_address = "68.65.248.0/21"' in prd_tfvars
+    assert 'name       = "GPConnectRelay"' in prd_tfvars
+    assert "priority   = 120" in prd_tfvars
+    assert 'ip_address = "195.194.4.65/32"' in prd_tfvars
+
+    # 6. Existing AllowHSCN remains present and dynamic block renders additional rules
+    assert "ip_restriction_default_action = var.ip_restriction_default_action" in main_tf
+    assert 'name     = "AllowHSCN"' in main_tf
+    assert 'ip_address = "192.168.0.0/16"' in main_tf
+    assert 'dynamic "ip_restriction"' in main_tf
+    assert "for_each = var.additional_ip_restrictions" in main_tf
+
+    # 7. SCM configuration remains unchanged (AllowVnet only, no SCM default Deny or use_main)
+    assert "scm_ip_restriction {" in main_tf
+    assert 'name                      = "AllowVnet"' in main_tf
+    assert "virtual_network_subnet_id = azurerm_subnet.app_subnet.id" in main_tf
+    assert "scm_ip_restriction_default_action" not in main_tf
+    assert "scm_use_main_ip_restriction" not in main_tf
+
+    # 8. INT and Play do not inherit PRD-specific addresses or default Deny
+    for non_prd_tfvars in (int_tfvars, play_tfvars):
+        assert "68.65.248.0/21" not in non_prd_tfvars
+        assert "195.194.4.65/32" not in non_prd_tfvars
+        assert "EpicHosting" not in non_prd_tfvars
+        assert "GPConnectRelay" not in non_prd_tfvars
+        assert 'ip_restriction_default_action = "Deny"' not in non_prd_tfvars
