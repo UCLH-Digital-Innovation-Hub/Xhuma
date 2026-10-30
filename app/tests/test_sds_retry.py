@@ -361,12 +361,12 @@ async def test_sds_transport_and_decode_failures_reach_gpconnect_caller(
     failure, status, reason, attempts, message, caplog
 ):
     with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
         patch("app.pds.pds.redis_client", autospec=True) as cache,
         patch("app.pds.pds.httpx.AsyncClient") as factory,
         patch("app.pds.pds.asyncio.sleep", new_callable=AsyncMock),
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as audit,
-        patch("app.gpconnect.record_application_failure"),
+        patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
+        patch("app.logging.record_application_failure"),
     ):
         cache.get.return_value = None
         client = AsyncMock()
@@ -396,10 +396,10 @@ async def test_gpconnect_endpoint_sds_upstream_failure_audits_safe_fields(caplog
     """GP Connect endpoint lookup failure with SDSUpstreamError records safe structured audit detail with 3 attempts."""
     sentinel = "UPSTREAM_SECRET_BODY_503"
     with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace") as mock_sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as mock_audit,
-        patch("app.gpconnect.record_application_failure"),
+        patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect_stages.routing.sds_trace") as mock_sds,
+        patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as mock_audit,
+        patch("app.logging.record_application_failure"),
         caplog.at_level(logging.DEBUG),
     ):
         mock_sds.side_effect = SDSUpstreamError(
@@ -443,10 +443,10 @@ async def test_gpconnect_device_sds_upstream_failure_audits_safe_fields(caplog):
     """GP Connect device lookup failure with SDSUpstreamError records safe structured audit detail with 3 attempts."""
     sentinel = "UPSTREAM_SECRET_DEVICE_503"
     with (
-        patch("app.gpconnect.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
-        patch("app.gpconnect.sds_trace") as mock_sds,
-        patch("app.gpconnect.attempt_audit", new_callable=AsyncMock) as mock_audit,
-        patch("app.gpconnect.record_application_failure"),
+        patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock, return_value=load_pds(9690937278)),
+        patch("app.gpconnect_stages.routing.sds_trace") as mock_sds,
+        patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as mock_audit,
+        patch("app.logging.record_application_failure"),
         caplog.at_level(logging.DEBUG),
     ):
         mock_sds.side_effect = [

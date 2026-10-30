@@ -34,13 +34,9 @@ async def test_warnings_handling():
             pass
 
     xml_ccda = await fhir2ccda.convert_bundle(fhir_bundle, bundle_index)
-    # with open("test_warnings.xml", "w") as output:
-    #     output.write(xmltodict.unparse(xml_ccda, pretty=True))
 
     # check note is present in the medications section
     medications_section = xml_ccda["ClinicalDocument"]["component"]["structuredBody"]["component"]
-    # for section in medications_section:
-    #     print(section)
 
     medications_section = [
         section
@@ -48,14 +44,8 @@ async def test_warnings_handling():
         if section.get("section", {}).get("code", {}).get("@code") == "10160-0"
     ][0]
 
-    # print(medications_section["section"]["text"] )
-
     medications_text = medications_section["section"]["text"]["paragraph"]["#text"]
-    print(medications_text)
 
-    # assert any(
-    #     "information not available" in text.lower() for text in medications_text
-    # )
     assert "information not available" in medications_text.lower()
 
 

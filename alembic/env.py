@@ -80,8 +80,6 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     config = context.config
-    # url = get_alembic_url()
-    # print("ALEMBIC URL:", url, type(url))
     config.set_main_option("sqlalchemy.url", get_alembic_url())
 
     connectable = engine_from_config(

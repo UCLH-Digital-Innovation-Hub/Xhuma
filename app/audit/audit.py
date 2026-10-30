@@ -2,7 +2,7 @@ import os
 from typing import Any
 
 from app.audit.models import SAMLAttributes
-from app.ccda.models.datatypes import CD  # adjust path
+from app.ccda.models.datatypes import CD
 from app.telemetry import measure
 
 

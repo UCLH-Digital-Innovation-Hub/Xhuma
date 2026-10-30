@@ -178,15 +178,6 @@ class SubstanceAdministration(BaseModel):
     moodCode: str = Field(alias="@moodCode", default="INT")
     templateId: List[II] = Field(default_factory=list)
     id: List[II] = Field(default_factory=list)
-    # ?code needed
-    # code: Optional[CD] = Field(
-    #     default=CD(
-    #         **{
-    #             "@code": "CONC",
-    #             "@codeSystem": "2.16.840.1.113883.5.6",
-    #         }
-    #     )
-    # )
     code: Optional[CD] = None
     text: Optional[Union[str, ED]] = None
     statusCode: Optional[CS] = None
@@ -210,7 +201,6 @@ class SubstanceAdministration(BaseModel):
 # TODO: Replace deprecated Extra.allow with Pydantic v2 configuration;
 # importing this model emits PydanticDeprecatedSince20 in the test suite.
 class EntryRelationship(BaseModel, extra=Extra.allow):
-    # act: EntryRelationshipAct
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
     sequenceNumber: Optional[int] = None
