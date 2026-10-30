@@ -107,7 +107,8 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
 async def medication(entry: medicationstatement.MedicationStatement, index: dict) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
-    dosages = mapped_dosages(entry.dosage)
+    dosage_result = mapped_dosages(entry.dosage)
+    dosages = dosage_result.dosages
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
     based_on_request: medicationrequest.MedicationRequest = index[entry.basedOn[0].reference]
     raw_notes = []
@@ -138,11 +139,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
             misc_notes.append(f"Transfer degraded medication text: {referenced_med.code.text}")
 
     multiple_dosages = len(dosages) > 1
-    for index, dosage in enumerate(dosages, start=1):
-        repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
-        warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
-        if warning:
-            misc_notes.append(warning)
     substance_administration = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
         id=[
@@ -327,6 +323,9 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         substance_administration.doseQuantity.get("@unit", "").lower() if substance_administration.doseQuantity else ""
     )
 
+    dmd_dose_warning = None
+    dmd_route_warning = None
+
     if substance_administration.doseQuantity:
         blank_unit = not substance_administration.doseQuantity.get("@unit")
         if unit in gp_units or blank_unit:
@@ -344,15 +343,9 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
                         substance_administration.doseQuantity["@value"] = processed_dose
                         substance_administration.doseQuantity["@unit"] = dmd_data.vpi.unit
-                        warning_text = (
+                        dmd_dose_warning = (
                             f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
                         )
-                        misc_notes.append(warning_text)
-
-                elif len(dosages) > 1:
-                    # multiple dosage instrutions so add warning to medication name instead of processing dose
-                    warning_text = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
-                    misc_notes.append(warning_text)
 
                 if substance_administration.routeCode:
                     if substance_administration.routeCode.displayName == "Take":
@@ -363,11 +356,10 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                             substance_administration.routeCode.codeSystem = "2.16.840.1.113883.6.96"
                             substance_administration.routeCode.codeSystemName = dmd_data.route.codeSystemName
                             # add a warning note about the route being automatically mapped
-                            warning_text = (
+                            dmd_route_warning = (
                                 f'Xhuma: Route inferred as {dmd_data.route.displayName} from dm+d because the GP source value was "Take"; '
                                 "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
                             )
-                            misc_notes.append(warning_text)
 
             except Exception as e:
                 logging.error(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
@@ -377,6 +369,26 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
             substance_administration.doseQuantity["@unit"] = (
                 substance_administration.doseQuantity["@unit"].replace("- unit of product usage", "").strip()
             )
+
+    # 1. dm+d mapping/inference warnings
+    if dmd_dose_warning:
+        misc_notes.append(dmd_dose_warning)
+    if dmd_route_warning:
+        misc_notes.append(dmd_route_warning)
+
+    # 2. free-sig / freetext dosage mapping warning
+    if dosage_result.freetext_mapped:
+        misc_notes.append("Xhuma: Free-text dosage instructions automatically mapped")
+
+    # 3. additional dosage/clinical warnings
+    if multiple_dosages:
+        misc_notes.append("Xhuma: Multiple dosage instructions found. Use caution when converting dose**")
+
+    for index, dosage in enumerate(dosages, start=1):
+        repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
+        warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
+        if warning:
+            misc_notes.append(warning)
 
     # check for prescribing agency and last issued date extensions
     remaining_repeats = None
