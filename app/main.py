@@ -46,7 +46,7 @@ from .redis_connect import redis_client, snomed_client
 from .relay import routes
 from .relay.hub import WebSocketHub
 from .security import fix_pem_formatting, get_jwk_keyset, verify_api_key
-from .settings import USE_RELAY
+from .settings import USE_RELAY, diag_compare_enabled, diag_ttl_minutes
 from .soap import soap
 from .telemetry import monitor_event_loop
 from .version import VERSION
@@ -515,3 +515,171 @@ if os.getenv("ENV", "prod").lower() in ("dev", "local"):
 
         out.append("</table></body></html>")
         return HTMLResponse("".join(out))
+
+
+# --- Diagnostic FHIR-vs-XML comparison viewer ---
+# Gated by settings.diag_compare_enabled(): always on in dev/local/int, opt-in in prd via
+# DIAG_COMPARE_ENABLED. Protected by the same API-key dependency as /_dev/audit. Both the FHIR
+# bundle and the C-CDA are PHI; they are read from the short-lived diag:* Redis keys written during
+# conversion (gpconnect._fetch_gpconnect_record) and expire on their own after DIAG_TTL_MIN.
+if diag_compare_enabled():
+    import difflib
+    import html as _html
+
+    _DIAG_VIEWS = ("split", "tabs", "diff")
+
+    _DIAG_STYLE = """
+    <style>
+      body { font-family: -apple-system, system-ui, sans-serif; margin: 1.5rem; color: #1a1a1a; }
+      h2 { margin: 0 0 0.25rem; }
+      .muted { color: #666; font-size: 0.85rem; }
+      nav { margin: 0.5rem 0 0.75rem; }
+      nav a { margin-right: 0.6rem; }
+      nav a.active { font-weight: 700; text-decoration: none; }
+      form input { padding: 0.4rem; width: 16rem; }
+      form button { padding: 0.4rem 0.9rem; }
+      .cols { display: flex; gap: 1rem; align-items: stretch; }
+      .col { flex: 1 1 0; min-width: 0; }
+      .col h3 { margin: 0.25rem 0; font-size: 0.95rem; }
+      pre { background: #f6f8fa; border: 1px solid #ddd; border-radius: 4px; padding: 0.75rem;
+            overflow: auto; max-height: 78vh; font-size: 0.8rem; white-space: pre; }
+      .tabbtn { padding: 0.4rem 0.9rem; margin-right: 0.3rem; cursor: pointer; border: 1px solid #ccc;
+                background: #eee; border-radius: 4px; }
+      .tabbtn.active { background: #0a7f46; color: #fff; border-color: #0a7f46; }
+      table.diff { font-family: monospace; font-size: 0.75rem; border-collapse: collapse; width: 100%; }
+      td.diff_header { text-align: right; color: #999; }
+      .diff_add { background: #dfd; }
+      .diff_chg { background: #ffd; }
+      .diff_sub { background: #fdd; }
+    </style>
+    """
+
+    _DIAG_FORM = (
+        "<html><head><title>Xhuma diagnostics: FHIR vs XML</title>" + _DIAG_STYLE + "</head><body>"
+        "<h2>FHIR &rarr; C-CDA comparison</h2>"
+        "<p class='muted'>Shows the FHIR bundle as received from GP Connect next to the C-CDA XML as "
+        "sent to Epic. Diagnostics expire " + str(diag_ttl_minutes()) + " min after a record is fetched.</p>"
+        "<form method='get' action='/_diag/compare'>"
+        "<label>NHS number:</label> <input name='nhsno' placeholder='e.g. 9690937278' autofocus/> "
+        "<button type='submit'>Compare</button></form>"
+        "<p class='muted'>Or pass <code>?doc_uuid=&lt;id&gt;</code>. Add <code>&amp;view=split|tabs|diff</code>.</p>"
+        "</body></html>"
+    )
+
+    def _diag_decode(raw):
+        if raw is None:
+            return None
+        if isinstance(raw, (bytes, bytearray)):
+            return raw.decode("utf-8", "replace")
+        return str(raw)
+
+    def _diag_message(title: str, body_html: str) -> HTMLResponse:
+        return HTMLResponse(
+            "<html><head><title>Xhuma diagnostics</title>" + _DIAG_STYLE + "</head><body>"
+            "<a href='/_diag/compare'>&larr; back</a><h2>" + title + "</h2>"
+            "<p class='muted'>" + body_html + "</p></body></html>"
+        )
+
+    @app.get(
+        "/_diag/compare",
+        response_class=HTMLResponse,
+        include_in_schema=False,
+        dependencies=[Depends(verify_api_key)],
+    )
+    async def diag_compare(nhsno: str | None = None, doc_uuid: str | None = None, view: str = "split"):
+        """Render the received FHIR bundle alongside the C-CDA XML sent to Epic.
+
+        Resolve order: explicit ``doc_uuid`` wins, else ``nhsno`` is mapped via the cached
+        ``nhsno -> doc_uuid`` key. ``view`` is one of split (default), tabs, diff.
+        """
+        view = view if view in _DIAG_VIEWS else "split"
+        if not nhsno and not doc_uuid:
+            return HTMLResponse(_DIAG_FORM)
+
+        if doc_uuid:
+            resolved = doc_uuid.strip()
+        else:
+            try:
+                nhs_key = str(int(nhsno))
+            except (TypeError, ValueError):
+                return _diag_message("Invalid NHS number", "Expected digits only.")
+            resolved = _diag_decode(await redis_client.get(nhs_key))
+            if not resolved:
+                return _diag_message(
+                    "No record cached",
+                    "No document is currently cached for that NHS number. Fetch the patient via "
+                    "ITI-38 first, then retry within the diagnostics window.",
+                )
+
+        bundle_text = _diag_decode(await redis_client.get(f"diag:bundle:{resolved}"))
+        xml_text = _diag_decode(await redis_client.get(f"diag:xml:{resolved}"))
+        if bundle_text is None and xml_text is None:
+            return _diag_message(
+                "Diagnostics expired or not captured",
+                "No diagnostic pair for doc_uuid <code>"
+                + _html.escape(resolved)
+                + "</code>. They expire "
+                + str(diag_ttl_minutes())
+                + " min after capture and are only written when the diagnostics "
+                "gate is enabled. Re-fetch the patient and retry.",
+            )
+
+        bundle_text = bundle_text if bundle_text is not None else "(FHIR bundle not captured)"
+        xml_text = xml_text if xml_text is not None else "(C-CDA XML not captured)"
+        esc_bundle = _html.escape(bundle_text)
+        esc_xml = _html.escape(xml_text)
+
+        qbase = "/_diag/compare?doc_uuid=" + _html.escape(resolved, quote=True)
+
+        def navlink(v: str, label: str) -> str:
+            cls = " class='active'" if v == view else ""
+            return "<a href='" + qbase + "&amp;view=" + v + "'" + cls + ">" + label + "</a>"
+
+        header = (
+            "<h2>FHIR &rarr; C-CDA comparison</h2>"
+            "<p class='muted'>doc_uuid <code>" + _html.escape(resolved) + "</code></p>"
+            "<nav><a href='/_diag/compare'>&larr; new</a> &nbsp;|&nbsp; View: "
+            + navlink("split", "Side-by-side")
+            + navlink("tabs", "Two pages")
+            + navlink("diff", "Diff")
+            + "</nav>"
+        )
+
+        if view == "tabs":
+            body = (
+                "<div style='margin:0.5rem 0;'>"
+                "<button id='tab-bundle' class='tabbtn active' onclick=\"diagShow('bundle')\">FHIR bundle (received)</button>"
+                "<button id='tab-xml' class='tabbtn' onclick=\"diagShow('xml')\">C-CDA XML (sent to Epic)</button>"
+                "</div>"
+                "<div id='pane-bundle'><pre>" + esc_bundle + "</pre></div>"
+                "<div id='pane-xml' style='display:none;'><pre>" + esc_xml + "</pre></div>"
+                "<script>function diagShow(w){"
+                "document.getElementById('pane-bundle').style.display=w==='bundle'?'block':'none';"
+                "document.getElementById('pane-xml').style.display=w==='xml'?'block':'none';"
+                "document.getElementById('tab-bundle').classList.toggle('active',w==='bundle');"
+                "document.getElementById('tab-xml').classList.toggle('active',w==='xml');}</script>"
+            )
+        elif view == "diff":
+            body = difflib.HtmlDiff(wrapcolumn=100).make_table(
+                bundle_text.splitlines(),
+                xml_text.splitlines(),
+                fromdesc="FHIR bundle (received)",
+                todesc="C-CDA XML (sent to Epic)",
+                context=False,
+            )
+        else:  # split
+            body = (
+                "<div class='cols'>"
+                "<div class='col'><h3>FHIR bundle (received)</h3><pre>" + esc_bundle + "</pre></div>"
+                "<div class='col'><h3>C-CDA XML (sent to Epic)</h3><pre>" + esc_xml + "</pre></div>"
+                "</div>"
+            )
+
+        return HTMLResponse(
+            "<html><head><title>Xhuma diagnostics: FHIR vs XML</title>"
+            + _DIAG_STYLE
+            + "</head><body>"
+            + header
+            + body
+            + "</body></html>"
+        )
