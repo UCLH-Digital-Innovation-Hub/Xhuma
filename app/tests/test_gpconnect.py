@@ -2052,6 +2052,10 @@ def observed_pipeline(monkeypatch, tmp_path):
             probe.published = True
 
     monkeypatch.setattr(probe.document, "redis_client", SimpleNamespace(pipeline=Pipeline))
+    # The optional FHIR<->XML diagnostics capture (ENV=int) writes its own diag:* keys and is
+    # covered by its own test; keep it out of the core publication characterisation so these
+    # fixtures observe only the primary pipeline.
+    monkeypatch.setattr(probe.document, "diag_compare_enabled", lambda: False)
     monkeypatch.setattr(iti38, "redis_client", SimpleNamespace(get=AsyncMock(return_value=None)))
     original_response = gp.JSONResponse
 
