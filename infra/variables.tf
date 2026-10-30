@@ -270,3 +270,23 @@ variable "dmd_cache_alert_action_group_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "dmd_cache_native_schedule_enabled" {
+  description = "Use the Container Apps Job native cron scheduler instead of a manual trigger"
+  type        = bool
+  default     = false
+}
+
+variable "dmd_cache_native_cron_expression" {
+  description = "UTC cron expression used by the native Container Apps Job scheduler"
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.dmd_cache_native_cron_expression == null || (
+      can(trimspace(var.dmd_cache_native_cron_expression)) &&
+      trimspace(var.dmd_cache_native_cron_expression) != ""
+    )
+    error_message = "dmd_cache_native_cron_expression must not be empty when provided."
+  }
+}
