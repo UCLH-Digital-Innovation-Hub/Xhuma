@@ -5,7 +5,7 @@ from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationrequest, medicationstatement
 
 from ..dmd import dmd_lookup
-from ..dosage_lookup import is_freetext_mapped, mapped_dosages
+from ..dosage_lookup import mapped_dosages
 from ..helpers import (
     cda_time_bound,
     clean_number,
@@ -107,7 +107,8 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
 async def medication(entry: medicationstatement.MedicationStatement, index: dict) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
-    dosages = mapped_dosages(entry.dosage)
+    dosage_result = mapped_dosages(entry.dosage)
+    dosages = dosage_result.dosages
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
     based_on_request: medicationrequest.MedicationRequest = index[entry.basedOn[0].reference]
     raw_notes = []
@@ -399,7 +400,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         misc_notes.append(dmd_route_warning)
 
     # 2. free-sig / freetext dosage mapping warning
-    if is_freetext_mapped(dosages):
+    if dosage_result.freetext_mapped:
         misc_notes.append("Xhuma: Free-text dosage instructions automatically mapped")
 
     # 3. additional dosage/clinical warnings
