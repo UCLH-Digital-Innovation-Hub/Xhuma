@@ -55,26 +55,6 @@ class SAMLAttributes(BaseModel):
     model_config = {"extra": "forbid"}
 
 
-class OrganisationRef(BaseModel):
-    name: str | None = None
-    id: str | None = None
-    home_community_id: str | None = None
-
-
-class UserIdentity(BaseModel):
-    user_id: str | None = None
-    name: str | None = None
-    role_profile: CD | None = None
-    organisation: OrganisationRef | None = None
-    urp_id: str | None = None
-    purpose_of_use: dict[str, Any] | None = None  # keep structured
-
-
-class AuthorityIdentity(BaseModel):
-    id: str | None = None
-    name: str | None = None
-
-
 class DeviceInfo(BaseModel):
     ip: str | None = None
     user_agent: str | None = None
@@ -82,7 +62,6 @@ class DeviceInfo(BaseModel):
 
 
 class EventDataRefs(BaseModel):
-    # subject_ref: Optional[str]
     message_id: str | None = None
     document_id: str | None = None
 
@@ -118,7 +97,6 @@ class AuditEvent(BaseModel):
     event_time: datetime
 
     # System identity
-    # service_name: str
     organisation: str
 
     # Correlation
@@ -154,7 +132,7 @@ class AuditEvent(BaseModel):
     @property
     def subject_ref(self) -> str | None:
         """
-        Pseudonymous patient reference derived from NHS number using AUDIT_SUBJECT_SECRET.
+        Pseudonymous patient reference derived from NHS number using API_KEY.
         Returns None if secret or nhs number not available.
         """
         nhsno = self.subject_nhs_number

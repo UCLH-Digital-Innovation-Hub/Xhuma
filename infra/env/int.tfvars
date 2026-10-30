@@ -14,7 +14,7 @@ device_id           = "1"
 xhuma_ods_code      = "RRV00"
 xhuma_mhs_party_key = "RRV00-824607"
 env                 = "int"
-app_version         = "1.0.1"
+app_version         = "1.0.3"
 
 allowed_hosts = "*"
 cors_origins  = "*"

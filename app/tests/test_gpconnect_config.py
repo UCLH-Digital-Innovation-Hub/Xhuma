@@ -25,12 +25,12 @@ def isolate_startup_io():
 
 
 @pytest.mark.asyncio
-@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
-@patch("app.gpconnect.redis_client.pipeline")
-@patch("app.gpconnect.create_nhs_ssl_context")
-@patch("app.gpconnect.httpx.AsyncClient")
-@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.document.redis_client.pipeline")
+@patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
+@patch("app.gpconnect_stages.transport.httpx.AsyncClient")
+@patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
 async def test_ccda_expiry_configuration_parsing(
     mock_audit, mock_client, mock_ssl, mock_pipeline, mock_sds, mock_lookup
 ):
@@ -49,18 +49,32 @@ async def test_ccda_expiry_configuration_parsing(
 
     async def mock_sds_trace(*args, **kwargs):
         if kwargs.get("endpoint"):
-            return {"entry": [{"resource": {"address": "test-url"}}]}
+            return {
+                "resourceType": "Bundle",
+                "entry": [
+                    {
+                        "resource": {
+                            "resourceType": "Endpoint",
+                            "address": "test-url",
+                            "identifier": [
+                                {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "123"},
+                            ],
+                        }
+                    }
+                ],
+            }
         return {
+            "resourceType": "Bundle",
             "entry": [
                 {
                     "resource": {
+                        "resourceType": "Device",
                         "identifier": [
                             {"system": "https://fhir.nhs.uk/Id/nhsSpineASID", "value": "123"},
-                            {"system": "https://fhir.nhs.uk/Id/nhsMhsPartyKey", "value": "123"},
-                        ]
+                        ],
                     }
                 }
-            ]
+            ],
         }
 
     mock_sds.side_effect = mock_sds_trace
@@ -77,7 +91,7 @@ async def test_ccda_expiry_configuration_parsing(
     request = MagicMock()
     del request.app
 
-    with patch("app.gpconnect.convert_bundle") as mock_convert:
+    with patch("app.gpconnect_stages.document.convert_bundle") as mock_convert:
 
         async def dummy_convert(*args, **kwargs):
             return {"ClinicalDocument": "test"}
