@@ -1,0 +1,28 @@
+{
+  "python": "3.14.8",
+  "scope": "Offline; synthetic dm+d; no external I/O; process startup excluded",
+  "repetitions": 5,
+  "isolated_ms": {
+    "python": 644.72,
+    "rust": 438.89
+  },
+  "serialization_ms": {
+    "python": 211.07,
+    "rust": 37.42
+  },
+  "concurrent": {
+    "inline": {
+      "batch_of_four_ms": 2011.33,
+      "median_max_heartbeat_gap_ms": 2012.09
+    },
+    "workers_1": {
+      "batch_of_four_ms": 2138.23,
+      "median_max_heartbeat_gap_ms": 21.96
+    },
+    "workers_2": {
+      "batch_of_four_ms": 1328.67,
+      "median_max_heartbeat_gap_ms": 31.59
+    }
+  },
+  "fixture": "app/tests/fixtures/bundles/9692136744.json"
+}

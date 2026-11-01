@@ -33,10 +33,29 @@ pytest_plugins = ("pytest_asyncio",)
 pytestmark = pytest.mark.usefixtures("mock_self_issuer")
 
 
+class InlineConversionWorkers:
+    """Exercise real job boundaries in-process; spawn behaviour has separate tests."""
+
+    async def run(self, function, *args):
+        return function(*args)
+
+    async def close(self):
+        pass
+
+
+@pytest.fixture(autouse=True)
+def inline_conversion_jobs(monkeypatch):
+    from app.gpconnect_stages import document
+
+    monkeypatch.setattr(document.ConversionWorkers, "from_environment", lambda: InlineConversionWorkers())
+    monkeypatch.setattr(document, "load_medication_dmd", AsyncMock(return_value={}))
+
+
 def get_mock_request():
     mock_request = MagicMock()
     mock_request.app.state.SessionLocal = MagicMock()
     mock_request.app.state.ccda_expiry_hours = 4.0
+    mock_request.app.state.conversion_workers = InlineConversionWorkers()
     return mock_request
 
 
@@ -86,8 +105,8 @@ def fake_sds_endpoint_trace():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("nhsno", get_nhs_ids())
 @patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
-@patch("app.gpconnect_stages.document.convert_bundle", new_callable=AsyncMock)
-@patch("app.gpconnect_stages.document.base64_xml")
+@patch("app.ccda.conversion.convert_bundle_sync")
+@patch("app.ccda.conversion.base64_xml")
 @patch("app.gpconnect_stages.document.redis_client.pipeline")
 @patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
 @patch("app.gpconnect_stages.transport.httpx.AsyncClient")
@@ -514,11 +533,10 @@ async def test_serialization_failure_returns_caller_error_with_step():
         patch("app.gpconnect_stages.transport.create_nhs_ssl_context"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as factory,
         patch(
-            "app.gpconnect_stages.document.convert_bundle",
-            new_callable=AsyncMock,
+            "app.ccda.conversion.convert_bundle_sync",
             return_value={"ClinicalDocument": {}},
         ),
-        patch("app.gpconnect_stages.document.base64_xml", side_effect=ValueError("PRIVATE_INTERNAL_ERROR")),
+        patch("app.ccda.conversion.base64_xml", side_effect=ValueError("PRIVATE_INTERNAL_ERROR")),
     ):
         sds.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
         factory.return_value.__aenter__.return_value.post.return_value = Response(
@@ -1121,7 +1139,7 @@ async def test_malformed_bundle_is_audited_and_recorded(payload, audit_fails):
     with (
         patch("app.audit.audit.attempt_audit", new_callable=AsyncMock) as audit,
         patch("app.logging.record_application_failure") as telemetry,
-        patch("app.gpconnect_stages.document.convert_bundle", new_callable=AsyncMock) as convert,
+        patch("app.ccda.conversion.convert_bundle_sync") as convert,
         patch("app.gpconnect_stages.document.redis_client.pipeline") as cache,
         patch("app.gpconnect_stages.transport.create_nhs_ssl_context"),
         patch("app.gpconnect_stages.transport.httpx.AsyncClient") as client,
@@ -1787,6 +1805,7 @@ def observed_pipeline(monkeypatch, tmp_path):
         request_stage=importlib.import_module("app.gpconnect_stages.request"),
         routing=importlib.import_module("app.gpconnect_stages.routing"),
         document=importlib.import_module("app.gpconnect_stages.document"),
+        conversion=importlib.import_module("app.ccda.conversion"),
         transport=importlib.import_module("app.gpconnect_stages.transport"),
         nhs="9999999999",  # Fabricated checksum-valid identifier, never sent externally.
         events=[],
@@ -1952,27 +1971,27 @@ def observed_pipeline(monkeypatch, tmp_path):
     client.post.side_effect = post
     monkeypatch.setattr(probe.transport.httpx, "AsyncClient", MagicMock(return_value=client))
     client.__aenter__.return_value = client
-    original_bundle = probe.document.bundle.Bundle
+    original_bundle = probe.conversion.bundle.Bundle
 
     def model(payload):
         note("fhir.models")
         return original_bundle(payload)
 
-    monkeypatch.setattr(probe.document, "bundle", SimpleNamespace(Bundle=model))
-    original_convert = probe.document.convert_bundle
+    monkeypatch.setattr(probe.conversion, "bundle", SimpleNamespace(Bundle=model))
+    original_convert = probe.conversion.convert_bundle_sync
 
-    async def convert(bundle, index):
+    def convert(bundle, index, concepts, **options):
         note("convert")
-        return await original_convert(bundle, index)
+        return original_convert(bundle, index, concepts, **options)
 
-    monkeypatch.setattr(probe.document, "convert_bundle", convert)
-    original_serialize = probe.document.base64_xml
+    monkeypatch.setattr(probe.conversion, "convert_bundle_sync", convert)
+    original_serialize = probe.conversion.base64_xml
 
     def serialize(document):
         note("serialize")
         return original_serialize(document)
 
-    monkeypatch.setattr(probe.document, "base64_xml", serialize)
+    monkeypatch.setattr(probe.conversion, "base64_xml", serialize)
 
     class Pipeline:
         async def __aenter__(self):
@@ -2167,7 +2186,7 @@ async def test_pipeline_characterization_store_audit_failure_stops_before_ttl(ob
             "ccda_serialize.base64_xml",
             500,
             "RuntimeError",
-            "GP Connect failed",
+            "Failed to convert FHIR Bundle to CCDA",
             ("gpconnect_request", "ok"),
         ),
         ("ttl", "ccda_cache.expiry_configuration", 500, "RuntimeError", "GP Connect failed", ("store_ccda", "ok")),
@@ -2339,19 +2358,14 @@ async def test_pipeline_characterization_custom_span_placement(observed_pipeline
             "xhuma.sds.trace",
             "xhuma.sds.self",
             "xhuma.gpconnect.http",
-            "xhuma.fhir.decode",
-            "xhuma.fhir.models",
-            "xhuma.fhir.index",
-            "FHIR2CCDA.convert_bundle",
-            "xhuma.ccda.serialize",
+            "xhuma.fhir.prepare",
+            "xhuma.terminology.prepare",
+            "xhuma.ccda.document",
             "xhuma.ccda.cache.write",
             *(["xhuma.audit.persist"] * 6),
         ]
     )
     assert by_name["xhuma.gpconnect.http"].attributes["transport"] == "direct"
-    assert by_name["xhuma.fhir.models"].attributes["resource_count"] == 1
-    assert by_name["FHIR2CCDA.convert_bundle"].attributes["resource_count"] == 1
-    assert by_name["xhuma.ccda.serialize"].attributes["document.base64_bytes"] == len(p.commands[1][2]["content"])
     assert by_name["xhuma.ccda.cache.write"].attributes["document_bytes"] == len(p.commands[1][2]["content"])
     for span in spans:
         if span.name != "synthetic.request":
@@ -2361,7 +2375,7 @@ async def test_pipeline_characterization_custom_span_placement(observed_pipeline
     assert active["inject"] == parent_context.span_id
     assert active["http.post"] == by_name["xhuma.gpconnect.http"].context.span_id
     assert active["audit:gpconnect_request:ok"] == parent_context.span_id
-    assert active["convert"] == by_name["FHIR2CCDA.convert_bundle"].context.span_id
+    assert active["convert"] == by_name["xhuma.ccda.document"].context.span_id
     assert by_name["xhuma.gpconnect.http"].parent.span_id == parent_context.span_id
     propagated = trace.get_current_span(extract(p.sent.headers)).get_span_context()
     assert (propagated.trace_id, propagated.span_id) == (parent_context.trace_id, parent_context.span_id)
@@ -2394,7 +2408,7 @@ async def test_pipeline_characterization_http_success_is_not_document_success(ob
             ("validate_fhir_bundle", "fail"),
         ]
         assert active["audit:gpconnect_request:ok"] == parent_id
-        assert spans["xhuma.fhir.decode"].attributes["stage.outcome"] == "error"
+        assert spans["xhuma.fhir.prepare"].attributes["stage.outcome"] == "error"
     else:
         assert response.status_code == 503
         assert json.loads(response.body)["error"] == "Error from GP Connect endpoint 503"
@@ -2881,20 +2895,17 @@ async def test_document_first_comment_and_index_identity(observed_pipeline, monk
         assert payload["entry"] == [entries[1]]
         return model
 
-    async def convert(actual, index):
+    def convert(actual, index, concepts, **options):
         assert actual is model
         assert index == {"Patient/same": first, "Patient/partial": partial, "urn:first": first, "urn:shared": first}
         assert all(index[key] is first for key in ("Patient/same", "urn:first", "urn:shared"))
         return {"ClinicalDocument": {}}
 
-    monkeypatch.setattr(p.document, "bundle", SimpleNamespace(Bundle=build))
-    monkeypatch.setattr(p.document, "convert_bundle", convert)
+    monkeypatch.setattr(p.conversion, "bundle", SimpleNamespace(Bundle=build))
+    monkeypatch.setattr(p.conversion, "convert_bundle_sync", convert)
     response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
     assert response.status_code == 200
-    assert (
-        caplog.text.count("Skipping FHIR resource (step: fhir_index.resource_index, exception_type: AttributeError)")
-        == 2
-    )
+    assert caplog.text.count("Skipping FHIR resource (AttributeError)") == 2
 
 
 @pytest.mark.asyncio
@@ -2966,11 +2977,11 @@ async def test_document_debug_file_order(observed_pipeline, monkeypatch, tmp_pat
             json.loads(response.body)["error"]
             == "GP Connect failed (step: ccda_serialize.xml_debug_file, exception_type: OSError)"
         )
-        assert "serialize" not in p.events
+        assert p.events.index("serialize") < p.events.index(f"file:{p.nhs}.xml")
         assert not p.published
     else:
         assert response.status_code == 200
-        assert p.events.index(f"file:{p.nhs}.xml") < p.events.index("serialize")
+        assert p.events.index("serialize") < p.events.index(f"file:{p.nhs}.xml")
 
 
 @pytest.mark.asyncio

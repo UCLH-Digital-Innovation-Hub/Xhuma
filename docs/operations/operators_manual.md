@@ -568,3 +568,44 @@ Specific deployment rehearsals, cutovers, and clean-room convergence tests are p
 - [PRD State Reconciliation Record (9 October 2026)](../assurance/evidence/2026-10-09-prd-state-reconciliation.md)
 - [Play dm+d Cache Warmer Commissioning (16 October 2026)](../assurance/evidence/2026-10-16-play-dmd-cache-warmer-commissioning.md)
 - [Medical Device Regulatory Statement](../assurance/medical_device_statement.md)
+
+## Conversion worker capacity
+
+FHIR-to-C-CDA CPU work uses a persistent process pool per API process. Start with
+one API worker, preserving embedded relay ownership, and tune conversion workers
+against the deployment's actual CPU quota and memory.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `CCDA_WORKERS` | `1` | Maximum CPU jobs executing concurrently; positive integer |
+| `CCDA_QUEUE_SIZE` | `2` | Additional submitted jobs allowed to wait; nonnegative integer |
+| `CCDA_JOB_TIMEOUT_SECONDS` | `60` | Finite positive per-job wait limit, including executor queue time |
+
+Each document submits two jobs, separated by asynchronous prewarmed dm+d reads.
+Admission is bounded independently for each job. Capacity exhaustion returns
+HTTP 503 immediately; a job wait timeout returns 504. These are per-job limits,
+not an overall upstream/terminology/document request deadline. A client should
+apply its existing bounded retry policy to overload responses.
+
+A cancelled/timed-out request does not kill a running process job. Its submitted
+slot stays occupied until the executor future finishes, and the abandoned result
+is not published. Shutdown stops admission, cancels queued work and waits for
+running work from a background thread. It does not impose a hard kill deadline;
+the deployment's shutdown grace period remains the final bound. Workers are
+started lazily on first submission, so first-use latency includes process startup.
+
+Normal HTTP requests reuse the lifespan pool. Increasing the number of API
+processes would multiply pool size and would also require solving embedded relay
+routing; increase conversion worker count separately instead.
+
+Monitor `xhuma.ccda.worker.wait` (queue + execution + transfer),
+`xhuma.fhir.prepare`, `xhuma.terminology.prepare`, `xhuma.ccda.document`, event-loop
+delay, overload/timeouts and process memory. Successful worker CPU durations are
+reported through `xhuma.stage.duration` with stages `fhir.models`, `fhir.index`,
+`ccda.convert` and `ccda.serialize`. Worker-internal spans are not exported as
+children of API spans; failures retain the exact diagnostic step at the API
+boundary. Prior `fhir.decode`/per-stage API spans have been replaced by these
+boundaries. Historical queries should account for this change.
+
+The architecture and mapping details are described in
+[Document conversion workers](../architecture/technical_architecture.md#document-conversion-workers).

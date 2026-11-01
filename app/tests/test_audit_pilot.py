@@ -215,10 +215,12 @@ async def test_redis_publication_audit_failure_interaction(
             mock_client.return_value.__aenter__.return_value.post.return_value = MagicMock(
                 status_code=200, text='{"resourceType": "Bundle", "type": "searchset", "entry": []}'
             )
-            with patch("app.gpconnect_stages.document.convert_bundle", new_callable=AsyncMock) as mock_convert:
-                mock_convert.return_value = {"ClinicalDocument": "test"}
-                with patch("app.gpconnect_stages.document.base64_xml") as mock_base64:
-                    mock_base64.return_value = "base64"
+            with patch("app.gpconnect_stages.document.run_job", new_callable=AsyncMock) as mock_convert:
+                from app.ccda.conversion import ConvertedDocument, PreparedBundle
+
+                mock_convert.side_effect = [PreparedBundle({}, []), ConvertedDocument("base64")]
+                with patch("app.gpconnect_stages.document.load_medication_dmd", new_callable=AsyncMock) as mapping:
+                    mapping.return_value = {}
 
                     # Make audit fail on store_ccda
                     def audit_side_effect(**kwargs):

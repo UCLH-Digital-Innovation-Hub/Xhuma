@@ -6,7 +6,6 @@ dependencies = [
     "fastapi>=0.162.0",
     "pyjwt>=2.15.1",
     "httpx",
-    "xmltodict",
     "uvicorn[standard]",
     "fhirclient~=3.0.0",
     "redis",
@@ -34,6 +33,7 @@ dependencies = [
     "urllib3>=2.8.0",
     "defusedxml>=0.7.1",
     "tzdata>=2026.5",
+    "xmltodict-fast==1.1.0",
 ]
 
 [tool.ruff]

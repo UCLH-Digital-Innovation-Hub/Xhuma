@@ -216,7 +216,7 @@ async def _resolve_dmd_concept(concept_id: int, release: str = None) -> DMDConce
         valueString=val_str,
     )
 
-    async def get_property(property_name: str, concept_data: dict) -> list:
+    def get_property(property_name: str, concept_data: dict) -> list:
         property_list = []
         for parm in concept_data.get("parameter", []):
             if parm.get("name") == "property":
@@ -225,7 +225,7 @@ async def _resolve_dmd_concept(concept_id: int, release: str = None) -> DMDConce
                         property_list.append(parm)
         return property_list
 
-    async def get_subproperty(property_data: dict, subproperty_name: str) -> dict | None:
+    def get_subproperty(property_data: dict, subproperty_name: str) -> dict | None:
         for part in property_data.get("part", []):
             if part.get("name") == "subproperty":
                 for subpart in part.get("part", []):
@@ -234,7 +234,7 @@ async def _resolve_dmd_concept(concept_id: int, release: str = None) -> DMDConce
         return None
 
     # Check parent property: if AMP, fetch parent VMP
-    parents = await get_property("parent", dmd)
+    parents = get_property("parent", dmd)
     if len(parents) == 2:
         value_codes = [parent["part"][1]["valueCode"] for parent in parents if len(parent.get("part", [])) > 1]
         if "AMP" in value_codes:
@@ -242,16 +242,16 @@ async def _resolve_dmd_concept(concept_id: int, release: str = None) -> DMDConce
             if len(value_codes) == 1 and value_codes[0].isdigit():
                 dmd = await get_dmd_concept(int(value_codes[0]), properties=properties, release=release)
 
-    vpi_properties = await get_property("VPI", dmd)
+    vpi_properties = get_property("VPI", dmd)
     if len(vpi_properties) == 1:
-        dose_value_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_VAL")
+        dose_value_part = get_subproperty(vpi_properties[0], "STRNT_NMRTR_VAL")
         dose_value = None
         if dose_value_part:
             for subpart in dose_value_part.get("part", []):
                 if subpart.get("name") == "valueDecimal":
                     dose_value = subpart.get("valueDecimal")
 
-        dose_unit_part = await get_subproperty(vpi_properties[0], "STRNT_NMRTR_UOMCD")
+        dose_unit_part = get_subproperty(vpi_properties[0], "STRNT_NMRTR_UOMCD")
         dose_unit_code = None
         if dose_unit_part:
             for subpart in dose_unit_part.get("part", []):
@@ -266,7 +266,7 @@ async def _resolve_dmd_concept(concept_id: int, release: str = None) -> DMDConce
 
         processed_dmd.vpi = VPI(value=dose_value, unit=unit_display or "")
 
-    route_properties = await get_property("ROUTECD", dmd)
+    route_properties = get_property("ROUTECD", dmd)
     if len(route_properties) == 1:
         route_code = None
         for subpart in route_properties[0].get("part", []):
@@ -311,3 +311,56 @@ async def dmd_lookup(concept_id: int | str) -> DMDConcept:
 
     # 2. No active release: safe existing on-demand fallback
     return await _resolve_dmd_concept(int(concept_id), release=None)
+
+
+async def load_medication_dmd(concept_ids: list[int], *, batch_size: int = 256, concurrency: int = 8) -> dict:
+    """Load distinct medication concepts from the prewarmed resolved cache.
+
+    Pin one release for the entire document. Missing records use the existing
+    release-pinned resolver, with bounded fan-out. None means enrichment failed;
+    callers retain the source dose/route. Cancellation is never swallowed.
+    """
+    import asyncio
+
+    if batch_size < 1 or concurrency < 1:
+        raise ValueError("dm+d batch size and concurrency must be positive")
+    codes = list(dict.fromkeys(concept_ids))
+    if not codes:
+        return {}
+    results = dict.fromkeys(codes)
+    try:
+        release = _decode_cached_token(await snomed_client.get(ACTIVE_RELEASE_KEY))
+        if release:
+            for start in range(0, len(codes), batch_size):
+                batch = codes[start : start + batch_size]
+                with measure("terminology.resolved.batch", concept_count=len(batch)):
+                    values = await snomed_client.mget([dmd_resolved_key(code, release) for code in batch])
+                for code, value in zip(batch, values, strict=True):
+                    record_cache("terminology.resolved", bool(value))
+                    if value:
+                        try:
+                            results[code] = DMDConcept.model_validate_json(value)
+                        except ValueError:
+                            logging.warning("Invalid resolved dm+d record; attempting pinned fallback")
+    except Exception as exc:
+        # Preserve the previous best-effort enrichment behaviour on Redis failure.
+        logging.warning("dm+d cache unavailable (%s)", type(exc).__name__)
+        return results
+
+    missing = [code for code, value in results.items() if value is None]
+
+    # Only create concurrency tasks at a time, rather than a task per medication.
+    async def resolve(code):
+        try:
+            result = await _resolve_dmd_concept(code, release=release)
+            if release:
+                await snomed_client.setex(dmd_resolved_key(code, release), DMD_RESOLVED_TTL, result.model_dump_json())
+            results[code] = result
+        except Exception as exc:
+            logging.warning("dm+d enrichment unavailable (%s)", type(exc).__name__)
+
+    for start in range(0, len(missing), concurrency):
+        async with asyncio.TaskGroup() as group:
+            for code in missing[start : start + concurrency]:
+                group.create_task(resolve(code))
+    return results

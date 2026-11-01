@@ -1,4 +1,3 @@
-import asyncio
 import datetime
 import logging
 import os
@@ -10,15 +9,57 @@ from fhirclient.models import list as fhirlist
 from app.gp_connect_config import get_gp_connect_inclusions
 from app.telemetry import measure
 
-from .entries import allergy, immunization_entry, medication, observation_entry, problem
+from .entries import allergy, immunization_entry, observation_entry, problem
 from .entries.allergy import allergy_onset_sort_key
 from .entries.investigation_grouping import build_investigation_graph
-from .entries.results import investigation
+from .entries.medication import medication_dmd_code, medication_sync
+from .entries.results import investigation_sync
 from .header import document_header
 from .helpers import fhir_date_is_after, templateId
 
 
 async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
+    """Compatibility API for callers with parsed models (not CPU offloaded).
+
+    Standalone callers retain the existing async medication lookup behaviour.
+    HTTP requests use convert_bundle_sync through the conversion service.
+    """
+    # Reuse the medication module's lookup hook for existing integrations.
+    from .entries.medication import dmd_lookup as lookup
+
+    concepts = {}
+    for entry in medication_entries(bundle, index):
+        try:
+            code = medication_dmd_code(entry, index)
+            if code is not None and code not in concepts:
+                try:
+                    concepts[code] = await lookup(code)
+                except Exception:
+                    concepts[code] = None
+        except Exception:
+            pass  # Rendering retains per-item omission/error handling.
+    return convert_bundle_sync(bundle, index, concepts)
+
+
+def medication_entries(bundle, index):
+    """Yield only medication entries referenced by rendered medication lists."""
+    for entry in bundle.entry or []:
+        resource = entry.resource
+        if isinstance(resource, fhirlist.List) and resource.title in (
+            "Medications and medical devices",
+            "Active Medications",
+            "Past Medications",
+        ):
+            for item in resource.entry or []:
+                medication = index.get(item.item.reference)
+                if medication is not None:
+                    yield medication
+
+
+def convert_bundle_sync(
+    bundle: bundle.Bundle, index: dict, dmd_concepts: dict, *, inclusions=None, caching_period=None
+) -> dict:
+    """Build a C-CDA dictionary from validated FHIR and prepared medication dm+d."""
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.1.15.html
     lists = [entry.resource for entry in bundle.entry or [] if isinstance(entry.resource, fhirlist.List)]
 
@@ -32,7 +73,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     investigation_graph = None
 
-    async def create_section(list: fhirlist.List) -> dict:
+    def create_section(list: fhirlist.List) -> dict:
         nonlocal investigation_graph
         templates = {
             "Allergies and adverse reactions": {
@@ -99,18 +140,13 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "text": "",  # Will be populated with table
             }
 
-            async def parse_medications(references):
-                # run lookups concurrently with return_exceptions=True so a single failure doesn't kill the section
-                results = await asyncio.gather(
-                    *(medication(entry, index) for entry in references),
-                    return_exceptions=True,
-                )
+            def parse_medications(references):
                 valid_items = []
-                for idx, res in enumerate(results):
-                    if isinstance(res, Exception):
-                        logging.error(f"Error parsing medication {getattr(references[idx], 'id', 'unknown')}: {res}")
-                    else:
-                        valid_items.append(res)
+                for entry in references:
+                    try:
+                        valid_items.append(medication_sync(entry, index, dmd_concepts))
+                    except Exception as exc:
+                        logging.error("Error parsing medication (%s)", type(exc).__name__)
                 return valid_items
 
             def parse_allergies(lst):
@@ -274,8 +310,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
                 parser = section_setup[list.title]["parser"]
                 items = parser(references)
-                if asyncio.iscoroutine(items):  # or: inspect.isawaitable(items)
-                    items = await items
                 entries = [i.entry for i in items]
                 rows = [i.row for i in items if i.row is not None]
                 table_rows = [create_row(row) for row in rows]
@@ -338,7 +372,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     span.set_attribute("graph.observations", len(investigation_graph.observations))
                     span.set_attribute("graph.reports", len(investigation_graph.reports))
                     span.set_attribute("graph.edges", len(investigation_graph.edges))
-            organizer_with_table = [await investigation(ref, index, investigation_graph) for ref in references]
+            organizer_with_table = [investigation_sync(ref, index, investigation_graph) for ref in references]
 
             table_list = {
                 "@styleCode": "TOC",
@@ -390,7 +424,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         if list_obj.title == "Medications and medical devices":
             try:
                 active, past, future_meds = split_medications(list_obj)
-                active_section = await create_section(clone_list(list_obj, "Active Medications", active))
+                active_section = create_section(clone_list(list_obj, "Active Medications", active))
 
                 if future_meds > 0:
                     existing_text = active_section["section"]["text"]["paragraph"].get("#text", "")
@@ -403,26 +437,26 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                         if row["td"][2] == "completed":
                             row["td"][1] = {"content": {"@styleCode": "flagData", "#text": row["td"][1]}}
 
-                past_section = await create_section(clone_list(list_obj, "Past Medications", past))
+                past_section = create_section(clone_list(list_obj, "Past Medications", past))
                 bundle_components.append(active_section)
                 bundle_components.append(past_section)
             except Exception as e:
                 print(f"Error processing medications: {e}")
                 try:
-                    section = await create_section(list_obj)
+                    section = create_section(list_obj)
                     if section is not None:
                         bundle_components.append(section)
                 except Exception as e:
                     print(f"Error processing medications without split: {e}")
         else:
-            section = await create_section(list_obj)
+            section = create_section(list_obj)
             if section is not None:
                 bundle_components.append(section)
 
-    caching_period = os.environ.get("CCDA_CACHING_PERIOD", "24 hours")
+    caching_period = caching_period if caching_period is not None else os.environ.get("CCDA_CACHING_PERIOD", "24 hours")
 
     # Get current query inclusions to build the clinical safety disclaimer
-    inclusions = get_gp_connect_inclusions()
+    inclusions = get_gp_connect_inclusions() if inclusions is None else inclusions
 
     # Map the boolean flags to their human-readable clinical section names
     section_mapping = {

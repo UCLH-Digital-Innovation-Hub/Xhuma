@@ -104,7 +104,42 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
     )
 
 
+def required_dmd_code(dosages, codings) -> int | None:
+    """Select the canonical concept only for tablet/capsule/unspecified doses.
+
+    Call with mapped dosages so narrative-only prescriptions use the same
+    eligibility rule as structured prescriptions. Other clinical sections never
+    participate in dm+d enrichment.
+    """
+    quantity = dosages[0].doseQuantity
+    if quantity is None or (quantity.unit or "").lower() not in ("", "tablet", "capsule"):
+        return None
+    code = code_with_translations(codings)
+    return int(code.code) if code and code.code else None
+
+
+def medication_dmd_code(entry, index) -> int | None:
+    """Read eligibility without mutating the source medication or dosage."""
+    return required_dmd_code(
+        mapped_dosages(entry.dosage).dosages,
+        index[entry.medicationReference.reference].code.coding,
+    )
+
+
 async def medication(entry: medicationstatement.MedicationStatement, index: dict) -> EntryWithRow:
+    """Compatibility entry point for standalone callers; production preloads dm+d."""
+    concepts = {}
+    try:
+        code = medication_dmd_code(entry, index)
+        if code is not None:
+            concepts[code] = await dmd_lookup(code)
+    except Exception as exc:
+        logging.warning("Medication enrichment unavailable (%s)", type(exc).__name__)
+    return medication_sync(entry, index, concepts)
+
+
+def medication_sync(entry: medicationstatement.MedicationStatement, index: dict, dmd_concepts: dict) -> EntryWithRow:
+    """Render one medication using prepared dm+d records; performs no I/O."""
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
     dosage_result = mapped_dosages(entry.dosage)
@@ -318,7 +353,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
     # check if snomed code is in cache and if so add to med name
     snomed_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
-    gp_units = ["tablet", "capsule"]
     unit = (
         substance_administration.doseQuantity.get("@unit", "").lower() if substance_administration.doseQuantity else ""
     )
@@ -327,12 +361,13 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
     dmd_route_warning = None
 
     if substance_administration.doseQuantity:
-        blank_unit = not substance_administration.doseQuantity.get("@unit")
-        if unit in gp_units or blank_unit:
+        if unit in ("", "tablet", "capsule"):
             # we only process doses for tablets or capsules.
 
             try:
-                dmd_data = await dmd_lookup(int(snomed_code))
+                dmd_data = dmd_concepts.get(required_dmd_code(dosages, referenced_med.code.coding))
+                if dmd_data is None:
+                    raise ValueError("dm+d enrichment unavailable")
                 # only process dose if a single dosage instruction
                 if len(dosages) == 1:
                     if dmd_data.vpi and substance_administration.doseQuantity:

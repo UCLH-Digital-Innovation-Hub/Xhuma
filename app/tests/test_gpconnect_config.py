@@ -91,12 +91,10 @@ async def test_ccda_expiry_configuration_parsing(
     request = MagicMock()
     del request.app
 
-    with patch("app.gpconnect_stages.document.convert_bundle") as mock_convert:
+    with patch("app.gpconnect_stages.document.run_job", new_callable=AsyncMock) as mock_convert:
+        from app.ccda.conversion import ConvertedDocument, PreparedBundle
 
-        async def dummy_convert(*args, **kwargs):
-            return {"ClinicalDocument": "test"}
-
-        mock_convert.side_effect = dummy_convert
+        mock_convert.side_effect = [PreparedBundle({}, []), ConvertedDocument("base64")]
 
         with patch.dict(
             os.environ, {"CCDA_EXPIRY_HOURS": "1.5", "ORG_ASID": "123", "API_KEY": "test", "ORG_CODE": "RRV00"}

@@ -16,7 +16,7 @@ def convert_mime(ccda: dict):
         XOP infoset
     """
 
-    ccda_xml = xmltodict.unparse(ccda, pretty=True)
+    ccda_xml = document_xml(ccda)
 
     msg = MIMEMultipart()
     xml = MIMEBase("application", "xop+xml")
@@ -37,7 +37,7 @@ def base64_xml(ccda: dict):
         XOP infoset
     """
 
-    ccda_xml = xmltodict.unparse(ccda, pretty=True)
+    ccda_xml = document_xml(ccda)
 
     # preserve <br /> tags
     ccda_xml = ccda_xml.replace("&lt;br /&gt;", "<br/>").replace("&lt;br&gt;", "<br/>")
@@ -46,3 +46,12 @@ def base64_xml(ccda: dict):
     ccda_64 = base64.b64encode(ccda_xml.encode("utf-8")).decode("utf-8")
 
     return ccda_64
+
+
+def document_xml(ccda: dict) -> str:
+    """Serialize with xmltodict-fast while retaining established XML options.
+
+    The replacement distribution supplies the same `xmltodict` import. Keep
+    narrative line-break handling in base64_xml, separate from raw debug output.
+    """
+    return xmltodict.unparse(ccda, pretty=True)

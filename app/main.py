@@ -40,6 +40,7 @@ from sqlalchemy import select
 from .audit.audit import AuditFailureException
 from .audit.db_models import AuditEventRow
 from .audit.models import _subject_ref_from_nhs_number
+from .ccda.workers import ConversionWorkers
 from .db import make_engine, make_sessionmaker
 from .middleware.mtls import MTLSMiddleware
 from .redis_connect import redis_client, snomed_client
@@ -97,6 +98,9 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(f"Invalid CCDA_EXPIRY_HOURS configuration: {e}")
 
     async with AsyncExitStack() as resources:
+        app.state.conversion_workers = ConversionWorkers.from_environment()
+        resources.push_async_callback(app.state.conversion_workers.close)
+
         # Initialize Postgres connection pool
         engine = make_engine()
         resources.push_async_callback(engine.dispose)

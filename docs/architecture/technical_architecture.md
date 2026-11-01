@@ -371,3 +371,69 @@ Centrally Managed Shared Services (Shared Scope):
 ├── Public JWKS Blob Storage ($web static endpoint)
 └── Azure Monitor Query Pack (xhuma-operational-diagnostics, 20 KQL queries)
 ```
+
+## Document conversion workers
+
+HTTP, Redis, audit persistence and relay handling remain asynchronous in the API
+process. CPU work runs in a lifespan-owned `ConversionWorkers` process pool,
+using the `spawn` start method so workers do not inherit live network pools.
+
+The document stage follows these steps:
+
+1. Submit `prepare_bundle` to decode JSON, retain the existing standalone-comment
+   compatibility handling and discover medication dm+d requirements. It builds a
+   raw reference index plus small dosage/coding models, not the full FHIR graph.
+2. In the API process, call `load_medication_dmd`. Read the active release once,
+   deduplicate concepts and fetch resolved prewarmed records in batches of 256.
+   Only missing/invalid records use on-demand resolution, pinned to that release,
+   with at most eight fallback tasks per document at a time. No active release
+   retains the existing unversioned fallback. Redis failures leave enrichment
+   unavailable rather than failing the document. Cancellation propagates.
+3. Submit `convert_document` with plain bundle data, the small dm+d result map and
+   a snapshot of inclusion/caching-disclaimer settings. Construct and validate
+   the full FHIR graph once, build indexes, render sections synchronously and
+   serialize XML/base64. The full FHIR ownership graph and C-CDA dictionary never
+   cross the process boundary.
+4. Back in the API process, record CPU-stage timings, perform the required store
+   audit, then publish the document and patient association using the existing
+   Redis transaction and TTL. Cancellation or a worker failure prevents this
+   publication path from running.
+
+The preparation scan uses the same `required_dmd_code` rule as medication
+rendering. Only medications referenced by rendered medication lists participate.
+The first mapped dosage must have a dose quantity with a tablet, capsule or blank
+unit. This includes supported free-text dosages mapped locally to structured
+instructions. Other clinical sections do not request terminology. Prewarmed
+`DMDConcept` records already contain strength, unit and route information; normal
+cache hits do not resolve parent concepts or make HTTP calls. A failed enrichment
+leaves the source medication dose/route intact, as before.
+
+Preparation precedes full FHIR validation, so a malformed bundle can cause
+best-effort dm+d reads before the final job rejects it. It cannot cause document
+publication. Validation failures retain their 502 response and validation audit;
+conversion failures retain sanitized diagnostics. Optional debug file writes
+remain in the API process; serialization now completes before the debug write.
+
+`xmltodict-fast` replaces the `xmltodict` distribution and supplies the same
+import name. Do not install both distributions together. The serialization
+adapter retains pretty printing, UTF-8/base64 and the existing narrative line
+break substitution. Debug XML retains the unmodified escaped narrative. Rust and
+Python serializer output are compared exactly on representative C-CDA fixtures.
+
+### Compatibility APIs
+
+`convert_bundle`, `medication`, `investigation` and `create_result_component`
+retain async wrappers for existing scripts/tests. They do not provide CPU
+isolation. Production document processing uses the synchronous core through the
+worker service. Standalone `process_document` calls without a lifespan pool own
+and close a temporary pool; their callers should use an import-safe `__main__`
+entry point because workers use spawn. Long-running integrations should supply
+an application request with its lifespan-owned pool.
+
+See the [operator configuration](../operations/operators_manual.md#conversion-worker-capacity)
+for admission, timeout and shutdown behaviour.
+
+The pinned 1.1.0 distribution has no Linux amd64 wheel. The Docker dependency
+stage therefore installs Rust/Cargo and a C toolchain, builds the extension, and
+asserts that the Rust backend is available. Only the resulting virtual environment
+is copied into the runtime stage. Local amd64 source installs also need Rust/Cargo.

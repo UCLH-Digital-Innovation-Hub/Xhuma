@@ -65,8 +65,11 @@ Stages are:
 | `pds.lookup`, `sds.device`, `sds.endpoint` | GP Connect's awaited discovery steps, including their cache/audit work |
 | `pds.cache.read`, `sds.cache.read` | Cache reads, including calls from ITI-55 |
 | `gpconnect.http` | Upstream request, with direct/relay transport attached to the span |
-| `fhir.decode`, `fhir.models`, `fhir.index` | JSON decoding, typed FHIR construction, reference index |
-| `ccda.convert` | Complete dictionary conversion, including terminology waits and result processing |
+| `fhir.prepare` | Worker queue/transfer, JSON decoding and medication requirement discovery |
+| `fhir.models`, `fhir.index` | Successful worker-stage durations reported as histograms in the API process |
+| `terminology.prepare`, `terminology.resolved.batch` | Prewarmed medication dm+d preparation and batch cache reads |
+| `ccda.worker.wait`, `ccda.document` | Queue/transfer/execution time and complete final conversion job |
+| `ccda.convert` | Successful synchronous dictionary rendering duration; excludes dm+d I/O |
 | `investigations.graph` | Shared graph construction, once when needed |
 | `investigations.group` | Per-report grouping |
 | `investigations.render` | Post-grouping component/narrative assembly and model dumping; excludes initial report metadata preparation |
@@ -75,7 +78,7 @@ Stages are:
 | `terminology.cache.read`, `terminology.token`, `terminology.http` | Concept cache read, token HTTP call, concept HTTP calls including a 401 retry |
 | `audit.persist` | Audit event construction, database work and commit |
 
-Each measurement also creates a span named `xhuma.<stage>`, except conversion retains the existing `FHIR2CCDA.convert_bundle` span name. Counts and sizes (bundle resources, graph edges/reports/observations, grouping issues, base64 size) are span attributes, not histogram labels. New instruments do not attach patient IDs, concept IDs, document IDs, exception messages or payloads. Existing automatic instrumentation and older application logging retain their own behaviour.
+API measurements create spans named `xhuma.<stage>`. The process-worker path reports successful `fhir.models`, `fhir.index`, `ccda.convert` and `ccda.serialize` durations as histograms without child spans. Investigation measurements remain available to in-process callers, but worker telemetry providers are not configured/exported. The old `FHIR2CCDA.convert_bundle` API span is replaced by `xhuma.ccda.document`. Counts and sizes (bundle resources, graph edges/reports/observations, grouping issues, base64 size) are span attributes, not histogram labels. New instruments do not attach patient IDs, concept IDs, document IDs, exception messages or payloads. Existing automatic instrumentation and older application logging retain their own behaviour.
 
 Stages nest: do not add every stage histogram together to infer request latency. `outcome` describes whether an exception escaped the measured block, not whether the final SOAP response succeeded; Locust performs that semantic check. Terminology HTTP spans also carry response status codes.
 
@@ -139,3 +142,192 @@ async with redis_client.pipeline() as pipe:
 ```
 
 Standalone async scripts using these clients should await both `redis_client.close()` and `snomed_client.close()` in cleanup before their event loop exits. Avoid sharing a connected client between separate event loops or threads. This change permits overlapping requests; it does not deduplicate simultaneous cache misses. Request coalescing remains separate work. The `keys()` helper is now asynchronous on the client, but Redis still executes `KEYS` synchronously on the server; use cursor-based scanning if large administrative cache operations become necessary.
+
+## Prewarmed dm+d and worker comparison
+
+Run the offline worker/serializer comparison with:
+
+```bash
+uv run --locked python -m scripts.profile_conversion_workers --repeat 5
+```
+
+It compares the Python and Rust serializer backends on identical converted data,
+then runs four concurrent documents inline, through one worker and through two
+workers. Each document includes raw preparation, full model construction,
+rendering and serialization. Synthetic dm+d results replace all external I/O;
+process startup is warmed separately and excluded. The heartbeat runs every 5 ms.
+Do not run other CPU-intensive work alongside the benchmark when assessing
+throughput. Worker dispatch/transfer overhead can make one worker slower than
+inline processing while still greatly improving API responsiveness.
+
+Correctness coverage includes exact Rust/Python XML comparisons and real spawned
+worker execution. An additional implementation-time comparison against the
+pre-refactor converter matched encoded output on five representative fixtures,
+with both successful synthetic dm+d enrichment and failed enrichment (10 cases),
+controlling generated timestamps and UUIDs.
+
+The historical Query Pack snapshot's explicit GP Connect stage filter predates
+worker isolation. For current deployments use:
+
+```kusto
+dependencies
+| where name in ("xhuma.gpconnect.http", "xhuma.fhir.prepare",
+                 "xhuma.terminology.prepare", "xhuma.ccda.worker.wait",
+                 "xhuma.ccda.document", "xhuma.ccda.cache.write")
+| project timestamp, operation_Id, name, duration, success, customDimensions
+| order by timestamp desc
+```
+
+Updating a saved live Query Pack is a separate deployment action; this repository
+change does not publish monitoring configuration to Azure.
+
+### Local implementation measurement — 2026-11-01
+
+[Recorded results](../reference/conversion-worker-benchmark-2026-11-01.json),
+Python 3.14.8, five repetitions, the default large mixed fixture:
+
+| Measurement | Python serializer | Rust serializer |
+| --- | ---: | ---: |
+| Isolated preparation + conversion | 644.72 ms | 438.89 ms |
+| XML/base64 stage | 211.07 ms | 37.42 ms |
+
+| Four documents, Rust serializer | Batch elapsed | Median maximum 5 ms heartbeat gap |
+| --- | ---: | ---: |
+| Inline | 2,011.33 ms | 2,012.09 ms |
+| One conversion worker | 2,138.23 ms | 21.96 ms |
+| Two conversion workers | 1,328.67 ms | 31.59 ms |
+
+On this host, Rust reduced isolated total time by about 32%; two workers reduced
+the four-document batch time by about 34% relative to inline Rust conversion.
+One worker was about 6% slower for the batch but substantially more responsive.
+These figures include process transfers and exclude process startup, external I/O
+and real dm+d cache latency. They are not Azure capacity predictions or a direct
+comparison with the older October profile on a different runtime/host load.
+
+Validation: the application regression suite passed 1,183 tests; the subsequently
+added document-cancellation regression and focused worker/telemetry checks also
+passed. Ten pre-refactor output comparisons passed. The Linux amd64 Docker image
+built successfully, and a network-disabled Python 3.13 container smoke test
+confirmed the Rust backend and a real spawned conversion.
+
+## Mixed cached retrieval and new conversion — 2026-11-01
+
+The controlled local comparison uses remote `ucl/dev` commit
+`91b738989911e9095d044070224a1d83838118d0` with its locked dependencies,
+and the working-tree refactor. The latter is measured inline and with one or
+two persistent conversion processes. All candidate modes use xmltodict-fast
+1.1.0 with its Rust backend; dev uses xmltodict 1.0.4. Each server has one
+Uvicorn event loop. Worker modes retain the configured two queued job slots
+and 60-second timeout; rejection is included in the failure counts.
+
+### Method
+
+[`scripts/mixed_traffic_benchmark.py`](../../scripts/mixed_traffic_benchmark.py)
+starts disposable local Redis and PostgreSQL 15 services and runs each server
+sequentially. The load generator is a separate process. Both source versions
+use Python 3.14.8 on the same host with four CPUs in the affinity mask. Process
+startup, cache population and connection warmup are excluded from measurement.
+
+Traffic is 80% cached SOAP ITI-39 retrieval and 20% fresh conversion, shuffled
+in blocks of five with identical seeds across modes. Arrivals follow a fixed
+schedule independent of response completion, avoiding a closed-loop generator
+that silently reduces load as latency rises. Two 30-second repetitions are
+run at each of 5 and 10 total requests/second. Mode order is shuffled per
+repetition. All pending requests are drained before stopping the server.
+
+Cached traffic executes the real SOAP router, SAML parsing, Redis retrieval,
+response serialization and PostgreSQL audit path. New traffic executes the
+real `process_document` stage, including dm+d cache reads, conversion, auditing
+and Redis publication, through a benchmark-only HTTP endpoint. Every new
+request converts the same repository fixture, `9692136744.json`, regardless
+of previously published documents. A fixed 20 ms asynchronous delay stands
+in for upstream I/O. Terminology is prewarmed with synthetic resolved dm+d
+concepts; external terminology fallbacks are prohibited and counted.
+
+This isolates the conversion/cache interaction. It does not measure the full
+ITI-55/ITI-38 journey, live NHS service latency, TLS, production middleware,
+multiple API replicas, cold caches or a distribution of patient record sizes.
+The dev comparison is local branch code, not the deployed dev service.
+
+Success requires both the HTTP result and response contents to be valid:
+cached retrievals must contain SOAP success and the expected document prefix;
+new conversions must return a successful document ID. SOAP failures carried
+in HTTP 200 therefore count as failures. The raw artifact retains status codes,
+success flags, per-request latency, generator dispatch lag and audit counts,
+without response payloads. Latency runs from the scheduled arrival until the
+full response body is received. Percentiles below pool individual successful
+samples across repetitions; failures are reported separately. New-conversion
+p99 is exploratory: only 60 or 120 requests are offered per mode/load.
+
+Reproduce after preparing an isolated checkout/archive of the baseline and
+installing its locked environment:
+
+```bash
+uv sync --project /tmp/xhuma-mixed-dev-91b73898 --python "$(pwd)/.venv/bin/python"
+uv run --locked python scripts/mixed_traffic_benchmark.py \
+  --baseline /tmp/xhuma-mixed-dev-91b73898 \
+  --baseline-sha 91b738989911e9095d044070224a1d83838118d0 \
+  --duration 30 --repeats 2 --rates 5 10
+```
+
+The harness requires `redis-server`, Docker and a local `postgres:15` image.
+It owns and removes its disposable services. Do not target shared stores.
+
+### Results
+
+[Raw request samples](../reference/mixed-traffic-2026-11-01.json) cover 3,600
+measured requests. Throughput is successful requests divided by total elapsed
+time including drain, pooled over both repetitions. Latencies are milliseconds
+and include only successful requests.
+
+**5 requests/s offered (4 cached + 1 new per second)**
+
+| Mode | Cached success/s | Cached p95 / p99 (ms) | Cached failures | New success/s | New p95 / p99 (ms) | New failures |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dev branch | 3.95 | 767 / 1243 | 0/240 | 0.99 | 1250 / 1958 | 0/60 |
+| Refactor inline | 4.00 | 474 / 869 | 0/240 | 1.00 | 1018 / 1346 | 0/60 |
+| Refactor: 1 worker | 4.00 | 69 / 78 | 0/240 | 1.00 | 724 / 913 | 0/60 |
+| Refactor: 2 workers | 4.00 | 70 / 89 | 0/240 | 1.00 | 714 / 1334 | 0/60 |
+
+**10 requests/s offered (8 cached + 2 new per second)**
+
+| Mode | Cached success/s | Cached p95 / p99 (ms) | Cached failures | New success/s | New p95 / p99 (ms) | New failures |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dev branch | 3.25 | 34204 / 38011 | 183/480 | 1.10 | 37604 / 43265 | 19/120 |
+| Refactor inline | 7.44 | 3658 / 4919 | 0/480 | 1.84 | 3837 / 4984 | 1/120 |
+| Refactor: 1 worker | 7.83 | 84 / 113 | 0/480 | 1.75 | 1842 / 1997 | 13/120 |
+| Refactor: 2 workers | 7.92 | 75 / 88 | 0/480 | 1.98 | 888 / 1091 | 0/120 |
+
+At 5 requests/s every mode serves the offered traffic without failures, but
+workers reduce cached tail latency substantially. At 10 requests/s, two workers
+complete all requests with cached p99 of 88 ms and new-conversion p99 of 1.09 s.
+The inline refactor reaches 4.92 s cached p99; dev reaches 38.01 s and suffers
+substantial failures. Relative to dev at this offered load, two workers deliver
+2.28 times the total successful throughput including drain (9.89 versus
+4.35 requests/s). This is a measured result at two offered rates, not a maximum
+capacity estimate or a claim of linear scaling.
+
+One worker protects cached traffic but rejects 13/120 new conversions with HTTP
+503 at the higher rate. Two workers avoid these rejections on this host. Retain
+bounded admission; increasing the queue alone would exchange rejections for
+longer waiting. Dev's cached failures comprise 165 HTTP-200 responses failing the
+SOAP/document success check and 18 HTTP 500 responses; its new failures are
+18 HTTP 500 responses and one transport read error. Inline has one
+HTTP 500 for new conversion. Error bodies were not retained, so the precise
+causes of those application failures are not established by this run.
+
+All trials had zero terminology fallbacks. Each trial's generator dispatch-lag
+p99 was at most 5.65 ms. Real audit writes were observed in every trial. The overloaded second dev
+trial recorded only 222 retrieval audits for 240 offered cached requests.
+Store audits can precede a failed publication, so audit counts alone are not
+a success measure. Successful document payload size was 885,028 base64
+bytes in every mode. The machine reports an Intel i7-7600U with two physical
+cores/four logical CPUs; all processes shared the host. The dev overloaded
+trials varied substantially, so use the results as evidence of overload and
+isolation benefit rather than precise production tail-latency predictions.
+
+For this workload, two conversion workers are the strongest configuration.
+The response-time benefit under mixed load is much larger than the isolated
+CPU-time reduction because cached requests no longer queue behind conversion
+CPU work. Repeat on deployment-sized resources with representative record
+sizes and longer runs before selecting a production worker count or SLO.

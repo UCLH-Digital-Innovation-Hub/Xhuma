@@ -3045,7 +3045,7 @@ dependencies = [
     { name = "tzdata" },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "xmltodict" },
+    { name = "xmltodict-fast" },
 ]
 
 [package.dev-dependencies]
@@ -3097,7 +3097,7 @@ requires-dist = [
     { name = "tzdata", specifier = ">=2026.5" },
     { name = "urllib3", specifier = ">=2.8.0" },
     { name = "uvicorn", extras = ["standard"] },
-    { name = "xmltodict" },
+    { name = "xmltodict-fast", specifier = "==1.1.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -3130,12 +3130,14 @@ wheels = [
 ]
 
 [[package]]
-name = "xmltodict"
-version = "1.0.4"
+name = "xmltodict-fast"
+version = "1.1.0"
 source = { registry = "https://pypi.python.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/19/70/80f3b7c10d2630aa66414bf23d210386700aa390547278c789afa994fd7e/xmltodict-1.0.4.tar.gz", hash = "sha256:6d94c9f834dd9e44514162799d344d815a3a4faec913717a9ecbfa5be1bb8e61", size = 26124, upload-time = "2026-02-22T02:21:22.074Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/4b/671784e7bb8d97dbb28269ab074f75cd9181a711346f420a69da994baf5e/xmltodict_fast-1.1.0.tar.gz", hash = "sha256:1925f9c8ba318e4477c7880e85351c569f6231c34843426476ba817069fed0f4", size = 69843, upload-time = "2026-04-09T08:01:26.392Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/38/34/98a2f52245f4d47be93b580dae5f9861ef58977d73a79eb47c58f1ad1f3a/xmltodict-1.0.4-py3-none-any.whl", hash = "sha256:a4a00d300b0e1c59fc2bfccb53d7b2e88c32f200df138a0dd2229f842497026a", size = 13580, upload-time = "2026-02-22T02:21:21.039Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/04/2dbf2da040c627fe59ff66486c555241b37404b62be1236ce7b9ce54ff42/xmltodict_fast-1.1.0-cp39-abi3-macosx_11_0_arm64.whl", hash = "sha256:d0618b96daadcb07eecfdd2f6bfa79f397cc065957cf4d43c527a16701417080", size = 428621, upload-time = "2026-04-09T08:01:25.118Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/aa/35701a7c00a6b9df9032336d45a1502bf047e7026e3c2116ee9b9f5f7f13/xmltodict_fast-1.1.0-cp39-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:47baf6b5309bd25c3d86d9804395957ceab1677e395f83880b5e310de660705d", size = 465597, upload-time = "2026-04-09T08:01:27.624Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/d8/e86b22ac0fff765490f4f68d302d3a146b13de61b4322636580f6b00d39d/xmltodict_fast-1.1.0-cp39-abi3-win_amd64.whl", hash = "sha256:94eacd14010574ad2ea11a734d0c756688469f98bf9e6bc132f22c11af1cb06b", size = 322932, upload-time = "2026-04-09T08:01:33.73Z" },
 ]
 
 [[package]]

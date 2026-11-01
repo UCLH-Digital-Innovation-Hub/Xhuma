@@ -177,7 +177,7 @@ def result_status(status: str | None, *, organizer: bool = False) -> CS:
     return CS(nullFlavor="OTH")
 
 
-async def create_result_component(observation: obs.Observation, group_time: IVL_TS = None) -> ResultWithRow:
+def create_result_component_sync(observation: obs.Observation, group_time: IVL_TS = None) -> ResultWithRow:
     result_component = ResultObservation(
         code=code_with_translations(observation.code.coding),
         id=id_helper(observation.identifier) if observation.identifier else None,
@@ -233,7 +233,7 @@ async def create_result_component(observation: obs.Observation, group_time: IVL_
     return ResultWithRow(entry=result_component, row=table_row)
 
 
-async def investigation(
+def investigation_sync(
     diagnostic_report: dr.DiagnosticReport, index: dict, graph: InvestigationGraph | None = None
 ) -> InvestigationWithTable:
     """Render one report with explicit groups and locally associated filing comments."""
@@ -313,7 +313,7 @@ async def investigation(
                 content = {"@styleCode": "allIndent", "content": content}
             table_rows.append(ResultTableRow(cells=[{"@colspan": 4, "content": content}]))
 
-        async def render(reference, path=(), *, table_root=False):
+        def render(reference, path=(), *, table_root=False):
             """Render each assertion once while retaining shared group associations."""
             nonlocal has_cycle
             observation = grouping.observations[reference]
@@ -352,13 +352,13 @@ async def investigation(
             # only standalone observations remain results. Keep unexpected values
             # on groups too, using the existing serializer without changing mapping.
             if not members or has_value:
-                converted = await create_result_component(observation, report_issued_time)
+                converted = create_result_component_sync(observation, report_issued_time)
                 components.append({"observation": converted.entry})
                 table_rows.append(converted.row)
             for comment in grouping.comments.get(reference, []):
-                await render(comment, path + (reference,))
+                render(comment, path + (reference,))
             for member in members:
-                await render(member, path + (reference,))
+                render(member, path + (reference,))
 
         # Render in the original root order to preserve structured component
         # order and shared-result ownership, collecting separate narrative tables.
@@ -366,10 +366,10 @@ async def investigation(
             if grouping.members.get(reference):
                 table_rows = []
                 group_tables.append((reference, table_rows))
-                await render(reference, table_root=True)
+                render(reference, table_root=True)
             else:
                 table_rows = other_rows
-                await render(reference)
+                render(reference)
         for reference in grouping.report_comments:
             if reference not in emitted:
                 emitted.add(reference)
@@ -389,7 +389,7 @@ async def investigation(
                 if not is_filing_comment(grouping.observations[reference]):
                     has_unplaced_result = True
                 narrative_row("Unplaced source item")
-                await render(reference)
+                render(reference)
         if grouping.issues:
             for issue in grouping.issues:
                 logger.warning("Investigation %s: %s", diagnostic_report.id, issue)
@@ -466,3 +466,13 @@ async def investigation(
             organizer=organizer.model_dump(by_alias=True, exclude_none=True),
             table=table,
         )
+
+
+async def create_result_component(observation, group_time=None):
+    """Compatibility wrapper; the synchronous core performs no I/O."""
+    return create_result_component_sync(observation, group_time)
+
+
+async def investigation(diagnostic_report, index, graph=None):
+    """Compatibility wrapper for existing standalone callers."""
+    return investigation_sync(diagnostic_report, index, graph)

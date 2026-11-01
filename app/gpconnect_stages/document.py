@@ -1,26 +1,23 @@
 """FHIR validation, C-CDA generation and publication with existing failure boundaries."""
 
-import json
 import logging
 import os
-import time
 from datetime import timedelta
 from uuid import uuid4
 
 import httpx
-import xmltodict
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse
-from fhirclient.models import bundle
 
 from .. import logging as application_logging
 from ..audit import audit
-from ..audit.audit import AuditFailureException
 from ..audit.models import AuditOutcome, SAMLAttributes
-from ..ccda.convert_mime import base64_xml
-from ..ccda.fhir2ccda import convert_bundle
+from ..ccda.conversion import ConversionFailure, convert_document, prepare_bundle
+from ..ccda.dmd import load_medication_dmd
+from ..ccda.workers import ConversionWorkers
+from ..gp_connect_config import get_gp_connect_inclusions
 from ..redis_connect import redis_client
-from ..telemetry import measure
+from ..telemetry import measure, stage_duration
 from .types import DiagnosticStep
 
 
@@ -35,101 +32,53 @@ async def process_document(
     step: DiagnosticStep,
 ) -> str | JSONResponse:
     """Return the published document ID or the existing early failure response."""
-    # 10) Validate the entire upstream payload before conversion or caching.
-    step.value = "validate_fhir_bundle.response_content"
+    # Jobs contain CPU work only. dm+d and publication stay on this event loop.
+    # HTTP requests reuse the lifespan pool; standalone scripts own a short-lived
+    # pool so they do not leak processes or require a FastAPI request object.
+    workers = (
+        getattr(request.app.state, "conversion_workers", None)
+        if request is not None and hasattr(request, "app")
+        else None
+    )
+    owned_workers = workers is None
+    if owned_workers:
+        workers = ConversionWorkers.from_environment()
     try:
-        step.value = "validate_fhir_bundle.json_decode"
-        with measure("fhir.decode", input_bytes=len(resp.content)):
-            scr_bundle = json.loads(resp.text)
-        step.value = "validate_fhir_bundle.resource_type"
-        if not isinstance(scr_bundle, dict) or scr_bundle.get("resourceType") != "Bundle":
-            raise ValueError("Expected a FHIR Bundle resource")
-        # Retain the existing compatibility handling for standalone comment entries.
-        step.value = "validate_fhir_bundle.comment_entries"
-        for j, entry in enumerate(scr_bundle.get("entry", [])):
-            if "fhir_comments" in entry:
-                scr_bundle["entry"].pop(j)
-                break
-        step.value = "validate_fhir_bundle.fhir_models"
-        with measure("fhir.models", resource_count=len(scr_bundle.get("entry", []))):
-            fhir_bundle = bundle.Bundle(scr_bundle)
-    except AuditFailureException:
-        raise
-    except Exception as e:
-        status_code = e.status_code if isinstance(e, HTTPException) else 502
-        msg = "FHIR bundle malformed"
-        diagnostic = f"{msg} (step: {step.value}, exception_type: {type(e).__name__})"
-        application_logging.record_application_failure(RuntimeError(diagnostic))
-        logging.error(diagnostic)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(diagnostic + "\n")
-        await audit.attempt_audit(
-            request=request,
-            request_id=ssp_trace_id,
-            nhs_number=str(nhsno),
-            saml=saml_attrs,
-            action="validate_fhir_bundle",
-            outcome=AuditOutcome.fail,
-            error_code=str(status_code),
-            detail={"step": step.value, "exception_type": type(e).__name__},
-        )
-        msg = "FHIR bundle malformed" + f": {e.detail}" if isinstance(e, HTTPException) else diagnostic
-        return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
+        step.value = "validate_fhir_bundle.prepare"
+        with measure("fhir.prepare", input_bytes=len(resp.content)):
+            prepared = await run_job(workers, prepare_bundle, resp.content)
 
-    # index resources for resolution
-    step.value = "fhir_index.resource_index"
-    with measure("fhir.index", resource_count=len(fhir_bundle.entry or [])):
-        bundle_index = {}
-        for entry in fhir_bundle.entry or []:
-            try:
-                addr = f"{entry.resource.resource_type}/{entry.resource.id}"
-                bundle_index[addr] = entry.resource
-                if entry.fullUrl:
-                    bundle_index[entry.fullUrl] = entry.resource
-            except Exception as e:
-                # Preserve compatibility with entries that cannot be indexed.
-                logging.warning(
-                    "Skipping FHIR resource (step: fhir_index.resource_index, exception_type: %s)",
-                    type(e).__name__,
-                )
+        step.value = "ccda_convert.medication_dmd"
+        with measure("terminology.prepare", concept_count=len(prepared.dmd_codes)):
+            dmd_concepts = await load_medication_dmd(prepared.dmd_codes)
 
-    step.value = "ccda_convert.start_timer"
-    start_time = time.perf_counter()
-    try:
-        step.value = "ccda_convert.convert_bundle"
-        with measure("ccda.convert", span_name="FHIR2CCDA.convert_bundle", resource_count=len(fhir_bundle.entry or [])):
-            xml_ccda = await convert_bundle(fhir_bundle, bundle_index)
-
-        step.value = "ccda_convert.duration"
-        duration_ms = (time.perf_counter() - start_time) * 1000
-        logging.info(f"FHIR2CCDA conversion completed in {duration_ms:.2f}ms")
-    except AuditFailureException:
-        raise
-    except Exception as e:
-        status_code = e.status_code if isinstance(e, HTTPException) else 500
-        msg = "Failed to convert FHIR Bundle to CCDA"
-        diagnostic = f"{msg} (step: {step.value}, exception_type: {type(e).__name__})"
-        application_logging.record_application_failure(RuntimeError(diagnostic))
-        logging.error(diagnostic)
-        if log_dir:
-            with open(os.path.join(log_dir, "error.log"), "a") as f:
-                f.write(diagnostic + "\n")
-        msg = f"{msg}: {e.detail}" if isinstance(e, HTTPException) else diagnostic
-        return JSONResponse(status_code=status_code, content={"success": False, "error": msg})
+        options = {
+            "inclusions": get_gp_connect_inclusions(),
+            "caching_period": os.getenv("CCDA_CACHING_PERIOD", "24 hours"),
+            "debug_xml": bool(log_dir) or os.getenv("ENV", "prod").lower() in ("dev", "local"),
+        }
+        step.value = "ccda_convert.worker"
+        with measure("ccda.document") as span:
+            result = await run_job(workers, convert_document, prepared.payload, dmd_concepts, options)
+            span.set_attribute("resource_count", result.resource_count)
+            span.set_attribute("document.base64_bytes", len(result.encoded))
+        # Worker telemetry providers are intentionally not configured. Publish
+        # measured CPU-stage durations from the API process, without PHI labels.
+        for stage, elapsed in result.timings.items():
+            stage_duration.record(elapsed, {"stage": stage, "outcome": "ok"})
+        logging.info("FHIR2CCDA conversion completed in %.2fms", result.timings.get("ccda.convert", 0))
+    except ConversionJobError as exc:
+        return await conversion_failure(exc.failure, nhsno, saml_attrs, request, ssp_trace_id, log_dir, step)
+    finally:
+        if owned_workers:
+            await workers.close()
 
     if log_dir:
         step.value = "ccda_serialize.xml_debug_file"
-        # CodeQL static analysis requires explicit integer casting to drop path traversal taint
-        safe_nhsno = str(int(nhsno))
-        with open(os.path.join(log_dir, f"{safe_nhsno}.xml"), "w") as output:
-            output.write(xmltodict.unparse(xml_ccda, pretty=True))
+        with open(os.path.join(log_dir, f"{int(nhsno)!s}.xml"), "w") as output:
+            output.write(result.debug_xml)
 
-    step.value = "ccda_serialize.base64_xml"
-    with measure("ccda.serialize") as span:
-        xop = base64_xml(xml_ccda)
-        step.value = "ccda_serialize.document_size"
-        span.set_attribute("document.base64_bytes", len(xop))
+    xop = result.encoded
     step.value = "store_ccda.document_id"
     doc_uuid = str(uuid4())
     step.value = "store_ccda.success_audit"
@@ -171,6 +120,47 @@ async def process_document(
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
         step.value = "ccda_serialize.local_xml_file"
         with open(f"{int(nhsno)!s}.xml", "w") as output:
-            output.write(xmltodict.unparse(xml_ccda, pretty=True))
+            output.write(result.debug_xml)
 
     return doc_uuid
+
+
+async def conversion_failure(failure, nhsno, saml_attrs, request, trace_id, log_dir, step):
+    """Restore the established validation audit and sanitized error boundary."""
+    step.value = failure.step
+    status_code = failure.status_code or (502 if failure.validation else 500)
+    message = "FHIR bundle malformed" if failure.validation else "Failed to convert FHIR Bundle to CCDA"
+    diagnostic = f"{message} (step: {step.value}, exception_type: {failure.exception_type})"
+    application_logging.record_application_failure(RuntimeError(diagnostic))
+    logging.error(diagnostic)
+    if log_dir:
+        with open(os.path.join(log_dir, "error.log"), "a") as output:
+            output.write(diagnostic + "\n")
+    if failure.validation:
+        await audit.attempt_audit(
+            request=request,
+            request_id=trace_id,
+            nhs_number=str(nhsno),
+            saml=saml_attrs,
+            action="validate_fhir_bundle",
+            outcome=AuditOutcome.fail,
+            error_code=str(status_code),
+            detail={"step": step.value, "exception_type": failure.exception_type},
+        )
+    error = f"{message}: {failure.detail}" if failure.detail is not None else diagnostic
+    return JSONResponse(status_code=status_code, content={"success": False, "error": error})
+
+
+class ConversionJobError(Exception):
+    """Local exception marks the surrounding API span as failed."""
+
+    def __init__(self, failure: ConversionFailure):
+        self.failure = failure
+        super().__init__(failure.exception_type)
+
+
+async def run_job(workers, function, *args):
+    result = await workers.run(function, *args)
+    if isinstance(result, ConversionFailure):
+        raise ConversionJobError(result)
+    return result

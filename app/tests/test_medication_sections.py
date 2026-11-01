@@ -53,7 +53,7 @@ async def test_medication_sections_preserve_source_and_avoid_bundle_copy(
     converted = []
     end_date = "01/01/2099" if future else "01/01/2000"
 
-    async def render_medication(statement, resource_index):
+    def render_medication(statement, resource_index, concepts):
         # Isolate section splitting from dose mapping and external terminology I/O.
         assert resource_index is index
         assert any(statement is original for original in originals)
@@ -62,8 +62,8 @@ async def test_medication_sections_preserve_source_and_avoid_bundle_copy(
             entry={"source_id": statement.id}, row=["", end_date, statement.status, "", "Drug", "", "", ""]
         )
 
-    monkeypatch.setattr(fhir2ccda, "medication", render_medication)
-    result = await fhir2ccda.convert_bundle(bundle, index)
+    monkeypatch.setattr(fhir2ccda, "medication_sync", render_medication)
+    result = fhir2ccda.convert_bundle_sync(bundle, index, {})
     sections = [
         item["section"]
         for item in result["ClinicalDocument"]["component"]["structuredBody"]["component"]
@@ -121,12 +121,12 @@ async def test_medication_fallback_headers_match_row_cells(monkeypatch):
     def fail_split(original):
         raise ValueError("Split unavailable")
 
-    async def render_medication(statement, resource_index):
+    def render_medication(statement, resource_index, concepts):
         return EntryWithRow(entry={"source_id": statement.id}, row=cells.copy())
 
     monkeypatch.setattr(fhir2ccda, "copy", fail_split)
-    monkeypatch.setattr(fhir2ccda, "medication", render_medication)
-    result = await fhir2ccda.convert_bundle(bundle, index)
+    monkeypatch.setattr(fhir2ccda, "medication_sync", render_medication)
+    result = fhir2ccda.convert_bundle_sync(bundle, index, {})
     section = next(
         item["section"]
         for item in result["ClinicalDocument"]["component"]["structuredBody"]["component"]

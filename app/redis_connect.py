@@ -111,6 +111,11 @@ class RedisClient:
         return await self._client.get(key)
 
     @retry_on_connection_error()
+    async def mget(self, keys: list[str]) -> list[bytes | None]:
+        """Read a bounded batch of string keys, preserving input order."""
+        return await self._client.mget(keys)
+
+    @retry_on_connection_error()
     async def hmget(self, key: str, *fields: str) -> list[bytes | None]:
         """Get hash fields together, preserving field order and missing values."""
         return await self._client.hmget(key, fields)
