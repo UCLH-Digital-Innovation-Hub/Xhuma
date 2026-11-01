@@ -57,10 +57,10 @@ dev = [
     "pytest-benchmark",
     "pre-commit",
     "coverage",
-    "ruff>=0.17.2",
+    "ruff>=0.17.3",
     "locust",
     "pytest-cov>=7.1.0",
-    "schemathesis>=4.32.5",
+    "schemathesis>=4.32.7",
     "hypothesis>=6.170.12",
     "pytest-sugar>=1.1.1",
 ]
