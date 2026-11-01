@@ -14,8 +14,9 @@ from app import telemetry
 from app.audit.models import AuditOutcome
 from app.gpconnect import _fetch_gpconnect_record
 from app.pds.pds import SDSUpstreamError, sds_cache_key, sds_trace
+from app.tests.configure_tests import load_pds
 from app.tests.fixtures.saml_attributes import saml
-from app.tests.test_gpconnect import fake_sds_endpoint_trace, get_mock_request, load_pds
+from app.tests.gpconnect_helpers import fake_sds_endpoint_trace, get_mock_request
 
 
 @pytest.mark.asyncio
