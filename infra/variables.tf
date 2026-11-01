@@ -270,3 +270,26 @@ variable "dmd_cache_alert_action_group_ids" {
   type        = list(string)
   default     = []
 }
+
+variable "ip_restriction_default_action" {
+  description = "Default action for unmatched App Service main-site ingress"
+  type        = string
+  default     = "Allow"
+
+  validation {
+    condition     = contains(["Allow", "Deny"], var.ip_restriction_default_action)
+    error_message = "ip_restriction_default_action must be Allow or Deny."
+  }
+}
+
+variable "additional_ip_restrictions" {
+  description = "Additional environment-specific App Service main-site IP restrictions"
+
+  type = list(object({
+    name       = string
+    priority   = number
+    ip_address = string
+  }))
+
+  default = []
+}

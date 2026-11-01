@@ -304,12 +304,25 @@ resource "azurerm_linux_web_app" "app" {
     use_32_bit_worker      = true # Typically false for production but B1 is small
     vnet_route_all_enabled = true
 
+    ip_restriction_default_action = var.ip_restriction_default_action
+
     ip_restriction {
       action   = "Allow"
       name     = "AllowHSCN"
       priority = 100
       # Placeholder for actual HSCN or Epic IP ranges
       ip_address = "192.168.0.0/16"
+    }
+
+    dynamic "ip_restriction" {
+      for_each = var.additional_ip_restrictions
+
+      content {
+        action     = "Allow"
+        name       = ip_restriction.value.name
+        priority   = ip_restriction.value.priority
+        ip_address = ip_restriction.value.ip_address
+      }
     }
 
     scm_ip_restriction {

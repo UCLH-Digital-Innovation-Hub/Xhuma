@@ -137,6 +137,12 @@ def test_multiple_dosages_preserve_metadata_and_source_objects():
     assert result[2] is originals[2]
     result[0].extension[0].valueString = "modified copy"
     assert [dosage.as_json() for dosage in originals] == before
+    assert result.mapped_indices == frozenset({0, 1})
+    assert result.freetext_mapped is True
+    assert not hasattr(result[0], "_freetext_mapped")
+    assert not hasattr(result[1], "_freetext_mapped")
+    assert not hasattr(result[2], "_freetext_mapped")
+    assert dosage_lookup.is_freetext_mapped(result) is True
 
 
 def test_a_medicine_with_any_structured_dosage_is_not_enriched():
@@ -145,7 +151,10 @@ def test_a_medicine_with_any_structured_dosage_is_not_enriched():
         Dosage({"text": "one daily", "doseQuantity": {"value": 5}}),
     ]
     before = [dosage.as_json() for dosage in originals]
-    assert dosage_lookup.mapped_dosages(originals) is originals
+    result = dosage_lookup.mapped_dosages(originals)
+    assert result.dosages is originals
+    assert not result.freetext_mapped
+    assert result.mapped_indices == frozenset()
     assert [dosage.as_json() for dosage in originals] == before
 
 
@@ -214,3 +223,45 @@ async def test_missing_and_unmapped_dosage_convert_without_inferred_structure(me
     assert len(cda["effectiveTime"]) == 1
     dmd.assert_not_awaited()
     assert statement.as_json() == before
+
+
+def test_dosage_mapping_result_metadata_and_provenance():
+    # Verify explicit Xhuma-owned provenance and absence of ad-hoc attributes on Dosage
+    originals = [
+        Dosage({"text": "unmapped first"}),
+        Dosage({"text": "one twice a day"}),
+        Dosage({"text": "unmapped third"}),
+    ]
+    result = dosage_lookup.mapped_dosages(originals)
+
+    assert isinstance(result, dosage_lookup.DosageMappingResult)
+    assert result.freetext_mapped is True
+    assert result.mapped_indices == frozenset({1})
+    assert len(result) == 3
+    assert [d for d in result] == result.dosages
+    assert result[1].doseQuantity.value == 1
+
+    # Original FHIR objects are untouched
+    assert result[0] is originals[0]
+    assert result[1] is not originals[1]
+    assert result[2] is originals[2]
+
+    # No arbitrary/private attributes added to Dosage instances
+    for d in result:
+        assert not hasattr(d, "_freetext_mapped")
+
+    # Sequence equality check
+    assert result == result.dosages
+
+    # Empty and None input handling
+    res_none = dosage_lookup.mapped_dosages(None)
+    assert isinstance(res_none, dosage_lookup.DosageMappingResult)
+    assert res_none.freetext_mapped is False
+    assert res_none.mapped_indices == frozenset()
+    assert len(res_none) == 1
+
+    res_empty = dosage_lookup.mapped_dosages([])
+    assert isinstance(res_empty, dosage_lookup.DosageMappingResult)
+    assert res_empty.freetext_mapped is False
+    assert res_empty.mapped_indices == frozenset()
+    assert len(res_empty) == 1
