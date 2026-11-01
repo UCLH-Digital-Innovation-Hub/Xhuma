@@ -37,3 +37,29 @@ dmd_base_url           = "https://ontology.nhs.uk/production2/fhir"
 # dm+d Cache Warmer (Standard target-local infrastructure in PRD; schedule deferred)
 dmd_cache_warm_enabled     = true
 dmd_cache_schedule_enabled = false
+
+ip_restriction_default_action = "Deny"
+
+additional_ip_restrictions = [
+  {
+    name       = "EpicHosting"
+    priority   = 110
+    ip_address = "68.65.248.0/21"
+  },
+  {
+    name       = "GPConnectRelay"
+    priority   = 120
+    ip_address = "195.194.4.65/32"
+  },
+  {
+    name       = "NHSEApiPlatform1"
+    priority   = 125
+    ip_address = "34.89.0.111/32"
+  },
+  {
+    name       = "NHSEApiPlatform2"
+    priority   = 126
+    ip_address = "34.89.69.6/32"
+  }
+]
+
