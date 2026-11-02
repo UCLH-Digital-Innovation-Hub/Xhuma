@@ -61,9 +61,9 @@ async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
 
     try:
         subject_ref = _subject_ref_from_nhs_number(nhs_number, secret)
-    except ValueError as e:
+    except ValueError:
         return HTMLResponse(
-            f"<h3>Invalid NHS number</h3><p>{e}</p>",
+            "<h3>Invalid NHS number</h3>",
             status_code=400,
         )
 
@@ -95,9 +95,9 @@ async def dev_audit_query(request: Request, nhs_number: str = Form(...)):
         async with SessionLocal() as session:  # type: AsyncSession
             result = await session.execute(stmt)
             rows = result.scalars().all()
-    except Exception as e:
+    except Exception:
         return HTMLResponse(
-            f"<h3>Query failed</h3><pre>{esc(repr(e))}</pre>",
+            "<h3>Query failed</h3>",
             status_code=500,
         )
 
