@@ -107,6 +107,24 @@ def test_routes_environment_gating_and_cached_relay_snapshot(tmp_path):
     )
 
 
+@pytest.mark.parametrize("environment", ["prod", "int"])
+def test_non_dev_construction_does_not_import_dev_api(tmp_path, environment):
+    run_isolated(
+        tmp_path,
+        f"""
+        os.environ["ENV"] = {environment!r}
+        import app.main as main
+        assert "app.api.dev" not in sys.modules
+        assert list(normalized_routes(main.app.routes)) == {BASE_ROUTES!r}
+
+        from app.bootstrap.application import create_app
+        application = create_app()
+        assert "app.api.dev" not in sys.modules
+        assert list(normalized_routes(application.routes)) == {BASE_ROUTES!r}
+        """,
+    )
+
+
 def test_metadata_handlers_middleware_and_public_responses(tmp_path):
     run_isolated(
         tmp_path,

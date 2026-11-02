@@ -62,7 +62,7 @@ def register_middleware(app: FastAPI):
 
 
 def register_routes(app: FastAPI):
-    from app.api import dev, system
+    from app.api import system
     from app.relay import routes
     from app.relay.hub import WebSocketHub
     from app.settings import USE_RELAY
@@ -80,4 +80,6 @@ def register_routes(app: FastAPI):
 
     app.include_router(system.router)
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
+        from app.api import dev
+
         app.include_router(dev.router)
