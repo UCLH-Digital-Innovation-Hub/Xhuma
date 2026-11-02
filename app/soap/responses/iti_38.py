@@ -10,6 +10,7 @@ from app.telemetry import measure, record_cache
 from ...audit.audit import AuditFailureException, attempt_audit
 from ...audit.models import AuditOutcome, SAMLAttributes
 from ...gpconnect import gpconnect
+from ...gpconnect_stages.failure import FAILURE_REASONS
 from ...redis_connect import redis_client
 from ..models import (
     XDS_DEFERRED_CREATION_STATUS,
@@ -71,6 +72,7 @@ async def iti_38_response(
 
     cache_hit = docid is not None
     audit_error_code = None
+    audit_detail = {"cache_hit": cache_hit}
     if docid is None:
         # no cached ccda
         try:
@@ -80,6 +82,9 @@ async def iti_38_response(
             r = json.loads(r.body)
             if not r.get("success"):
                 audit_error_code = "GP_CONNECT_FAILURE"
+                reason = r.get("reason")
+                if isinstance(reason, str) and reason in FAILURE_REASONS:
+                    audit_detail["reason"] = reason
         except AuditFailureException:
             raise
         except Exception as e:
@@ -112,7 +117,7 @@ async def iti_38_response(
         outcome=AuditOutcome.ok if docid else AuditOutcome.fail,
         error_code=audit_error_code,
         message_id=message_id,
-        detail={"cache_hit": cache_hit},
+        detail=audit_detail,
         document_id=docid,
     )
 
