@@ -13,14 +13,12 @@ from app.pds.pds import lookup_patient
 
 @pytest.fixture
 def client():
-    # Make sure we don't have any MTLS or API_KEY requirements for these internal tests
-    with patch("app.main.verify_api_key", return_value=True):
+    # Bypass mTLS for these internal tests.
+    async def dummy_dispatch(request, call_next):
+        return await call_next(request)
 
-        async def dummy_dispatch(request, call_next):
-            return await call_next(request)
-
-        with patch("app.middleware.mtls.MTLSMiddleware.dispatch", side_effect=dummy_dispatch):
-            yield TestClient(app.main.app)
+    with patch("app.middleware.mtls.MTLSMiddleware.dispatch", side_effect=dummy_dispatch):
+        yield TestClient(app.main.app)
 
 
 def create_soap_request(nhsno="9690937278", query_id="12345"):

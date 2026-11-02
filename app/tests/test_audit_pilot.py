@@ -16,13 +16,11 @@ from app.soap.responses.iti_38 import iti_38_response
 
 @pytest.fixture
 def client():
-    with patch("app.main.verify_api_key", return_value=True):
+    async def dummy_dispatch(request, call_next):
+        return await call_next(request)
 
-        async def dummy_dispatch(request, call_next):
-            return await call_next(request)
-
-        with patch("app.middleware.mtls.MTLSMiddleware.dispatch", side_effect=dummy_dispatch):
-            yield TestClient(app.main.app)
+    with patch("app.middleware.mtls.MTLSMiddleware.dispatch", side_effect=dummy_dispatch):
+        yield TestClient(app.main.app)
 
 
 def create_iti39_request(doc_id="test-doc-123", reply_to="https://test.nhs.uk"):
