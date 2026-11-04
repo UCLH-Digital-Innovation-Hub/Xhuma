@@ -789,7 +789,7 @@ def _serialized_medication_notes(result):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario", ["dmd", "freetext", "multiple", "event", "combined", "collision"])
-async def test_medication_narrative_bolds_whole_authored_warnings(scenario):
+async def test_medication_narrative_bolds_only_authored_provenance_markers(scenario):
     dose_warning = "Xhuma: Dose of 100 mg automatically mapped via dm+d lookup"
     route_warning = (
         'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
@@ -865,9 +865,12 @@ async def test_medication_narrative_bolds_whole_authored_warnings(scenario):
         if should_bold:
             assert bold is not None
             assert bold.attrib == {"styleCode": "Bold"}
-            assert bold.text == text
+            marker = "Xhuma:" if text in (dose_warning, route_warning, free_warning, multiple_warning) else "Xhuma"
+            assert bold.text == marker
             assert len(bold) == 0
-            assert not bold.tail.strip()
+            assert bold.tail.strip() == text[len(marker) :].strip()
+            assert list(note) == [bold, note[-1]]
+            assert note[-1].attrib == {}
         else:
             assert bold is None
     assert len(cell.findall(".//*[@styleCode]")) == len(generated)
