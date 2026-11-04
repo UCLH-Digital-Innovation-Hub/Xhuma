@@ -71,13 +71,14 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
 
     date_val = readable_date(fhir_to_cda_timestamp(entry.date)) if entry.date else ""
     vaccine_val = entry.vaccineCode.coding[0].display if (entry.vaccineCode and entry.vaccineCode.coding) else ""
+    vaccine_content = [{"@styleCode": "Bold", "#text": vaccine_val}]
     if misc_notes:
-        vaccine_val = f"{vaccine_val}<br />Notes: " + "<br />".join(misc_notes)
+        vaccine_content.append({"#text": "<br />Notes: " + "<br />".join(misc_notes)})
 
     lot_val = entry.lotNumber if entry.lotNumber else ""
     status_val = entry.status if entry.status else ""
 
-    immunization_row = [date_val, vaccine_val, lot_val, status_val]
+    immunization_row = [date_val, {"content": vaccine_content}, lot_val, status_val]
 
     return EntryWithRow(
         entry=immunization_entry.model_dump(by_alias=True, exclude_none=True),

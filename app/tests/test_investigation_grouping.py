@@ -67,7 +67,7 @@ async def test_membership_directions_and_reverse_filing_comment(direction):
     report, index = report_and_index([note, hb, panel], ["panel"])
     output = await investigation(report, index)
     xml = xmltodict.unparse({"table": output.table})
-    assert output.table["caption"].startswith("panel (")
+    assert output.table["caption"] == "Issued 20/01/2024 12:00 GMT — panel"
     assert "caption" not in output.table["table"][0]  # Single panel isn't named twice.
     assert "Test group: hb" not in xml
     assert "Repeat in three months" in xml
@@ -184,7 +184,7 @@ async def test_nested_group_preserves_own_value_and_comment_only_members_are_not
     )
     output = await investigation(report, index)
     narrative = xmltodict.unparse({"table": output.table})
-    assert output.table["caption"].startswith("outer (")
+    assert output.table["caption"] == "Issued 20/01/2024 12:00 GMT — outer"
     assert "Test group: inner" in narrative
     assert "Test group: test" not in narrative
     assert "Sample haemolysed" in narrative and "Panel summary" in narrative

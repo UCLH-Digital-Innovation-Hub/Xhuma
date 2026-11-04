@@ -221,7 +221,9 @@ async def test_bundle_orders_entries_and_rows_by_onset_with_stable_ties_and_unkn
     )
     expected = ["old", "partial", "recent", "tie", "unknown-first", "unknown-last"]
     assert [e["act"]["id"][0]["@root"] for e in section["entry"]] == expected
-    assert [r["td"][1] for r in section["text"]["table"]["tbody"]["tr"]] == expected
+    assert [r["td"][1] for r in section["text"]["table"]["tbody"]["tr"]] == [
+        {"content": {"@styleCode": "Bold", "#text": name}} for name in expected
+    ]
     assert section["text"]["table"]["thead"]["tr"]["th"] == [
         "Dates",
         "Description",
@@ -322,4 +324,6 @@ async def test_absence_and_positive_allergies_remain_separate_in_full_ccda():
     assert observations[0]["value"]["@code"] == "419199007"
     assert observations[1]["id"]["@root"] == "positive"
     assert "@negationInd" not in observations[1]
-    assert [r["td"][1] for r in section["text"]["table"]["tbody"]["tr"]] == ["No known allergy", "Test substance"]
+    assert [r["td"][1] for r in section["text"]["table"]["tbody"]["tr"]] == [
+        {"content": {"@styleCode": "Bold", "#text": name}} for name in ["No known allergy", "Test substance"]
+    ]
