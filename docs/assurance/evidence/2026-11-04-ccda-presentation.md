@@ -11,7 +11,7 @@ Production changes are confined to narrative construction in `fhir2ccda.py` and 
 - A final production-code search finds exactly one `flagData` use: the result-value cell guarded by the unchanged `outside_reference_range(observation)` predicate. Normal and boundary values remain ordinary; no whole rows or reports acquire abnormal labels.
 - Medication, allergy, problem and vaccine primary names use Bold. Dates, statuses and source notes do not acquire blanket styling. Vaccine notes are separate ordinary content. Allergy annotation line splitting is unchanged, including CR/LF variants and the original structured annotation text.
 - All requested clinical-table widths total 100%; active, past and fallback medication layouts are identical. Result widths are 28/17/20/35.
-- Entire Xhuma medication warnings, including event timing, use Bold at the code generation point. There is no supplier-prefix/colon parser. Existing first-occurrence/deduplication behaviour is retained: if supplier text exactly collides with a generated warning, that first supplier occurrence remains ordinary. Structured warning text and ordering are unchanged.
+- Following clinical feedback, only the Xhuma provenance marker uses Bold: `Xhuma:` for standard generated notes, and `Xhuma` for event-timing warnings. Explanatory text remains normal weight. Formatting is assigned at the code generation point. There is no supplier-prefix/colon parser. Existing first-occurrence/deduplication behaviour is retained: if supplier text exactly collides with a generated warning, that first supplier occurrence remains ordinary. Structured warning text and ordering are unchanged.
 - Important Information retains every original sentence, scope/omission meaning and freshness value, separated into paragraphs with Bold labels. The generator statement is visible narrative rather than a footnote.
 - Report-level filing uses a Bold heading and separate paragraphs for each structured comment label/value/comment; source text is not parsed, truncated or deduplicated.
 
@@ -28,7 +28,7 @@ Repository inspection found offline profiling tooling but no established local E
 The real `base64_xml` delivery encoder was used, not only dictionary assertions. Investigation tests also exercise `convert_mime`. Regression coverage lives in:
 
 - `test_section_presentation_xml.py`: full-document notices, populated/empty/fallback layouts, sums, Important Information with all/none/mixed scope and default/overridden freshness.
-- `test_meds.py`: complete dm+d, route, free-text, multiple-dosage and event warnings; supplier spoof/collision cases; plain structured comments; lowercase narrative breaks.
+- `test_meds.py`: marker-only Bold with ordinary explanatory text for dm+d, route, free-text, multiple-dosage and event warnings; supplier spoof/collision cases; plain structured comments; lowercase narrative breaks.
 - `test_allergy_narrative.py`: supplier newline variants and original structured text.
 - `test_clinical_name_presentation_xml.py`: primary anchors with ordinary metadata, and structured XML snapshots (generated UUID roots normalised).
 - `test_investigation_presentation_xml.py`: singular/40-item TOCs, duplicate identities/captions, named/generic reports across years, preserved order, distinct filing paragraphs, abnormal/normal/boundary values and exact pre-change organizer hashes.
@@ -55,10 +55,10 @@ Before:
 ```xml
 <content><content styleCode="Bold">Xhuma:</content> Dose of 50 mg automatically mapped via dm+d lookup <br/></content>
 ```
-After:
+After clinical-feedback amendment (standard note emphasis matches the baseline; event warnings now also carry a provenance cue):
 ```xml
-<content><content styleCode="Bold">Xhuma: Dose of 50 mg automatically mapped via dm+d lookup</content> <br/></content>
-<content><content styleCode="Bold">Xhuma warning: Event-based medication timing: Morning (MORN).</content> <br/></content>
+<content><content styleCode="Bold">Xhuma:</content> Dose of 50 mg automatically mapped via dm+d lookup <br/></content>
+<content><content styleCode="Bold">Xhuma</content> warning: Event-based medication timing: Morning (MORN). <br/></content>
 ```
 The matching structured `xmlText` still contains plain warning text, with newlines and no `content`/`br` children.
 
@@ -99,10 +99,11 @@ Result tables and remaining report items are omitted from this excerpt only. The
 
 ## Validation and existing warnings
 
-Final verification:
+Final verification (rerun after the marker-only emphasis amendment):
 
 - `uv run --locked pytest -q`: **1,316 passed, 1 skipped, 14 subtests passed**, 42 warnings.
-- Focused section/investigation/medication run before adding the final three normal/boundary/abnormal cases: **39 passed**; those three additional cases passed in the final full suite.
+- Focused medication/warning/medication-section amendment tests: **34 passed**.
+- Regenerated the six fixture documents after the amendment: all **241 structured entries** still match the preceding PR version (UUID roots normalised). Serialized warnings contain only `Xhuma:` or `Xhuma` inside Bold; their explanatory text is an ordinary tail before lowercase `<br/>`.
 - `uv run --locked ruff check .`: passed.
 - `uv run --locked ruff format --check .`: passed.
 - `git diff --check`: passed.
