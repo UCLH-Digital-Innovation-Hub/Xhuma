@@ -285,7 +285,7 @@ def allergy(entry: allergyintolerance.AllergyIntolerance, index: dict | None = N
         entry=AllergyEntry(act=act).model_dump(by_alias=True, exclude_none=True),
         row=[
             _dates(entry),
-            substance_ce.displayName or entry.code.text or "",
+            {"content": {"@styleCode": "Bold", "#text": substance_ce.displayName or entry.code.text or ""}},
             _lines(statuses),
             "; ".join(dict.fromkeys(reaction_labels)),
             "; ".join(dict.fromkeys(severity_labels)),

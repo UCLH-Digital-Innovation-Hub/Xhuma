@@ -86,7 +86,7 @@ def create_xml_table(table: ResultTable, *, caption: str | None = None) -> dict:
     """Build a report wrapper containing one independently readable result table."""
     result_table = {
         **({"caption": {"@styleCode": "Bold", "#text": caption}} if caption else {}),
-        "colgroup": column_widths(30, 20, 20, 30),
+        "colgroup": column_widths(28, 17, 20, 35),
         "thead": {"tr": {"th": table.headers}},
         "tbody": {"tr": [{"td": row.cells} for row in table.rows]},
     }
@@ -374,13 +374,11 @@ async def investigation(
             if reference not in emitted:
                 emitted.add(reference)
                 comment = grouping.observations[reference]
-                filing_comments.append(
-                    {
-                        "paragraph": [
-                            {"content": {"@styleCode": "Bold", "#text": observation_label(comment)}},
-                            *[text for text in (comment.valueString, comment.comment) if text is not None],
-                        ]
-                    }
+                filing_comments.extend(
+                    [
+                        {"content": {"@styleCode": "Bold", "#text": observation_label(comment)}},
+                        *[text for text in (comment.valueString, comment.comment) if text is not None],
+                    ]
                 )
         table_rows = unplaced_rows
         # Cyclic and otherwise unplaced items must not disappear from the report.
@@ -409,7 +407,7 @@ async def investigation(
         if category_observation:
             organizer.component.append({"observation": category_observation})
 
-        title = f"{test_title} ({report_heading_time(diagnostic_report, index)})"
+        title = f"{report_heading_time(diagnostic_report, index)} — {test_title}"
         narrative_tables = []
 
         def add_table(rows, caption):
@@ -438,20 +436,16 @@ async def investigation(
             )
         if grouping.issues:
             paragraphs.append("Some investigation relationships could not be resolved; available results are shown.")
+        if filing_comments:
+            paragraphs.extend(
+                [
+                    {"content": {"@styleCode": "Bold", "#text": "Report-level filing"}},
+                    *filing_comments,
+                ]
+            )
         table = {
             "caption": title,
             **({"paragraph": paragraphs} if paragraphs else {}),
-            **(
-                {
-                    "list": {
-                        "@listType": "unordered",
-                        "caption": {"@styleCode": "Bold", "#text": "Report-level filing"},
-                        "item": filing_comments,
-                    }
-                }
-                if filing_comments
-                else {}
-            ),
             "table": narrative_tables,
         }
         specimen_table = specimen_notes_table(diagnostic_report, index)
