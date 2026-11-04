@@ -146,8 +146,8 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         narrative_notes.setdefault(
             warning,
             {
-                "content": {"@styleCode": "Bold", "#text": warning},
-                "#text": " <br />",
+                "content": {"@styleCode": "Bold", "#text": "Xhuma:"},
+                "#text": f"{warning[len('Xhuma:') :]} <br />",
             },
         )
 
@@ -401,7 +401,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
         warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
         if warning:
-            append_xhuma_warning(warning)
+            misc_notes.append(warning)
 
     # check for prescribing agency and last issued date extensions
     remaining_repeats = None
@@ -515,7 +515,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         readable_date(high_time[0]) if high_time else "",
         entry.status if entry.status else "unknown",
         prescription_type if "prescription_type" in locals() else "",
-        {"content": {"@styleCode": "Bold", "#text": med_name}},
+        med_name,
         f"{text_instructions}<br />{patient_instructions}",
         {"content": misc_notes_text},
         prescription_information,

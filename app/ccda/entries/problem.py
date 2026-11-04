@@ -60,7 +60,7 @@ def problem(entry: condition.Condition) -> EntryWithRow:
     problem_row = [
         readable_date(prob["act"]["effectiveTime"]["low"]["@value"]) if entry.assertedDate else "",
         prob["act"]["statusCode"].get("@code", ""),
-        {"content": {"@styleCode": "Bold", "#text": observation["value"].get("@displayName", "")}},
+        observation["value"].get("@displayName", ""),
     ]
 
     return EntryWithRow(entry=prob, row=problem_row)

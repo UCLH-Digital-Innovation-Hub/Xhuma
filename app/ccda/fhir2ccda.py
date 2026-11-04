@@ -13,7 +13,6 @@ from app.telemetry import measure
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
 from .entries.allergy import allergy_onset_sort_key
 from .entries.investigation_grouping import build_investigation_graph
-from .entries.result_presentation import column_widths
 from .entries.results import investigation
 from .header import document_header
 from .helpers import fhir_date_is_after, templateId
@@ -219,16 +218,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 },
             }
 
-            medication_widths = (7, 7, 6, 10, 17, 18, 22, 13)
-            widths = {
-                "Allergies and adverse reactions": (12, 18, 15, 15, 10, 30),
-                "Medications and medical devices": medication_widths,
-                "Active Medications": medication_widths,
-                "Past Medications": medication_widths,
-                "Problems": (15, 15, 70),
-                "Immunisations": (15, 50, 15, 20),
-            }
-
             def create_headers(title: str) -> dict:
                 """Create headers for the table based on the section
 
@@ -256,9 +245,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 # An empty allergy list means no information was received;
                 # absence of records must not imply a no-known-allergy assertion.
                 comp["section"]["text"] = {
-                    "paragraph": {},
+                    "paragraph": {"@styleCode": "flagData"},
                     "table": {
-                        "colgroup": column_widths(*widths[list.title]),
                         "thead": create_headers(list.title),
                         "tbody": {
                             "tr": {
@@ -304,16 +292,14 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     warning_text = f"CLINICAL WARNING: {missing_count} item(s) in this section could not be safely converted and have been omitted. Please refer directly to alternative systems for complete data.<br />"
 
                 comp["section"]["text"] = {
-                    "paragraph": {},
-                    "table": {
-                        "colgroup": column_widths(*widths[list.title]),
-                        "thead": headers,
-                        "tbody": {"tr": table_rows},
+                    "paragraph": {
+                        "@styleCode": "flagData",
                     },
+                    "table": {"thead": headers, "tbody": {"tr": table_rows}},
                 }
 
                 if warning_text:
-                    comp["section"]["text"]["paragraph"]["content"] = {"@styleCode": "Bold", "#text": warning_text}
+                    comp["section"]["text"]["paragraph"]["#text"] = warning_text
 
             if list.title == "Allergies and adverse reactions":
                 paragraph = comp["section"]["text"]["paragraph"]
@@ -358,15 +344,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "@styleCode": "TOC",
                 "item": [org.table for org in organizer_with_table],
             }
-            report_count = len(organizer_with_table)
-            comp["section"]["text"] = {
-                "paragraph": [
-                    *warnings,
-                    f"{report_count} investigation report{'s' if report_count != 1 else ''}",
-                    "Select a report below to jump to its results.",
-                ],
-                "list": table_list,
-            }
+            comp["section"]["text"] = {**({"paragraph": warnings} if warnings else {}), "list": table_list}
             entries = [{"@typeCode": "DRIV", "organizer": org.organizer} for org in organizer_with_table]
             comp["section"]["entry"] = entries
             return comp
@@ -423,7 +401,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     for row in active_section["section"]["text"]["table"]["tbody"]["tr"]:
                         # Completed rows in Active have a future end date; flag the discrepancy.
                         if row["td"][2] == "completed":
-                            row["td"][1] = {"content": {"@styleCode": "Bold", "#text": row["td"][1]}}
+                            row["td"][1] = {"content": {"@styleCode": "flagData", "#text": row["td"][1]}}
 
                 past_section = await create_section(clone_list(list_obj, "Past Medications", past))
                 bundle_components.append(active_section)
@@ -460,29 +438,16 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     included_str = ", ".join(included_sections) if included_sections else "None"
 
-    def labelled_paragraph(label, text):
-        return {"content": [{"@styleCode": "Bold", "#text": label}, " " + text]}
+    disclaimer_text = (
+        f"This record contains information from the patient's GP record. It was generated on {datetime.datetime.now().strftime('%Y-%m-%d')}. "
+        f"IMPORTANT: This document ONLY contains information regarding: {included_str}. "
+    )
 
-    information = [
-        labelled_paragraph(
-            "Generated:",
-            "C-CDA generated by Xhuma from GP Connect on " + datetime.datetime.now().strftime("%d-%m-%Y"),
-        ),
-        f"This record contains information from the patient's GP record. It was generated on {datetime.datetime.now().strftime('%Y-%m-%d')}.",
-        labelled_paragraph("Scope:", f"IMPORTANT: This document ONLY contains information regarding: {included_str}."),
-    ]
     if omitted_sections:
         omitted_str = ", ".join(omitted_sections)
-        information.append(
-            labelled_paragraph(
-                "Not included:", f"All other clinical information (such as {omitted_str}) should be sought elsewhere."
-            )
-        )
-    information.append(
-        labelled_paragraph(
-            "Freshness:", f"Information added to the record in the last {caching_period} may be missing."
-        )
-    )
+        disclaimer_text += f"All other clinical information (such as {omitted_str}) should be sought elsewhere. "
+
+    disclaimer_text += f"Information added to the record in the last {caching_period} may be missing."
 
     header_components = {
         "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),
@@ -492,7 +457,10 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "@displayName": "Additional Document Comments",
         },
         "title": "Important Information",
-        "text": {"paragraph": information},
+        "text": {
+            "#text": disclaimer_text,
+            "footnote": "C-CDA generated by Xhuma from GP Connect on " + datetime.datetime.now().strftime("%d-%m-%Y"),
+        },
     }
     bundle_components.insert(0, {"section": header_components})
 
