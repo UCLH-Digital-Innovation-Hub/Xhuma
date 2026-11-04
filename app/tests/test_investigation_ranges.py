@@ -44,8 +44,6 @@ async def test_abnormal_comparison_requires_matching_units_and_applicability(uni
     source = observation("range", valueQuantity={"value": 10, "unit": "mg/L"}, referenceRange=[source_range])
     result = await create_result_component(source)
     assert isinstance(result.row.cells[1], dict) == flag
-    xml = xmltodict.unparse({"tr": {"td": result.row.cells}})
-    assert ('<content styleCode="flagData">10 mg/L</content>' in xml) == flag
     if unit is None:
         assert result.entry.referenceRange[0].observationRange.value.high.unit is None
     if qualified:

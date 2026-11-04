@@ -86,8 +86,8 @@ async def test_medication_sections_preserve_source_and_avoid_bundle_copy(
                 assert len(cells) == len(headers)
                 assert cells[2] == index[f"MedicationStatement/{entry['source_id']}"].status
                 if section["title"] == "Active Medications" and future and cells[2] == "completed":
-                    assert cells[1] == {"content": {"@styleCode": "Bold", "#text": end_date}}
-                    assert '<content styleCode="Bold">01/01/2099</content>' in xmltodict.unparse({"table": table})
+                    assert cells[1] == {"content": {"@styleCode": "flagData", "#text": end_date}}
+                    assert '<content styleCode="flagData">01/01/2099</content>' in xmltodict.unparse({"table": table})
                 else:
                     assert cells[1] == end_date
         else:

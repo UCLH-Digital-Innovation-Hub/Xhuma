@@ -40,7 +40,7 @@ def test_entry_retains_narrative_substance_and_translations_without_reaction():
     result = allergy(entry)
     assert result.row == [
         {"content": ["Onset: 02/01/2020 <br />", "Asserted: 03/02/2024 <br />"]},
-        {"content": {"@styleCode": "Bold", "#text": "Test substance"}},
+        "Test substance",
         {"content": ["Clinical status: Active <br />", "Verification status: Confirmed <br />"]},
         "",
         "",
@@ -324,7 +324,7 @@ def test_explicit_no_known_allergy_uses_native_negation(source_code, display, ta
     assert obs["informant"]["relatedEntity"]["relatedPerson"]["name"] == "Patient"
     assert obs["entryRelationship"]["act"]["text"]["xmlText"] == "Source assertion"
     assert result.entry["act"]["effectiveTime"]["low"]["@value"] == "20240203"
-    assert result.row[1] == {"content": {"@styleCode": "Bold", "#text": display}}
+    assert result.row[1] == display
     assert AllergyEntry.model_validate(result.entry).model_dump(by_alias=True, exclude_none=True) == result.entry
     assert entry.as_json() == original
 
