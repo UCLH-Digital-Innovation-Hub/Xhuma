@@ -59,12 +59,12 @@ async def test_processes_all_investigation_reports_from_9692136744(
             assert tables[0]["tbody"]["tr"]
         else:
             # A report containing only filing comments needs no results table.
-            assert processed_report.table["list"]["item"]
+            assert processed_report.table["paragraph"]
             assert not processed_report.organizer["component"]
 
         xml = xmltodict.unparse({"xml": processed_report.table})
         assert "<caption>" in xml
-        assert "<table>" in xml if tables else '<list listType="unordered">' in xml
+        assert "<table>" in xml if tables else "Report-level filing" in xml
 
 
 @pytest.mark.asyncio
@@ -75,7 +75,7 @@ async def test_glucose_tolerance_report_keeps_category_and_comment_rows(
     glucose_report = next(report for report in reports if report.id == "c200000000000000_6237000000000000")
 
     processed_report = await investigation(glucose_report, bundle_index)
-    assert processed_report.table["caption"] == "Glucose tolerance test (Issued 30/03/2023 00:00 BST)"
+    assert processed_report.table["caption"] == "Issued 30/03/2023 00:00 BST — Glucose tolerance test"
     components = processed_report.organizer["component"]
     # The flat report's narrative observations now survive alongside category.
     assert len(components) == 3
@@ -97,7 +97,7 @@ async def test_fbc_report_preserves_interpretation_without_inventing_range_units
     rows = processed_report.table["table"][0]["tbody"]["tr"]
     platelet_row = next(row for row in rows if row["td"][0] == "Platelet count")
 
-    assert processed_report.table["caption"] == ("Full blood count (Issued 20/01/2024 10:46 GMT)")
+    assert processed_report.table["caption"] == "Issued 20/01/2024 10:46 GMT — Full blood count"
     assert len(processed_report.organizer["component"]) == 14  # Retain the unlinked heading as well.
     assert platelet_row["td"][1] == "497 10^9/L"  # Source range boundaries have no units.
     assert platelet_row["td"][2] == {"#text": "150 – 450"}

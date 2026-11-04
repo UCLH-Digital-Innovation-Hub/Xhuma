@@ -589,9 +589,9 @@ async def test_immunization_entry_with_notes():
     assert "Reason: Immunisation due" in entry["entryRelationship"][0]["act"]["text"]["xmlText"]
     # Check narrative row formatting
     assert row[0] == "12/03/2026"
-    assert "Comirnaty Omicron XBB.1.5 injection" in row[1]
-    assert "Notes on adminstration of vaccine" in row[1]
-    assert "Reason: Immunisation due" in row[1]
+    assert row[1]["content"][0] == {"@styleCode": "Bold", "#text": "Comirnaty Omicron XBB.1.5 injection"}
+    assert "Notes on adminstration of vaccine" in row[1]["content"][1]["#text"]
+    assert "Reason: Immunisation due" in row[1]["content"][1]["#text"]
     assert row[2] == "LOT123"
     assert row[3] == "completed"
 
@@ -776,12 +776,20 @@ def _serialized_medication_notes(result):
     assert comment.findtext("text/xmlText") == structured_notes
     assert comment.find(".//content") is None
     assert comment.find(".//br") is None
-    return root.find("text/table/tbody/tr").findall("td")[6]
+    cells = root.find("text/table/tbody/tr").findall("td")
+    # The medication name is the row's primary visual anchor, not the dates or status.
+    name = cells[4].find("content")
+    assert name.attrib == {"styleCode": "Bold"}
+    material_code = root.find("entry/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code")
+    assert name.text == material_code.get("displayName")
+    assert len(name) == 0
+    assert all(cell.find(".//*[@styleCode='Bold']") is None for cell in cells[:4] + cells[5:6] + cells[7:])
+    return cells[6]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scenario", ["dmd", "freetext", "multiple", "collision"])
-async def test_medication_narrative_bolds_only_authored_prefix(scenario):
+@pytest.mark.parametrize("scenario", ["dmd", "freetext", "multiple", "event", "combined", "collision"])
+async def test_medication_narrative_bolds_whole_authored_warnings(scenario):
     dose_warning = "Xhuma: Dose of 100 mg automatically mapped via dm+d lookup"
     route_warning = (
         'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
@@ -794,11 +802,13 @@ async def test_medication_narrative_bolds_only_authored_prefix(scenario):
     statement_data["note"] = [{"text": source_note}]
     dosage = statement_data["dosage"][0]
     dosage.pop("timing")
-    if scenario == "dmd":
+    if scenario in ("dmd", "combined"):
         dosage["method"] = {"coding": [{"system": "http://snomed.info/sct", "code": "419652001", "display": "Take"}]}
-    if scenario == "multiple":
+    if scenario in ("multiple", "combined"):
         dosage["timing"] = {"repeat": {"when": ["MORN"]}}
         statement_data["dosage"].append({"text": "Second dosage"})
+    if scenario == "event":
+        dosage["timing"] = {"repeat": {"when": ["MORN", "AC"], "offset": 30}}
     statement = medicationstatement.MedicationStatement(statement_data)
     request_data = med_request.as_json()
     request_data["note"] = [{"text": "Ordinary supplier note"}]
@@ -817,7 +827,9 @@ async def test_medication_narrative_bolds_only_authored_prefix(scenario):
         patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock, return_value=concept),
         patch(
             "app.ccda.entries.medication.mapped_dosages",
-            return_value=SimpleNamespace(dosages=statement.dosage, freetext_mapped=scenario == "freetext"),
+            return_value=SimpleNamespace(
+                dosages=statement.dosage, freetext_mapped=scenario in ("freetext", "combined")
+            ),
         ),
     ):
         result = await medication_entry(statement, index)
@@ -826,6 +838,16 @@ async def test_medication_narrative_bolds_only_authored_prefix(scenario):
         "dmd": [dose_warning, route_warning],
         "freetext": [dose_warning, free_warning],
         "multiple": [multiple_warning, "Xhuma warning: Event-based medication timing for dosage 1: Morning (MORN)."],
+        "event": [
+            dose_warning,
+            "Xhuma warning: Event-based medication timing: Morning (MORN); Before a meal (AC). Offset: 30 minutes.",
+        ],
+        "combined": [
+            route_warning,
+            free_warning,
+            multiple_warning,
+            "Xhuma warning: Event-based medication timing for dosage 1: Morning (MORN).",
+        ],
         "collision": [],
     }[scenario]
     expected = ["Ordinary supplier note", source_note, *generated]
@@ -839,18 +861,16 @@ async def test_medication_narrative_bolds_only_authored_prefix(scenario):
         assert note.attrib == {}
         assert note[-1].tag == "br"
         bold = note.find("content")
-        should_bold = text in [dose_warning, route_warning, free_warning, multiple_warning] and scenario != "collision"
+        should_bold = text in generated
         if should_bold:
             assert bold is not None
             assert bold.attrib == {"styleCode": "Bold"}
-            assert bold.text == "Xhuma:"
+            assert bold.text == text
             assert len(bold) == 0
-            assert bold.tail.strip() == text[len("Xhuma:") :].strip()
+            assert not bold.tail.strip()
         else:
             assert bold is None
-    assert len(cell.findall(".//*[@styleCode]")) == (
-        1 if scenario == "multiple" else 0 if scenario == "collision" else 2
-    )
+    assert len(cell.findall(".//*[@styleCode]")) == len(generated)
     structured = next(
         rel["act"]["text"]["xmlText"]
         for rel in result.entry["substanceAdministration"]["entryRelationship"]
