@@ -1,4 +1,6 @@
+import base64
 import json
+import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -12,6 +14,7 @@ from fhirclient.models import (
 )
 from fhirclient.models import list as fhirlist
 
+from app.ccda.convert_mime import base64_xml
 from app.ccda.entries import _cda_period_from_repeat, _event_timing_warning
 from app.ccda.entries import immunization_entry as immunization_entry_func
 from app.ccda.entries import medication as medication_entry
@@ -520,7 +523,8 @@ async def test_new_structured_detail(mock_dmd_lookup):
         'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
         "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
     )
-    assert any(warning in note for note in substance_administration.row[6]["BR"])
+    notes = _serialized_medication_notes(substance_administration)
+    assert any(warning == " ".join("".join(note.itertext()).split()) for note in notes)
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
     assert substance_administration["routeCode"]["@displayName"] == "Oral"
@@ -752,3 +756,105 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
     row = entry_with_row.row
     assert "Prescription 1 of 6 allowed repeats." in row[7], "Repeats missing from prescription info"
     assert "Issued quantity: 30 tablets" in row[7], "Issued quantity missing from prescription info"
+
+
+def _serialized_medication_notes(result):
+    document = {
+        "section": {
+            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "text": {"table": {"tbody": {"tr": {"td": result.row}}}},
+            "entry": result.entry,
+        }
+    }
+    root = ET.fromstring(base64.b64decode(base64_xml(document)))
+    structured_notes = next(
+        rel["act"]["text"]["xmlText"]
+        for rel in result.entry["substanceAdministration"]["entryRelationship"]
+        if rel.get("act", {}).get("code", {}).get("@code") == "48767-8"
+    )
+    comment = root.find("entry/substanceAdministration/entryRelationship/act/code[@code='48767-8']/..")
+    assert comment.findtext("text/xmlText") == structured_notes
+    assert comment.find(".//content") is None
+    assert comment.find(".//br") is None
+    return root.find("text/table/tbody/tr").findall("td")[6]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", ["dmd", "freetext", "multiple", "collision"])
+async def test_medication_narrative_bolds_only_authored_prefix(scenario):
+    dose_warning = "Xhuma: Dose of 100 mg automatically mapped via dm+d lookup"
+    route_warning = (
+        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
+        "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
+    )
+    free_warning = "Xhuma: Free-text dosage instructions automatically mapped"
+    multiple_warning = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
+    source_note = dose_warning if scenario == "collision" else "Xhuma: Supplier note & clinical advice"
+    statement_data = structured_statement.as_json()
+    statement_data["note"] = [{"text": source_note}]
+    dosage = statement_data["dosage"][0]
+    dosage.pop("timing")
+    if scenario == "dmd":
+        dosage["method"] = {"coding": [{"system": "http://snomed.info/sct", "code": "419652001", "display": "Take"}]}
+    if scenario == "multiple":
+        dosage["timing"] = {"repeat": {"when": ["MORN"]}}
+        statement_data["dosage"].append({"text": "Second dosage"})
+    statement = medicationstatement.MedicationStatement(statement_data)
+    request_data = med_request.as_json()
+    request_data["note"] = [{"text": "Ordinary supplier note"}]
+    request = medicationrequest.MedicationRequest(request_data)
+    index = {
+        statement.medicationReference.reference: structured_med,
+        statement.basedOn[0].reference: request,
+    }
+    concept = DMDConcept(
+        concept_id=1,
+        valueString="Mock dm+d concept",
+        vpi=VPIProperty(unit="mg", value=100),
+        route=CD(code="26643006", codeSystem="2.16.840.1.113883.6.96", displayName="Oral"),
+    )
+    with (
+        patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock, return_value=concept),
+        patch(
+            "app.ccda.entries.medication.mapped_dosages",
+            return_value=SimpleNamespace(dosages=statement.dosage, freetext_mapped=scenario == "freetext"),
+        ),
+    ):
+        result = await medication_entry(statement, index)
+
+    generated = {
+        "dmd": [dose_warning, route_warning],
+        "freetext": [dose_warning, free_warning],
+        "multiple": [multiple_warning, "Xhuma warning: Event-based medication timing for dosage 1: Morning (MORN)."],
+        "collision": [],
+    }[scenario]
+    expected = ["Ordinary supplier note", source_note, *generated]
+    cell = _serialized_medication_notes(result)
+    assert cell.find(".//BR") is None
+    assert len(cell.findall(".//br")) == len(expected)
+    # xmltodict's pretty printing inserts whitespace between child content and its tail.
+    assert [" ".join("".join(note.itertext()).split()) for note in cell] == expected
+    for note, text in zip(cell, expected):
+        assert note.tag == "content"
+        assert note.attrib == {}
+        assert note[-1].tag == "br"
+        bold = note.find("content")
+        should_bold = text in [dose_warning, route_warning, free_warning, multiple_warning] and scenario != "collision"
+        if should_bold:
+            assert bold is not None
+            assert bold.attrib == {"styleCode": "Bold"}
+            assert bold.text == "Xhuma:"
+            assert len(bold) == 0
+            assert bold.tail.strip() == text[len("Xhuma:") :].strip()
+        else:
+            assert bold is None
+    assert len(cell.findall(".//*[@styleCode]")) == (
+        1 if scenario == "multiple" else 0 if scenario == "collision" else 2
+    )
+    structured = next(
+        rel["act"]["text"]["xmlText"]
+        for rel in result.entry["substanceAdministration"]["entryRelationship"]
+        if rel.get("act", {}).get("code", {}).get("@code") == "48767-8"
+    )
+    assert structured == "\n".join(expected)
+    assert "<br" not in structured

@@ -39,9 +39,9 @@ def test_entry_retains_narrative_substance_and_translations_without_reaction():
     original = entry.as_json()
     result = allergy(entry)
     assert result.row == [
-        {"BR": ["Onset: 02/01/2020 <br />", "Asserted: 03/02/2024 <br />"]},
+        {"content": ["Onset: 02/01/2020 <br />", "Asserted: 03/02/2024 <br />"]},
         "Test substance",
-        {"BR": ["Clinical status: Active <br />", "Verification status: Confirmed <br />"]},
+        {"content": ["Clinical status: Active <br />", "Verification status: Confirmed <br />"]},
         "",
         "",
         "",
@@ -107,7 +107,7 @@ def test_onset_period_end_is_not_resolution_and_partial_dates_are_preserved():
     interval = get_observation(result)["effectiveTime"]
     assert interval["low"]["@value"] == "2020"
     assert "high" not in interval
-    assert result.row[0] == {"BR": ["Onset from: 2020 <br />", "Onset to: 2021 <br />", "Asserted: 2024 <br />"]}
+    assert result.row[0] == {"content": ["Onset from: 2020 <br />", "Onset to: 2021 <br />", "Asserted: 2024 <br />"]}
 
 
 def test_unknown_assertion_and_resolution_dates():
@@ -172,7 +172,7 @@ def test_notes_and_transfer_degraded_text_preserved_with_reactions():
     assert [c["text"]["xmlText"] for c in comments] == notes
     assert all("<br" not in c["text"]["xmlText"] for c in comments)
     assert result.row[3] == "Rash"
-    assert result.row[5] == {"BR": [f"{note} <br />" for note in notes]}
+    assert result.row[5] == {"content": [f"{note} <br />" for note in notes]}
     restored = AllergyEntry.model_validate(result.entry)
     assert restored.model_dump(by_alias=True, exclude_none=True) == result.entry
     parsed = xmltodict.parse(xmltodict.unparse({"entry": result.entry}))

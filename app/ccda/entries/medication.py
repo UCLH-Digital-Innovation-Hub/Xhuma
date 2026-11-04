@@ -138,6 +138,19 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         if code.code == "196421000000109":
             misc_notes.append(f"Transfer degraded medication text: {referenced_med.code.text}")
 
+    # First occurrence owns the narrative formatting, including supplier/warning collisions.
+    narrative_notes = {note: {"#text": f"{note} <br />"} for note in misc_notes}
+
+    def append_xhuma_warning(warning: str):
+        misc_notes.append(warning)
+        narrative_notes.setdefault(
+            warning,
+            {
+                "content": {"@styleCode": "Bold", "#text": "Xhuma:"},
+                "#text": f"{warning[len('Xhuma:') :]} <br />",
+            },
+        )
+
     multiple_dosages = len(dosages) > 1
     substance_administration = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
@@ -372,17 +385,17 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
     # 1. dm+d mapping/inference warnings
     if dmd_dose_warning:
-        misc_notes.append(dmd_dose_warning)
+        append_xhuma_warning(dmd_dose_warning)
     if dmd_route_warning:
-        misc_notes.append(dmd_route_warning)
+        append_xhuma_warning(dmd_route_warning)
 
     # 2. free-sig / freetext dosage mapping warning
     if dosage_result.freetext_mapped:
-        misc_notes.append("Xhuma: Free-text dosage instructions automatically mapped")
+        append_xhuma_warning("Xhuma: Free-text dosage instructions automatically mapped")
 
     # 3. additional dosage/clinical warnings
     if multiple_dosages:
-        misc_notes.append("Xhuma: Multiple dosage instructions found. Use caution when converting dose**")
+        append_xhuma_warning("Xhuma: Multiple dosage instructions found. Use caution when converting dose**")
 
     for index, dosage in enumerate(dosages, start=1):
         repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
@@ -469,7 +482,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
     # CRITICAL: Epic's C-CDA parser swallows text preceding a <br/> tag in structured `xmlText` nodes.
     # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the
     # HTML <br /> tags exclusively for the narrative `entry_row` table view.
-    misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
+    misc_notes_text = [narrative_notes.get(note, {"#text": f"{note} <br />"}) for note in misc_notes if note]
     structured_notes_text = "\n".join(misc_notes) if misc_notes else ""
 
     comment_activity = EntryRelationship()
@@ -504,7 +517,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         prescription_type if "prescription_type" in locals() else "",
         med_name,
         f"{text_instructions}<br />{patient_instructions}",
-        {"BR": misc_notes_text},
+        {"content": misc_notes_text},
         prescription_information,
     ]
 

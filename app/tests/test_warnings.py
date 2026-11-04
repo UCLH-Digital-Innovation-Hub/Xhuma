@@ -1,4 +1,6 @@
+import base64
 import json
+import xml.etree.ElementTree as ET
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,6 +14,7 @@ from fhirclient.models import (
 )
 
 from app.ccda import fhir2ccda
+from app.ccda.convert_mime import base64_xml
 from app.ccda.entries.medication import medication
 from app.ccda.models.datatypes import CD
 from app.ccda.models.dmd import DMDConcept, VPIProperty
@@ -101,7 +104,8 @@ def _build_statement(dosages, notes=None):
 
 
 def _extract_notes_and_xml(result):
-    br_notes = [note.replace("<br />", "").strip() for note in result.row[6]["BR"] if note.strip()]
+    cell = ET.fromstring(base64.b64decode(base64_xml({"td": result.row[6]})))
+    br_notes = [" ".join("".join(note.itertext()).split()) for note in cell]
     cda = result.entry["substanceAdministration"]
     comment_act = next(
         rel["act"]

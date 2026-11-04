@@ -47,7 +47,7 @@ def test_asserter_recorder_and_note_author_are_distinct_and_survive_xml():
     comment = parsed["entryRelationship"]["act"]
     assert comment["author"]["assignedAuthor"]["assignedPerson"]["name"] == "Dr Note Author"
     assert comment["author"]["time"]["@value"] == "20240203101112+0100"
-    assert result.row[5]["BR"] == ["Clinical note <br />", "Asserter: Dr Asserter <br />"]
+    assert result.row[5]["content"] == ["Clinical note <br />", "Asserter: Dr Asserter <br />"]
     assert "Dr Recorder" not in str(result.row)
     assert (
         list(parsed).index("author")
@@ -63,7 +63,7 @@ def test_asserter_reference_resolution(reference):
     p = practitioner("1", "Dr Source")
     entry = resource(asserter={"reference": reference}, contained=[p.as_json()] if reference.startswith("#") else None)
     result = allergy(entry, {"Practitioner/1": p})
-    assert result.row[5]["BR"] == ["Asserter: Dr Source <br />"]
+    assert result.row[5]["content"] == ["Asserter: Dr Source <br />"]
 
 
 def test_unresolved_asserter_retains_reference_without_inventing_name():
@@ -71,7 +71,7 @@ def test_unresolved_asserter_retains_reference_without_inventing_name():
     entity = get_observation(result)["informant"][0]["assignedEntity"]
     assert "assignedPerson" not in entity
     assert entity["id"][0]["@root"] == "Practitioner/missing"
-    assert result.row[5]["BR"] == ["Asserter: Practitioner/missing <br />"]
+    assert result.row[5]["content"] == ["Asserter: Practitioner/missing <br />"]
 
 
 def test_display_only_asserter_is_an_unidentified_informant():
@@ -103,13 +103,13 @@ def test_statuses_and_dates_are_labelled_without_inventing_missing_values():
         reaction=[{"onset": "1980-06-02", "manifestation": [{"coding": [{"code": "1", "display": "Rash"}]}]}],
     )
     result = allergy(entry)
-    assert result.row[0]["BR"] == [
+    assert result.row[0]["content"] == [
         "Onset: 07/02/1978 <br />",
         "Asserted: 10/02/1978 <br />",
         "Last occurrence: 1980-06 <br />",
         "Reaction 1 onset: 02/06/1980 <br />",
     ]
-    assert result.row[2]["BR"] == [
+    assert result.row[2]["content"] == [
         "Clinical status: Active <br />",
         "Verification status: Unconfirmed <br />",
         "Criticality: High <br />",
@@ -122,7 +122,7 @@ def test_statuses_and_dates_are_labelled_without_inventing_missing_values():
         )
     )
     assert missing.row[0] == ""
-    assert missing.row[2] == {"BR": ["Verification status: Entered in error <br />"]}
+    assert missing.row[2] == {"content": ["Verification status: Entered in error <br />"]}
     assert "informant" not in get_observation(missing)
     assert "author" not in get_observation(missing)
 
@@ -139,7 +139,7 @@ def test_statuses_and_dates_are_labelled_without_inventing_missing_values():
 )
 def test_onset_precision_and_alternatives(changes, expected):
     result = allergy(resource(assertedDate=None, **changes))
-    assert result.row[0]["BR"] == [expected + " <br />"]
+    assert result.row[0]["content"] == [expected + " <br />"]
 
 
 def test_unmapped_extensions_are_omitted_while_native_notes_and_identifiers_remain():
