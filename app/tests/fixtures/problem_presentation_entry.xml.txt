@@ -1,0 +1,26 @@
+<entry xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+		<act classCode="ACT" moodCode="EVN">
+			<templateId root="2.16.840.1.113883.10.20.22.4.3" />
+			<templateId root="2.16.840.1.113883.10.20.22.4.3" extension="2015-08-01" />
+			<id root="GENERATED-UUID" />
+			<code code="CONC" codeSystem="2.16.840.1.113883.5.6" />
+			<statusCode code="active" />
+			<effectiveTime>
+				<low xsi:type="IVXB_TS" value="20240203" />
+			</effectiveTime>
+			<entryRelationship typeCode="SUBJ">
+				<observation classCode="OBS" moodCode="EVN">
+					<templateId root="2.16.840.1.113883.10.20.22.4.4" />
+					<templateId root="2.16.840.1.113883.10.20.22.4.4" extension="2015-08-01" />
+					<id root="GENERATED-UUID" />
+					<code code="64572001" displayName="Condition" codeSystemName="SNOMED CT" codeSystem="2.16.840.1.113883.6.96" />
+					<code code="75323-6" displayName="Condition" codeSystemName="LOINC" codeSystem="2.16.840.1.113883.6.1" />
+					<statusCode code="completed" />
+					<effectiveTime>
+						<low xsi:type="IVXB_TS" value="20240203" />
+					</effectiveTime>
+					<value xsi:type="CD" code="123" displayName="Problem &amp; &lt;name&gt;" codeSystemName="SNOMED CT" codeSystem="2.16.840.1.113883.6.96" />
+				</observation>
+			</entryRelationship>
+		</act>
+	</entry>

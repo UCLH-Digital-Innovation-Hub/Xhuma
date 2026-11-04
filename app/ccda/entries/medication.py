@@ -141,13 +141,13 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
     # First occurrence owns the narrative formatting, including supplier/warning collisions.
     narrative_notes = {note: {"#text": f"{note} <br />"} for note in misc_notes}
 
-    def append_xhuma_warning(warning: str):
+    def append_xhuma_warning(warning: str, *, marker: str = "Xhuma:"):
         misc_notes.append(warning)
         narrative_notes.setdefault(
             warning,
             {
-                "content": {"@styleCode": "Bold", "#text": "Xhuma:"},
-                "#text": f"{warning[len('Xhuma:') :]} <br />",
+                "content": {"@styleCode": "Bold", "#text": marker},
+                "#text": f"{warning[len(marker) :]} <br />",
             },
         )
 
@@ -401,7 +401,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
         warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
         if warning:
-            misc_notes.append(warning)
+            append_xhuma_warning(warning, marker="Xhuma")
 
     # check for prescribing agency and last issued date extensions
     remaining_repeats = None
@@ -515,7 +515,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         readable_date(high_time[0]) if high_time else "",
         entry.status if entry.status else "unknown",
         prescription_type if "prescription_type" in locals() else "",
-        med_name,
+        {"content": {"@styleCode": "Bold", "#text": med_name}},
         f"{text_instructions}<br />{patient_instructions}",
         {"content": misc_notes_text},
         prescription_information,
