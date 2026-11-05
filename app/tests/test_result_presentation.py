@@ -83,7 +83,8 @@ async def test_only_a_single_resolved_panel_is_a_battery(case):
     report.code = CodeableConcept({"text": "Supplied report title"})
     output = await investigation(report, index)
     assert output.organizer["@classCode"] == "CLUSTER"
-    assert output.table["caption"] == "Issued 20/01/2024 12:00 GMT — Supplied report title"
+    suffix = "" if case in ("flat", "cycle") else " (panel)"
+    assert output.table["caption"] == "Issued 20/01/2024 12:00 GMT — Supplied report title" + suffix
     assert all(
         t.get("caption") not in ("Specimen notes", "Performing laboratory / organisation")
         for t in output.table["table"]
@@ -288,7 +289,7 @@ async def test_report_filing_is_paragraphs_before_tables_and_after_conclusion(co
         {"content": {"@styleCode": "Bold", "#text": "Report-level filing"}},
         {"content": {"@styleCode": "Bold", "#text": "first"}},
         "Filing value",
-        "A < B & C\nNext line",
+        {"content": [{"#text": "A < B & C"}, {"br": None}, {"#text": "Next line"}]},
         {"content": {"@styleCode": "Bold", "#text": "second"}},
         "Second comment",
     ]
@@ -297,7 +298,7 @@ async def test_report_filing_is_paragraphs_before_tables_and_after_conclusion(co
     assert xml.index("Report-level filing") < xml.index("<table>")
     if conclusion:
         assert xml.index(conclusion) < xml.index("Report-level filing")
-    assert "A &lt; B &amp; C\nNext line" in xml
+    assert "A &lt; B &amp; C</content><content><br></br></content><content>Next line" in xml
     assert "Attached comment" not in xmltodict.unparse({"filing": {"paragraph": filing}})
     assert "Attached comment" in xmltodict.unparse({"tables": {"table": output.table["table"]}})
     assert "Second comment" not in xmltodict.unparse({"tables": {"table": output.table["table"]}})

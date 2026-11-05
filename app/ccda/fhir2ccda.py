@@ -13,7 +13,7 @@ from app.telemetry import measure
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
 from .entries.allergy import allergy_onset_sort_key
 from .entries.investigation_grouping import build_investigation_graph
-from .entries.result_presentation import column_widths
+from .entries.result_presentation import column_widths, report_sort_key
 from .entries.results import investigation
 from .header import document_header
 from .helpers import fhir_date_is_after, templateId
@@ -352,6 +352,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     span.set_attribute("graph.observations", len(investigation_graph.observations))
                     span.set_attribute("graph.reports", len(investigation_graph.reports))
                     span.set_attribute("graph.edges", len(investigation_graph.edges))
+            # One stable sequence drives TOC items, their report bodies and organizers.
+            references.sort(key=lambda report: report_sort_key(report, index), reverse=True)
             organizer_with_table = [await investigation(ref, index, investigation_graph) for ref in references]
 
             table_list = {

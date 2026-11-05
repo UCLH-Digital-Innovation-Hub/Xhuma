@@ -104,6 +104,33 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
     )
 
 
+def _labelled_narrative(label: str, value: Union[str, list[str]]) -> dict:
+    # A literal separator lives in the normal-value node, independent of pretty-print
+    # whitespace. Source remainders are verbatim: existing leading whitespace is
+    # additional to this separator (and collapses in ordinary narrative rendering).
+    values = [value] if isinstance(value, str) else value
+    return {
+        "content": [
+            {"@styleCode": "Bold", "#text": label},
+            {"#text": f" {values[0]}"},
+            # Separate wrappers preserve alternating break/value order in xmltodict.
+            *[{"br": None, "content": {"#text": item}} for item in values[1:]],
+        ],
+    }
+
+
+def _source_note_narrative(note: str) -> dict:
+    for prefix in (
+        "Prescriber Notes:",
+        "Patient Notes:",
+        "Additional Information:",
+        "Transfer degraded medication text:",
+    ):
+        if note.startswith(prefix):
+            return {**_labelled_narrative(prefix, note[len(prefix) :]), "br": None}
+    return {"#text": f"{note} <br />"}
+
+
 async def medication(entry: medicationstatement.MedicationStatement, index: dict) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
@@ -139,7 +166,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
             misc_notes.append(f"Transfer degraded medication text: {referenced_med.code.text}")
 
     # First occurrence owns the narrative formatting, including supplier/warning collisions.
-    narrative_notes = {note: {"#text": f"{note} <br />"} for note in misc_notes}
+    narrative_notes = {note: _source_note_narrative(note) for note in misc_notes}
 
     def append_xhuma_warning(warning: str, *, marker: str = "Xhuma:"):
         misc_notes.append(warning)
@@ -410,13 +437,13 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         for ext in entry.extension:
             if ext.url == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1":
                 prescribing_agency = ext.valueCodeableConcept.coding[0].display
-                prescription_information.append(prescribing_agency)
+                prescription_information.append({"content": {"#text": prescribing_agency}})
             if (
                 ext.url
                 == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
             ):
                 last_issued_date = readable_date(fhir_to_cda_timestamp(ext.valueDateTime))
-                prescription_information.append(f"Last issued date: {last_issued_date}")
+                prescription_information.append(_labelled_narrative("Last issued date:", last_issued_date))
 
     # look for prescription type in medication request
     if based_on_request.extension:
@@ -443,7 +470,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 if repeats_allowed is not None and repeats_issued is not None:
                     remaining_repeats = repeats_allowed - repeats_issued
                     prescription_information.append(
-                        f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                        {"content": {"#text": f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."}}
                     )
             if (
                 ext.url
@@ -452,7 +479,11 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 for i in ext.extension:
                     if i.url == "statusReason":
                         status_reason = i.valueCodeableConcept.text
-                        misc_notes.append(f"Medication status reason: {status_reason}")
+                        status_note = f"Medication status reason: {status_reason}"
+                        misc_notes.append(status_note)
+                        narrative_notes.setdefault(
+                            status_note, {**_labelled_narrative("Medication status reason:", status_reason), "br": None}
+                        )
 
     # process issued quantity from based_on_request
     if based_on_request.dispenseRequest and based_on_request.dispenseRequest.quantity:
@@ -468,14 +499,17 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                     == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationQuantityText-1"
                 ):
                     unit = ext.valueString
-        issued_quantity = f"Issued quantity: {quantity.value} {unit}"
-        prescription_information.append(issued_quantity)
+        prescription_information.append(_labelled_narrative("Issued quantity:", f"{quantity.value} {unit}"))
 
-    # add br tags to prescription information with a join
-    prescription_information = "<br />".join(prescription_information) if prescription_information else ""
-
-    patient_instructions = "Patient Instructions: " + "<br />".join(patient_instr_list) if patient_instr_list else ""
-    text_instructions = " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
+    instructions = []
+    if text_instr_list:
+        instructions.append(_labelled_narrative("Instructions:", text_instr_list))
+    if patient_instr_list:
+        instructions.append(_labelled_narrative("Patient Instructions:", patient_instr_list))
+    # Breaks follow child content, never #text (which xmltodict emits last).
+    for lines in (instructions, prescription_information):
+        for line in lines[:-1]:
+            line["br"] = None
     # use dict.fromkeys to avoid duplicates while preserving chronological insertion order
     misc_notes = list(dict.fromkeys(misc_notes))
 
@@ -516,9 +550,9 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         entry.status if entry.status else "unknown",
         prescription_type if "prescription_type" in locals() else "",
         {"content": {"@styleCode": "Bold", "#text": med_name}},
-        f"{text_instructions}<br />{patient_instructions}",
+        {"content": instructions},
         {"content": misc_notes_text},
-        prescription_information,
+        {"content": prescription_information},
     ]
 
     return EntryWithRow(
