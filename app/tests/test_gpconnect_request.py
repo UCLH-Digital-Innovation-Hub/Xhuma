@@ -82,7 +82,12 @@ async def test_gpconnect_malformed_error_retains_upstream_status(payload):
         response = await gpconnect(9690937278, saml, request=get_mock_request())
 
     assert response.status_code == 503
-    assert json.loads(response.body) == {"success": False, "error": "Error from GP Connect endpoint 503"}
+    assert json.loads(response.body) == {
+        "success": False,
+        "error": "Error from GP Connect endpoint 503",
+        "reason": "unknown_provider_error",
+        "http_status": 503,
+    }
     assert audit.await_args.kwargs["error_code"] == "503"
 
 
