@@ -29,7 +29,7 @@ def serialized_xml(document, transport):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("transport", ["base64", "mime"])
 @pytest.mark.parametrize("count", [1, 40])
-async def test_serialized_toc_preserves_report_count_duplicate_captions_and_source_order(transport, count):
+async def test_serialized_toc_preserves_report_count_duplicates_and_stable_time_order(transport, count):
     data = create_bundle_dict([{"family": "Test", "given": ["Patient"]}])
     # Two distinct reports deliberately have identical captions. Repeated list
     # references must also survive; captions are not unique navigation keys.
@@ -77,6 +77,7 @@ async def test_serialized_toc_preserves_report_count_duplicate_captions_and_sour
         f"{count} investigation report{'s' if count != 1 else ''}",
         "Select a report below to jump to its results.",
     ]
+    order = [i for i in order if i != 1] + [i for i in order if i == 1]
     expected = [
         f"Issued 20/01/{'2023' if i == 1 else '2024'} 12:00 GMT — "
         + ("Full blood count" if i == 1 else "Diagnostic studies report")
@@ -113,7 +114,9 @@ async def test_serialized_filing_is_plain_prose_under_bold_labels_and_widths(tra
     output = await investigation(report, index)
     root = ET.fromstring(serialized_xml({"item": output.table}, transport))
     assert root.find("list") is None
-    assert [p.find("content").text for p in root.findall("paragraph") if p.find("content") is not None] == [
+    assert [
+        p.find("content").text for p in root.findall("paragraph") if p.find("content[@styleCode='Bold']") is not None
+    ] == [
         "Report Interpretation",
         "Report-level filing",
         "first",
@@ -122,12 +125,12 @@ async def test_serialized_filing_is_plain_prose_under_bold_labels_and_widths(tra
     assert [p.text for p in root.findall("paragraph") if p.find("content") is None] == [
         "Interpretation: source prose",
         "Normal: source prose",
-        "A < B & C\nNext line",
         "Normal: source prose",
     ]
-    assert all(
-        p.find("content").get("styleCode") == "Bold" for p in root.findall("paragraph") if p.find("content") is not None
-    )
+    multiline = root.findall("paragraph")[5]
+    assert [node.text for node in multiline if node.find("br") is None] == ["A < B & C", "Next line"]
+    assert len(multiline.findall("content/br")) == 1
+    assert multiline.findall(".//*[@styleCode]") == []
     assert [c.get("width") for c in root.findall("table/colgroup/col")] == ["28%", "17%", "20%", "35%"]
     assert root.find("table/tbody/tr/td/content").attrib == {"styleCode": "flagData"}
     assert root.find("table/tbody/tr/td/content").text == "10 mg/L"

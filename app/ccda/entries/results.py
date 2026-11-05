@@ -22,7 +22,15 @@ from .investigation_grouping import (
     observation_label,
 )
 from .result_context import cda_specimen, organizer_collection_time, report_issue_time, report_specimens
-from .result_presentation import column_widths, laboratory_details_table, report_heading_time, report_identity
+from .result_presentation import (
+    column_widths,
+    display_time,
+    explicit_group_summary,
+    laboratory_details_table,
+    narrative_paragraphs,
+    report_heading_time,
+    report_identity,
+)
 from .result_ranges import outside_reference_range, reference_range
 from .result_values import map_result_value
 from .types import EntryWithRow
@@ -131,11 +139,11 @@ def specimen_notes_table(report: dr.DiagnosticReport, index: dict) -> dict | Non
         collection = specimen.collection
         collected = "Not supplied"
         if collection and collection.collectedDateTime:
-            collected = collection.collectedDateTime.as_json()
+            collected = display_time(collection.collectedDateTime, preserve_seconds=True)
         elif collection and collection.collectedPeriod:
             period = collection.collectedPeriod
-            collected = f"{period.start.as_json() if period.start else 'Unknown start'} – {period.end.as_json() if period.end else 'Unknown end'}"
-        received = specimen.receivedTime.as_json() if specimen.receivedTime else "Not supplied"
+            collected = f"{display_time(period.start, preserve_seconds=True) if period.start else 'Unknown start'} – {display_time(period.end, preserve_seconds=True) if period.end else 'Unknown end'}"
+        received = display_time(specimen.receivedTime, preserve_seconds=True)
         notes = [note.text for note in specimen.note or [] if note.text]
         for note in notes or [""]:
             rows.append({"td": [label, note, collected, received]})
@@ -377,7 +385,12 @@ async def investigation(
                 filing_comments.extend(
                     [
                         {"content": {"@styleCode": "Bold", "#text": observation_label(comment)}},
-                        *[text for text in (comment.valueString, comment.comment) if text is not None],
+                        *[
+                            paragraph
+                            for text in (comment.valueString, comment.comment)
+                            if text is not None
+                            for paragraph in narrative_paragraphs(text)
+                        ],
                     ]
                 )
         table_rows = unplaced_rows
@@ -408,6 +421,9 @@ async def investigation(
             organizer.component.append({"observation": category_observation})
 
         title = f"{report_heading_time(diagnostic_report, index)} — {test_title}"
+        summary = explicit_group_summary(grouping, test_title)
+        if summary:
+            title += f" ({summary})"
         narrative_tables = []
 
         def add_table(rows, caption):
@@ -431,7 +447,7 @@ async def investigation(
             paragraphs.extend(
                 [
                     {"content": {"@styleCode": "Bold", "#text": "Report Interpretation"}},
-                    diagnostic_report.conclusion,
+                    *narrative_paragraphs(diagnostic_report.conclusion),
                 ]
             )
         if grouping.issues:

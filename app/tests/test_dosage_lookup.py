@@ -1,9 +1,11 @@
 """Canonical-source fidelity, immutable lookup, and medication fallback behaviour."""
 
+import base64
 import csv
 import hashlib
 import importlib
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -14,6 +16,7 @@ from fhirclient.models.medicationrequest import MedicationRequest
 from fhirclient.models.medicationstatement import MedicationStatement
 
 from app.ccda import dosage_lookup
+from app.ccda.convert_mime import base64_xml
 from app.ccda.entries import medication
 from app.ccda.models.dmd import DMDConcept, VPIProperty
 from scripts.build_dosage_mapping import DEFAULT_OUTPUT, DEFAULT_SOURCE, SOURCE_SHA256, consolidate
@@ -204,8 +207,10 @@ async def test_fallback_reaches_cda_without_mutating_fhir_or_cached_mapping(medi
         assert cda["doseQuantity"]["@unit"] == "mg"
         assert cda["effectiveTime"][1]["period"]["@value"] == 0.5
         assert cda["effectiveTime"][1]["period"]["@unit"] == "d"
-        assert "ONE   twice A day" in result.row[5]
-        assert "Retain this instruction" in result.row[5]
+        cell = ET.fromstring(base64.b64decode(base64_xml({"td": result.row[5]})))
+        narrative = "".join(cell.itertext())
+        assert "ONE   twice A day" in narrative
+        assert "Retain this instruction" in narrative
     assert statement.as_json() == before
     assert index["MedicationRequest/1"].as_json() == request_before
     assert dosage_lookup.lookup_dosage("one twice a day")["doseQuantity"]["value"] == 1
