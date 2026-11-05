@@ -115,6 +115,59 @@ async def test_gpconnect_with_nhs_data(
 
 
 @pytest.mark.asyncio
+@patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.document.convert_bundle", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.document.base64_xml")
+@patch("app.gpconnect_stages.document.redis_client.pipeline")
+@patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
+@patch("app.gpconnect_stages.transport.httpx.AsyncClient")
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock)
+async def test_gpconnect_captures_diag_pair_when_enabled(
+    mock_lookup_patient,
+    mock_sds_trace,
+    mock_async_client,
+    mock_create_nhs_ssl_context,
+    mock_redis_pipeline,
+    mock_base64_xml,
+    mock_convert_bundle,
+    mock_attempt_audit,
+    monkeypatch,
+):
+    """With the diagnostics gate on (int), the received bundle and C-CDA are cached under diag:* keys."""
+    monkeypatch.setenv("ENV", "int")
+    nhsno = get_nhs_ids()[0]
+
+    pipeline = mock_redis_pipeline.return_value
+    pipeline.__aenter__.return_value = pipeline
+    pipeline.execute = AsyncMock()
+
+    fake_bundle = load_bundle(nhsno)
+    mock_lookup_patient.return_value = load_pds(nhsno)
+    mock_sds_trace.side_effect = [fake_sds_endpoint_trace(), fake_sds_device_trace()]
+
+    mock_client = AsyncMock()
+    mock_client.post.return_value = Response(status_code=200, content=json.dumps(fake_bundle))
+    mock_async_client.return_value.__aenter__.return_value = mock_client
+
+    mock_convert_bundle.return_value = {"ClinicalDocument": {"title": "Mocked CCDA document"}}
+    mock_base64_xml.return_value = "mocked_base64_doc"
+
+    result = await gpconnect(nhsno, saml_attrs=saml, request=get_mock_request())
+    body = json.loads(result.body)
+
+    assert result.status_code == 200
+    assert body["success"] is True
+    doc_uuid = body["document_id"]
+
+    setex_keys = [call.args[0] for call in pipeline.setex.call_args_list]
+    assert f"diag:bundle:{doc_uuid}" in setex_keys
+    assert f"diag:xml:{doc_uuid}" in setex_keys
+    # One execute() for the main cache write, one for the diagnostics write.
+    assert pipeline.execute.await_count == 2
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [403, 404, 429, 500, 503])
 @pytest.mark.parametrize("failed_lookup", ["device", "endpoint", "self"])
 @pytest.mark.parametrize("wire", ["json", "soap"])

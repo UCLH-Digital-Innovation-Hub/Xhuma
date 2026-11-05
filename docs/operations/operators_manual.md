@@ -30,6 +30,7 @@ For the 20-query KQL diagnostics library, see the [Observability & Diagnostics G
   - [7.2 Post-Deployment Health Verification](#72-post-deployment-health-verification)
   - [7.3 Key Vault Reference Verification](#73-key-vault-reference-verification)
   - [7.4 HSCN Relay Observability & Diagnostics](#74-hscn-relay-observability--diagnostics)
+  - [7.5 FHIR to C-CDA Comparison Viewer](#75-fhir-to-c-cda-comparison-viewer)
 - [8. Shared Infrastructure Adoption (Terraform)](#8-shared-infrastructure-adoption-terraform)
 - [9. Operational Observability & Shared Query Pack](#9-operational-observability--shared-query-pack)
   - [9.1 Shared Azure Monitor Query Pack](#91-shared-azure-monitor-query-pack)
@@ -328,6 +329,41 @@ The WebSocket relay hub consumes and sanitises client-side diagnostics (`relay_l
 - `outcome = "ok"` proves relay transport succeeded; an HTTP 500 can still be an upstream application failure.
 - `outcome = "upstream_error"` indicates communication failure between relay and upstream Spine / GP practice.
 - `outcome = "blocked"` indicates firewall, proxy, or mTLS authorisation failure.
+
+---
+
+### 7.5 FHIR to C-CDA Comparison Viewer
+
+A gated diagnostic page (`/_diag/compare`) that shows the **FHIR bundle as received** from GP
+Connect next to the **C-CDA XML as sent to Epic**, for side-by-side smoke-test comparison. See
+[`fhir_xml_compare_proposal.md`](../fhir_xml_compare_proposal.md) for the full design.
+
+1. **Availability**: Always on in `dev`, `local` and `int` (`ENV` value). In `prd` it is **off by
+   default** and must be deliberately enabled with `DIAG_COMPARE_ENABLED=true` for an exceptional,
+   time-boxed smoke test, then disabled again.
+2. **Authentication**: Protected by the same `X-API-Key` dependency as `/_dev/audit`.
+3. **Data capture**: During conversion, the received bundle and serialised C-CDA are written to
+   short-lived Redis keys `diag:bundle:{doc_uuid}` and `diag:xml:{doc_uuid}`. These are **PHI** and
+   expire after `DIAG_TTL_MIN` minutes (default 30), independently of the 4h document cache.
+4. **Usage**:
+   - By NHS number: `GET /_diag/compare?nhsno=9690937278` (must have been fetched via ITI-38
+     within the diagnostics window).
+   - By document id: `GET /_diag/compare?doc_uuid=<id>`.
+   - Layout: append `&view=split` (side-by-side, default), `&view=tabs` (two toggleable pages) or
+     `&view=diff` (unified diff).
+   ```bash
+   curl -s -H "X-API-Key: $API_KEY" "https://<host>/_diag/compare?nhsno=9690937278&view=split"
+   ```
+5. **Configuration**:
+
+   | Variable | Default | Purpose |
+   | --- | --- | --- |
+   | `DIAG_COMPARE_ENABLED` | `false` | Opt-in switch to enable the viewer in `prd` only (ignored in non-prod, where it is always on). |
+   | `DIAG_TTL_MIN` | `30` | Minutes before the captured bundle/XML pair expires from Redis. |
+
+6. **Operational Caveat**: Both payloads contain full patient clinical data. Keep the viewer
+   disabled in `prd` outside a controlled smoke test, keep the TTL short, and remember the capture
+   adds two Redis writes per record while enabled.
 
 ---
 
