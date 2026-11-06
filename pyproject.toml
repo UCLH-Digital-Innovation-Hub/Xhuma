@@ -24,7 +24,7 @@ dependencies = [
     "asyncpg",
     "sqlalchemy[asyncio]",
     "grpcio",
-    "python-multipart>=0.0.31",
+    "python-multipart>=0.0.33",
     "sqlmodel",
     "alembic",
     "psycopg[binary]",
@@ -33,7 +33,7 @@ dependencies = [
     "azure-keyvault-secrets",
     "urllib3>=2.8.0",
     "defusedxml>=0.7.1",
-    "tzdata>=2026.5",
+    "tzdata>=2026.6",
 ]
 
 [tool.ruff]
@@ -60,8 +60,8 @@ dev = [
     "ruff>=0.17.3",
     "locust",
     "pytest-cov>=7.1.0",
-    "schemathesis>=4.32.7",
-    "hypothesis>=6.170.12",
+    "schemathesis>=4.33.0",
+    "hypothesis>=6.170.14",
     "pytest-sugar>=1.1.1",
 ]
 
