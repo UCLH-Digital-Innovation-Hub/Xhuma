@@ -15,8 +15,8 @@ from ..helpers import (
     readable_date,
     templateId,
 )
-from ..models.base import Act, EntryRelationship, SubstanceAdministration
-from ..models.datatypes import CD, ED, IVL_INT, IVL_PQ, IVL_TS, IVXB_PQ, PIVL_TS, PQ
+from ..models.base import Act, Criterion, EntryRelationship, Precondition, SubstanceAdministration
+from ..models.datatypes import CD, ED, IVL_INT, IVL_PQ, IVL_TS, IVXB_PQ, PIVL_TS, PQ, PQR, RTO_PQ_PQ
 from .types import EntryWithRow
 
 # http://hl7.org/fhir/ValueSet/event-timing|4.0.1
@@ -204,57 +204,34 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         },
         entryRelationship=[],
     )
-    # if dose quantiy is in dosage
-    if dosages[0].doseQuantity:
-        # TODO: Build a PQ/IVL_PQ instance (including typed translations) rather
-        # than assigning a dict; test_meds/test_prn_meds emit Pydantic serializer
-        # warnings for doseQuantity. Preserve the subsequent dose-conversion logic.
-        substance_administration.doseQuantity = {
-            "@xsi:type": "PQ",
-            "@value": dosages[0].doseQuantity.value,
-        }
-        if dosages[0].doseQuantity.unit:
-            substance_administration.doseQuantity["@unit"] = dosages[0].doseQuantity.unit
+    source_dose = dosages[0].doseQuantity
+    dose = None
+    if source_dose:
+        dose = PQ(value=source_dose.value, unit=source_dose.unit)
+        if source_dose.code:
+            dose.translation = [
+                PQR(
+                    value=source_dose.value,
+                    code=source_dose.code,
+                    codeSystem="2.16.840.1.113883.6.96",
+                    originalText=source_dose.unit,
+                )
+            ]
+        substance_administration.doseQuantity = dose
 
-        # if there is a code add a translation
-        if dosages[0].doseQuantity.code:
-            substance_administration.doseQuantity["translation"] = {
-                "@value": dosages[0].doseQuantity.value,
-                "@code": dosages[0].doseQuantity.code,
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "originalText": dosages[0].doseQuantity.unit,
-            }
-    # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
-    # check if dosage has as needed boolean of true
-
-    if dosages[0].asNeededBoolean:
-        # populate precondition
-        # TODO: Build a list of Precondition models rather than a single dict;
-        # structured-dosage/PRN tests warn that precondition expects list[Precondition].
-        substance_administration.precondition = {
-            "@typeCode": "PRCN",
-            "criterion": {
-                "templateId": templateId(root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"),
-                "code": {
-                    "@code": "ASSERTION",
-                    "@codeSystem": "2.16.840.1.113883.5.4",
-                },
-            },
-        }
-        # if there is a asNeededCodeableConcept, use it
-        if dosages[0].asNeededCodeableConcept:
-            substance_administration.precondition["criterion"]["value"] = {
-                "@xsi:type": "CD",
-                "@code": dosages[0].asNeededCodeableConcept.coding[0].code,
-                "@displayName": dosages[0].asNeededCodeableConcept.coding[0].display,
-                "@codeSystemName": dosages[0].asNeededCodeableConcept.coding[0].value,
-            }
-        else:
-            # if no asNeededCodeableConcept, use NI
-            substance_administration.precondition["criterion"]["value"] = {
-                "@xsi:type": "CD",
-                "@nullFlavor": "NI",
-            }
+    reason = dosages[0].asNeededCodeableConcept
+    if dosages[0].asNeededBoolean or reason:
+        value = code_with_translations(reason.coding) if reason else None
+        if value is None:
+            value = CD(nullFlavor="NI")
+        if reason and reason.text:
+            value.originalText = reason.text
+        criterion = Criterion(
+            templateId=templateId("2.16.840.1.113883.10.20.22.4.25", "2014-06-09"),
+            code=CD(code="ASSERTION", codeSystem="2.16.840.1.113883.5.4"),
+            value=value,
+        )
+        substance_administration.precondition = [Precondition(criterion=criterion)]
 
     if dosages[0].timing:
         repeat = dosages[0].timing.repeat
@@ -276,22 +253,10 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         numerator = dosages[0].maxDosePerPeriod.numerator
         denominator = dosages[0].maxDosePerPeriod.denominator
         if numerator and denominator:
-            try:
-                # TODO: Build an RTO_PQ_PQ model with PQ numerator/denominator;
-                # test_prn_meds emits a serializer warning for this dict assignment.
-                substance_administration.maxDoseQuantity = {
-                    "@xsi:type": "RTO_PQ_PQ",
-                    "numerator": {
-                        "@value": numerator.value,
-                        "@unit": numerator.unit,
-                    },
-                    "denominator": {
-                        "@value": denominator.value,
-                        "@unit": denominator.unit,
-                    },
-                }
-            except Exception as e:
-                logging.error(f"Error processing maxDosePerPeriod: {e}")
+            substance_administration.maxDoseQuantity = RTO_PQ_PQ(
+                numerator=PQ(value=numerator.value, unit=numerator.unit),
+                denominator=PQ(value=denominator.value, unit=denominator.unit),
+            )
 
     #   check if route is in dosage
     if dosages[0].method:
@@ -359,30 +324,26 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
     # check if snomed code is in cache and if so add to med name
     snomed_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
     gp_units = ["tablet", "capsule"]
-    unit = (
-        substance_administration.doseQuantity.get("@unit", "").lower() if substance_administration.doseQuantity else ""
-    )
-
     dmd_dose_warning = None
     dmd_route_warning = None
 
-    if substance_administration.doseQuantity:
-        blank_unit = not substance_administration.doseQuantity.get("@unit")
-        if unit in gp_units or blank_unit:
+    if dose:
+        unit = (dose.unit or "").lower()
+        if unit in gp_units or not unit:
             # we only process doses for tablets or capsules.
 
             try:
                 dmd_data = await dmd_lookup(int(snomed_code))
                 # only process dose if a single dosage instruction
                 if len(dosages) == 1:
-                    if dmd_data.vpi and substance_administration.doseQuantity:
-                        processed_dose = dmd_data.vpi.value * substance_administration.doseQuantity["@value"]
+                    if dmd_data.vpi and dose.value is not None:
+                        processed_dose = dmd_data.vpi.value * dose.value
 
                         # clean number to remove trailing .0 if whole number
                         processed_dose = clean_number(processed_dose)
 
-                        substance_administration.doseQuantity["@value"] = processed_dose
-                        substance_administration.doseQuantity["@unit"] = dmd_data.vpi.unit
+                        dose.value = processed_dose
+                        dose.unit = dmd_data.vpi.unit
                         dmd_dose_warning = (
                             f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
                         )
@@ -406,9 +367,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
         if "- unit of product usage" in unit:
             # strip overly verbose snomed unit description to just unit
-            substance_administration.doseQuantity["@unit"] = (
-                substance_administration.doseQuantity["@unit"].replace("- unit of product usage", "").strip()
-            )
+            dose.unit = dose.unit.replace("- unit of product usage", "").strip()
 
     # 1. dm+d mapping/inference warnings
     if dmd_dose_warning:

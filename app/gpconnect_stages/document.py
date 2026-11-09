@@ -156,7 +156,7 @@ async def process_document(
     step.value = "ccda_cache.pipeline_open"
     async with redis_client.pipeline() as pipe:
         step.value = "ccda_cache.queue_patient_document"
-        pipe.setex(str(nhsno), cache_ttl, doc_uuid)
+        pipe.set(str(nhsno), doc_uuid, ex=cache_ttl)
         document_key = f"document:{doc_uuid}"
         step.value = "ccda_cache.queue_document_content"
         pipe.hset(document_key, mapping={"nhs_number": str(nhsno), "content": xop})

@@ -157,3 +157,10 @@ def test_no_notes_adds_no_empty_content_sibling(kind, column):
     if kind == "allergy":
         assert not list(cells[5])
         assert cells[5].text is None
+
+
+def test_immunization_products_receive_distinct_identifiers():
+    path = "./entry/consumable/manufacturedProduct/id"
+    first = delivery(clinical_entry("immunization")).find(path)
+    second = delivery(clinical_entry("immunization")).find(path)
+    assert first.attrib["root"] != second.attrib["root"]
