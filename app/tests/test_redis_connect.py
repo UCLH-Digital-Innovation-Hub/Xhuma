@@ -31,7 +31,6 @@ def backend(monkeypatch):
         ("ping", (), True, True),
         ("get", ("key",), b"\x00document\xff", b"\x00document\xff"),
         ("get", ("missing",), None, None),
-        ("setex", ("key", timedelta(hours=4), b"value"), True, True),
         ("delete", ("one", "two"), 2, 2),
         ("keys", ("prefix:*",), [b"prefix:one"], [b"prefix:one"]),
         ("info", (), {"used_memory": 100}, {"used_memory": 100}),
@@ -203,11 +202,12 @@ async def test_real_redis_bytes_expiry_database_isolation_and_atomic_pipeline(tm
         await asyncio.wait_for(ready(), timeout=5)
         assert await document_cache.ping()
         assert await terminology_cache.setex("concept", 30, b"cached term")
+        assert 0 < await terminology_cache.ttl("concept") <= 30
         assert await document_cache.get("concept") is None
         assert await terminology_cache.get("concept") == b"cached term"
         async with document_cache.pipeline() as pipe:
             # Enqueue without await; nothing is sent until execute().
-            pipe.setex("patient", timedelta(seconds=30), "document")
+            pipe.set("patient", "document", ex=timedelta(seconds=30))
             pipe.hset("document:document", mapping={"content": b"\x00mime\xff", "nhs_number": "patient"})
             pipe.expire("document:document", timedelta(seconds=30))
             assert await document_cache.get("patient") is None
@@ -223,7 +223,7 @@ async def test_real_redis_bytes_expiry_database_isolation_and_atomic_pipeline(tm
         # Abandoning a queued transaction must release state without publishing it.
         with pytest.raises(ValueError):
             async with document_cache.pipeline() as pipe:
-                pipe.setex("abandoned", 30, "value")
+                pipe.set("abandoned", "value", ex=30)
                 raise ValueError("cancel before publishing")
         assert await document_cache.get("abandoned") is None
         assert await document_cache.delete("patient", "document:document") == 1

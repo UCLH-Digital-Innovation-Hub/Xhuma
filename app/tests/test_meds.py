@@ -416,9 +416,9 @@ async def test_structured_detail(mock_dmd_lookup):
         "Xhuma warning: Event-based medication timing: Morning (MORN); Before a meal (AC). Offset: 30 minutes."
     ) in comment_text
     assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"
-    assert substance_administration["doseQuantity"]["translation"]["@value"] == 1
-    assert substance_administration["doseQuantity"]["translation"]["originalText"] == "tablet"
-    assert substance_administration["doseQuantity"]["translation"]["@codeSystem"] == "2.16.840.1.113883.6.96"
+    assert substance_administration["doseQuantity"]["translation"][0]["@value"] == 1
+    assert substance_administration["doseQuantity"]["translation"][0]["originalText"] == "tablet"
+    assert substance_administration["doseQuantity"]["translation"][0]["@codeSystem"] == "2.16.840.1.113883.6.96"
 
 
 new_structured_statement = medicationstatement.MedicationStatement(

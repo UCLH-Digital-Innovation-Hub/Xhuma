@@ -105,7 +105,7 @@ async def test_gpconnect_with_nhs_data(
     mock_convert_bundle.assert_called_once()
     mock_base64_xml.assert_called_once()
     document_key = f"document:{body['document_id']}"
-    pipeline.setex.assert_called_once_with(str(nhsno), timedelta(hours=4), body["document_id"])
+    pipeline.set.assert_called_once_with(str(nhsno), body["document_id"], ex=timedelta(hours=4))
     pipeline.hset.assert_called_once_with(
         document_key, mapping={"nhs_number": str(nhsno), "content": "mocked_base64_doc"}
     )
@@ -449,7 +449,7 @@ async def test_pipeline_characterization_success_order_and_publication(observed_
         "audit:store_ccda:ok",
         "ttl",
         "redis.enter",
-        "redis.setex",
+        "redis.set",
         "redis.hset",
         "redis.expire",
         "redis.execute",
@@ -459,8 +459,8 @@ async def test_pipeline_characterization_success_order_and_publication(observed_
     body = json.loads(response.body)
     document_id = body["document_id"]
     assert body == {"success": True, "document_id": document_id}
-    assert [command[0] for command in p.commands] == ["setex", "hset", "expire"]
-    assert p.commands[0] == ("setex", p.nhs, timedelta(hours=1.5), document_id)
+    assert [command[0] for command in p.commands] == ["set", "hset", "expire"]
+    assert p.commands[0] == ("set", p.nhs, document_id, timedelta(hours=1.5))
     assert p.commands[1][1] == f"document:{document_id}"
     assert p.commands[1][2]["nhs_number"] == p.nhs
     assert b"ClinicalDocument" in base64.b64decode(p.commands[1][2]["content"])
@@ -689,7 +689,7 @@ async def test_pipeline_characterization_ttl_source(observed_pipeline, state_pre
     response = await p.gp.gpconnect(p.nhs, p.saml, request=p.request)
     assert response.status_code == 200
     ttl = timedelta(hours=1.5 if state_present else 9)
-    assert p.commands[0][2] == p.commands[2][2] == ttl
+    assert p.commands[0][3] == p.commands[2][2] == ttl
     assert p.events.index("audit:store_ccda:ok") < p.events.index("redis.enter")
 
 
@@ -874,7 +874,7 @@ async def test_pipeline_characterization_iti38_cache_miss_journey(observed_pipel
     assert root.find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0}RegistryError") is None
     document = root.find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0}ExtrinsicObject")
     document_id = document.attrib["id"]
-    assert p.commands[0][3] == document_id
+    assert p.commands[0][2] == document_id
     assert p.published
     iti38.redis_client.get.assert_awaited_once_with(p.nhs)
     assert [event.event.action for event in p.persisted] == [
@@ -979,7 +979,7 @@ async def test_transport_overlapping_requests_keep_failure_steps_local(observed_
     "boundary,step",
     [
         ("redis.enter", "pipeline_open"),
-        ("redis.setex", "queue_patient_document"),
+        ("redis.set", "queue_patient_document"),
         ("redis.hset", "queue_document_content"),
         ("redis.expire", "queue_document_expiry"),
     ],
@@ -1237,9 +1237,9 @@ async def test_pipeline_overlapping_misses_generate_independent_documents(observ
     documents = {json.loads(response.body)["document_id"] for response in responses}
     assert len(documents) == len(set(trace_ids)) == 2
     assert documents.isdisjoint(trace_ids)
-    pointers = [command for command in p.commands if command[0] == "setex"]
+    pointers = [command for command in p.commands if command[0] == "set"]
     assert [command[1] for command in pointers] == [p.nhs, p.nhs]
-    assert {command[3] for command in pointers} == documents
+    assert {command[2] for command in pointers} == documents
     assert {command[1] for command in p.commands if command[0] == "hset"} == {
         f"document:{document}" for document in documents
     }

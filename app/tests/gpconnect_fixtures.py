@@ -231,9 +231,9 @@ def observed_pipeline(monkeypatch, tmp_path):
         async def __aexit__(self, *_):
             note("redis.exit")
 
-        def setex(self, key, ttl, value):
-            note("redis.setex")
-            probe.commands.append(("setex", key, ttl, value))
+        def set(self, key, value, *, ex):
+            note("redis.set")
+            probe.commands.append(("set", key, value, ex))
 
         def hset(self, key, *, mapping):
             note("redis.hset")

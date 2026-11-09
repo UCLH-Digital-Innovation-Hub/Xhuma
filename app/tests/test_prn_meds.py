@@ -179,7 +179,8 @@ med_request = medicationrequest.MedicationRequest(
 
 
 @pytest.mark.asyncio
-async def test_prn_medication_statement():
+@pytest.mark.parametrize("coded_reason", [False, True])
+async def test_prn_medication_statement(coded_reason):
     """Test the conversion of a PRN medication statement to a CCDA entry."""
     # Convert the FHIR MedicationStatement to a CCDA entry
     index_dict = {
@@ -187,7 +188,16 @@ async def test_prn_medication_statement():
         "prn_medicationStatement/9": prn_med,
         "MedicationRequest/968546F0-EF03-491B-A045-4D46EE61A860": med_request,
     }
-    substance_administration = await medication_entry(prn_statement, index_dict)
+    statement = prn_statement
+    if coded_reason:
+        data = prn_statement.as_json()
+        dosage = data["dosage"][0]
+        del dosage["asNeededBoolean"]
+        dosage["asNeededCodeableConcept"] = {
+            "coding": [{"system": "http://snomed.info/sct", "code": "22253000", "display": "Pain"}]
+        }
+        statement = medicationstatement.MedicationStatement(data)
+    substance_administration = await medication_entry(statement, index_dict)
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
 
@@ -195,15 +205,16 @@ async def test_prn_medication_statement():
     assert substance_administration is not None
 
     # Check that the entry has the expected structure
-    assert "precondition" in substance_administration
-    assert substance_administration["precondition"]["@typeCode"] == "PRCN"
-    assert (
-        substance_administration["precondition"]["criterion"]["templateId"][0]["@root"]
-        == "2.16.840.1.113883.10.20.22.4.25"
-    )
-    assert substance_administration["precondition"]["criterion"]["code"]["@code"] == "ASSERTION"
-    assert substance_administration["precondition"]["criterion"]["value"]["@nullFlavor"] == "NI"
-    # Check the medication details
+    [precondition] = substance_administration["precondition"]
+    assert precondition["@typeCode"] == "PRCN"
+    criterion = precondition["criterion"]
+    assert criterion["templateId"][0]["@root"] == "2.16.840.1.113883.10.20.22.4.25"
+    assert criterion["code"]["@code"] == "ASSERTION"
+    if coded_reason:
+        assert criterion["value"]["@code"] == "22253000"
+        assert criterion["value"]["@codeSystem"] == "2.16.840.1.113883.6.96"
+    else:
+        assert criterion["value"]["@nullFlavor"] == "NI"
 
 
 @pytest.mark.asyncio

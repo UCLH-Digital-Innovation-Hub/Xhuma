@@ -162,16 +162,16 @@ async def test_delivery_only_flags_out_of_range_values(value, abnormal):
         assert cell.attrib == {} and len(cell) == 0
 
 
-# Captured from the unmodified renderer before this presentation change. Hash
+# Includes the corrected PQR xsi:type on quantity translations. Hash
 # the complete serialized organizers, including order, identifiers, values,
 # ranges, times, codes, statuses, specimens and category observations.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "nhs,count,digest",
     [
-        ("9730333939", 20, "4f78773d3927cbfb322eb5b62aeff2b87c4a5b99a26307c6d054b87760574ca9"),
-        ("9465700088", 34, "9cd094002bc2324c1fd0ddf5eded6d23db053fb1cfceaf89b681203354585380"),
-        ("9692136744", 32, "fc9b53cd18c5f7e5c9b932001dc66ee22b89dbeff6c8abe81b8ca9993319747f"),
+        ("9730333939", 20, "e341423c8a8c412c870c3ac5f0cbe035b5e2373a5407baa52b1f516aa68ea188"),
+        ("9465700088", 34, "abc54e65b4e11d7b8acae02b603becc17456b56d8dc812bf20593da4083495d8"),
+        ("9692136744", 32, "b9849e0b3ede0cb805f0485f9fd64e271fd8f6bc378cdbd559ecf1f6275de378"),
     ],
 )
 async def test_supplier_structured_xml_is_identical_to_before_presentation_changes(nhs, count, digest):

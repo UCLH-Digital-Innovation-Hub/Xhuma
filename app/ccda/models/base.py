@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
-from pydantic import BaseModel, Extra, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from .admin import AuthorParticipation
 from .datatypes import (
@@ -34,9 +34,7 @@ class ManufacturedMaterial(BaseModel):
 class ManufacturedProduct(BaseModel):
     manufacturedMaterial: ManufacturedMaterial
     templateId: List[II] = Field(default_factory=list)
-    # TODO: Use an II default factory rather than an unvalidated dict; immunization
-    # tests emit PydanticSerializationUnexpectedValue for manufacturedProduct.id.
-    id: II = {"@root": str(uuid4())}
+    id: II = Field(default_factory=lambda: II(root=str(uuid4())))
     classCode: str = Field(default="MANU", alias="@classCode")
 
 
@@ -157,6 +155,7 @@ class InstructionObservation(Observation):
 
 
 class Criterion(BaseModel):
+    templateId: List[II] = Field(default_factory=list)
     classCode: str = Field(alias="@classCode", default="OBS")
     moodCode: str = Field(alias="@moodCode", default="EVN")
     code: Optional[CD] = None
@@ -198,9 +197,9 @@ class SubstanceAdministration(BaseModel):
         return [time.model_dump(by_alias=True, exclude_none=True) for time in sxcm_ts_list]
 
 
-# TODO: Replace deprecated Extra.allow with Pydantic v2 configuration;
-# importing this model emits PydanticDeprecatedSince20 in the test suite.
-class EntryRelationship(BaseModel, extra=Extra.allow):
+class EntryRelationship(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     typeCode: str = Field(alias="@typeCode", default="SUBJ")
     inversionInd: Optional[bool] = Field(alias="@inversionInd", default=None)
     sequenceNumber: Optional[int] = None
@@ -232,10 +231,7 @@ class Section(BaseModel):
     text: Optional[str] = None
     entry: List[Entry] = Field(default_factory=list)
 
-    # TODO: Replace class-based Config with ConfigDict; importing Section emits
-    # PydanticDeprecatedSince20 in the test suite.
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ResultOrganizerTime(IVL_TS):

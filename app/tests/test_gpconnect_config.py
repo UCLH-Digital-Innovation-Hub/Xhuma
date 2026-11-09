@@ -104,10 +104,8 @@ async def test_ccda_expiry_configuration_parsing(
             await _fetch_gpconnect_record(9690937278, saml, request=request)
 
             # Verify pipeline was called with timedelta(hours=1.5)
-            mock_pipeline.return_value.setex.assert_called()
-            # We can inspect the arguments for the first setex call
-            args, kwargs = mock_pipeline.return_value.setex.call_args_list[0]
-            assert args[1].total_seconds() == 1.5 * 3600
+            mock_pipeline.return_value.set.assert_called_once()
+            assert mock_pipeline.return_value.set.call_args.kwargs["ex"].total_seconds() == 1.5 * 3600
 
 
 @pytest.mark.asyncio

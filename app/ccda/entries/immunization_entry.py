@@ -1,8 +1,8 @@
 from fhirclient.models import immunization
 
 from ..helpers import code_with_translations, fhir_to_cda_timestamp, readable_date, templateId
-from ..models.base import EntryRelationship, SubstanceAdministration
-from ..models.datatypes import SXCM_TS
+from ..models.base import Act, EntryRelationship, SubstanceAdministration
+from ..models.datatypes import CD, ED, SXCM_TS
 from .types import EntryWithRow
 
 
@@ -58,15 +58,7 @@ def immunization_entry(entry: immunization.Immunization, index: dict) -> EntryWi
         # HTML <br /> tags exclusively for the narrative `immunization_row` table view.
         structured_notes_text = "\n".join(misc_notes)
 
-        comment_activity = EntryRelationship()
-        # TODO: Build an Act with typed code/text rather than assigning a dict;
-        # immunization notes tests emit PydanticSerializationUnexpectedValue for act.
-        comment_activity.act = {
-            "code": {
-                "@code": "48767-8",
-            },
-            "text": {"@xsi:type": "ED", "xmlText": structured_notes_text},
-        }
+        comment_activity = EntryRelationship(act=Act(code=CD(code="48767-8"), text=ED(xmlText=structured_notes_text)))
         immunization_entry.entryRelationship.append(comment_activity)
 
     date_val = readable_date(fhir_to_cda_timestamp(entry.date)) if entry.date else ""
