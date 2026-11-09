@@ -21,16 +21,35 @@ def test_legacy_routes_retired():
     assert cd_wf is None, "legacy cd.yml must be retired"
 
 
-def test_dependabot_container_uses_unprivileged_pr_event():
+def test_container_smoke_uses_unprivileged_pr_event():
     workflow = load_workflow("ci.yml")
     triggers = workflow.get(True) or workflow.get("on", {})
-    assert "dev" in triggers["pull_request"]["branches"]
+    assert set(triggers["pull_request"]["branches"]) == {"dev", "int", "main"}
+    assert "paths" not in triggers["pull_request"]
+    assert "paths-ignore" not in triggers["pull_request"]
     assert "pull_request_target" not in triggers
-    job = workflow["jobs"]["dependabot-container"]
-    assert "github.event_name == 'pull_request'" in job["if"]
-    assert "github.event.pull_request.user.login == 'dependabot[bot]'" in job["if"]
+    assert "dependabot-container" not in workflow["jobs"]
+    job = workflow["jobs"]["container-smoke"]
+    assert job["name"] == "Production container smoke"
+    assert job["if"] == "github.event_name == 'pull_request'"
+    assert "dependabot" not in json.dumps(job).lower()
     assert job["permissions"] == {"contents": "read"}
     assert "secrets." not in json.dumps(job)
+    smoke_steps = [
+        step
+        for candidate in workflow["jobs"].values()
+        for step in candidate.get("steps", [])
+        if "scripts/container_smoke/run.sh" in step.get("run", "")
+    ]
+    assert len(smoke_steps) == 1
+    assert smoke_steps[0] in job["steps"]
+    assert smoke_steps[0]["run"] == "bash scripts/container_smoke/run.sh"
+    uploads = [step for step in job["steps"] if step.get("uses") == "actions/upload-artifact@v4"]
+    assert len(uploads) == 1
+    assert uploads[0]["if"] == "always()"
+    assert uploads[0]["with"]["name"] == "container-smoke-diagnostics"
+    assert uploads[0]["with"]["path"] == "container-smoke-artifacts/"
+    assert uploads[0]["with"]["retention-days"] == 7
 
 
 def test_container_journey_keeps_production_runtime_and_network_isolated():

@@ -105,9 +105,9 @@ jobs:
         if: steps.tests.outputs.exit_code != 0
         run: exit 1
 
-  dependabot-container:
-    name: Dependabot container journey
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+  container-smoke:
+    name: Production container smoke
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -124,7 +124,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install test driver dependencies
+      - name: Install smoke driver dependencies
         run: uv sync --locked --dev
 
       - name: Build production image and run ITI-55 → ITI-38 → ITI-39
@@ -134,7 +134,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dependabot-container-diagnostics
+          name: container-smoke-diagnostics
           path: container-smoke-artifacts/
           if-no-files-found: ignore
           retention-days: 7
