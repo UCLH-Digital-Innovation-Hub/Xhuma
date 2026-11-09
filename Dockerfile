@@ -8,6 +8,7 @@ ENV UV_LINK_MODE=copy
 WORKDIR /code
 
 RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends cargo rustc build-essential && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     python -m pip uninstall -y pip setuptools
 
