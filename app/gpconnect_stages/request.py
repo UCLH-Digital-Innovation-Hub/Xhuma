@@ -9,8 +9,6 @@ from uuid import uuid4
 import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from fhirclient.models.fhirabstractbase import FHIRValidationError
-from fhirclient.models.operationoutcome import OperationOutcome
 from opentelemetry.propagate import inject
 
 from .. import logging as application_logging
@@ -20,6 +18,7 @@ from ..audit.models import AuditOutcome, SAMLAttributes
 from ..pds.pds import SDSUpstreamError, lookup_self_issuer
 from ..security import create_jwt
 from ..telemetry import measure
+from .failure import classify_operation_outcome
 from .transport import send_request
 from .types import DiagnosticStep, OutboundRequest, ProviderRoute
 
@@ -161,11 +160,11 @@ async def fetch_record(
             step=step,
         )
 
-        if log_dir:
+        if log_dir and resp.status_code == 200:
             step.value = "gpconnect_request.response_debug_file"
             with open(os.path.join(log_dir, f"{resp.status_code}_response.json"), "w") as f:
                 f.write(resp.text)
-        logging.info(f"GP Connect request successful with status {resp.status_code}")
+        logging.info("GP Connect response received with status %s", resp.status_code)
 
     except AuditFailureException:
         raise
@@ -222,23 +221,29 @@ async def fetch_record(
     # 9) Non-200 handling
     step.value = "gpconnect_request.response_status"
     if resp.status_code != 200:
-        msg = f"Error from GP Connect endpoint {resp.status_code}"
         try:
             payload = resp.json()
-            if isinstance(payload, dict) and payload.get("resourceType") == "OperationOutcome":
-                outcome = OperationOutcome(payload)
-                displays = [
-                    " ".join(coding.display.split())
-                    for issue in outcome.issue or []
-                    if issue.details
-                    for coding in issue.details.coding or []
-                    if coding.display and coding.display.strip()
-                ]
-                if displays:
-                    msg += ": " + " | ".join(dict.fromkeys(displays))
-        except (ValueError, UnicodeDecodeError, FHIRValidationError):
-            pass
-        diagnostic = f"{msg} (step: {step.value})"
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            payload = None
+        failure = classify_operation_outcome(resp.status_code, payload)
+        detail = {
+            "step": step.value,
+            "transport": "relay" if relay_enabled() else "direct",
+            "reason": failure.reason,
+        }
+        content = {
+            "success": False,
+            "error": failure.user_message,
+            "reason": failure.reason,
+            "http_status": failure.http_status,
+        }
+        if failure.provider_code is not None:
+            detail["provider_code"] = failure.provider_code
+            content["provider_code"] = failure.provider_code
+        diagnostic = (
+            f"GP Connect failure (status: {failure.http_status}, reason: {failure.reason}, "
+            f"provider_code: {failure.provider_code}, step: {step.value})"
+        )
         application_logging.record_application_failure(RuntimeError(diagnostic))
         logging.error(diagnostic)
         if log_dir:
@@ -252,9 +257,9 @@ async def fetch_record(
             action="gpconnect_request",
             outcome=AuditOutcome.fail,
             error_code=str(resp.status_code),
-            detail={"step": step.value, "transport": "relay" if relay_enabled() else "direct"},
+            detail=detail,
         )
-        return JSONResponse(status_code=resp.status_code, content={"success": False, "error": msg})
+        return JSONResponse(status_code=failure.http_status, content=content)
 
     # audit successful response
     step.value = "gpconnect_request.success_audit"

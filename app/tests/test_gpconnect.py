@@ -193,7 +193,7 @@ async def test_sds_http_failure_reaches_caller(mock_self_issuer, monkeypatch, st
     ("status", "displays", "expected"),
     [
         (403, ["Patient has not provided consent to share data"], "Patient has not provided consent to share data"),
-        (403, ["ASID_CHECK_FAILED_MESSAGESENDER_100000000001"], "ASID_CHECK_FAILED_MESSAGESENDER_100000000001"),
+        (403, ["ASID_CHECK_FAILED_MESSAGESENDER_100000000001"], ""),
         (404, ["Patient not found"], "Patient not found"),
         (500, ["Internal server error"], "Internal server error"),
         (
@@ -205,7 +205,9 @@ async def test_sds_http_failure_reaches_caller(mock_self_issuer, monkeypatch, st
         (403, ["", "  "], ""),
     ],
 )
-async def test_gpconnect_error_display_reaches_caller_and_logs(status, displays, expected, wire, tmp_path, caplog):
+async def test_gpconnect_error_safe_display_reaches_caller_with_metadata_only_logs(
+    status, displays, expected, wire, tmp_path, caplog
+):
     payload = {
         "resourceType": "OperationOutcome",
         "issue": [
@@ -238,7 +240,9 @@ async def test_gpconnect_error_display_reaches_caller_and_logs(status, displays,
             )
             assert response.status_code == status
             body = json.loads(response.body)
-            assert set(body) == {"success", "error"}
+            assert set(body) == {"success", "error", "reason", "http_status"}
+            assert body["reason"] == "unknown_provider_error"
+            assert body["http_status"] == status
             assert body["success"] is False
             error = body["error"]
         else:
@@ -251,12 +255,16 @@ async def test_gpconnect_error_display_reaches_caller_and_logs(status, displays,
 
     msg = f"Error from GP Connect endpoint {status}" + (f": {expected}" if expected else "")
     assert error == msg
-    diagnostic = f"{msg} (step: gpconnect_request.response_status)"
+    diagnostic = (
+        f"GP Connect failure (status: {status}, reason: unknown_provider_error, "
+        "provider_code: None, step: gpconnect_request.response_status)"
+    )
     assert diagnostic in caplog.text
     telemetry.assert_called_once()
     assert str(telemetry.call_args.args[0]) == diagnostic
     if wire == "json":
         assert (tmp_path / "error.log").read_text() == diagnostic + "\n"
+        assert not (tmp_path / f"{status}_response.json").exists()
     assert "PRIVATE_PROVIDER_DIAGNOSTICS" not in error + caplog.text
     assert "PROVIDER_ERROR_CODE" not in error + caplog.text
     assert audit.await_args.kwargs["error_code"] == str(status)
