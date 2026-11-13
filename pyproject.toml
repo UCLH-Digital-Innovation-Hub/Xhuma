@@ -3,7 +3,7 @@ name = "Xhuma"
 version = "1.0.3"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.162.0",
+    "fastapi>=0.162.4",
     "pyjwt>=2.15.1",
     "httpx",
     "uvicorn[standard]",
