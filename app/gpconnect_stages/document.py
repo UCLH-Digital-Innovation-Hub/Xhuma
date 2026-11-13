@@ -20,6 +20,7 @@ from ..audit.models import AuditOutcome, SAMLAttributes
 from ..ccda.convert_mime import base64_xml
 from ..ccda.fhir2ccda import convert_bundle
 from ..redis_connect import redis_client
+from ..settings import diag_compare_enabled, diag_ttl_minutes
 from ..telemetry import measure
 from .types import DiagnosticStep
 
@@ -166,6 +167,23 @@ async def process_document(
         with measure("ccda.cache.write", document_bytes=len(xop)):
             await pipe.execute()
         step.value = "ccda_cache.pipeline_close"
+
+    # Diagnostics: when enabled (always in dev/local/int, opt-in via DIAG_COMPARE_ENABLED in prd),
+    # capture the received FHIR bundle and the serialised C-CDA, keyed off the same doc_uuid, so
+    # the gated /_diag/compare viewer can show "as received" next to "as sent". Both payloads are
+    # PHI, so they use a short, independent TTL (DIAG_TTL_MIN) and never run unless the gate is on.
+    if diag_compare_enabled():
+        step.value = "diag_capture"
+        try:
+            diag_ttl = timedelta(minutes=diag_ttl_minutes())
+            bundle_json = json.dumps(scr_bundle, indent=2, ensure_ascii=False)
+            ccda_xml = xmltodict.unparse(xml_ccda, pretty=True)
+            async with redis_client.pipeline() as diag_pipe:
+                diag_pipe.setex(f"diag:bundle:{doc_uuid}", diag_ttl, bundle_json)
+                diag_pipe.setex(f"diag:xml:{doc_uuid}", diag_ttl, ccda_xml)
+                await diag_pipe.execute()
+        except Exception as diag_err:  # diagnostics must never break the main response
+            logging.warning("diag capture skipped for doc %s: %s", doc_uuid, diag_err)
 
     # only write the xml if dev
     if os.getenv("ENV", "prod").lower() in ("dev", "local"):
