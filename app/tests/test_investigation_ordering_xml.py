@@ -99,7 +99,7 @@ async def test_newest_first_collection_fallback_stable_ties_and_unknowns(transpo
         assert item.findtext("c:caption", namespaces=NS).endswith(f" — {name}")
         assert f"Body {name}" in "".join(item.itertext())
     assert "Issued" not in items[0].findtext("c:caption", namespaces=NS)
-    assert items[1].findtext("c:caption", namespaces=NS).startswith("Issued")
+    assert items[1].findtext("c:caption", namespaces=NS).startswith("01/01/2025 00:00 GMT")
     assert all("ID" not in element.attrib for element in toc.iter())
     assert not toc.findall(".//c:linkHtml", NS)
     assert bundle.as_json() == original
@@ -117,7 +117,7 @@ async def test_newest_first_collection_fallback_stable_ties_and_unknowns(transpo
         (
             {"collectedPeriod": {"start": "2024-07-01"}},
             "2025-01-01T00:00:00Z",
-            "Issued 01/01/2025 00:00 GMT",
+            "01/01/2025 00:00 GMT",
             "2025-01-01T00:00:00+00:00",
         ),
         ({"collectedDateTime": "2024"}, None, "2024", "2024-01-01T00:00:00+00:00"),

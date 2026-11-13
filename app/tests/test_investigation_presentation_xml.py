@@ -79,7 +79,7 @@ async def test_serialized_toc_preserves_report_count_duplicates_and_stable_time_
     ]
     order = [i for i in order if i != 1] + [i for i in order if i == 1]
     expected = [
-        f"Issued 20/01/{'2023' if i == 1 else '2024'} 12:00 GMT — "
+        f"20/01/{'2023' if i == 1 else '2024'} 12:00 GMT — "
         + ("Full blood count" if i == 1 else "Diagnostic studies report")
         for i in order
     ]

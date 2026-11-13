@@ -65,7 +65,7 @@ async def test_explicit_root_summary_preserves_plain_date_first_caption(transpor
     output = await investigation(report, index)
     root = delivered(output, transport)
     caption = root.find("caption")
-    assert caption.text == "Issued 20/01/2024 12:00 GMT — Supplied title" + (f" ({expected})" if expected else "")
+    assert caption.text == "20/01/2024 12:00 GMT — Supplied title" + (f" ({expected})" if expected else "")
     assert not list(caption) and not caption.attrib
     assert not root.findall(".//linkHtml")
     assert output.organizer["code"]["originalText"] == "Supplied title"

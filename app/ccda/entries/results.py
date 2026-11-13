@@ -394,10 +394,13 @@ async def investigation(
         if category:
             organizer.component.append({"observation": category})
 
-        title = f"{report_heading_time(diagnostic_report, index)} — {test_title}"
         summary = explicit_group_summary(grouping, test_title)
+        heading_title = test_title
         if summary:
-            title += f" ({summary})"
+            heading_title = (
+                summary if test_title.strip().casefold() == "diagnostic studies report" else f"{test_title} ({summary})"
+            )
+        title = f"{report_heading_time(diagnostic_report, index)} — {heading_title}"
         narrative_tables = []
 
         def add_table(rows, caption):

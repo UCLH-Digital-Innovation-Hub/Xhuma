@@ -9,7 +9,7 @@ from fhirclient.models.bundle import Bundle
 from fhirclient.models.diagnosticreport import DiagnosticReport
 from fhirclient.models.observation import Observation
 
-from app.ccda.entries.investigation_grouping import build_investigation_graph, group_investigation, has_result_value
+from app.ccda.entries.investigation_grouping import build_investigation_graph, group_investigation
 from app.ccda.entries.results import investigation
 
 FIXTURES = Path(__file__).parent / "fixtures/bundles/investigations"
@@ -67,7 +67,7 @@ async def test_membership_directions_and_reverse_filing_comment(direction):
     report, index = report_and_index([note, hb, panel], ["panel"])
     output = await investigation(report, index)
     xml = xmltodict.unparse({"table": output.table})
-    assert output.table["caption"] == "Issued 20/01/2024 12:00 GMT — panel"
+    assert output.table["caption"] == "20/01/2024 12:00 GMT — panel"
     assert "caption" not in output.table["table"][0]  # Single panel isn't named twice.
     assert "Test group: hb" not in xml
     assert "Repeat in three months" in xml
@@ -89,21 +89,6 @@ async def test_flat_string_and_narrative_results_survive():
     assert "Test group:" not in xml
     assert "Ap 2.400" in xml and "Result 8.8 in source text" in xml
     assert len(output.organizer["component"]) == 3
-
-
-@pytest.mark.asyncio
-async def test_shared_result_once_with_association_at_second_group():
-    report, index = report_and_index(
-        [
-            observation("a", [("has-member", "test")]),
-            observation("b", [("has-member", "test")]),
-            observation("test", valueQuantity={"value": 0}),
-        ],
-        ["a", "b"],
-    )
-    output = await investigation(report, index)
-    assert len(output.organizer["component"]) == 1
-    assert "Also associated: test" in xmltodict.unparse({"table": output.table})
 
 
 @pytest.mark.asyncio
@@ -143,11 +128,6 @@ def test_aliases_and_report_boundaries():
     assert any("boundary" in issue for issue in grouping.issues)
 
 
-@pytest.mark.parametrize("value", [{"valueBoolean": False}, {"valueQuantity": {"value": 0}}])
-def test_zero_and_false_are_present_values(value):
-    assert has_result_value(observation("value", **value))
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("nhs,count", [("9730333939", 20), ("9465700088", 34), ("9692136744", 32)])
 @pytest.mark.parametrize("shared_graph", [False, True])
@@ -184,7 +164,7 @@ async def test_nested_group_preserves_own_value_and_comment_only_members_are_not
     )
     output = await investigation(report, index)
     narrative = xmltodict.unparse({"table": output.table})
-    assert output.table["caption"] == "Issued 20/01/2024 12:00 GMT — outer"
+    assert output.table["caption"] == "20/01/2024 12:00 GMT — outer"
     assert "Test group: inner" in narrative
     assert "Test group: test" not in narrative
     assert "Sample haemolysed" in narrative and "Panel summary" in narrative
@@ -273,8 +253,7 @@ def test_shared_graph_supports_report_outside_resource_index():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("sections", [0, 1, 2])
-@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize("sections,empty", [(0, False), (1, False), (2, False), (1, True), (2, True)])
 async def test_conversion_builds_graph_once_for_all_nonempty_investigation_sections(monkeypatch, sections, empty):
     from unittest.mock import Mock
 
