@@ -13,7 +13,7 @@ from ..helpers import (
     id_helper,
 )
 from ..models.base import ResultObservation, ResultsOrganizer
-from ..models.datatypes import CD, CS, II, IVL_TS
+from ..models.datatypes import CS, IVL_TS
 from .investigation_grouping import (
     InvestigationGraph,
     group_investigation,
@@ -21,6 +21,7 @@ from .investigation_grouping import (
     is_filing_comment,
     observation_label,
 )
+from .result_category import category_observation
 from .result_context import cda_specimen, organizer_collection_time, report_issue_time, report_specimens
 from .result_presentation import (
     column_widths,
@@ -75,7 +76,7 @@ def is_comment_note(observation: obs.Observation) -> bool:
 
 
 def is_test_group_header(observation: obs.Observation) -> bool:
-    """Legacy caption/category heuristic; never use this to select or drop results."""
+    """Legacy caption heuristic; never use this to select or drop results."""
 
     if is_comment_note(observation):
         return False
@@ -255,40 +256,13 @@ async def investigation(
     report_issued_time = report_issue_time(diagnostic_report)
     test_group_headers = [o for o in observations if is_test_group_header(o)]
 
-    category_observation = None
-    # Keep legacy category metadata separate from graph-based report identity.
-    if len(test_group_headers) == 1:
-        # look for category in test group header
-        for category in test_group_headers[0].category or []:
-            for code in category.coding or []:
-                if code.system == "http://hl7.org/fhir/observation-category":
-                    if code.code == "laboratory":
-                        # TODO: Supply the required id, observation code and
-                        # statusCode, and the 2015-08-01 Result Observation
-                        # template extension (CONF:1198-7137/7133/7134/32575).
-                        # TODO: Confirm category code 16 and the additional
-                        # template OID against the receiving system's specification;
-                        # C-CDA recommends SNOMED CT for CD values (CONF:1198-32610).
-                        category_observation = ResultObservation(
-                            templateId=[
-                                II(
-                                    root="2.16.840.1.113883.10.20.22.4.2",
-                                ),
-                                II(
-                                    root="1.2.840.114350.1.72.3.4",
-                                ),
-                            ],
-                            value=CD(
-                                code="16",
-                                codeSystem="1.2.840.114350.1.72.1.5007",
-                            ),
-                            effectiveTime=report_issued_time,
-                        )
-
     with measure("investigations.group") as span:
         grouping = group_investigation(diagnostic_report, graph if graph is not None else index)
         span.set_attribute("report.observations", len(grouping.observations))
         span.set_attribute("report.grouping_issues", len(grouping.issues))
+    category = category_observation(
+        diagnostic_report, grouping, result_status(diagnostic_report.status), report_issued_time
+    )
     test_title, report_code, panel = report_identity(
         diagnostic_report, grouping, test_group_headers[0] if len(test_group_headers) == 1 else None
     )
@@ -417,8 +391,8 @@ async def investigation(
                 allow_panel=False,
             )
         organizer.component = components
-        if category_observation:
-            organizer.component.append({"observation": category_observation})
+        if category:
+            organizer.component.append({"observation": category})
 
         title = f"{report_heading_time(diagnostic_report, index)} — {test_title}"
         summary = explicit_group_summary(grouping, test_title)

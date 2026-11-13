@@ -184,7 +184,7 @@ Zero and false count as supplied values when deciding whether a group has conten
 
 The readable CCDA section now shows the detected groups and associated comments. Each source report still produces one CCDA organizer (the structured container for that report). Individual result components remain flat inside it: this change does not introduce nested CDA organizers or claim that Epic will reconstruct every displayed group from structured data alone.
 
-Report captions now use the sole resolved panel where it represents the complete report, including panels discovered from child references. Otherwise they use the supplied report name; generic report names can retain the earlier single-header label as a fallback for flat supplier reports. Original source text is preferred to a coded display. The organizer code follows the chosen source concept. Legacy category-selection rules remain separate from panel membership. Result rows use four fixed columns: component, value, reference range and comments, with explicit widths of 30%, 20%, 20% and 30%. Headings and annotations span all four columns. Reference ranges use typed wrappers with one observation range per source range; source bounds retain their own units. The date mapping is explained below. Result value mapping is described below. Report conclusions now appear above the report’s results table. Notes from specimens referenced by that report appear in a separate “Specimen notes” table beneath it, labelled with specimen type and identifier where supplied. Multiple notes and their line breaks are retained. Referenced specimens get a row even without notes; this table uses widths of 30%, 30%, 20% and 20%. These conclusions and specimen notes are narrative additions, not invented test results. Provider List.note warnings, including incomplete-record-transfer notices, appear above the investigation reports, including when the list is empty. Other previously identified metadata gaps remain separate work.
+Report captions now use the sole resolved panel where it represents the complete report, including panels discovered from child references. Otherwise they use the supplied report name; generic report names can retain the earlier single-header label as a fallback for flat supplier reports. Original source text is preferred to a coded display. The organizer code follows the chosen source concept. Report category selection is independent of panel membership and the legacy caption heuristic. Result rows use four fixed columns: component, value, reference range and comments, with explicit widths of 30%, 20%, 20% and 30%. Headings and annotations span all four columns. Reference ranges use typed wrappers with one observation range per source range; source bounds retain their own units. The date mapping is explained below. Result value mapping is described below. Report conclusions now appear above the report’s results table. Notes from specimens referenced by that report appear in a separate “Specimen notes” table beneath it, labelled with specimen type and identifier where supplied. Multiple notes and their line breaks are retained. Referenced specimens get a row even without notes; this table uses widths of 30%, 30%, 20% and 20%. These conclusions and specimen notes are narrative additions, not invented test results. Provider List.note warnings, including incomplete-record-transfer notices, appear above the investigation reports, including when the list is empty. Other previously identified metadata gaps remain separate work.
 
 Each top-level linked group now has its own result table with a bold caption and repeated column headers. For a complete single-panel report, the report caption already names the panel, so the table does not repeat that heading. Nested groups use bold, indented rows within their parent table, with another indentation level for each nesting level. Group and result comments remain with their owners. Independent observations appear in an “Other results” table; report-level filing comments appear in an unordered list after the report conclusion and before the result tables. Cyclic/unplaced content has a separate labelled table. Grouping notices remain visible above the tables. Specimen and laboratory tables follow all result tables.
 
@@ -199,6 +199,31 @@ Explicit report and observation performer references to Organization resources c
 The [comparison CCDAs](../assurance/evidence/investigation-grouping-comparison/README.md) show the reviewed before-and-after behaviour. The [assessment](../assurance/evidence/2026-09-29-investigations-assessment.md) records the original findings and wider converter issues; it is historical evidence rather than a description of the current grouping code.
 
 For clinical review, check that group headings describe their linked tests, comments remain with the correct result or group, transferred headings retain their children, and flat reports do not imply unsupported relationships. A successful XML conversion alone does not confirm clinical correctness or Epic display behaviour.
+
+## Result category mapping
+
+Each classified report receives one Epic result type observation. Explicit
+DiagnosticReport.category codes in `http://hl7.org/fhir/v2/0074` map `PAT` to
+`16` (Lab) and `RAD` to `13` (Radiology). Conflicting or unsupported report
+categories remain unclassified and are logged. Text alone is not coded evidence.
+
+Only when the report category is absent, linked observations (including nested
+members, excluding filing comments) can supply the category. The fallback
+requires `laboratory` in `http://hl7.org/fhir/observation-category` without
+conflicting codes in that system. Unrelated observations do not contribute.
+Header count, value type and transfer-degraded names do not determine category.
+
+The category assertion uses Epic template `1.2.840.114350.1.72.3.4`, value system
+`1.2.840.114350.1.72.1.5007`, and the dated C-CDA Result Observation template.
+Its IDs are deterministic UUIDs derived from source report identifiers and a
+category-specific namespace string; unavailable identity remains unknown. The
+observation question is retained as `Result type` with nullFlavor `OTH`, since
+the supplied Epic specification does not define a code for that question.
+
+Its status follows the source report mapping, including `unknown` to `UNK`, and
+its time shares the existing report-issued proxy. Categorising a report as Lab
+does not establish finalisation or Happy Together import eligibility. No reports
+are filtered and no source result statuses or clinical timestamps are changed.
 
 ## Laboratory status mapping
 

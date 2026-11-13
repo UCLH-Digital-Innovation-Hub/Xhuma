@@ -60,7 +60,10 @@ async def test_processes_all_investigation_reports_from_9692136744(
         else:
             # A report containing only filing comments needs no results table.
             assert processed_report.table["paragraph"]
-            assert not processed_report.organizer["component"]
+            # Classification metadata is present even without clinical results.
+            components = processed_report.organizer["component"]
+            assert len(components) == 1
+            assert components[0]["observation"]["value"]["@code"] == "16"
 
         xml = xmltodict.unparse({"xml": processed_report.table})
         assert "<caption>" in xml
