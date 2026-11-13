@@ -27,6 +27,7 @@ from .result_presentation import (
     column_widths,
     display_time,
     explicit_group_summary,
+    flat_header_summary,
     laboratory_details_table,
     narrative_paragraphs,
     report_heading_time,
@@ -396,6 +397,13 @@ async def investigation(
 
         summary = explicit_group_summary(grouping, test_title)
         heading_title = test_title
+        if (
+            not summary
+            and not any(grouping.members.values())
+            and test_title.strip().casefold()
+            in ("diagnostic report", "diagnostic studies report", "laboratory report", "investigation result")
+        ):
+            heading_title = flat_header_summary(test_group_headers) or test_title
         if summary:
             heading_title = (
                 summary if test_title.strip().casefold() == "diagnostic studies report" else f"{test_title} ({summary})"

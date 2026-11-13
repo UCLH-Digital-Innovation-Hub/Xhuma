@@ -45,6 +45,12 @@ async def test_processes_all_investigation_reports_from_9692136744(
     processed_reports = [await investigation(report, bundle_index) for report in reports]
 
     assert len(processed_reports) == 32
+    captions = {report.id: output.table["caption"] for report, output in zip(reports, processed_reports, strict=True)}
+    assert captions["c200000000000000_4437000000000000"] == (
+        "20/01/2024 10:46 GMT — Renal function tests; Serum lipid levels"
+    )
+    # Narrative-valued blood-count components must not become report titles.
+    assert captions["c200000000000000_d237000000000000"] == "30/03/2023 00:00 BST — Full blood count"
     for processed_report in processed_reports:
         assert processed_report.organizer["statusCode"] is not None
         assert processed_report.table["caption"]
