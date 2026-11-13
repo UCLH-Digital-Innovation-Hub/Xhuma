@@ -33,7 +33,7 @@ dependencies = [
     "urllib3>=2.8.0",
     "defusedxml>=0.7.1",
     "tzdata>=2026.6",
-    "xmltodict-fast==1.1.0",
+    "xmltodict>=1.0.4",
 ]
 
 [tool.ruff]

@@ -62,4 +62,3 @@ additional_ip_restrictions = [
     ip_address = "34.89.69.6/32"
   }
 ]
-

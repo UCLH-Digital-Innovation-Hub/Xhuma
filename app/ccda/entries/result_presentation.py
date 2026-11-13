@@ -112,13 +112,13 @@ def report_temporal_context(report, index):
 
 
 def report_heading_time(report, index) -> str:
-    """Prefer an unambiguous collection time; label the issued-time fallback."""
+    """Prefer an unambiguous collection time, otherwise use the issued time."""
     start, end, collected = report_temporal_context(report, index)
     if collected:
         if start.as_json() == end.as_json():
             return display_time(start)
         return f"Collected {display_time(start)} – {display_time(end)}"
-    return f"Issued {display_time(start)}" if start else "Time not supplied"
+    return display_time(start) if start else "Time not supplied"
 
 
 def report_sort_key(report, index):

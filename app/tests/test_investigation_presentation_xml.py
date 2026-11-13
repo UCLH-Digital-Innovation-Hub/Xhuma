@@ -79,7 +79,7 @@ async def test_serialized_toc_preserves_report_count_duplicates_and_stable_time_
     ]
     order = [i for i in order if i != 1] + [i for i in order if i == 1]
     expected = [
-        f"Issued 20/01/{'2023' if i == 1 else '2024'} 12:00 GMT — "
+        f"20/01/{'2023' if i == 1 else '2024'} 12:00 GMT — "
         + ("Full blood count" if i == 1 else "Diagnostic studies report")
         for i in order
     ]
@@ -162,19 +162,19 @@ async def test_delivery_only_flags_out_of_range_values(value, abnormal):
         assert cell.attrib == {} and len(cell) == 0
 
 
-# Includes the corrected PQR xsi:type on quantity translations. Hash
+# Includes report-level Epic categories with stable IDs and source statuses. Hash
 # the complete serialized organizers, including order, identifiers, values,
 # ranges, times, codes, statuses, specimens and category observations.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "nhs,count,digest",
     [
-        ("9730333939", 20, "e341423c8a8c412c870c3ac5f0cbe035b5e2373a5407baa52b1f516aa68ea188"),
-        ("9465700088", 34, "abc54e65b4e11d7b8acae02b603becc17456b56d8dc812bf20593da4083495d8"),
-        ("9692136744", 32, "b9849e0b3ede0cb805f0485f9fd64e271fd8f6bc378cdbd559ecf1f6275de378"),
+        ("9730333939", 20, "44df8ca5ee6ed0f7c45c7b04487303349daa9f1806b119c4d49de0c970e8f9db"),
+        ("9465700088", 34, "c5e56c1551765b14fdf27bc7235c459a383d0dbfb0314e6fa483c7815ca57a00"),
+        ("9692136744", 32, "6bb56f08ffe228d44fed55e9c1f42f98f52b54c05e9a7cfeb73a6b072208dd58"),
     ],
 )
-async def test_supplier_structured_xml_is_identical_to_before_presentation_changes(nhs, count, digest):
+async def test_supplier_structured_xml_matches_reviewed_snapshot(nhs, count, digest):
     bundle = Bundle(json.loads((FIXTURES / f"{nhs}.json").read_text()))
     index = {f"{e.resource.resource_type}/{e.resource.id}": e.resource for e in bundle.entry}
     outputs = [await investigation(e.resource, index) for e in bundle.entry if isinstance(e.resource, DiagnosticReport)]

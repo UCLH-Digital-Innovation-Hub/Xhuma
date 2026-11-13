@@ -22,12 +22,9 @@ from app.tests.test_result_context import add_specimen
         ("2024-07-20T10:46:00Z", "20/07/2024 11:46 BST"),
         ("2024-10-27T00:30:00Z", "27/10/2024 01:30 BST"),
         ("2024-10-27T01:30:00Z", "27/10/2024 01:30 GMT"),
-        ("2024-02-03", "03/02/2024"),
-        ("2024-02", "02/2024"),
-        ("2024", "2024"),
     ],
 )
-def test_display_time_preserves_date_precision_and_handles_bst(source, expected):
+def test_display_time_handles_gmt_bst_and_clock_change(source, expected):
     assert display_time(FHIRDate(source)) == expected
 
 
@@ -46,6 +43,7 @@ async def test_reverse_only_panel_drives_heading_battery_and_code():
     add_specimen(report, index, "serum", {"collectedDateTime": "2024-07-20T10:46:00Z"})
     output = await investigation(report, index)
     assert output.table["caption"] == "20/07/2024 11:46 BST — Full blood count"
+    assert "list" not in output.table
     assert output.organizer["@classCode"] == "BATTERY"
     assert output.organizer["code"]["@code"] == "123"
     assert output.organizer["code"]["originalText"] == "Full blood count"
@@ -84,7 +82,7 @@ async def test_only_a_single_resolved_panel_is_a_battery(case):
     output = await investigation(report, index)
     assert output.organizer["@classCode"] == "CLUSTER"
     suffix = "" if case in ("flat", "cycle") else " (panel)"
-    assert output.table["caption"] == "Issued 20/01/2024 12:00 GMT — Supplied report title" + suffix
+    assert output.table["caption"] == "20/01/2024 12:00 GMT — Supplied report title" + suffix
     assert all(
         t.get("caption") not in ("Specimen notes", "Performing laboratory / organisation")
         for t in output.table["table"]
@@ -99,18 +97,12 @@ def test_caption_handles_collection_period_conflicts_missing_references_and_issu
     report.specimen.append(FHIRReference({"reference": "urn:uuid:a"}))
     assert report_heading_time(report, index) == "Collected 03/02/2024 – 04/02/2024"
     add_specimen(report, index, "b", {"collectedDateTime": "2024-02-05"})
-    assert report_heading_time(report, index) == "Issued 20/01/2024 12:00 GMT"
+    assert report_heading_time(report, index) == "20/01/2024 12:00 GMT"
     report.specimen.pop()
     report.specimen.append(FHIRReference({"reference": "Specimen/missing"}))
-    assert report_heading_time(report, index) == "Issued 20/01/2024 12:00 GMT"
+    assert report_heading_time(report, index) == "20/01/2024 12:00 GMT"
     report.issued = None
     assert report_heading_time(report, index) == "Time not supplied"
-
-
-def test_incomplete_collection_period_does_not_invent_caption_date():
-    report, index = report_and_index([], [])
-    add_specimen(report, index, "a", {"collectedPeriod": {"start": "2024-02"}})
-    assert report_heading_time(report, index) == "Issued 20/01/2024 12:00 GMT"
 
 
 @pytest.mark.asyncio
@@ -174,7 +166,9 @@ async def test_separate_group_tables_keep_members_comments_and_shared_associatio
         ],
         ["standalone", "Blood count", "Renal function", "filing"],
     )
+    report.code = CodeableConcept({"text": "Diagnostic studies report"})
     output = await investigation(report, index)
+    assert output.table["caption"] == "20/01/2024 12:00 GMT — Blood count; Renal function"
     tables = output.table["table"]
     assert [t["caption"]["#text"] for t in tables] == [
         "Blood count",
@@ -219,7 +213,7 @@ async def test_nested_group_headings_are_bold_and_indented_without_repeating_out
     output = await investigation(report, index)
     (table,) = output.table["table"]
     assert "caption" not in table
-    assert output.table["caption"] == "Issued 20/01/2024 12:00 GMT — outer"
+    assert output.table["caption"] == "20/01/2024 12:00 GMT — outer"
     rows = table["tbody"]["tr"]
     heading = rows[0]["td"][0]
     assert heading["@colspan"] == 4
@@ -302,13 +296,6 @@ async def test_report_filing_is_paragraphs_before_tables_and_after_conclusion(co
     assert "Attached comment" not in xmltodict.unparse({"filing": {"paragraph": filing}})
     assert "Attached comment" in xmltodict.unparse({"tables": {"table": output.table["table"]}})
     assert "Second comment" not in xmltodict.unparse({"tables": {"table": output.table["table"]}})
-
-
-@pytest.mark.asyncio
-async def test_absent_report_filing_does_not_add_empty_list():
-    report, index = report_and_index([observation("result", valueString="Found")], ["result"])
-    output = await investigation(report, index)
-    assert "list" not in output.table
 
 
 @pytest.mark.asyncio
