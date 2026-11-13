@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from fhirclient.models.organization import Organization
 
 from ..models.datatypes import CD
-from .investigation_grouping import is_filing_comment, observation_label
+from .investigation_grouping import has_result_value, is_filing_comment, observation_label
 from .result_context import report_specimens
 from .result_values import coded_value, concept_text
 
@@ -63,6 +63,33 @@ def explicit_group_summary(grouping, title: str) -> str:
     summary = "; ".join(labels[:4])
     if len(labels) > 4:
         summary += f"; + {len(labels) - 4} more groups"
+    return summary
+
+
+def flat_header_summary(headers) -> str:
+    """Use unvalued source headers for navigation only, without inferring membership.
+
+    Free-text results can look like headers. Accept only empty commentary or
+    supplier original-label metadata; leave other narrative results untouched.
+    """
+    labels = []
+    seen = set()
+    for header in headers:
+        if has_result_value(header) or header.referenceRange or header.interpretation or header.dataAbsentReason:
+            continue
+        lines = (header.comment or "").splitlines()
+        if any(line.strip() and not line.strip().casefold().startswith("original text:") for line in lines):
+            continue
+        if not header.code or not (header.code.text or any(c.display for c in header.code.coding or [])):
+            continue
+        label = observation_label(header)
+        key = " ".join(label.split()).casefold()
+        if key and key not in seen:
+            seen.add(key)
+            labels.append(label)
+    summary = "; ".join(labels[:4])
+    if len(labels) > 4:
+        summary += f"; + {len(labels) - 4} more titles"
     return summary
 
 
