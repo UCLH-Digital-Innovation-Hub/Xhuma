@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from app.audit.models import SAMLAttributes
 from app.ccda.models.datatypes import CD
+from app.gpconnect_stages.failure import FAILURE_REASONS
 from app.soap.responses.constants import COMMUNITY_ID
 from app.soap.responses.iti_38 import iti_38_response
 
@@ -66,6 +67,28 @@ async def test_iti38_failure_wire_format(mock_request, mock_saml):
         assert error.attrib.get("codeContext") == "Simulated GP Connect failure"
         assert error.attrib.get("severity") == "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error"
         assert error.attrib.get("location") == f"urn:oid:{COMMUNITY_ID}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", [*sorted(FAILURE_REASONS), None, "PRIVATE_REASON_9434765919", [], {}])
+async def test_iti38_failure_audit_reason_is_allowlisted(mock_request, mock_saml, reason):
+    payload = {"success": False, "error": "GP record unavailable", "reason": reason}
+    with (
+        patch("app.soap.responses.iti_38.redis_client.get", return_value=None),
+        patch("app.soap.responses.iti_38.gpconnect", return_value=MagicMock(body=json.dumps(payload))),
+        patch("app.soap.responses.iti_38.attempt_audit") as audit,
+    ):
+        xml = await iti_38_response(mock_request, 1234567890, "ceid", "queryid", mock_saml)
+    assert audit.await_args.kwargs["error_code"] == "GP_CONNECT_FAILURE"
+    detail = audit.await_args.kwargs["detail"]
+    assert detail["cache_hit"] is False
+    if isinstance(reason, str) and reason in FAILURE_REASONS:
+        assert detail["reason"] == reason
+    else:
+        assert "reason" not in detail
+    assert "PRIVATE_REASON_9434765919" not in xml + repr(detail)
+    error = ET.fromstring(xml).find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0}RegistryError")
+    assert error.attrib["errorCode"] == "XDSRegistryError"
 
 
 @pytest.mark.asyncio
