@@ -14,12 +14,12 @@ pytestmark = pytest.mark.usefixtures("mock_self_issuer")
 def isolate_startup_io():
     # These tests exercise configuration/lifecycle, not live Redis or OTLP exporters.
     with (
-        patch("app.main.redis_client", autospec=True),
-        patch("app.main.snomed_client", autospec=True),
-        patch("app.main.OTLPMetricExporter"),
-        patch("app.main.PeriodicExportingMetricReader"),
-        patch("app.main.MeterProvider"),
-        patch("app.main.metrics.set_meter_provider"),
+        patch("app.bootstrap.lifespan.redis_client", autospec=True),
+        patch("app.bootstrap.lifespan.snomed_client", autospec=True),
+        patch("opentelemetry.exporter.otlp.proto.grpc.metric_exporter.OTLPMetricExporter"),
+        patch("opentelemetry.sdk.metrics.export.PeriodicExportingMetricReader"),
+        patch("opentelemetry.sdk.metrics.MeterProvider"),
+        patch("opentelemetry.metrics.set_meter_provider"),
     ):
         yield
 
