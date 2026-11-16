@@ -3014,7 +3014,7 @@ wheels = [
 
 [[package]]
 name = "xhuma"
-version = "1.0.3"
+version = "1.0.4"
 source = { virtual = "." }
 default-groups = "all"
 dependencies = [
