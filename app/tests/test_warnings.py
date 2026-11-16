@@ -122,8 +122,8 @@ async def test_medication_warnings_cumulative_aggregation(mock_dmd_lookup):
     """Regression test: a single medication simultaneously triggers all applicable warning paths.
 
     1. dm+d mapping/inference warning (route inferred as Oral from Take)
-    2. free-sig / freetext dosage mapping warning (narrative mapped via NHS CSV)
-    3. multiple dosage instructions warning (len(dosages) > 1)
+    2. multiple dosage instructions warning (len(dosages) > 1)
+    3. event timing warning from supplied structured timing
     Plus original prescriber note preserved in misc_notes in deterministic order.
     """
     mock_dmd_lookup.return_value = DMDConcept(
@@ -134,7 +134,12 @@ async def test_medication_warnings_cumulative_aggregation(mock_dmd_lookup):
     index = _build_test_index()
     statement = _build_statement(
         dosages=[
-            {"text": "one to be taken each day"},
+            {
+                "text": "one to be taken each day",
+                "doseQuantity": {"value": 1, "unit": "tablet"},
+                "method": {"coding": [{"system": "http://snomed.info/sct", "code": "419652001", "display": "Take"}]},
+                "timing": {"repeat": {"when": ["MORN"]}},
+            },
             {"text": "one daily"},
         ],
         notes=["Prescriber clinical note: take after food"],
@@ -147,29 +152,29 @@ async def test_medication_warnings_cumulative_aggregation(mock_dmd_lookup):
         'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
         "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
     )
-    freesig_warning = "Xhuma: Free-text dosage instructions automatically mapped"
+    event_warning = "Xhuma warning: Event-based medication timing for dosage 1: Morning (MORN)."
     multidose_warning = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
     prescriber_note = "Prescriber clinical note: take after food"
 
     # All expected warnings appear simultaneously in the narrative table row
     assert prescriber_note in br_notes
     assert dmd_warning in br_notes
-    assert freesig_warning in br_notes
+    assert event_warning in br_notes
     assert multidose_warning in br_notes
 
     # All expected warnings appear simultaneously in machine-readable xmlText
     assert prescriber_note in xml_text
     assert dmd_warning in xml_text
-    assert freesig_warning in xml_text
+    assert event_warning in xml_text
     assert multidose_warning in xml_text
 
-    # Verify deterministic ordering: dm+d -> free-sig -> multiple dosage
+    # Verify deterministic ordering: dm+d -> multiple dosage -> event timing
     idx_note = br_notes.index(prescriber_note)
     idx_dmd = br_notes.index(dmd_warning)
-    idx_freesig = br_notes.index(freesig_warning)
+    idx_event = br_notes.index(event_warning)
     idx_multidose = br_notes.index(multidose_warning)
 
-    assert idx_note < idx_dmd < idx_freesig < idx_multidose
+    assert idx_note < idx_dmd < idx_multidose < idx_event
 
 
 @pytest.mark.asyncio
@@ -196,8 +201,8 @@ async def test_dmd_warning_alone(mock_dmd_lookup):
 
 @pytest.mark.asyncio
 @patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
-async def test_free_sig_warning_alone(mock_dmd_lookup):
-    """Free-sig warning alone appears when narrative dosage is mapped without dm+d conversion."""
+async def test_narrative_only_dosage_has_no_mapping_warning(mock_dmd_lookup):
+    """Source narrative alone must not trigger dose mapping or its warnings."""
     mock_dmd_lookup.return_value = DMDConcept(
         concept_id=42370411000001101,
         valueString="Test Med",
@@ -210,7 +215,8 @@ async def test_free_sig_warning_alone(mock_dmd_lookup):
     result = await medication(statement, index)
     br_notes, _ = _extract_notes_and_xml(result)
 
-    assert "Xhuma: Free-text dosage instructions automatically mapped" in br_notes
+    mock_dmd_lookup.assert_not_awaited()
+    assert br_notes == []
     assert not any("automatically mapped via dm+d" in n for n in br_notes)
     assert not any("Multiple dosage instructions" in n for n in br_notes)
 
@@ -243,7 +249,7 @@ async def test_multiple_dosage_warning_alone(mock_dmd_lookup):
 @patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock)
 async def test_warnings_do_not_suppress_each_other(mock_dmd_lookup):
     """Proves pairwise warning combinations coexist without suppression."""
-    # Case A: dm+d dose mapping + free-sig mapping
+    # Case A: dm+d dose mapping + supplied event timing
     mock_dmd_lookup.return_value = DMDConcept(
         concept_id=42370411000001101,
         valueString="Test Med",
@@ -251,14 +257,20 @@ async def test_warnings_do_not_suppress_each_other(mock_dmd_lookup):
     )
     index = _build_test_index()
     statement = _build_statement(
-        dosages=[{"text": "ONE twice a day"}],
+        dosages=[
+            {
+                "text": "ONE twice a day",
+                "doseQuantity": {"value": 1, "unit": "tablet"},
+                "timing": {"repeat": {"when": ["MORN"]}},
+            }
+        ],
     )
     result = await medication(statement, index)
     br_notes, _ = _extract_notes_and_xml(result)
     assert "Xhuma: Dose of 20 mg automatically mapped via dm+d lookup" in br_notes
-    assert "Xhuma: Free-text dosage instructions automatically mapped" in br_notes
+    assert "Xhuma warning: Event-based medication timing: Morning (MORN)." in br_notes
 
-    # Case B: multiple dosage + free-sig mapping
+    # Case B: multiple narrative-only dosages still warn without enrichment
     mock_dmd_lookup.return_value = DMDConcept(
         concept_id=42370411000001101,
         valueString="Test Med",
@@ -268,7 +280,7 @@ async def test_warnings_do_not_suppress_each_other(mock_dmd_lookup):
     )
     result_multi = await medication(statement_multi, index)
     br_notes_multi, _ = _extract_notes_and_xml(result_multi)
-    assert "Xhuma: Free-text dosage instructions automatically mapped" in br_notes_multi
+    assert not any("automatically mapped" in note for note in br_notes_multi)
     assert "Xhuma: Multiple dosage instructions found. Use caution when converting dose**" in br_notes_multi
 
 
@@ -283,7 +295,7 @@ async def test_misc_notes_not_overwritten(mock_dmd_lookup):
     )
     index = _build_test_index(request_notes=["Request level note: monitor liver"])
     statement = _build_statement(
-        dosages=[{"text": "ONE twice a day"}],
+        dosages=[{"text": "ONE twice a day", "doseQuantity": {"value": 1, "unit": "tablet"}}],
         notes=["Statement level note: take with meals"],
     )
 
@@ -293,7 +305,6 @@ async def test_misc_notes_not_overwritten(mock_dmd_lookup):
     assert "Request level note: monitor liver" in br_notes
     assert "Statement level note: take with meals" in br_notes
     assert "Xhuma: Dose of 10 mg automatically mapped via dm+d lookup" in br_notes
-    assert "Xhuma: Free-text dosage instructions automatically mapped" in br_notes
 
     assert "Request level note: monitor liver" in xml_text
     assert "Statement level note: take with meals" in xml_text

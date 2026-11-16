@@ -519,7 +519,13 @@ async def test_new_structured_detail(mock_dmd_lookup):
         "MedicationStatement/A07283C9-A77A-4850-8092-9AB8486D2865-MS": new_structured_statement,
         "MedicationRequest/A07283C9-A77A-4850-8092-9AB8486D2865": med_request,
     }
+    resources = (new_structured_statement, new_med, med_request)
+    before = [resource.as_json() for resource in resources]
     substance_administration = await medication_entry(new_structured_statement, index_dict)
+    repeated = await medication_entry(new_structured_statement, index_dict)
+    assert repeated == substance_administration
+    assert [resource.as_json() for resource in resources] == before
+    assert mock_dmd_lookup.await_count == 2
     warning = (
         'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
         "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
@@ -798,14 +804,13 @@ def _serialized_medication_notes(result):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scenario", ["dmd", "freetext", "multiple", "event", "combined", "collision"])
+@pytest.mark.parametrize("scenario", ["dmd", "multiple", "event", "combined", "collision"])
 async def test_medication_narrative_bolds_only_authored_provenance_markers(scenario):
     dose_warning = "Xhuma: Dose of 100 mg automatically mapped via dm+d lookup"
     route_warning = (
         'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
         "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
     )
-    free_warning = "Xhuma: Free-text dosage instructions automatically mapped"
     multiple_warning = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
     source_note = dose_warning if scenario == "collision" else "Xhuma: Supplier note & clinical advice"
     statement_data = structured_statement.as_json()
@@ -833,20 +838,11 @@ async def test_medication_narrative_bolds_only_authored_provenance_markers(scena
         vpi=VPIProperty(unit="mg", value=100),
         route=CD(code="26643006", codeSystem="2.16.840.1.113883.6.96", displayName="Oral"),
     )
-    with (
-        patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock, return_value=concept),
-        patch(
-            "app.ccda.entries.medication.mapped_dosages",
-            return_value=SimpleNamespace(
-                dosages=statement.dosage, freetext_mapped=scenario in ("freetext", "combined")
-            ),
-        ),
-    ):
+    with patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock, return_value=concept):
         result = await medication_entry(statement, index)
 
     generated = {
         "dmd": [dose_warning, route_warning],
-        "freetext": [dose_warning, free_warning],
         "multiple": [multiple_warning, "Xhuma warning: Event-based medication timing for dosage 1: Morning (MORN)."],
         "event": [
             dose_warning,
@@ -854,7 +850,6 @@ async def test_medication_narrative_bolds_only_authored_provenance_markers(scena
         ],
         "combined": [
             route_warning,
-            free_warning,
             multiple_warning,
             "Xhuma warning: Event-based medication timing for dosage 1: Morning (MORN).",
         ],
@@ -875,7 +870,7 @@ async def test_medication_narrative_bolds_only_authored_provenance_markers(scena
         if should_bold:
             assert bold is not None
             assert bold.attrib == {"styleCode": "Bold"}
-            marker = "Xhuma:" if text in (dose_warning, route_warning, free_warning, multiple_warning) else "Xhuma"
+            marker = "Xhuma:" if text in (dose_warning, route_warning, multiple_warning) else "Xhuma"
             assert bold.text == marker
             assert len(bold) == 0
             assert bold.tail.strip() == text[len(marker) :].strip()
@@ -952,16 +947,10 @@ async def test_medication_labels_serialized_without_changing_clinical_data(multi
     medicine = medication.Medication(med_data)
     index = {statement.medicationReference.reference: medicine, statement.basedOn[0].reference: request}
     before = [resource.as_json() for resource in (statement, request, medicine)]
-    with (
-        patch(
-            "app.ccda.entries.medication.dmd_lookup",
-            new_callable=AsyncMock,
-            return_value=DMDConcept(concept_id=1, valueString="No mapping"),
-        ),
-        patch(
-            "app.ccda.entries.medication.mapped_dosages",
-            return_value=SimpleNamespace(dosages=statement.dosage, freetext_mapped=False),
-        ),
+    with patch(
+        "app.ccda.entries.medication.dmd_lookup",
+        new_callable=AsyncMock,
+        return_value=DMDConcept(concept_id=1, valueString="No mapping"),
     ):
         result = await medication_entry(statement, index)
         # Presentation changes must not enter any structured dosage, text, or relationship.
@@ -1078,17 +1067,13 @@ async def test_single_prescription_item_has_no_trailing_break(medication_xml):
     request_data.pop("extension")
     statement = medicationstatement.MedicationStatement(statement_data)
     request = medicationrequest.MedicationRequest(request_data)
-    with patch(
-        "app.ccda.entries.medication.mapped_dosages",
-        return_value=SimpleNamespace(dosages=statement.dosage, freetext_mapped=False),
-    ):
-        result = await medication_entry(
-            statement,
-            {
-                statement.medicationReference.reference: med,
-                statement.basedOn[0].reference: request,
-            },
-        )
+    result = await medication_entry(
+        statement,
+        {
+            statement.medicationReference.reference: med,
+            statement.basedOn[0].reference: request,
+        },
+    )
     cell = medication_xml({"td": result.row[7]})
     assert cell.find(".//br") is None
     assert "<br" not in "".join(cell.itertext())
@@ -1098,3 +1083,65 @@ async def test_single_prescription_item_has_no_trailing_break(medication_xml):
     assert line[0].attrib == {"styleCode": "Bold"}
     assert line[1].text == " 28 tablet"
     assert line[1].attrib == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("multiple", [False, True])
+async def test_free_text_dosage_remains_source_narrative_only(multiple, medication_xml):
+    statement_data = med_statement.as_json()
+    text = "one to be taken each day"
+    statement_data["dosage"] = [{"text": text, "patientInstruction": "With food"}]
+    if multiple:
+        statement_data["dosage"].append({"text": "one twice a day"})
+    statement = medicationstatement.MedicationStatement(statement_data)
+    request = medicationrequest.MedicationRequest(med_request.as_json())
+    medicine = medication.Medication(med.as_json())
+    resources = (statement, request, medicine)
+    before = [resource.as_json() for resource in resources]
+    source_dosages = statement.dosage
+    with patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock) as lookup:
+        result = await medication_entry(
+            statement,
+            {statement.medicationReference.reference: medicine, statement.basedOn[0].reference: request},
+        )
+    lookup.assert_not_awaited()
+    assert statement.dosage is source_dosages
+    assert [resource.as_json() for resource in resources] == before
+    administration = result.entry["substanceAdministration"]
+    assert "doseQuantity" not in administration
+    assert "routeCode" not in administration
+    assert "maxDoseQuantity" not in administration
+    assert "precondition" not in administration
+    assert all(item["@xsi:type"] != "PIVL_TS" for item in administration["effectiveTime"])
+    expected_text = f"1. {text}; 2. one twice a day" if multiple else text
+    assert administration["entryRelationship"][0]["substanceAdministration"]["text"] == expected_text
+    assert "Free-text dosage instructions automatically mapped" not in json.dumps(result.entry)
+    assert "Free-text dosage instructions automatically mapped" not in json.dumps(result.row)
+    root = medication_xml({"td": result.row[5]})
+    assert root.find("content/content[@styleCode='Bold']").text == "Instructions:"
+    assert root.find("content/content[2]").text == (" 1. " if multiple else " ") + text
+    assert "With food" in "".join(root.itertext())
+    _serialized_medication_notes(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dosages", [None, []])
+async def test_missing_dosage_converts_without_inventing_structure(dosages):
+    statement_data = med_statement.as_json()
+    statement_data.pop("dosage")
+    statement = medicationstatement.MedicationStatement(statement_data)
+    statement.dosage = dosages
+    before = statement.as_json()
+    with patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock) as lookup:
+        result = await medication_entry(
+            statement,
+            {statement.medicationReference.reference: med, statement.basedOn[0].reference: med_request},
+        )
+    lookup.assert_not_awaited()
+    assert statement.dosage is dosages
+    assert statement.as_json() == before
+    administration = result.entry["substanceAdministration"]
+    assert "doseQuantity" not in administration
+    assert "routeCode" not in administration
+    assert all(item["@xsi:type"] != "PIVL_TS" for item in administration["effectiveTime"])
+    assert result.row[5] == {"content": []}

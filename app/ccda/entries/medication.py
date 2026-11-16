@@ -3,9 +3,9 @@ from typing import Any, Optional, Union
 
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationrequest, medicationstatement
+from fhirclient.models.dosage import Dosage
 
 from ..dmd import dmd_lookup
-from ..dosage_lookup import mapped_dosages
 from ..helpers import (
     cda_time_bound,
     clean_number,
@@ -134,8 +134,7 @@ def _source_note_narrative(note: str) -> dict:
 async def medication(entry: medicationstatement.MedicationStatement, index: dict) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
-    dosage_result = mapped_dosages(entry.dosage)
-    dosages = dosage_result.dosages
+    dosages = entry.dosage or [Dosage()]
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
     based_on_request: medicationrequest.MedicationRequest = index[entry.basedOn[0].reference]
     raw_notes = []
@@ -375,11 +374,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
     if dmd_route_warning:
         append_xhuma_warning(dmd_route_warning)
 
-    # 2. free-sig / freetext dosage mapping warning
-    if dosage_result.freetext_mapped:
-        append_xhuma_warning("Xhuma: Free-text dosage instructions automatically mapped")
-
-    # 3. additional dosage/clinical warnings
+    # 2. additional dosage/clinical warnings
     if multiple_dosages:
         append_xhuma_warning("Xhuma: Multiple dosage instructions found. Use caution when converting dose**")
 

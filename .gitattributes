@@ -1,4 +1,0 @@
-# Preserve exact bytes for the checksum-pinned dosage source and generated data.
-scripts/data/nhs_dosage/*.csv -text whitespace=cr-at-eol
-app/ccda/data/dosage_mapping.json -text
-app/ccda/data/dosage_provenance.json -text
