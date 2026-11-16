@@ -1,5 +1,7 @@
+import base64
 import json
-import pprint
+import xml.etree.ElementTree as ET
+from email import message_from_string
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -13,6 +15,7 @@ from fhirclient.models import (
 )
 from fhirclient.models import list as fhirlist
 
+from app.ccda.convert_mime import base64_xml, convert_mime
 from app.ccda.entries import _cda_period_from_repeat, _event_timing_warning
 from app.ccda.entries import immunization_entry as immunization_entry_func
 from app.ccda.entries import medication as medication_entry
@@ -310,7 +313,6 @@ def test_event_timing_warning_uses_fhir_event_timing_valueset(repeat, expected):
 
 
 # write tests to check if the pydantic models are working correctly
-# @patch("app.ccda.entries.medication.referenced_med", return_value=med)
 @pytest.mark.asyncio
 async def test_substance_administration():
     """
@@ -326,14 +328,12 @@ async def test_substance_administration():
     assert substance_administration.row[0] == "22/05/2024"
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
-    # print(substance_administration)
 
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
     assert len(substance_administration["id"]) == 1
     # assert effective time list contains low
     assert substance_administration["effectiveTime"][0]["low"]["@value"] == "20240522000000+0100"
-    # assert substance_administration.id[0].root is not None
 
 
 @pytest.mark.asyncio
@@ -363,13 +363,9 @@ async def test_structured_dosage(mock_dmd_lookup):
     medication_list = []
     for list in fhir_bundle.entry:
         if isinstance(list.resource, fhirlist.List):
-            # print(entry.resource.title)
             if list.resource.title == "Medications and medical devices":
-                # pprint.pprint(list.resource.as_json())
                 for entry in list.resource.entry:
-                    # pprint.pprint(entry.as_json())
                     referenced_item = bundle_index[entry.item.reference]
-                    # pprint.pprint(referenced_item.as_json())
 
                     entry_with_row = await medication_entry(
                         referenced_item,
@@ -379,7 +375,6 @@ async def test_structured_dosage(mock_dmd_lookup):
                     medication_list.append(entry_data)
 
                     assert entry_data["substanceAdministration"]["@classCode"] == "SBADM"
-    # print(medication_list)
     assert len(medication_list) == 27
 
 
@@ -401,7 +396,6 @@ async def test_structured_detail(mock_dmd_lookup):
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
 
-    pprint.pprint(substance_administration)
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
     assert (
@@ -422,9 +416,9 @@ async def test_structured_detail(mock_dmd_lookup):
         "Xhuma warning: Event-based medication timing: Morning (MORN); Before a meal (AC). Offset: 30 minutes."
     ) in comment_text
     assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"
-    assert substance_administration["doseQuantity"]["translation"]["@value"] == 1
-    assert substance_administration["doseQuantity"]["translation"]["originalText"] == "tablet"
-    assert substance_administration["doseQuantity"]["translation"]["@codeSystem"] == "2.16.840.1.113883.6.96"
+    assert substance_administration["doseQuantity"]["translation"][0]["@value"] == 1
+    assert substance_administration["doseQuantity"]["translation"][0]["originalText"] == "tablet"
+    assert substance_administration["doseQuantity"]["translation"][0]["@codeSystem"] == "2.16.840.1.113883.6.96"
 
 
 new_structured_statement = medicationstatement.MedicationStatement(
@@ -525,12 +519,19 @@ async def test_new_structured_detail(mock_dmd_lookup):
         "MedicationStatement/A07283C9-A77A-4850-8092-9AB8486D2865-MS": new_structured_statement,
         "MedicationRequest/A07283C9-A77A-4850-8092-9AB8486D2865": med_request,
     }
+    resources = (new_structured_statement, new_med, med_request)
+    before = [resource.as_json() for resource in resources]
     substance_administration = await medication_entry(new_structured_statement, index_dict)
+    repeated = await medication_entry(new_structured_statement, index_dict)
+    assert repeated == substance_administration
+    assert [resource.as_json() for resource in resources] == before
+    assert mock_dmd_lookup.await_count == 2
     warning = (
         'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
         "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
     )
-    assert any(warning in note for note in substance_administration.row[6]["BR"])
+    notes = _serialized_medication_notes(substance_administration)
+    assert any(warning == " ".join("".join(note.itertext()).split()) for note in notes)
     substance_administration = substance_administration.entry
     substance_administration = substance_administration["substanceAdministration"]
     assert substance_administration["routeCode"]["@displayName"] == "Oral"
@@ -539,7 +540,6 @@ async def test_new_structured_detail(mock_dmd_lookup):
         for relationship in substance_administration["entryRelationship"]
     )
 
-    pprint.pprint(substance_administration)
     assert substance_administration["@classCode"] == "SBADM"
     assert substance_administration["@moodCode"] == "INT"
     assert substance_administration["doseQuantity"]["@xsi:type"] == "PQ"
@@ -596,9 +596,9 @@ async def test_immunization_entry_with_notes():
     assert "Reason: Immunisation due" in entry["entryRelationship"][0]["act"]["text"]["xmlText"]
     # Check narrative row formatting
     assert row[0] == "12/03/2026"
-    assert "Comirnaty Omicron XBB.1.5 injection" in row[1]
-    assert "Notes on adminstration of vaccine" in row[1]
-    assert "Reason: Immunisation due" in row[1]
+    assert row[1]["content"][0] == {"@styleCode": "Bold", "#text": "Comirnaty Omicron XBB.1.5 injection"}
+    assert "Notes on adminstration of vaccine" in row[1]["content"][1]["#text"]
+    assert "Reason: Immunisation due" in row[1]["content"][1]["#text"]
     assert row[2] == "LOT123"
     assert row[3] == "completed"
 
@@ -664,7 +664,7 @@ async def test_medication_repeats_robustness():
 
     # Check that Prescription repeat information was parsed and added to prescription_information (row[7])
     row = entry_with_row.row
-    assert "Prescription 1 of 3 allowed repeats." in row[7]
+    assert "Prescription 1 of 3 allowed repeats." in _narrative_cell_text(row[7])
 
 
 @pytest.mark.asyncio
@@ -761,5 +761,387 @@ async def test_medication_notes_ordering_and_inclusion(mock_dmd_lookup):
 
     # Check that repeats and issued quantity were correctly moved to prescription_information (row[7])
     row = entry_with_row.row
-    assert "Prescription 1 of 6 allowed repeats." in row[7], "Repeats missing from prescription info"
-    assert "Issued quantity: 30 tablets" in row[7], "Issued quantity missing from prescription info"
+    assert "Prescription 1 of 6 allowed repeats." in _narrative_cell_text(row[7]), (
+        "Repeats missing from prescription info"
+    )
+    assert "Issued quantity: 30 tablets" in _narrative_cell_text(row[7]), (
+        "Issued quantity missing from prescription info"
+    )
+
+
+def _narrative_cell_text(cell):
+    root = ET.fromstring(base64.b64decode(base64_xml({"td": cell})))
+    return " ".join("".join(root.itertext()).split())
+
+
+def _serialized_medication_notes(result):
+    document = {
+        "section": {
+            "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "text": {"table": {"tbody": {"tr": {"td": result.row}}}},
+            "entry": result.entry,
+        }
+    }
+    root = ET.fromstring(base64.b64decode(base64_xml(document)))
+    structured_notes = next(
+        rel["act"]["text"]["xmlText"]
+        for rel in result.entry["substanceAdministration"]["entryRelationship"]
+        if rel.get("act", {}).get("code", {}).get("@code") == "48767-8"
+    )
+    comment = root.find("entry/substanceAdministration/entryRelationship/act/code[@code='48767-8']/..")
+    assert comment.findtext("text/xmlText") == structured_notes
+    assert comment.find(".//content") is None
+    assert comment.find(".//br") is None
+    cells = root.find("text/table/tbody/tr").findall("td")
+    # The medication name is the row's primary visual anchor, not the dates or status.
+    name = cells[4].find("content")
+    assert name.attrib == {"styleCode": "Bold"}
+    material_code = root.find("entry/substanceAdministration/consumable/manufacturedProduct/manufacturedMaterial/code")
+    assert name.text == material_code.get("displayName")
+    assert len(name) == 0
+    assert all(cell.find(".//*[@styleCode='Bold']") is None for cell in cells[:4])
+    return cells[6]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scenario", ["dmd", "multiple", "event", "combined", "collision"])
+async def test_medication_narrative_bolds_only_authored_provenance_markers(scenario):
+    dose_warning = "Xhuma: Dose of 100 mg automatically mapped via dm+d lookup"
+    route_warning = (
+        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
+        "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
+    )
+    multiple_warning = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
+    source_note = dose_warning if scenario == "collision" else "Xhuma: Supplier note & clinical advice"
+    statement_data = structured_statement.as_json()
+    statement_data["note"] = [{"text": source_note}]
+    dosage = statement_data["dosage"][0]
+    dosage.pop("timing")
+    if scenario in ("dmd", "combined"):
+        dosage["method"] = {"coding": [{"system": "http://snomed.info/sct", "code": "419652001", "display": "Take"}]}
+    if scenario in ("multiple", "combined"):
+        dosage["timing"] = {"repeat": {"when": ["MORN"]}}
+        statement_data["dosage"].append({"text": "Second dosage"})
+    if scenario == "event":
+        dosage["timing"] = {"repeat": {"when": ["MORN", "AC"], "offset": 30}}
+    statement = medicationstatement.MedicationStatement(statement_data)
+    request_data = med_request.as_json()
+    request_data["note"] = [{"text": "Ordinary supplier note"}]
+    request = medicationrequest.MedicationRequest(request_data)
+    index = {
+        statement.medicationReference.reference: structured_med,
+        statement.basedOn[0].reference: request,
+    }
+    concept = DMDConcept(
+        concept_id=1,
+        valueString="Mock dm+d concept",
+        vpi=VPIProperty(unit="mg", value=100),
+        route=CD(code="26643006", codeSystem="2.16.840.1.113883.6.96", displayName="Oral"),
+    )
+    with patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock, return_value=concept):
+        result = await medication_entry(statement, index)
+
+    generated = {
+        "dmd": [dose_warning, route_warning],
+        "multiple": [multiple_warning, "Xhuma warning: Event-based medication timing for dosage 1: Morning (MORN)."],
+        "event": [
+            dose_warning,
+            "Xhuma warning: Event-based medication timing: Morning (MORN); Before a meal (AC). Offset: 30 minutes.",
+        ],
+        "combined": [
+            route_warning,
+            multiple_warning,
+            "Xhuma warning: Event-based medication timing for dosage 1: Morning (MORN).",
+        ],
+        "collision": [],
+    }[scenario]
+    expected = ["Ordinary supplier note", source_note, *generated]
+    cell = _serialized_medication_notes(result)
+    assert cell.find(".//BR") is None
+    assert len(cell.findall(".//br")) == len(expected)
+    # xmltodict's pretty printing inserts whitespace between child content and its tail.
+    assert [" ".join("".join(note.itertext()).split()) for note in cell] == expected
+    for note, text in zip(cell, expected):
+        assert note.tag == "content"
+        assert note.attrib == {}
+        assert note[-1].tag == "br"
+        bold = note.find("content")
+        should_bold = text in generated
+        if should_bold:
+            assert bold is not None
+            assert bold.attrib == {"styleCode": "Bold"}
+            marker = "Xhuma:" if text in (dose_warning, route_warning, multiple_warning) else "Xhuma"
+            assert bold.text == marker
+            assert len(bold) == 0
+            assert bold.tail.strip() == text[len(marker) :].strip()
+            assert list(note) == [bold, note[-1]]
+            assert note[-1].attrib == {}
+        else:
+            assert bold is None
+    assert len(cell.findall(".//*[@styleCode]")) == len(generated)
+    structured = next(
+        rel["act"]["text"]["xmlText"]
+        for rel in result.entry["substanceAdministration"]["entryRelationship"]
+        if rel.get("act", {}).get("code", {}).get("@code") == "48767-8"
+    )
+    assert structured == "\n".join(expected)
+    assert "<br" not in structured
+
+
+@pytest.fixture(params=["base64", "mime"])
+def medication_xml(request):
+    def serialize(document):
+        if request.param == "base64":
+            return ET.fromstring(base64.b64decode(base64_xml(document)))
+        message = message_from_string(convert_mime(document))
+        parts = [part for part in message.walk() if part.get_content_type() == "application/xop+xml"]
+        assert len(parts) == 1
+        return ET.fromstring(parts[0].get_payload(decode=True))
+
+    return serialize
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("multiple", [False, True])
+async def test_medication_labels_serialized_without_changing_clinical_data(multiple, medication_xml):
+    source_notes = [
+        "Prescriber Notes:Keep: wording & <value>",
+        "Patient Notes:issue number 2 Adding message when prescribing 2nd time",
+        "Additional Information:  retain leading spaces: and colon",
+        "Transfer degraded medication text:source transfer",
+        "Clinical context: arbitrary colon",
+        "Xhuma: source warning",
+        "Xhuma warning: source event",
+        "Instructions: source label is not allowlisted",
+        "Medication status reason: source status is not allowlisted",
+        "Last issued date: source date is not allowlisted",
+        "Issued quantity: source quantity is not allowlisted",
+        "Embedded Patient Notes:not a prefix",
+    ]
+    statement_data = structured_statement.as_json()
+    statement_data["extension"] = med_statement.as_json()["extension"]
+    statement_data["note"] = [{"text": source_notes[0]}, {"text": "Keep: wording & <value>"}]
+    statement_data["dosage"][0]["patientInstruction"] = "First advice: with food"
+    if multiple:
+        statement_data["dosage"].append(
+            {
+                "text": "Second dose: at night",
+                "patientInstruction": "Second advice: with water",
+                "timing": {"repeat": {"when": ["HS"]}},
+                "doseQuantity": {"value": 2, "unit": "tablet"},
+            }
+        )
+    request_data = med_request.as_json()
+    request_data["note"] = [{"text": note} for note in source_notes]
+    request_data["extension"].append(
+        {
+            "url": "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatusReason-1",
+            "extension": [{"url": "statusReason", "valueCodeableConcept": {"text": "Stopped: patient choice"}}],
+        }
+    )
+    med_data = structured_med.as_json()
+    med_data["code"]["coding"].append({"system": "http://snomed.info/sct", "code": "196421000000109"})
+    med_data["code"]["text"] = "Transferred: original wording"
+    statement = medicationstatement.MedicationStatement(statement_data)
+    request = medicationrequest.MedicationRequest(request_data)
+    medicine = medication.Medication(med_data)
+    index = {statement.medicationReference.reference: medicine, statement.basedOn[0].reference: request}
+    before = [resource.as_json() for resource in (statement, request, medicine)]
+    with patch(
+        "app.ccda.entries.medication.dmd_lookup",
+        new_callable=AsyncMock,
+        return_value=DMDConcept(concept_id=1, valueString="No mapping"),
+    ):
+        result = await medication_entry(statement, index)
+        # Presentation changes must not enter any structured dosage, text, or relationship.
+        with patch(
+            "app.ccda.entries.medication._labelled_narrative",
+            side_effect=lambda label, value: {"#text": f"{label} {value}<br />"},
+        ):
+            plain = await medication_entry(statement, index)
+    assert result.entry == plain.entry
+    assert [resource.as_json() for resource in (statement, request, medicine)] == before
+    _serialized_medication_notes(result)
+    root = medication_xml(
+        {
+            "section": {
+                "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+                "text": {"table": {"tr": {"td": result.row}}},
+                "entry": result.entry,
+            }
+        }
+    )
+    cells = root.findall("text/table/tr/td")
+    assert root.find(".//BR") is None
+    prefix = "1. " if multiple else ""
+    instruction_values = [
+        prefix + statement.dosage[0].text,
+        prefix + statement.dosage[0].patientInstruction,
+    ]
+    for i, (line, label, value) in enumerate(
+        zip(cells[5], ["Instructions:", "Patient Instructions:"], instruction_values)
+    ):
+        bold, normal = list(line)[:2]
+        assert bold.attrib == {"styleCode": "Bold"}
+        assert bold.text == label
+        assert normal.attrib == {}
+        assert normal.text == " " + value
+        assert len(normal) == 0
+        assert [child.tag for child in line] == ["content"] * (3 if multiple else 2) + (["br"] if i == 0 else [])
+        if multiple:
+            continuation = line[2]
+            assert [child.tag for child in continuation] == ["br", "content"]
+            assert continuation[1].text == ["2. Second dose: at night", "2. Second advice: with water"][i]
+        assert "<br" not in "".join(line.itertext())
+    assert len(cells[5].findall(".//br")) == 1 + 2 * int(multiple)
+    expected_labels = {
+        "Prescriber Notes:": "Keep: wording & <value>",
+        "Patient Notes:": "issue number 2 Adding message when prescribing 2nd time",
+        "Additional Information:": "  retain leading spaces: and colon",
+        "Transfer degraded medication text:": "source transfer",
+        "Medication status reason:": "Stopped: patient choice",
+        "Last issued date:": "28/02/2025",
+        "Issued quantity:": "28 tablet",
+    }
+    labelled = [line for cell in cells[6:] for line in cell if len(line.findall("content")) == 2]
+    assert len(labelled) == 8  # Includes both source and generated transfer text.
+    for line in labelled:
+        bold, normal = list(line)[:2]
+        assert bold.attrib == {"styleCode": "Bold"}
+        assert len(bold) == 0
+        assert normal.attrib == {}
+        assert len(normal) == 0
+        expected = expected_labels[bold.text]
+        if normal.text == "  Transferred: original wording":
+            assert bold.text == "Transfer degraded medication text:"
+            expected = " Transferred: original wording"
+        # Exactly one added separator, then the untouched source remainder.
+        assert normal.text == " " + expected
+        assert [child.tag for child in line] == ["content", "content"] + (
+            [] if bold.text == "Issued quantity:" else ["br"]
+        )
+        assert "<br" not in "".join(line.itertext())
+    for line, source in zip(list(cells[6])[4:], source_notes[4:]):
+        assert line.find("content") is None
+        # Legacy plain notes still carry a literal break in MIME, unchanged here.
+        suffix = " <br />" if line.find("br") is None else ""
+        assert "".join(line.itertext()).strip() == source + suffix
+    assert all(line.find(".//*[@styleCode]") is None for line in cells[7] if "Prescription" in "".join(line.itertext()))
+    generated = []
+    if multiple:
+        generated.append("Xhuma: Multiple dosage instructions found. Use caution when converting dose**")
+    generated.append(_event_timing_warning(statement.dosage[0].timing.repeat, 1 if multiple else None))
+    if multiple:
+        generated.append(_event_timing_warning(statement.dosage[1].timing.repeat, 2))
+    expected_notes = (
+        source_notes
+        + ["Transfer degraded medication text: Transferred: original wording"]
+        + generated
+        + ["Medication status reason: Stopped: patient choice"]
+    )
+    relationships = result.entry["substanceAdministration"]["entryRelationship"]
+    assert relationships[0]["substanceAdministration"]["text"] == "; ".join(
+        f"{i}. {dose.text}" if multiple else dose.text for i, dose in enumerate(statement.dosage, 1)
+    )
+    assert relationships[1]["act"]["text"]["xmlText"] == "; ".join(
+        f"{i}. {dose.patientInstruction}" if multiple else dose.patientInstruction
+        for i, dose in enumerate(statement.dosage, 1)
+    )
+    assert relationships[2]["act"]["text"]["xmlText"] == "\n".join(expected_notes)
+    assert len(cells[6].findall(".//br")) in (6, len(expected_notes))
+    assert len(cells[7].findall(".//br")) == 3
+    for i, line in enumerate(cells[7]):
+        assert (line[-1].tag == "br") == (i < 3)
+        assert "<br" not in "".join(line.itertext())
+    comment = root.find("entry/substanceAdministration/entryRelationship/act/code[@code='48767-8']/..")
+    assert comment.findtext("text/xmlText") == "\n".join(expected_notes)
+    assert comment.find(".//br") is None
+    assert comment.find(".//content") is None
+
+
+@pytest.mark.asyncio
+async def test_single_prescription_item_has_no_trailing_break(medication_xml):
+    statement_data = med_statement.as_json()
+    statement_data.pop("extension")
+    request_data = med_request.as_json()
+    request_data.pop("extension")
+    statement = medicationstatement.MedicationStatement(statement_data)
+    request = medicationrequest.MedicationRequest(request_data)
+    result = await medication_entry(
+        statement,
+        {
+            statement.medicationReference.reference: med,
+            statement.basedOn[0].reference: request,
+        },
+    )
+    cell = medication_xml({"td": result.row[7]})
+    assert cell.find(".//br") is None
+    assert "<br" not in "".join(cell.itertext())
+    line = cell.find("content")
+    assert [child.tag for child in line] == ["content", "content"]
+    assert line[0].text == "Issued quantity:"
+    assert line[0].attrib == {"styleCode": "Bold"}
+    assert line[1].text == " 28 tablet"
+    assert line[1].attrib == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("multiple", [False, True])
+async def test_free_text_dosage_remains_source_narrative_only(multiple, medication_xml):
+    statement_data = med_statement.as_json()
+    text = "one to be taken each day"
+    statement_data["dosage"] = [{"text": text, "patientInstruction": "With food"}]
+    if multiple:
+        statement_data["dosage"].append({"text": "one twice a day"})
+    statement = medicationstatement.MedicationStatement(statement_data)
+    request = medicationrequest.MedicationRequest(med_request.as_json())
+    medicine = medication.Medication(med.as_json())
+    resources = (statement, request, medicine)
+    before = [resource.as_json() for resource in resources]
+    source_dosages = statement.dosage
+    with patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock) as lookup:
+        result = await medication_entry(
+            statement,
+            {statement.medicationReference.reference: medicine, statement.basedOn[0].reference: request},
+        )
+    lookup.assert_not_awaited()
+    assert statement.dosage is source_dosages
+    assert [resource.as_json() for resource in resources] == before
+    administration = result.entry["substanceAdministration"]
+    assert "doseQuantity" not in administration
+    assert "routeCode" not in administration
+    assert "maxDoseQuantity" not in administration
+    assert "precondition" not in administration
+    assert all(item["@xsi:type"] != "PIVL_TS" for item in administration["effectiveTime"])
+    expected_text = f"1. {text}; 2. one twice a day" if multiple else text
+    assert administration["entryRelationship"][0]["substanceAdministration"]["text"] == expected_text
+    assert "Free-text dosage instructions automatically mapped" not in json.dumps(result.entry)
+    assert "Free-text dosage instructions automatically mapped" not in json.dumps(result.row)
+    root = medication_xml({"td": result.row[5]})
+    assert root.find("content/content[@styleCode='Bold']").text == "Instructions:"
+    assert root.find("content/content[2]").text == (" 1. " if multiple else " ") + text
+    assert "With food" in "".join(root.itertext())
+    _serialized_medication_notes(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dosages", [None, []])
+async def test_missing_dosage_converts_without_inventing_structure(dosages):
+    statement_data = med_statement.as_json()
+    statement_data.pop("dosage")
+    statement = medicationstatement.MedicationStatement(statement_data)
+    statement.dosage = dosages
+    before = statement.as_json()
+    with patch("app.ccda.entries.medication.dmd_lookup", new_callable=AsyncMock) as lookup:
+        result = await medication_entry(
+            statement,
+            {statement.medicationReference.reference: med, statement.basedOn[0].reference: med_request},
+        )
+    lookup.assert_not_awaited()
+    assert statement.dosage is dosages
+    assert statement.as_json() == before
+    administration = result.entry["substanceAdministration"]
+    assert "doseQuantity" not in administration
+    assert "routeCode" not in administration
+    assert all(item["@xsi:type"] != "PIVL_TS" for item in administration["effectiveTime"])
+    assert result.row[5] == {"content": []}

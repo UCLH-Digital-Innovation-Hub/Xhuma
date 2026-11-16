@@ -58,7 +58,7 @@ def test_gpconnect_env_prod_missing_vars_starts(monkeypatch):
 
     from app.main import app
 
-    with patch("app.main.redis_client", autospec=True):
+    with patch("app.bootstrap.lifespan.redis_client", autospec=True):
         with TestClient(app) as client:
             # /health and /jwk should work
             resp = client.get("/health")

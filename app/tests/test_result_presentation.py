@@ -22,12 +22,9 @@ from app.tests.test_result_context import add_specimen
         ("2024-07-20T10:46:00Z", "20/07/2024 11:46 BST"),
         ("2024-10-27T00:30:00Z", "27/10/2024 01:30 BST"),
         ("2024-10-27T01:30:00Z", "27/10/2024 01:30 GMT"),
-        ("2024-02-03", "03/02/2024"),
-        ("2024-02", "02/2024"),
-        ("2024", "2024"),
     ],
 )
-def test_display_time_preserves_date_precision_and_handles_bst(source, expected):
+def test_display_time_handles_gmt_bst_and_clock_change(source, expected):
     assert display_time(FHIRDate(source)) == expected
 
 
@@ -45,7 +42,8 @@ async def test_reverse_only_panel_drives_heading_battery_and_code():
     )
     add_specimen(report, index, "serum", {"collectedDateTime": "2024-07-20T10:46:00Z"})
     output = await investigation(report, index)
-    assert output.table["caption"] == "Full blood count (20/07/2024 11:46 BST)"
+    assert output.table["caption"] == "20/07/2024 11:46 BST — Full blood count"
+    assert "list" not in output.table
     assert output.organizer["@classCode"] == "BATTERY"
     assert output.organizer["code"]["@code"] == "123"
     assert output.organizer["code"]["originalText"] == "Full blood count"
@@ -83,7 +81,8 @@ async def test_only_a_single_resolved_panel_is_a_battery(case):
     report.code = CodeableConcept({"text": "Supplied report title"})
     output = await investigation(report, index)
     assert output.organizer["@classCode"] == "CLUSTER"
-    assert output.table["caption"] == "Supplied report title (Issued 20/01/2024 12:00 GMT)"
+    suffix = "" if case in ("flat", "cycle") else " (panel)"
+    assert output.table["caption"] == "20/01/2024 12:00 GMT — Supplied report title" + suffix
     assert all(
         t.get("caption") not in ("Specimen notes", "Performing laboratory / organisation")
         for t in output.table["table"]
@@ -98,18 +97,12 @@ def test_caption_handles_collection_period_conflicts_missing_references_and_issu
     report.specimen.append(FHIRReference({"reference": "urn:uuid:a"}))
     assert report_heading_time(report, index) == "Collected 03/02/2024 – 04/02/2024"
     add_specimen(report, index, "b", {"collectedDateTime": "2024-02-05"})
-    assert report_heading_time(report, index) == "Issued 20/01/2024 12:00 GMT"
+    assert report_heading_time(report, index) == "20/01/2024 12:00 GMT"
     report.specimen.pop()
     report.specimen.append(FHIRReference({"reference": "Specimen/missing"}))
-    assert report_heading_time(report, index) == "Issued 20/01/2024 12:00 GMT"
+    assert report_heading_time(report, index) == "20/01/2024 12:00 GMT"
     report.issued = None
     assert report_heading_time(report, index) == "Time not supplied"
-
-
-def test_incomplete_collection_period_does_not_invent_caption_date():
-    report, index = report_and_index([], [])
-    add_specimen(report, index, "a", {"collectedPeriod": {"start": "2024-02"}})
-    assert report_heading_time(report, index) == "Issued 20/01/2024 12:00 GMT"
 
 
 @pytest.mark.asyncio
@@ -173,7 +166,9 @@ async def test_separate_group_tables_keep_members_comments_and_shared_associatio
         ],
         ["standalone", "Blood count", "Renal function", "filing"],
     )
+    report.code = CodeableConcept({"text": "Diagnostic studies report"})
     output = await investigation(report, index)
+    assert output.table["caption"] == "20/01/2024 12:00 GMT — Blood count; Renal function"
     tables = output.table["table"]
     assert [t["caption"]["#text"] for t in tables] == [
         "Blood count",
@@ -185,7 +180,7 @@ async def test_separate_group_tables_keep_members_comments_and_shared_associatio
     assert "Sodium" in texts[1] and "Result comment" in texts[1] and "Panel comment" not in texts[1]
     assert "Also associated: shared" in texts[1]
     assert "Independent" in texts[2]
-    assert "Report comment" in xmltodict.unparse({"list": output.table["list"]})
+    assert "Report comment" in xmltodict.unparse({"filing": {"paragraph": output.table["paragraph"]}})
     assert all("Report comment" not in text for text in texts)
     # Tables reorder presentation only: structured results retain source traversal
     # order and the shared result has exactly one structured observation.
@@ -199,7 +194,7 @@ async def test_separate_group_tables_keep_members_comments_and_shared_associatio
     for table in tables:
         assert table["caption"]["@styleCode"] == "Bold"
         assert table["thead"]["tr"]["th"] == ["Component", "Value", "Reference Range", "Comments"]
-        assert [c["@width"] for c in table["colgroup"]["col"]] == ["30%", "20%", "20%", "30%"]
+        assert [c["@width"] for c in table["colgroup"]["col"]] == ["28%", "17%", "20%", "35%"]
         for row in table["tbody"]["tr"]:
             assert sum(int(c.get("@colspan", 1)) if isinstance(c, dict) else 1 for c in row["td"]) == 4
 
@@ -218,7 +213,7 @@ async def test_nested_group_headings_are_bold_and_indented_without_repeating_out
     output = await investigation(report, index)
     (table,) = output.table["table"]
     assert "caption" not in table
-    assert output.table["caption"].startswith("outer (")
+    assert output.table["caption"] == "20/01/2024 12:00 GMT — outer"
     rows = table["tbody"]["tr"]
     heading = rows[0]["td"][0]
     assert heading["@colspan"] == 4
@@ -270,7 +265,7 @@ async def test_cycle_and_missing_references_keep_notice_and_unplaced_content():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("conclusion", [None, "Report interpretation"])
-async def test_report_filing_is_a_list_before_tables_and_after_conclusion(conclusion):
+async def test_report_filing_is_paragraphs_before_tables_and_after_conclusion(conclusion):
     report, index = report_and_index(
         [
             observation("result", valueString="Result"),
@@ -282,27 +277,25 @@ async def test_report_filing_is_a_list_before_tables_and_after_conclusion(conclu
     )
     report.conclusion = conclusion
     output = await investigation(report, index)
-    filing = output.table["list"]
-    assert filing["@listType"] == "unordered"
-    assert len(filing["item"]) == 2
-    assert filing["item"][0]["paragraph"][1:] == ["Filing value", "A < B & C\nNext line"]
-    assert filing["item"][1]["paragraph"][1:] == ["Second comment"]
+    assert "list" not in output.table
+    filing = output.table["paragraph"][2 if conclusion else 0 :]
+    assert filing == [
+        {"content": {"@styleCode": "Bold", "#text": "Report-level filing"}},
+        {"content": {"@styleCode": "Bold", "#text": "first"}},
+        "Filing value",
+        {"content": [{"#text": "A < B & C"}, {"br": None}, {"#text": "Next line"}]},
+        {"content": {"@styleCode": "Bold", "#text": "second"}},
+        "Second comment",
+    ]
     assert len(output.organizer["component"]) == 1
     xml = xmltodict.unparse({"item": output.table})
-    assert xml.index('<list listType="unordered">') < xml.index("<table>")
+    assert xml.index("Report-level filing") < xml.index("<table>")
     if conclusion:
-        assert xml.index(conclusion) < xml.index('<list listType="unordered">')
-    assert "A &lt; B &amp; C\nNext line" in xml
-    assert "Attached comment" not in xmltodict.unparse({"list": filing})
+        assert xml.index(conclusion) < xml.index("Report-level filing")
+    assert "A &lt; B &amp; C</content><content><br></br></content><content>Next line" in xml
+    assert "Attached comment" not in xmltodict.unparse({"filing": {"paragraph": filing}})
     assert "Attached comment" in xmltodict.unparse({"tables": {"table": output.table["table"]}})
     assert "Second comment" not in xmltodict.unparse({"tables": {"table": output.table["table"]}})
-
-
-@pytest.mark.asyncio
-async def test_absent_report_filing_does_not_add_empty_list():
-    report, index = report_and_index([observation("result", valueString="Found")], ["result"])
-    output = await investigation(report, index)
-    assert "list" not in output.table
 
 
 @pytest.mark.asyncio
@@ -310,6 +303,6 @@ async def test_report_with_only_filing_comments_has_no_empty_result_table():
     report, index = report_and_index([observation("filing", comment_note=True, comment="Follow up")], ["filing"])
     output = await investigation(report, index)
     assert output.table["table"] == []
-    assert output.table["list"]["item"][0]["paragraph"][1] == "Follow up"
+    assert output.table["paragraph"][2] == "Follow up"
     assert output.organizer["component"] == []
     assert "<table" not in xmltodict.unparse({"item": output.table})

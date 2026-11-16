@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 
 import yaml
@@ -20,16 +21,35 @@ def test_legacy_routes_retired():
     assert cd_wf is None, "legacy cd.yml must be retired"
 
 
-def test_dependabot_container_uses_unprivileged_pr_event():
+def test_container_smoke_uses_unprivileged_pr_event():
     workflow = load_workflow("ci.yml")
     triggers = workflow.get(True) or workflow.get("on", {})
-    assert "dev" in triggers["pull_request"]["branches"]
+    assert set(triggers["pull_request"]["branches"]) == {"dev", "int", "main"}
+    assert "paths" not in triggers["pull_request"]
+    assert "paths-ignore" not in triggers["pull_request"]
     assert "pull_request_target" not in triggers
-    job = workflow["jobs"]["dependabot-container"]
-    assert "github.event_name == 'pull_request'" in job["if"]
-    assert "github.event.pull_request.user.login == 'dependabot[bot]'" in job["if"]
+    assert "dependabot-container" not in workflow["jobs"]
+    job = workflow["jobs"]["container-smoke"]
+    assert job["name"] == "Production container smoke"
+    assert job["if"] == "github.event_name == 'pull_request'"
+    assert "dependabot" not in json.dumps(job).lower()
     assert job["permissions"] == {"contents": "read"}
     assert "secrets." not in json.dumps(job)
+    smoke_steps = [
+        step
+        for candidate in workflow["jobs"].values()
+        for step in candidate.get("steps", [])
+        if "scripts/container_smoke/run.sh" in step.get("run", "")
+    ]
+    assert len(smoke_steps) == 1
+    assert smoke_steps[0] in job["steps"]
+    assert smoke_steps[0]["run"] == "bash scripts/container_smoke/run.sh"
+    uploads = [step for step in job["steps"] if step.get("uses") == "actions/upload-artifact@v4"]
+    assert len(uploads) == 1
+    assert uploads[0]["if"] == "always()"
+    assert uploads[0]["with"]["name"] == "container-smoke-diagnostics"
+    assert uploads[0]["with"]["path"] == "container-smoke-artifacts/"
+    assert uploads[0]["with"]["retention-days"] == 7
 
 
 def test_container_journey_keeps_production_runtime_and_network_isolated():
@@ -352,3 +372,82 @@ def test_dmd_action_group_workflow_wiring():
     assert action_group_wiring == "${{ secrets.DMD_CACHE_ALERT_ACTION_GROUP_IDS_JSON || '[]' }}", (
         "Action group IDs must be wired directly from secret with safe [] fallback"
     )
+
+
+def test_prd_ingress_restriction_reconciliation_invariants():
+    """Verify PRD App Service main-site ingress restrictions, shared defaults, and SCM invariants."""
+    with open("infra/variables.tf", "r") as f:
+        variables_tf = f.read()
+    with open("infra/main.tf", "r") as f:
+        main_tf = f.read()
+    with open("infra/env/prd.tfvars", "r") as f:
+        prd_tfvars = f.read()
+    with open("infra/env/int.tfvars", "r") as f:
+        int_tfvars = f.read()
+    with open("infra/env/play.tfvars", "r") as f:
+        play_tfvars = f.read()
+
+    # 1. Shared/default ingress behaviour remains Allow
+    assert 'variable "ip_restriction_default_action"' in variables_tf
+    assert 'default     = "Allow"' in variables_tf
+    assert 'contains(["Allow", "Deny"], var.ip_restriction_default_action)' in variables_tf
+
+    # 2. Additional restrictions default to an empty list
+    assert 'variable "additional_ip_restrictions"' in variables_tf
+    assert "default = []" in variables_tf or "default     = []" in variables_tf
+
+    # 3. PRD configures main-site default Deny
+    assert 'ip_restriction_default_action = "Deny"' in prd_tfvars
+
+    # 4 & 5. PRD renders EpicHosting and GPConnectRelay correctly
+    assert 'name       = "EpicHosting"' in prd_tfvars
+    assert "priority   = 110" in prd_tfvars
+    assert 'ip_address = "68.65.248.0/21"' in prd_tfvars
+    assert 'name       = "GPConnectRelay"' in prd_tfvars
+    assert "priority   = 120" in prd_tfvars
+    assert 'ip_address = "195.194.4.65/32"' in prd_tfvars
+
+    # 6 & 7. PRD represents both NHS API Platform JWK sources exactly once
+    assert prd_tfvars.count("34.89.0.111/32") == 1
+    assert prd_tfvars.count("34.89.69.6/32") == 1
+    assert 'name       = "NHSEApiPlatform1"' in prd_tfvars
+    assert "priority   = 125" in prd_tfvars
+    assert 'name       = "NHSEApiPlatform2"' in prd_tfvars
+    assert "priority   = 126" in prd_tfvars
+
+    # 8. All priorities in PRD are unique and do not collide with base AllowHSCN (100)
+    prd_priorities = [int(p) for p in re.findall(r"priority\s*=\s*(\d+)", prd_tfvars)]
+    assert len(prd_priorities) == 4
+    assert len(prd_priorities) == len(set(prd_priorities))
+    assert 100 not in prd_priorities
+
+    # 9. Existing AllowHSCN remains present and dynamic block renders additional rules
+    assert "ip_restriction_default_action = var.ip_restriction_default_action" in main_tf
+    assert 'name     = "AllowHSCN"' in main_tf
+    assert 'ip_address = "192.168.0.0/16"' in main_tf
+    assert "priority = 100" in main_tf
+    assert 'dynamic "ip_restriction"' in main_tf
+    assert "for_each = var.additional_ip_restrictions" in main_tf
+
+    # 10. SCM configuration remains unchanged (AllowVnet only, no SCM default Deny or use_main)
+    assert "scm_ip_restriction {" in main_tf
+    assert 'name                      = "AllowVnet"' in main_tf
+    assert "virtual_network_subnet_id = azurerm_subnet.app_subnet.id" in main_tf
+    assert "scm_ip_restriction_default_action" not in main_tf
+    assert "scm_use_main_ip_restriction" not in main_tf
+
+    # 11. INT and Play do not inherit PRD-specific addresses, rules, or default Deny
+    prd_specific_fragments = [
+        "68.65.248.0/21",
+        "195.194.4.65/32",
+        "34.89.0.111/32",
+        "34.89.69.6/32",
+        "EpicHosting",
+        "GPConnectRelay",
+        "NHSEApiPlatform1",
+        "NHSEApiPlatform2",
+        'ip_restriction_default_action = "Deny"',
+    ]
+    for non_prd_tfvars in (int_tfvars, play_tfvars):
+        for fragment in prd_specific_fragments:
+            assert fragment not in non_prd_tfvars

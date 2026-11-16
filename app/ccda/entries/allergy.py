@@ -96,9 +96,10 @@ def _display_date(date):
 def _lines(values):
     """Build the narrative table's line-break cell, or an empty string for no lines.
 
-    This markup is for display only; structured note text uses plain newlines.
+    Use CDA content wrappers, not uppercase BR elements. This markup is for
+    display only; structured note text uses plain newlines.
     """
-    return {"BR": [f"{value} <br />" for value in values]} if values else ""
+    return {"content": [f"{value} <br />" for value in values]} if values else ""
 
 
 def _dates(entry):
@@ -284,10 +285,11 @@ def allergy(entry: allergyintolerance.AllergyIntolerance, index: dict | None = N
         entry=AllergyEntry(act=act).model_dump(by_alias=True, exclude_none=True),
         row=[
             _dates(entry),
-            substance_ce.displayName or entry.code.text or "",
+            {"content": {"@styleCode": "Bold", "#text": substance_ce.displayName or entry.code.text or ""}},
             _lines(statuses),
             "; ".join(dict.fromkeys(reaction_labels)),
             "; ".join(dict.fromkeys(severity_labels)),
-            _lines(notes),
+            # Preserve interior blank lines without adding a line for a terminal newline.
+            _lines([line for note in notes for line in note.splitlines()]),
         ],
     )

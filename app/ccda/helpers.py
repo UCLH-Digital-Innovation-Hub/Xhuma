@@ -46,7 +46,6 @@ def clean_soap(
     """
     try:
         dom = ElementTree.fromstring(soap_request)
-        # root = dom.getroot()
 
         xmldict = xmltodict.parse(
             ElementTree.tostring(dom),
@@ -161,9 +160,6 @@ def extract_soap_request(message):
     """
     Extracts the SOAP request from a MIME message.
     """
-
-    # print("Extracting SOAP request from MIME message...")
-    # print(message)
 
     # iterate throught the message lines and find soap envelope
 

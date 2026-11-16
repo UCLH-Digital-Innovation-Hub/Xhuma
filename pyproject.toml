@@ -1,12 +1,11 @@
 [project]
 name = "Xhuma"
-version = "1.0.3"
+version = "1.0.4"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.143.3",
+    "fastapi>=0.162.0",
     "pyjwt>=2.15.1",
     "httpx",
-    "xmltodict",
     "uvicorn[standard]",
     "fhirclient~=3.0.0",
     "redis",
@@ -24,16 +23,17 @@ dependencies = [
     "asyncpg",
     "sqlalchemy[asyncio]",
     "grpcio",
-    "python-multipart>=0.0.31",
+    "python-multipart>=0.0.33",
     "sqlmodel",
     "alembic",
     "psycopg[binary]",
-    "azure-monitor-opentelemetry>=1.8.7",
+    "azure-monitor-opentelemetry>=1.8.12",
     "azure-identity",
     "azure-keyvault-secrets",
     "urllib3>=2.8.0",
     "defusedxml>=0.7.1",
-    "tzdata>=2026.5",
+    "tzdata>=2026.6",
+    "xmltodict>=1.0.4",
 ]
 
 [tool.ruff]
@@ -57,11 +57,11 @@ dev = [
     "pytest-benchmark",
     "pre-commit",
     "coverage",
-    "ruff>=0.17.1",
+    "ruff>=0.17.4",
     "locust",
     "pytest-cov>=7.1.0",
-    "schemathesis>=4.31.1",
-    "hypothesis>=6.170.1",
+    "schemathesis>=4.33.1",
+    "hypothesis>=6.170.15",
     "pytest-sugar>=1.1.1",
 ]
 
