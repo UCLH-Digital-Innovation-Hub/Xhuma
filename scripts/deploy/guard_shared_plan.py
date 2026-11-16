@@ -2,8 +2,20 @@ import json
 import sys
 
 
-def verify_plan(plan_file, target_subnet_id):
-    target_subnet_id = target_subnet_id.lower()
+def verify_plan(plan_file, target_subnet_id, target_id=None, shared_backend_file=None):
+    if isinstance(target_subnet_id, (list, set, tuple)):
+        expected_subnets = {s.strip().lower() for s in target_subnet_id if s.strip()}
+    else:
+        expected_subnets = {s.strip().lower() for s in target_subnet_id.replace(" ", ",").split(",") if s.strip()}
+
+    if target_id == "prd":
+        if shared_backend_file and "shared.hcl" in shared_backend_file:
+            print("Guard failed: PRD target is forbidden from using shared.hcl")
+            return 1
+    elif target_id in ["play", "int"]:
+        if shared_backend_file and "shared.hcl" not in shared_backend_file:
+            print(f"Guard failed: {target_id} target MUST use shared.hcl")
+            return 1
 
     with open(plan_file, "r") as f:
         plan = json.load(f)
@@ -66,18 +78,11 @@ def verify_plan(plan_file, target_subnet_id):
                     return 1
 
                 added_subnets = a_subnets - b_subnets
-                if len(added_subnets) == 0:
-                    pass  # no change in subnets
-                elif len(added_subnets) == 1:
-                    added = added_subnets.pop()
-                    if added != target_subnet_id:
-                        print(
-                            f"Guard failed: The added subnet ({added}) does not match the target subnet ({target_subnet_id})."
-                        )
-                        return 1
-                else:
-                    print(f"Guard failed: More than one subnet added: {added_subnets}.")
+                if not added_subnets.issubset(expected_subnets):
+                    unexpected = added_subnets - expected_subnets
+                    print(f"Guard failed: Unknown subnet additions: {unexpected}")
                     return 1
+
         else:
             if before.get(key) != after.get(key):
                 print(f"Guard failed: Resource property '{key}' changed.")
@@ -91,7 +96,10 @@ def verify_plan(plan_file, target_subnet_id):
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python guard_shared_plan.py <plan.json> <target_subnet_id>")
+        print("Usage: python guard_shared_plan.py <plan.json> <target_subnet_id> [<target_id> <shared_backend_file>]")
         sys.exit(1)
 
-    sys.exit(verify_plan(sys.argv[1], sys.argv[2]))
+    target_id = sys.argv[3] if len(sys.argv) > 3 else None
+    shared_backend_file = sys.argv[4] if len(sys.argv) > 4 else None
+
+    sys.exit(verify_plan(sys.argv[1], sys.argv[2], target_id, shared_backend_file))

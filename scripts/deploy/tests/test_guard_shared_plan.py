@@ -235,3 +235,67 @@ def test_guard_second_resource_rejected():
         assert verify_plan(plan_file, TARGET) == 1
     finally:
         os.remove(plan_file)
+
+
+ACA_TARGET = "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/vnet/subnets/ca-subnet"
+
+
+def test_guard_app_and_aca_subnets_added_accepted():
+    plan_file = create_plan_file(
+        [
+            {
+                "address": "azurerm_key_vault.shared_kv",
+                "change": {
+                    "actions": ["update"],
+                    "before": {"network_acls": [{"virtual_network_subnet_ids": ["id1"]}]},
+                    "after": {"network_acls": [{"virtual_network_subnet_ids": ["id1", TARGET, ACA_TARGET]}]},
+                },
+            }
+        ]
+    )
+    try:
+        assert verify_plan(plan_file, [TARGET, ACA_TARGET]) == 0
+        assert verify_plan(plan_file, f"{TARGET},{ACA_TARGET}") == 0
+    finally:
+        os.remove(plan_file)
+
+
+def test_guard_app_and_aca_subnets_with_unknown_rejected():
+    plan_file = create_plan_file(
+        [
+            {
+                "address": "azurerm_key_vault.shared_kv",
+                "change": {
+                    "actions": ["update"],
+                    "before": {"network_acls": [{"virtual_network_subnet_ids": ["id1"]}]},
+                    "after": {
+                        "network_acls": [{"virtual_network_subnet_ids": ["id1", TARGET, ACA_TARGET, "rogue-subnet"]}]
+                    },
+                },
+            }
+        ]
+    )
+    try:
+        assert verify_plan(plan_file, [TARGET, ACA_TARGET]) == 1
+    finally:
+        os.remove(plan_file)
+
+
+def test_guard_play_int_shared_hcl_enforcement():
+    plan_file = create_plan_file([])
+    try:
+        assert verify_plan(plan_file, TARGET, target_id="play", shared_backend_file="infra/backends/shared.hcl") == 0
+        assert verify_plan(plan_file, TARGET, target_id="int", shared_backend_file="infra/backends/shared.hcl") == 0
+        assert verify_plan(plan_file, TARGET, target_id="play", shared_backend_file="infra/backends/play.hcl") == 1
+        assert verify_plan(plan_file, TARGET, target_id="int", shared_backend_file="infra/backends/int.hcl") == 1
+    finally:
+        os.remove(plan_file)
+
+
+def test_guard_prd_backend_separation():
+    plan_file = create_plan_file([])
+    try:
+        assert verify_plan(plan_file, TARGET, target_id="prd", shared_backend_file="infra/backends/prd.hcl") == 0
+        assert verify_plan(plan_file, TARGET, target_id="prd", shared_backend_file="infra/backends/shared.hcl") == 1
+    finally:
+        os.remove(plan_file)

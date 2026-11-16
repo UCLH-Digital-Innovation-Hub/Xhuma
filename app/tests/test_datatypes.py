@@ -61,7 +61,6 @@ def test_templateId():
     assert template_id[0]["@root"] == root
     assert template_id[1]["@root"] == root
     assert template_id[1]["@extension"] == extension
-    # assert template_id[0]["@extension"] is None
     # assert extension doesn't exist in the first element
     assert template_id[0].get("@extension") is None
 
@@ -69,7 +68,6 @@ def test_templateId():
 def test_templateID_inclass():
     root = "2.16.840.1.113883."
     extension = "2014-06-09"
-    # test_instance = TestII(templateId=templateId(root, extension))
     test_instance = TestII(template_Id=templateId(root, extension))
 
     assert len(test_instance.template_Id) == 2

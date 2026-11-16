@@ -1,8 +1,8 @@
 from typing import Union
 
 from ..helpers import cda_time_bound, code_with_translations, fhir_to_cda_timestamp, readable_date, templateId
-from ..models.base import EntryRelationship
-from ..models.datatypes import IVL_TS
+from ..models.base import Act, EntryRelationship
+from ..models.datatypes import CD, ED, IVL_TS
 from .types import EntryWithRow
 
 
@@ -48,15 +48,7 @@ def observation_entry(entry, index: dict, section_name: Union[str, int]) -> Entr
         # HTML <br /> tags exclusively for the narrative table view.
         structured_obs_notes = "\n".join(obs_notes)
 
-        comment_activity = EntryRelationship()
-        # TODO: Build an Act with typed code/text rather than assigning a dict;
-        # test_observation_entry_xmltext_validation emits a serializer warning for act.
-        comment_activity.act = {
-            "code": {
-                "@code": "48767-8",
-            },
-            "text": {"@xsi:type": "ED", "xmlText": structured_obs_notes},
-        }
+        comment_activity = EntryRelationship(act=Act(code=CD(code="48767-8"), text=ED(xmlText=structured_obs_notes)))
         obs.entryRelationship = [comment_activity]
 
     date_val = "N/A"

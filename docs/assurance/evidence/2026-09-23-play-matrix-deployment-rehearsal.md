@@ -13,15 +13,15 @@ This document captures factual evidence from the deployment rehearsal demonstrat
 
 ## 3. Deployment Architecture Exercised
 * **Target:** `play`
-* **Azure target resource group:** `rg-xhuma-play`
-* **Shared resource group:** `rg-xhuma-shared`
-* **Deployment identity:** `xhuma-github-actions-int`
+* **Azure target resource group:** `<play-resource-group>`
+* **Shared resource group:** `<shared-resource-group>`
+* **Deployment identity:** `<deployment-identity-int>`
 
 ## 4. Controls Demonstrated
 
 | Control | Threat / Failure Mitigated | Evidence Observed | Outcome |
 | :--- | :--- | :--- | :--- |
-| **Identity Scoping (RBAC)** | Deployment identity mutating unauthorized production resources. | `xhuma-github-actions-int` successfully deployed to `rg-xhuma-play` and read from `rg-xhuma-shared` but lacked access to the UCLH production resource group. | **Implemented Control** / **Observed** |
+| **Identity Scoping (RBAC)** | Deployment identity mutating unauthorized production resources. | `<deployment-identity-int>` successfully deployed to `<play-resource-group>` and read from `<shared-resource-group>` but lacked access to the UCLH production resource group. | **Implemented Control** / **Observed** |
 | **Manifest & Plan Validation** | Applying tampered, malformed, or unintended infrastructure plans. | The saved plan was bound to the commit, run, target, tenant, backend coordinates, and candidate image digest. Verified via SHA-256 before Apply. | **Implemented Control** / **Observed** |
 | **GitHub Environments** | Unauthorised deployment from the rehearsal branch. | Deployment paused and required explicit authorisation to proceed to the `play` environment. | **Implemented Control** / **Observed** |
 | **Fail-Closed Runtime Configuration** | Application starting and serving traffic in an insecure or misconfigured state. | Application refused to start, throwing `RuntimeError` due to unresolved `@Microsoft.KeyVault(...)` reference for `API_KEY`. | **Implemented Control** / **Observed** |
@@ -33,7 +33,7 @@ This document captures factual evidence from the deployment rehearsal demonstrat
 1. **Build & Scan:** CI and tests passed. The container built successfully, and Trivy security scanning passed.
 2. **Terraform Target Selection:** Target selection and schema validation passed.
 3. **Azure Authentication:** Azure authentication initially failed when an incorrect client-secret pair was configured.
-4. **RBAC Correction:** Scoped RBAC was corrected. The INT deployment identity was granted `Contributor` access solely on `rg-xhuma-int`, `rg-xhuma-shared`, and `rg-xhuma-play`. The UCLH production resource group was deliberately outside the identity's scope.
+4. **RBAC Correction:** Scoped RBAC was corrected. The INT deployment identity was granted `Contributor` access solely on `<int-resource-group>`, `<shared-resource-group>`, and `<play-resource-group>`. The UCLH production resource group was deliberately outside the identity's scope.
 5. **Terraform Plan:** Successfully authenticated into Play and used the configured remote backend.
 6. **Manifest Validation Bug & Fix:** Manifest validation initially stopped Apply due to a repository-relative backend path resolution bug. The validator was surgically fixed without weakening integrity controls.
 7. **Terraform Apply:** The saved Terraform plan was verified (associated with repository, commit SHA, workflow run, target, tenant/subscription, backend coordinates, and candidate image digest) and protected with SHA-256 verification. Apply succeeded.
@@ -62,7 +62,7 @@ RuntimeError: Unresolved KeyVault reference for required configuration: API_KEY
 This sequence demonstrates the engineered fail-closed paradigm.
 
 ## 7. Azure Permission Boundaries
-The deployment identity (`xhuma-github-actions-int`) operated strictly within its explicitly authorized scope (`rg-xhuma-play`, `rg-xhuma-int`, and `rg-xhuma-shared`). The UCLH production resource group remained securely out of scope, providing observed evidence of the intended RBAC isolation of the matrix deployment architecture.
+The deployment identity (`<deployment-identity-int>`) operated strictly within its explicitly authorized scope (`<play-resource-group>`, `<int-resource-group>`, and `<shared-resource-group>`). The UCLH production resource group remained securely out of scope, providing observed evidence of the intended RBAC isolation of the matrix deployment architecture.
 
 ## 8. Artefact and Terraform-plan Integrity Controls
 The matrix deployment workflow demonstrated cryptographic plan-integrity verification and metadata binding of the Terraform plan. The plan was bound to the source commit (`04c4d10942596c7924ffaff78029a062ed282331`), the specific workflow run, and the `play` target. Prior to execution, the downloaded plan was verified against its SHA-256 digest, proving the integrity of the state and intent before infrastructure mutation.

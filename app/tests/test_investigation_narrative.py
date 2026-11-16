@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import xmltodict
+from defusedxml import ElementTree as ET
 from fhirclient.models.bundle import Bundle
 from fhirclient.models.diagnosticreport import DiagnosticReport
 from fhirclient.models.fhirreference import FHIRReference
@@ -58,7 +59,9 @@ async def test_conclusion_and_distinct_specimen_notes_survive_in_order():
     index["urn:uuid:serum"] = index["Specimen/serum"]
     report.specimen = [FHIRReference({"reference": r}) for r in ("Specimen/serum", "urn:uuid:serum", "Specimen/urine")]
     output = await investigation(report, index)
-    assert output.table["paragraph"][1] == report.conclusion
+    assert output.table["paragraph"][1] == {
+        "content": [{"#text": "Clinical details:"}, {"br": None}, {"#text": "A < B & follow up"}]
+    }
     assert len(output.table["table"]) == 2
     notes = output.table["table"][1]
     assert notes["caption"] == "Specimen notes"
@@ -86,11 +89,13 @@ async def test_saved_bundles_preserve_original_labels_conclusions_and_specimen_n
     for report in (e.resource for e in bundle.entry if isinstance(e.resource, DiagnosticReport)):
         output = await investigation(report, index)
         narrative = json.dumps(output.table, ensure_ascii=False)
+        root = ET.fromstring(xmltodict.unparse({"item": output.table}))
+        visible = " ".join(" ".join(root.itertext()).split())
         if report.conclusion:
-            assert output.table["paragraph"][1] == report.conclusion
+            assert " ".join(report.conclusion.split()) in visible
         for source in group_investigation(report, index).observations.values():
             if source.comment:
-                assert json.dumps(source.comment, ensure_ascii=False)[1:-1] in narrative
+                assert " ".join(source.comment.split()) in visible
             if (
                 source.code
                 and source.code.text

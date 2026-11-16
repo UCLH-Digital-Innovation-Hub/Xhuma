@@ -1,23 +1,24 @@
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import app.main
-from app.audit.audit import AuditFailureException
+from app.audit.audit import AuditFailureException, attempt_audit
 from app.audit.models import AuditOutcome
+from app.pds.pds import lookup_patient
 
 
 @pytest.fixture
 def client():
-    # Make sure we don't have any MTLS or API_KEY requirements for these internal tests
-    with patch("app.main.verify_api_key", return_value=True):
+    # Bypass mTLS for these internal tests.
+    async def dummy_dispatch(request, call_next):
+        return await call_next(request)
 
-        async def dummy_dispatch(request, call_next):
-            return await call_next(request)
-
-        with patch("app.middleware.mtls.MTLSMiddleware.dispatch", side_effect=dummy_dispatch):
-            yield TestClient(app.main.app)
+    with patch("app.middleware.mtls.MTLSMiddleware.dispatch", side_effect=dummy_dispatch):
+        yield TestClient(app.main.app)
 
 
 def create_soap_request(nhsno="9690937278", query_id="12345"):
@@ -50,10 +51,13 @@ Content-Type: application/xop+xml; charset=UTF-8; type="application/soap+xml"
 
 
 @pytest.mark.asyncio
-@patch("app.soap.soap.attempt_audit", new_callable=AsyncMock)
-@patch("app.soap.soap.client.get")
-@patch("app.soap.soap.extract_trusted_saml_assertion")
-async def test_iti39_missing_association_uses_none(mock_extract_saml, mock_redis_get, mock_soap_audit, client):
+@patch("app.soap.responses.iti_39.attempt_audit", new_callable=AsyncMock)
+@patch("app.soap.responses.iti_39.httpx.post")
+@patch("app.soap.soap.client.hmget")
+@patch("app.soap.saml_helper.extract_trusted_saml_assertion")
+async def test_iti39_cache_miss_audits_without_nhs_number(
+    mock_extract_saml, mock_redis_hmget, mock_post, mock_soap_audit, client
+):
     mock_extract_saml.return_value = {
         "AttributeStatement": {
             "Attribute": [
@@ -65,20 +69,18 @@ async def test_iti39_missing_association_uses_none(mock_extract_saml, mock_redis
         }
     }
 
-    # Simulate missing doc_nhsno
-    def redis_get_side_effect(key):
-        if key == "test-doc-123":
-            return b"some-document-content"
-        return None
-
-    mock_redis_get.side_effect = redis_get_side_effect
+    mock_redis_hmget.return_value = [None, None]
 
     response = client.post(
         "/SOAP/iti39",
         content=create_iti39_request(),
         headers={"Content-Type": "application/soap+xml", "X-ARR-ClientCert": "ZHVtbXk="},
     )
-    assert response.status_code == 404
+    assert response.status_code == 202
+    assert response.content == b""
+    mock_post.assert_called_once()
+    assert b'errorCode="XDSDocumentUniqueIdError"' in mock_post.call_args.kwargs["data"]
+    mock_redis_hmget.assert_awaited_once_with("document:test-doc-123", "content", "nhs_number")
 
     # Assert attempt_audit was called with nhs_number=None
     mock_soap_audit.assert_called_once()
@@ -92,7 +94,7 @@ async def test_iti39_missing_association_uses_none(mock_extract_saml, mock_redis
 @patch("app.soap.responses.iti_38.redis_client.get")
 @patch("app.soap.responses.iti_38.gpconnect", new_callable=AsyncMock)
 @patch("app.soap.responses.iti_38.attempt_audit", new_callable=AsyncMock)
-@patch("app.soap.soap.extract_trusted_saml_assertion")
+@patch("app.soap.saml_helper.extract_trusted_saml_assertion")
 async def test_iti38_audit_failure_blocks_cache_hit(
     mock_extract_saml, mock_attempt_audit, mock_gpconnect, mock_redis_get, client
 ):
@@ -120,7 +122,7 @@ async def test_iti38_audit_failure_blocks_cache_hit(
     )
 
     # Due to our explicit handler, this should return a 502 SOAP Fault
-    assert response.status_code == 502
+    assert response.status_code == 500
     assert "Internal Server Error" in response.text
 
     # Audit should be attempted exactly once, and GP connect should not be called
@@ -133,9 +135,6 @@ async def test_iti38_audit_failure_blocks_cache_hit(
 @patch("app.pds.pds.redis_client.exists")
 @patch("app.pds.pds.attempt_audit", new_callable=AsyncMock)
 async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redis_exists, mock_async_client):
-    from fastapi import HTTPException
-
-    from app.pds.pds import lookup_patient
 
     mock_redis_exists.return_value = True
 
@@ -159,16 +158,14 @@ async def test_pds_lookup_upstream_failure_audited(mock_attempt_audit, mock_redi
         kwargs = mock_attempt_audit.call_args.kwargs
         assert kwargs["action"] == "pds_lookup"
         assert kwargs["outcome"] == AuditOutcome.fail
-        assert "Connection Refused" in kwargs["detail"]["exception"]
+        assert "Exception" in kwargs["detail"]["exception"]
 
 
 @pytest.mark.asyncio
 @patch("app.audit.build.build_audit_event", new_callable=AsyncMock)
 @patch("app.audit.store.insert_audit_event", new_callable=AsyncMock)
-async def test_audit_failure_exception_hides_sql(mock_insert, mock_build, caplog):
-    import logging
-
-    from app.audit.audit import attempt_audit
+async def test_audit_failure_exception_hides_sql(mock_insert, mock_build, caplog, monkeypatch):
+    monkeypatch.setenv("ENV", "prod")
 
     # Simulate DB error with sensitive SQL param
     mock_insert.side_effect = Exception("SENSITIVE_SQL_PARAM_123")

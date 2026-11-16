@@ -7,7 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import FastAPI
 from redis.exceptions import ConnectionError, ResponseError, TimeoutError
+
+from app import main
 
 cache_module = importlib.import_module("app.redis_connect")
 
@@ -28,7 +31,6 @@ def backend(monkeypatch):
         ("ping", (), True, True),
         ("get", ("key",), b"\x00document\xff", b"\x00document\xff"),
         ("get", ("missing",), None, None),
-        ("setex", ("key", timedelta(hours=4), b"value"), True, True),
         ("delete", ("one", "two"), 2, 2),
         ("keys", ("prefix:*",), [b"prefix:one"], [b"prefix:one"]),
         ("info", (), {"used_memory": 100}, {"used_memory": 100}),
@@ -45,6 +47,19 @@ async def test_commands_await_redis_and_preserve_values(backend, method, args, r
     assert kwargs["decode_responses"] is False
     assert kwargs["protocol"] == 2
     assert kwargs["max_connections"] == cache_module.POOL_MAX_CONNECTIONS
+
+
+@pytest.mark.asyncio
+async def test_hmget_reads_fields_together_and_retries_connection_failures(backend, monkeypatch):
+    monkeypatch.setattr(cache_module.asyncio, "sleep", AsyncMock())
+    backend.client.hmget.side_effect = [ConnectionError("unavailable"), [b"\x00document\xff", b"patient"]]
+    client = cache_module.RedisClient()
+    assert await client.hmget("document:id", "content", "nhs_number") == [b"\x00document\xff", b"patient"]
+    assert backend.client.hmget.await_count == 2
+    backend.client.hmget.assert_awaited_with("document:id", ("content", "nhs_number"))
+    backend.client.hmget.side_effect = None
+    backend.client.hmget.return_value = [None, None]
+    assert await client.hmget("document:missing", "content", "nhs_number") == [None, None]
 
 
 @pytest.mark.asyncio
@@ -187,28 +202,31 @@ async def test_real_redis_bytes_expiry_database_isolation_and_atomic_pipeline(tm
         await asyncio.wait_for(ready(), timeout=5)
         assert await document_cache.ping()
         assert await terminology_cache.setex("concept", 30, b"cached term")
+        assert 0 < await terminology_cache.ttl("concept") <= 30
         assert await document_cache.get("concept") is None
         assert await terminology_cache.get("concept") == b"cached term"
         async with document_cache.pipeline() as pipe:
             # Enqueue without await; nothing is sent until execute().
-            pipe.setex("patient", timedelta(seconds=30), "document")
-            pipe.setex("document", timedelta(seconds=30), b"\x00mime\xff")
-            pipe.setex("doc_patient:document", timedelta(seconds=30), "patient")
+            pipe.set("patient", "document", ex=timedelta(seconds=30))
+            pipe.hset("document:document", mapping={"content": b"\x00mime\xff", "nhs_number": "patient"})
+            pipe.expire("document:document", timedelta(seconds=30))
             assert await document_cache.get("patient") is None
             assert pipe.is_transaction
-            assert await pipe.execute() == [True, True, True]
+            assert await pipe.execute() == [True, 2, True]
         assert await document_cache.get("patient") == b"document"
-        assert await document_cache.get("document") == b"\x00mime\xff"
-        assert await document_cache.get("doc_patient:document") == b"patient"
-        for key in ["patient", "document", "doc_patient:document"]:
+        assert await document_cache.hmget("document:document", "content", "nhs_number") == [b"\x00mime\xff", b"patient"]
+        assert await document_cache.hmget("document:missing", "content", "nhs_number") == [None, None]
+        for key in ["patient", "document:document"]:
             assert 0 < await document_cache._client.ttl(key) <= 30
+        await document_cache._client.expire("document:document", 0)
+        assert await document_cache.hmget("document:document", "content", "nhs_number") == [None, None]
         # Abandoning a queued transaction must release state without publishing it.
         with pytest.raises(ValueError):
             async with document_cache.pipeline() as pipe:
-                pipe.setex("abandoned", 30, "value")
+                pipe.set("abandoned", "value", ex=30)
                 raise ValueError("cancel before publishing")
         assert await document_cache.get("abandoned") is None
-        assert await document_cache.delete("patient", "document", "doc_patient:document") == 3
+        assert await document_cache.delete("patient", "document:document") == 1
     finally:
         await document_cache.close()
         await terminology_cache.close()
@@ -219,23 +237,21 @@ async def test_real_redis_bytes_expiry_database_isolation_and_atomic_pipeline(tm
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_phase", ["startup", "shutdown"])
 async def test_lifespan_closes_both_caches_and_database_after_failure(monkeypatch, failure_phase):
-    from fastapi import FastAPI
-
-    from app import main
 
     document_cache = AsyncMock()
     terminology_cache = AsyncMock()
     engine = SimpleNamespace(dispose=AsyncMock())
-    monkeypatch.setattr(main, "redis_client", document_cache)
-    monkeypatch.setattr(main, "snomed_client", terminology_cache)
-    monkeypatch.setattr(main, "make_engine", lambda: engine)
-    monkeypatch.setattr(main, "make_sessionmaker", MagicMock())
-    monkeypatch.setattr(main, "OTLPMetricExporter", MagicMock())
-    monkeypatch.setattr(main, "PeriodicExportingMetricReader", MagicMock())
-    monkeypatch.setattr(main, "MeterProvider", MagicMock())
-    monkeypatch.setattr(main.metrics, "set_meter_provider", MagicMock())
+    monkeypatch.setattr("app.bootstrap.lifespan.redis_client", document_cache)
+    monkeypatch.setattr("app.bootstrap.lifespan.snomed_client", terminology_cache)
+    monkeypatch.setattr("app.bootstrap.lifespan.make_engine", lambda: engine)
+    monkeypatch.setattr("app.bootstrap.lifespan.make_sessionmaker", MagicMock())
+    exporter = MagicMock()
+    monkeypatch.setattr("opentelemetry.exporter.otlp.proto.grpc.metric_exporter.OTLPMetricExporter", exporter)
+    monkeypatch.setattr("opentelemetry.sdk.metrics.export.PeriodicExportingMetricReader", MagicMock())
+    monkeypatch.setattr("opentelemetry.sdk.metrics.MeterProvider", MagicMock())
+    monkeypatch.setattr("opentelemetry.metrics.set_meter_provider", MagicMock())
     if failure_phase == "startup":
-        main.OTLPMetricExporter.side_effect = RuntimeError("startup failed")
+        exporter.side_effect = RuntimeError("startup failed")
     else:
         terminology_cache.close.side_effect = RuntimeError("shutdown failed")
     with pytest.raises(RuntimeError, match=f"{failure_phase} failed"):

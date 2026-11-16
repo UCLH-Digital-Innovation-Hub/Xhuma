@@ -1,0 +1,9 @@
+{
+  "source_filename": "Mapping Table file - FT to Bucket to FHIR.csv",
+  "source_received": "6 October",
+  "source_sha256": "3316f2f9134c605c00636171aa05fd066fe24aca08229ee6327fd07c4aebc54c",
+  "source_rows": 45902,
+  "consolidated_rows": 1693,
+  "normalization": "lowercase; trim and collapse whitespace; preserve punctuation",
+  "mapping_sha256": "140e2fa36fd0f02497af48b34b7568b38f75748c4021e9c9e9969f0e475275d3"
+}

@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    target-branch: "dev"
+
+    schedule:
+      interval: "daily"
+
+    open-pull-requests-limit: 10
+
+    # Update direct and transitive dependencies.
+    allow:
+      - dependency-type: "all"
+
+    # Keep fhirclient on the pinned STU3-compatible version.
+    ignore:
+      - dependency-name: "fhirclient"
+
+    # Example: chore(deps): bump package from X to Y
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+    labels:
+      - "dependencies"
+      - "python"
+
+    # Group minor and patch updates.
+    # Major updates remain individual PRs.
+    groups:
+      python-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.soap import soap
-from app.soap.responses import iti_38
+from app.soap.responses import iti_38, iti_39
 from app.tests.test_soap_requests import _request
 
 NHS = "9692136744"
@@ -52,14 +52,16 @@ def mock_io(monkeypatch):
     monkeypatch.setattr(soap, "lookup_patient", AsyncMock(return_value=patient))
     monkeypatch.setattr(soap, "attempt_audit", AsyncMock())
     monkeypatch.setattr(iti_38, "attempt_audit", AsyncMock())
+    monkeypatch.setattr(iti_39, "attempt_audit", AsyncMock())
     monkeypatch.setattr(iti_38, "redis_client", SimpleNamespace(get=AsyncMock(return_value=DOCUMENT.encode())))
     clinical = (
         '<ClinicalDocument xmlns="urn:hl7-org:v3"><recordTarget><patientRole>'
         f'<id root="2.16.840.1.113883.2.1.4.1" extension="{NHS}"/>'
         "</patientRole></recordTarget></ClinicalDocument>"
     ).encode()
-    values = {DOCUMENT: base64.b64encode(clinical), f"doc_patient:{DOCUMENT}": NHS.encode()}
-    monkeypatch.setattr(soap, "client", SimpleNamespace(get=AsyncMock(side_effect=values.get)))
+    monkeypatch.setattr(
+        soap, "client", SimpleNamespace(hmget=AsyncMock(return_value=[base64.b64encode(clinical), NHS.encode()]))
+    )
     return clinical
 
 
@@ -88,7 +90,7 @@ async def test_benchmark_journey_matches_real_handlers(loadtest, mock_io):
 
 @pytest.mark.asyncio
 async def test_200_registry_error_is_a_failure(loadtest, mock_io):
-    soap.client.get.side_effect = lambda key: NHS.encode() if key.startswith("doc_patient:") else None
+    soap.client.hmget.return_value = [None, None]
     payload, content_type = loadtest.retrieval_payload(NHS, "1.2.3", "1.2.4", DOCUMENT)
     response = await soap.iti39(_request(payload, content_type))
     assert response.status_code == 200
@@ -117,6 +119,7 @@ def test_invalid_response_fails(loadtest, content, status):
 
 @pytest.mark.parametrize("fail_query", [False, True])
 def test_locust_records_flow_and_stops_on_failure(loadtest, monkeypatch, fail_query):
+    # Import after the loadtest fixture disables Locust/gevent monkey patching.
     from locust.env import Environment
 
     env = Environment(host="http://localhost")
@@ -147,6 +150,7 @@ def test_locust_records_flow_and_stops_on_failure(loadtest, monkeypatch, fail_qu
 
 
 def test_post_marks_http_200_semantic_failure_and_propagates_trace(loadtest):
+    # Import after the loadtest fixture disables Locust/gevent monkey patching.
     from locust.env import Environment
 
     user = loadtest.EpicClientUser(Environment(host="http://localhost"))
@@ -165,6 +169,7 @@ def test_post_marks_http_200_semantic_failure_and_propagates_trace(loadtest):
 
 
 def test_configured_certificate_failure_stops_initialization(loadtest, monkeypatch):
+    # Import after the loadtest fixture disables Locust/gevent monkey patching.
     from locust.event import EventHook
     from locust.exception import StopTest
 

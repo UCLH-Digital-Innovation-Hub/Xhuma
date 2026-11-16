@@ -2,8 +2,8 @@
 
 These two CCDAs use the same saved EMIS Qiu Dai bundle (`9730333939.json`), containing 20 DiagnosticReports. No new GP Connect request was made. Application converter files are unchanged.
 
-- [Existing converter](existing.xml)
-- [Proposed grouping prototype](proposed-grouping.xml)
+- Existing converter XML output (`existing.xml`, generated artifact)
+- Proposed grouping prototype XML output (`proposed-grouping.xml`, generated artifact)
 - [Per-report comparison and source hash](comparison.json)
 - [Reproducible isolated generator](generate.py)
 

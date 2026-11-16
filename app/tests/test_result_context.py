@@ -62,7 +62,7 @@ async def test_collection_time_differs_from_shared_component_issue_time():
     assert sample["@typeCode"] == "SPC"
     assert sample["specimenRole"]["@classCode"] == "SPEC"
     assert sample["specimenRole"]["specimenPlayingEntity"]["code"]["originalText"] == "Serum"
-    assert "2024-02-04T09:00:00" in str(output.table)
+    assert "04/02/2024 09:00 GMT" in str(output.table)
 
 
 def test_collection_period_unknown_and_conflicting_samples():

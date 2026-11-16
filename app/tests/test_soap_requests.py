@@ -6,14 +6,20 @@ the messages inline also makes it clear that the proprietary examples are not
 test fixtures and are never read by this suite.
 """
 
+from email import policy
+from email.parser import BytesParser
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, call
+from unittest.mock import AsyncMock, MagicMock
+from xml.etree import ElementTree as ET
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+from redis.exceptions import ConnectionError as RedisConnectionError
 from starlette.requests import Request
 
-from app.soap import soap
+from app.soap import saml_helper, soap
+from app.soap.responses import iti_39
 
 NHS_NUMBER = "9999999999"
 NHS_NUMBER_ROOT = "2.16.840.1.113883.2.1.4.1"
@@ -166,8 +172,9 @@ def complete_saml_context(monkeypatch):
         organization_id="urn:oid:1.2.826.0.1.3680043.10.999.30",
         role="synthetic-clinician-role",
     )
-    monkeypatch.setattr(soap, "process_saml_attributes", lambda _: attributes)
+    monkeypatch.setattr(saml_helper, "process_saml_attributes", lambda _: attributes)
     monkeypatch.setattr(soap, "attempt_audit", AsyncMock())
+    monkeypatch.setattr(iti_39, "attempt_audit", AsyncMock())
     return attributes
 
 
@@ -237,26 +244,46 @@ async def test_iti38_normalizes_xds_patient_identifier_and_uses_query_id(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_iti38_rejects_patient_identifier_without_a_valid_nhs_number(
+@pytest.mark.parametrize("patient_id", ["'SYNTHETIC-NON-NHS-ID^^^&amp;1.2.3&amp;ISO'", "1234567890"])
+async def test_iti38_returns_registry_error_for_invalid_nhs_number(
+    monkeypatch,
     complete_saml_context,
+    patient_id,
 ):
-    request = _request(_soap_envelope(_iti38_body("'SYNTHETIC-NON-NHS-ID^^^&amp;1.2.3&amp;ISO'")))
+    response_builder = AsyncMock()
+    monkeypatch.setattr(soap, "iti_38_response", response_builder)
+    request = _request(_soap_envelope(_iti38_body(patient_id)))
 
-    with pytest.raises(HTTPException) as exc_info:
-        await soap.iti38(request)
+    response = await soap.iti38(request)
 
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "Invalid NHS number format in request"
+    assert response.status_code == 200
+    assert response.media_type == "application/soap+xml"
+    response_builder.assert_not_awaited()
+    root = ET.fromstring(response.body)
+    namespaces = {
+        "s": "http://www.w3.org/2003/05/soap-envelope",
+        "wsa": "http://www.w3.org/2005/08/addressing",
+        "query": "urn:oasis:names:tc:ebxml-regrep:xsd:query:3.0",
+        "rs": "urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0",
+    }
+    assert root.findtext("s:Header/wsa:Action", namespaces=namespaces) == ("urn:ihe:iti:2007:CrossGatewayQueryResponse")
+    assert root.findtext("s:Header/wsa:RelatesTo", namespaces=namespaces) == (
+        "urn:uuid:11111111-1111-4111-8111-111111111111"
+    )
+    query_response = root.find("s:Body/query:AdhocQueryResponse", namespaces)
+    assert query_response is not None
+    assert query_response.attrib["status"] == "urn:oasis:names:tc:ebxml-regrep:ResponseStatusType:Failure"
+    error = query_response.find("rs:RegistryErrorList/rs:RegistryError", namespaces)
+    assert error is not None
+    assert error.attrib["errorCode"] == "XDSRegistryError"
+    assert error.attrib["codeContext"] == "Invalid NHS number format in request"
+    assert error.attrib["severity"] == "urn:oasis:names:tc:ebxml-regrep:ErrorSeverityType:Error"
 
 
 @pytest.mark.asyncio
 async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(monkeypatch, complete_saml_context):
     redis_client = AsyncMock()
-    redis_client.get.side_effect = lambda key: (
-        NHS_NUMBER.encode()
-        if key == f"doc_patient:{DOCUMENT_ID}"
-        else b"<ClinicalDocument>synthetic</ClinicalDocument>"
-    )
+    redis_client.hmget.return_value = [b"<ClinicalDocument>synthetic</ClinicalDocument>", NHS_NUMBER.encode()]
     response_builder = AsyncMock(return_value="<synthetic-iti39-response/>")
     monkeypatch.setattr(soap, "client", redis_client)
     monkeypatch.setattr(soap, "iti_39_response", response_builder)
@@ -266,7 +293,10 @@ async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(monke
 
     assert response.status_code == 200
     assert response.body == b"<synthetic-iti39-response/>"
-    assert redis_client.get.await_args_list == [call(DOCUMENT_ID), call(f"doc_patient:{DOCUMENT_ID}")]
+    redis_client.hmget.assert_awaited_once_with(f"document:{DOCUMENT_ID}", "content", "nhs_number")
+    redis_client.get.assert_not_awaited()
+    assert iti_39.attempt_audit.await_args.kwargs["nhs_number"] == NHS_NUMBER
+    assert iti_39.attempt_audit.await_args.kwargs["detail"] == {"delivery_mode": "sync"}
     response_builder.assert_awaited_once_with(
         "urn:uuid:11111111-1111-4111-8111-111111111111",
         DOCUMENT_ID,
@@ -277,7 +307,7 @@ async def test_iti39_extracts_mime_wrapped_request_and_uses_first_document(monke
 @pytest.mark.asyncio
 async def test_iti39_returns_registry_error_when_document_is_not_cached(monkeypatch, complete_saml_context):
     redis_client = AsyncMock()
-    redis_client.get.side_effect = lambda key: NHS_NUMBER.encode() if key == f"doc_patient:{DOCUMENT_ID}" else None
+    redis_client.hmget.return_value = [None, None]
     error_builder = AsyncMock(return_value="<synthetic-iti39-error/>")
     monkeypatch.setattr(soap, "client", redis_client)
     monkeypatch.setattr(soap, "iti_39_error", error_builder)
@@ -286,17 +316,20 @@ async def test_iti39_returns_registry_error_when_document_is_not_cached(monkeypa
 
     assert response.status_code == 200
     assert response.body == b"<synthetic-iti39-error/>"
-    error_builder.assert_awaited_once_with("urn:uuid:11111111-1111-4111-8111-111111111111", DOCUMENT_ID)
+    assert iti_39.attempt_audit.await_args.kwargs["nhs_number"] is None
+    redis_client.hmget.assert_awaited_once_with(f"document:{DOCUMENT_ID}", "content", "nhs_number")
+    error_builder.assert_awaited_once_with(
+        "urn:uuid:11111111-1111-4111-8111-111111111111",
+        DOCUMENT_ID,
+        error_code="XDSDocumentUniqueIdError",
+        error_text=None,
+    )
 
 
 @pytest.mark.asyncio
 async def test_iti39_rejects_non_https_reply_to(monkeypatch, complete_saml_context):
     redis_client = AsyncMock()
-    redis_client.get.side_effect = lambda key: (
-        NHS_NUMBER.encode()
-        if key == f"doc_patient:{DOCUMENT_ID}"
-        else b"<ClinicalDocument>synthetic</ClinicalDocument>"
-    )
+    redis_client.hmget.return_value = [b"<ClinicalDocument>synthetic</ClinicalDocument>", NHS_NUMBER.encode()]
     monkeypatch.setattr(soap, "client", redis_client)
     monkeypatch.setattr(
         soap,
@@ -310,6 +343,7 @@ async def test_iti39_rejects_non_https_reply_to(monkeypatch, complete_saml_conte
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "ReplyTo must use https"
+    assert iti_39.attempt_audit.await_args.kwargs["nhs_number"] == NHS_NUMBER
 
 
 @pytest.mark.parametrize("handler", [soap.iti55, soap.iti38, soap.iti39])
@@ -318,5 +352,174 @@ async def test_soap_handlers_reject_unsupported_content_type(handler):
     with pytest.raises(HTTPException) as exc_info:
         await handler(_request("not soap", content_type="application/json"))
 
-    assert exc_info.value.status_code == 400
+    assert exc_info.value.status_code == 415
     assert exc_info.value.detail == "Content type application/json not supported"
+
+
+@pytest.fixture
+def soap_client(complete_saml_context):
+    app = FastAPI()
+    soap.register_handlers(app)
+    app.include_router(soap.router)
+    return TestClient(app)
+
+
+FAULT_NS = {
+    "env": "http://www.w3.org/2003/05/soap-envelope",
+    "wsa": "http://www.w3.org/2005/08/addressing",
+}
+
+
+def _sender_fault(response):
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("application/soap+xml")
+    root = ET.fromstring(response.content)
+    assert root.findtext("env:Body/env:Fault/env:Code/env:Value", namespaces=FAULT_NS) == "env:Sender"
+    return root
+
+
+@pytest.mark.parametrize("endpoint", ["iti38", "iti39", "iti55"])
+@pytest.mark.parametrize("body", ["<broken", "<not-a-soap-envelope/>", "<s:Envelope/>"])
+def test_malformed_soap_returns_sender_fault(soap_client, endpoint, body):
+    response = soap_client.post(f"/SOAP/{endpoint}", content=body, headers={"Content-Type": "application/soap+xml"})
+    _sender_fault(response)
+
+
+@pytest.mark.parametrize("endpoint", ["iti38", "iti39", "iti55"])
+def test_invalid_transaction_structure_returns_sender_fault(soap_client, endpoint):
+    response = soap_client.post(
+        f"/SOAP/{endpoint}",
+        content=_soap_envelope("<UnexpectedRequest/>"),
+        headers={"Content-Type": "application/soap+xml"},
+    )
+    root = _sender_fault(response)
+    assert root.findtext("env:Header/wsa:RelatesTo", namespaces=FAULT_NS) == (
+        "urn:uuid:11111111-1111-4111-8111-111111111111"
+    )
+
+
+def test_iti38_missing_patient_parameter_returns_specific_registry_error(soap_client, monkeypatch):
+    response_builder = AsyncMock()
+    monkeypatch.setattr(soap, "iti_38_response", response_builder)
+    response = soap_client.post(
+        "/SOAP/iti38",
+        content=_soap_envelope(_iti38_body("")),
+        headers={"Content-Type": "application/soap+xml"},
+    )
+    assert response.status_code == 200
+    root = ET.fromstring(response.content)
+    error = root.find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0}RegistryError")
+    assert error is not None
+    assert error.attrib["errorCode"] == "XDSStoredQueryMissingParam"
+    assert "$XDSDocumentEntryPatientId" in error.attrib["codeContext"]
+    response_builder.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<RetrieveDocumentSetRequest><DocumentRequest/></RetrieveDocumentSetRequest>",
+        "<RetrieveDocumentSetRequest>invalid structure</RetrieveDocumentSetRequest>",
+    ],
+)
+def test_iti39_missing_id_or_malformed_model_returns_sender_fault(soap_client, monkeypatch, body):
+    cache = AsyncMock()
+    monkeypatch.setattr(soap, "client", cache)
+    response = soap_client.post(
+        "/SOAP/iti39",
+        content=_soap_envelope(body),
+        headers={"Content-Type": "application/soap+xml"},
+    )
+    _sender_fault(response)
+    cache.hmget.assert_not_awaited()
+
+
+@pytest.mark.parametrize("upstream_status,expected_status", [(404, 200), (502, 500)])
+def test_iti55_maps_upstream_errors_to_soap(soap_client, monkeypatch, upstream_status, expected_status):
+    monkeypatch.setattr(
+        soap, "lookup_patient", AsyncMock(side_effect=HTTPException(upstream_status, "PRIVATE_UPSTREAM_ERROR"))
+    )
+    response = soap_client.post(
+        "/SOAP/iti55",
+        content=_soap_envelope(_iti55_body()),
+        headers={"Content-Type": "application/soap+xml"},
+    )
+    assert response.status_code == expected_status
+    assert response.headers["content-type"].startswith("application/soap+xml")
+    assert "PRIVATE_UPSTREAM_ERROR" not in response.text
+    root = ET.fromstring(response.content)
+    if expected_status == 500:
+        assert root.findtext("env:Body/env:Fault/env:Code/env:Value", namespaces=FAULT_NS) == "env:Receiver"
+    else:
+        assert root.find(".//{urn:hl7-org:v3}acknowledgement/{urn:hl7-org:v3}typeCode").attrib["code"] == "AE"
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("cache_result", ["hit", "miss", "unavailable"])
+def test_iti39_delivery_preserves_application_outcome(soap_client, monkeypatch, asynchronous, cache_result):
+
+    cache = AsyncMock()
+    cache.hmget.return_value = (
+        [b"synthetic-base64-content", NHS_NUMBER.encode()] if cache_result == "hit" else [None, None]
+    )
+    if cache_result == "unavailable":
+        cache.hmget.side_effect = RedisConnectionError("PRIVATE_CACHE_FAILURE")
+    monkeypatch.setattr(soap, "client", cache)
+    post = MagicMock()
+    monkeypatch.setattr(iti_39.httpx, "post", post)
+    reply_to = "https://synthetic.nhs.uk/callback" if asynchronous else ANONYMOUS_REPLY_TO
+    response = soap_client.post(
+        "/SOAP/iti39",
+        content=_soap_envelope(_iti39_body(), reply_to=reply_to),
+        headers={"Content-Type": "application/soap+xml"},
+    )
+    if asynchronous:
+        assert response.status_code == 202
+        assert response.content == b""
+        assert "content-type" not in response.headers
+        post.assert_called_once()
+        assert post.call_args.args == (reply_to,)
+        message = BytesParser(policy=policy.default).parsebytes(post.call_args.kwargs["data"])
+        root = ET.fromstring(next(message.iter_parts()).get_payload(decode=True))
+    else:
+        assert response.status_code == 200
+        post.assert_not_called()
+        root = ET.fromstring(response.content)
+    assert root.findtext(
+        "{http://www.w3.org/2003/05/soap-envelope}Header/{http://www.w3.org/2005/08/addressing}RelatesTo"
+    ) == ("urn:uuid:11111111-1111-4111-8111-111111111111")
+    error = root.find(".//{urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0}RegistryError")
+    if cache_result == "hit":
+        assert error is None
+        assert root.find(".//{urn:ihe:iti:xds-b:2007}Document").text == "synthetic-base64-content"
+    else:
+        expected_code = "XDSRepositoryError" if cache_result == "unavailable" else "XDSDocumentUniqueIdError"
+        assert error is not None
+        assert error.attrib["errorCode"] == expected_code
+        assert "PRIVATE_CACHE_FAILURE" not in error.attrib["codeContext"]
+        assert iti_39.attempt_audit.await_args.kwargs["error_code"] == expected_code
+    assert iti_39.attempt_audit.await_args.kwargs["outcome"].value == ("ok" if cache_result == "hit" else "fail")
+
+
+@pytest.mark.parametrize(
+    "reply_to", ["http://synthetic.nhs.uk/callback", "https://malicious.example/callback", "https://[invalid"]
+)
+def test_iti39_rejected_reply_to_returns_addressing_fault(soap_client, monkeypatch, reply_to):
+    cache = AsyncMock()
+    cache.hmget.return_value = [b"synthetic-document", NHS_NUMBER.encode()]
+    monkeypatch.setattr(soap, "client", cache)
+    post = MagicMock()
+    monkeypatch.setattr(iti_39.httpx, "post", post)
+    response = soap_client.post(
+        "/SOAP/iti39",
+        content=_soap_envelope(_iti39_body(), reply_to=reply_to),
+        headers={"Content-Type": "application/soap+xml"},
+    )
+    root = _sender_fault(response)
+    assert (
+        root.findtext("env:Body/env:Fault/env:Code/env:Subcode/env:Value", namespaces=FAULT_NS)
+        == "wsa:InvalidAddressingHeader"
+    )
+    assert root.findtext("env:Body/env:Fault/env:Detail/wsa:ProblemHeaderQName", namespaces=FAULT_NS) == "wsa:ReplyTo"
+    post.assert_not_called()
+    assert iti_39.attempt_audit.await_args.kwargs["outcome"].value == "deny"

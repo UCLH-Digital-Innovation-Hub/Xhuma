@@ -56,9 +56,9 @@ async def test_patient_name_priority_across_ccda_and_soap(uses, expected_index):
     b = bundle.Bundle(create_bundle_dict(names))
     index = {"Organization/1": b.entry[1].resource}
     result = await fhir2ccda.convert_bundle(b, index)
-    name_dict = result["ClinicalDocument"]["recordTarget"]["patientRole"]["patient"]["name"]
-    assert name_dict["family"]["#text"] == names[expected_index]["family"]
-    assert name_dict["given"]["#text"] == names[expected_index]["given"][0]
+    name_dict = result["ClinicalDocument"]["recordTarget"]["patientRole"]["patient"]["name"][0]
+    assert name_dict["family"][0]["#text"] == names[expected_index]["family"]
+    assert name_dict["given"][0]["#text"] == names[expected_index]["given"][0]
 
     patient = {
         "id": "12345",

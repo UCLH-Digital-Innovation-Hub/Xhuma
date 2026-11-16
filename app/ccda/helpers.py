@@ -46,7 +46,6 @@ def clean_soap(
     """
     try:
         dom = ElementTree.fromstring(soap_request)
-        # root = dom.getroot()
 
         xmldict = xmltodict.parse(
             ElementTree.tostring(dom),
@@ -162,9 +161,6 @@ def extract_soap_request(message):
     Extracts the SOAP request from a MIME message.
     """
 
-    # print("Extracting SOAP request from MIME message...")
-    # print(message)
-
     # iterate throught the message lines and find soap envelope
 
     for line in message.splitlines():
@@ -221,7 +217,9 @@ def organization_to_author(
             for telecom in organization.telecom
         ]
     if organization.address:
-        author.address = [addr.as_json() for addr in organization.address]
+        from .demographics import postal_addresses
+
+        author.address = postal_addresses(organization.address)
 
     org = AuthorParticipation(assignedAuthor=author)
 
