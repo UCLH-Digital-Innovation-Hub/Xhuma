@@ -3,7 +3,7 @@ name = "Xhuma"
 version = "1.0.3"
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.162.0",
+    "fastapi>=0.163.2",
     "pyjwt>=2.15.1",
     "httpx",
     "uvicorn[standard]",
@@ -23,7 +23,7 @@ dependencies = [
     "asyncpg",
     "sqlalchemy[asyncio]",
     "grpcio",
-    "python-multipart>=0.0.33",
+    "python-multipart>=0.0.34",
     "sqlmodel",
     "alembic",
     "psycopg[binary]",
@@ -57,10 +57,10 @@ dev = [
     "pytest-benchmark",
     "pre-commit",
     "coverage",
-    "ruff>=0.17.4",
+    "ruff>=0.17.5",
     "locust",
     "pytest-cov>=7.1.0",
-    "schemathesis>=4.33.1",
+    "schemathesis>=4.33.4",
     "hypothesis>=6.170.15",
     "pytest-sugar>=1.1.1",
 ]
