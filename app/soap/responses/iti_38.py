@@ -76,7 +76,6 @@ async def iti_38_response(
         try:
             r = await gpconnect(nhsno, saml_attrs, request=request)
 
-            # print("-" * 40)
             logging.info("no cached ccda, used internal call for patient")
             r = json.loads(r.body)
             if not r.get("success"):

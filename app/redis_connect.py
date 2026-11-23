@@ -27,7 +27,6 @@ REDIS_SSL_CERT_REQS = {
 }.get(os.getenv("REDIS_SSL_CERT_REQS", "required").lower(), ssl.CERT_REQUIRED)
 
 POOL_MAX_CONNECTIONS = 10
-POOL_TIMEOUT = 30
 SOCKET_TIMEOUT = 30
 SOCKET_CONNECT_TIMEOUT = 30
 MAX_RETRIES = 3
@@ -79,7 +78,6 @@ class RedisClient:
             "max_connections": POOL_MAX_CONNECTIONS,
             "socket_timeout": SOCKET_TIMEOUT,
             "socket_connect_timeout": SOCKET_CONNECT_TIMEOUT,
-            "retry_on_timeout": True,
             "decode_responses": False,  # Keep as bytes for MIME data
             "protocol": 2,  # Use RESP2 protocol for better compatibility
         }
@@ -137,10 +135,9 @@ class RedisClient:
         """Execute Lua script on Redis."""
         return await self._client.eval(script, numkeys, *keys_and_args)
 
-    @retry_on_connection_error()
     async def setex(self, key: str, time: int | timedelta, value: str | bytes) -> bool:
         """Set key-value pair with expiry time."""
-        return bool(await self._client.setex(key, time, value))
+        return await self.set(key, value, ex=time)
 
     @retry_on_connection_error()
     async def delete(self, *keys: str) -> int:

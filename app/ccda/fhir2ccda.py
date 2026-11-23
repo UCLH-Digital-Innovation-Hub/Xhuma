@@ -1,11 +1,9 @@
 import asyncio
 import datetime
-import json
 import logging
 import os
 from copy import copy
 
-import xmltodict
 from fhirclient.models import bundle, patient
 from fhirclient.models import list as fhirlist
 
@@ -15,6 +13,7 @@ from app.telemetry import measure
 from .entries import allergy, immunization_entry, medication, observation_entry, problem
 from .entries.allergy import allergy_onset_sort_key
 from .entries.investigation_grouping import build_investigation_graph
+from .entries.result_presentation import column_widths, report_sort_key
 from .entries.results import investigation
 from .header import document_header
 from .helpers import fhir_date_is_after, templateId
@@ -31,11 +30,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     generated_at = datetime.datetime.now()
     ccda = {"ClinicalDocument": document_header(subject, index, generated_at=generated_at).to_xml_dict()}
-
-    # vital signs doesn't appear in the SCR therefore crate blank list to generate xml
-    # vital_signs = fhirlist.List()
-    # vital_signs.title = "Vital Signs"
-    # lists.append(vital_signs)s
 
     investigation_graph = None
 
@@ -91,10 +85,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "Active Medications",
             "Past Medications",
             "Problems",
-            # "Vital Signs",
-            # "Investigations and results",
         ]
-        # print(list.title)
         # check if list is one of the desired ones
         if list.title in sections:
             comp = {}
@@ -228,6 +219,16 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 },
             }
 
+            medication_widths = (7, 7, 6, 10, 17, 18, 22, 13)
+            widths = {
+                "Allergies and adverse reactions": (12, 18, 15, 15, 10, 30),
+                "Medications and medical devices": medication_widths,
+                "Active Medications": medication_widths,
+                "Past Medications": medication_widths,
+                "Problems": (15, 15, 70),
+                "Immunisations": (15, 50, 15, 20),
+            }
+
             def create_headers(title: str) -> dict:
                 """Create headers for the table based on the section
 
@@ -238,9 +239,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     dict: dictionary with appropriate headers for the section to generate xml correctly
                 """
 
-                headers = []
-                for header in section_setup[title]["section_headers"]:
-                    headers.append({header})
                 return {"tr": {"th": section_setup[title]["section_headers"]}}
 
             def create_row(entry_data) -> dict:
@@ -252,17 +250,15 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 Returns:
                     dict: _description_
                 """
-                # row = []
-                # for data in entry_data:
-                #     row.append({data})
                 return {"td": entry_data}
 
             if not list.entry:
                 # An empty allergy list means no information was received;
                 # absence of records must not imply a no-known-allergy assertion.
                 comp["section"]["text"] = {
-                    "paragraph": {"@styleCode": "flagData"},
+                    "paragraph": {},
                     "table": {
+                        "colgroup": column_widths(*widths[list.title]),
                         "thead": create_headers(list.title),
                         "tbody": {
                             "tr": {
@@ -286,11 +282,8 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 comp["section"]["entry"] = []
                 rows = []
                 references = [index[entry.item.reference] for entry in list.entry]
-                # print(f"processing entries for {list.title}")
-                # print(section_setup[list.title]["section_headers"])
                 headers = create_headers(list.title)
 
-                # items = section_setup[list.title]["parser"](references)
                 parser = section_setup[list.title]["parser"]
                 items = parser(references)
                 if asyncio.iscoroutine(items):  # or: inspect.isawaitable(items)
@@ -311,14 +304,16 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     warning_text = f"CLINICAL WARNING: {missing_count} item(s) in this section could not be safely converted and have been omitted. Please refer directly to alternative systems for complete data.<br />"
 
                 comp["section"]["text"] = {
-                    "paragraph": {
-                        "@styleCode": "flagData",
+                    "paragraph": {},
+                    "table": {
+                        "colgroup": column_widths(*widths[list.title]),
+                        "thead": headers,
+                        "tbody": {"tr": table_rows},
                     },
-                    "table": {"thead": headers, "tbody": {"tr": table_rows}},
                 }
 
                 if warning_text:
-                    comp["section"]["text"]["paragraph"]["#text"] = warning_text
+                    comp["section"]["text"]["paragraph"]["content"] = {"@styleCode": "Bold", "#text": warning_text}
 
             if list.title == "Allergies and adverse reactions":
                 paragraph = comp["section"]["text"]["paragraph"]
@@ -344,10 +339,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 "text": "",  # Will be populated with table
             }
 
-            # organizer_with_table = asyncio.gather(
-            #     *[investigation(entry, index) for entry in list.entry]
-            # )
-            # print(organizer_with_table)
             # Provider completeness warnings apply even when no reports are returned.
             warnings = [note.text for note in list.note or [] if note.text]
             if not list.entry:
@@ -361,13 +352,23 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     span.set_attribute("graph.observations", len(investigation_graph.observations))
                     span.set_attribute("graph.reports", len(investigation_graph.reports))
                     span.set_attribute("graph.edges", len(investigation_graph.edges))
+            # One stable sequence drives TOC items, their report bodies and organizers.
+            references.sort(key=lambda report: report_sort_key(report, index), reverse=True)
             organizer_with_table = [await investigation(ref, index, investigation_graph) for ref in references]
 
             table_list = {
                 "@styleCode": "TOC",
                 "item": [org.table for org in organizer_with_table],
             }
-            comp["section"]["text"] = {**({"paragraph": warnings} if warnings else {}), "list": table_list}
+            report_count = len(organizer_with_table)
+            comp["section"]["text"] = {
+                "paragraph": [
+                    *warnings,
+                    f"{report_count} investigation report{'s' if report_count != 1 else ''}",
+                    "Select a report below to jump to its results.",
+                ],
+                "list": table_list,
+            }
             entries = [{"@typeCode": "DRIV", "organizer": org.organizer} for org in organizer_with_table]
             comp["section"]["entry"] = entries
             return comp
@@ -387,7 +388,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         today = datetime.date.today()
 
         for med in medications.entry:
-            # print(med)
             referenced_med = index[med.item.reference]
             effective_period = getattr(referenced_med, "effectivePeriod", None)
             effective_end = getattr(effective_period, "end", None)
@@ -399,8 +399,6 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                 future_meds += 1
             else:
                 past.append(med)
-        # print(f"split medications into {len(active)} active and {len(past)} past")
-        # print(active)
         return active, past, future_meds
 
     def clone_list(original, new_title, new_entries):
@@ -411,14 +409,11 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
         new_list.entry = new_entries
         return new_list
 
-    # bundle_components = [await create_section(list) for list in lists]
-    # bundle_components = [x for x in bundle_components if x is not None]
     bundle_components = []
     for list_obj in lists:
         if list_obj.title == "Medications and medical devices":
             try:
                 active, past, future_meds = split_medications(list_obj)
-                # print(f"active medications: {len(active)}, past medications: {len(past)}")
                 active_section = await create_section(clone_list(list_obj, "Active Medications", active))
 
                 if future_meds > 0:
@@ -430,7 +425,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
                     for row in active_section["section"]["text"]["table"]["tbody"]["tr"]:
                         # Completed rows in Active have a future end date; flag the discrepancy.
                         if row["td"][2] == "completed":
-                            row["td"][1] = {"content": {"@styleCode": "flagData", "#text": row["td"][1]}}
+                            row["td"][1] = {"content": {"@styleCode": "Bold", "#text": row["td"][1]}}
 
                 past_section = await create_section(clone_list(list_obj, "Past Medications", past))
                 bundle_components.append(active_section)
@@ -467,16 +462,29 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
 
     included_str = ", ".join(included_sections) if included_sections else "None"
 
-    disclaimer_text = (
-        f"This record contains information from the patient's GP record. It was generated on {datetime.datetime.now().strftime('%Y-%m-%d')}. "
-        f"IMPORTANT: This document ONLY contains information regarding: {included_str}. "
-    )
+    def labelled_paragraph(label, text):
+        return {"content": [{"@styleCode": "Bold", "#text": label}, " " + text]}
 
+    information = [
+        labelled_paragraph(
+            "Generated:",
+            "C-CDA generated by Xhuma from GP Connect on " + datetime.datetime.now().strftime("%d-%m-%Y"),
+        ),
+        f"This record contains information from the patient's GP record. It was generated on {datetime.datetime.now().strftime('%Y-%m-%d')}.",
+        labelled_paragraph("Scope:", f"IMPORTANT: This document ONLY contains information regarding: {included_str}."),
+    ]
     if omitted_sections:
         omitted_str = ", ".join(omitted_sections)
-        disclaimer_text += f"All other clinical information (such as {omitted_str}) should be sought elsewhere. "
-
-    disclaimer_text += f"Information added to the record in the last {caching_period} may be missing."
+        information.append(
+            labelled_paragraph(
+                "Not included:", f"All other clinical information (such as {omitted_str}) should be sought elsewhere."
+            )
+        )
+    information.append(
+        labelled_paragraph(
+            "Freshness:", f"Information added to the record in the last {caching_period} may be missing."
+        )
+    )
 
     header_components = {
         "templateId": templateId("2.16.840.1.113883.10.20.22.2.64", "2016-11-01"),
@@ -486,10 +494,7 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
             "@displayName": "Additional Document Comments",
         },
         "title": "Important Information",
-        "text": {
-            "#text": disclaimer_text,
-            "footnote": "C-CDA generated by Xhuma from GP Connect on " + datetime.datetime.now().strftime("%d-%m-%Y"),
-        },
+        "text": {"paragraph": information},
     }
     bundle_components.insert(0, {"section": header_components})
 
@@ -498,36 +503,3 @@ async def convert_bundle(bundle: bundle.Bundle, index: dict) -> dict:
     ccda["ClinicalDocument"]["component"]["structuredBody"]["component"] = bundle_components
 
     return ccda
-
-
-if __name__ == "__main__":
-    # Example usage
-    with open("app/tests/fixtures/bundles/9690937286.json", "r") as f:
-        structured_dosage_bundle = json.load(f)
-
-    comment_index = None
-    for j, i in enumerate(structured_dosage_bundle["entry"]):
-        if "fhir_comments" in i.keys():
-            comment_index = j
-    if comment_index is not None:
-        structured_dosage_bundle["entry"].pop(comment_index)
-    fhir_bundle = bundle.Bundle(structured_dosage_bundle)
-
-    fhir_bundle = bundle.Bundle(structured_dosage_bundle)
-
-    # index resources to allow for resolution
-    bundle_index = {}
-    for entry in fhir_bundle.entry:
-        try:
-            address = f"{entry.resource.resource_type}/{entry.resource.id}"
-            bundle_index[address] = entry.resource
-        except Exception:
-            logging.error(f"Could not index resource {entry.resource} with id {entry.resource.id}")
-
-    # ccda = await convert_bundle(fhir_bundle, bundle_index)
-    ccda = asyncio.run(convert_bundle(fhir_bundle, bundle_index))
-    # pprint.pprint(ccda)
-    with open("output.xml", "w") as output:
-        xml = xmltodict.unparse(ccda, pretty=True)
-        xml = xml.replace("&lt;br /&gt;", "<br/>").replace("&lt;br&gt;", "<br/>")
-        output.write(xml)

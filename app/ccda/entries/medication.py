@@ -3,6 +3,7 @@ from typing import Any, Optional, Union
 
 from fhirclient.models import medication as fhirmed
 from fhirclient.models import medicationrequest, medicationstatement
+from fhirclient.models.dosage import Dosage
 
 from ..dmd import dmd_lookup
 from ..helpers import (
@@ -14,8 +15,8 @@ from ..helpers import (
     readable_date,
     templateId,
 )
-from ..models.base import Act, EntryRelationship, SubstanceAdministration
-from ..models.datatypes import CD, ED, IVL_INT, IVL_PQ, IVL_TS, IVXB_PQ, PIVL_TS, PQ
+from ..models.base import Act, Criterion, EntryRelationship, Precondition, SubstanceAdministration
+from ..models.datatypes import CD, ED, IVL_INT, IVL_PQ, IVL_TS, IVXB_PQ, PIVL_TS, PQ, PQR, RTO_PQ_PQ
 from .types import EntryWithRow
 
 # http://hl7.org/fhir/ValueSet/event-timing|4.0.1
@@ -103,9 +104,37 @@ def _cda_period_from_repeat(repeat: Any) -> Optional[Union[PQ, IVL_PQ]]:
     )
 
 
+def _labelled_narrative(label: str, value: Union[str, list[str]]) -> dict:
+    # A literal separator lives in the normal-value node, independent of pretty-print
+    # whitespace. Source remainders are verbatim: existing leading whitespace is
+    # additional to this separator (and collapses in ordinary narrative rendering).
+    values = [value] if isinstance(value, str) else value
+    return {
+        "content": [
+            {"@styleCode": "Bold", "#text": label},
+            {"#text": f" {values[0]}"},
+            # Separate wrappers preserve alternating break/value order in xmltodict.
+            *[{"br": None, "content": {"#text": item}} for item in values[1:]],
+        ],
+    }
+
+
+def _source_note_narrative(note: str) -> dict:
+    for prefix in (
+        "Prescriber Notes:",
+        "Patient Notes:",
+        "Additional Information:",
+        "Transfer degraded medication text:",
+    ):
+        if note.startswith(prefix):
+            return {**_labelled_narrative(prefix, note[len(prefix) :]), "br": None}
+    return {"#text": f"{note} <br />"}
+
+
 async def medication(entry: medicationstatement.MedicationStatement, index: dict) -> EntryWithRow:
     # http://www.hl7.org/ccdasearch/templates/2.16.840.1.113883.10.20.22.4.16.html
 
+    dosages = entry.dosage or [Dosage()]
     referenced_med: fhirmed.Medication = index[entry.medicationReference.reference]
     based_on_request: medicationrequest.MedicationRequest = index[entry.basedOn[0].reference]
     raw_notes = []
@@ -135,17 +164,20 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         if code.code == "196421000000109":
             misc_notes.append(f"Transfer degraded medication text: {referenced_med.code.text}")
 
-    multiple_dosages = len(entry.dosage) > 1
-    for index, dosage in enumerate(entry.dosage, start=1):
-        repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
-        warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
-        if warning:
-            misc_notes.append(warning)
-    # request = index[entry.basedOn[0].reference]
-    # dosage_instructions = request.dosageInstruction
-    # for dose in dosage_instructions:
-    #     print(dose.as_json())
-    # print(dosage_instructions.as_json())
+    # First occurrence owns the narrative formatting, including supplier/warning collisions.
+    narrative_notes = {note: _source_note_narrative(note) for note in misc_notes}
+
+    def append_xhuma_warning(warning: str, *, marker: str = "Xhuma:"):
+        misc_notes.append(warning)
+        narrative_notes.setdefault(
+            warning,
+            {
+                "content": {"@styleCode": "Bold", "#text": marker},
+                "#text": f"{warning[len(marker) :]} <br />",
+            },
+        )
+
+    multiple_dosages = len(dosages) > 1
     substance_administration = SubstanceAdministration(
         templateId=templateId("2.16.840.1.113883.10.20.22.4.16", "2014-06-09"),
         id=[
@@ -171,74 +203,37 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
         },
         entryRelationship=[],
     )
-    # if dose quantiy is in dosage
-    if entry.dosage[0].doseQuantity:
-        # assumption that all structuered dosage will be snomed
-        # substance_administration.doseQuantity = {
-        #     "value": {
-        #         "@xsi:type": "PQ",
-        #         "@nullFlavor": "OTH",
-        #         "translation": {
-        #             "@value": entry.dosage[0].doseQuantity.value,
-        #             "@code": entry.dosage[0].doseQuantity.code,
-        #             "@codeSystemName": entry.dosage[0].doseQuantity.system,
-        #             "@codeSystem": "2.16.840.1.113883.6.96",
-        #             "originalText": entry.dosage[0].doseQuantity.unit,
-        #         },
-        #     },
-        # }
-        # TODO: Build a PQ/IVL_PQ instance (including typed translations) rather
-        # than assigning a dict; test_meds/test_prn_meds emit Pydantic serializer
-        # warnings for doseQuantity. Preserve the subsequent dose-conversion logic.
-        substance_administration.doseQuantity = {
-            "@xsi:type": "PQ",
-            "@value": entry.dosage[0].doseQuantity.value,
-        }
-        if entry.dosage[0].doseQuantity.unit:
-            substance_administration.doseQuantity["@unit"] = entry.dosage[0].doseQuantity.unit
+    source_dose = dosages[0].doseQuantity
+    dose = None
+    if source_dose:
+        dose = PQ(value=source_dose.value, unit=source_dose.unit)
+        if source_dose.code:
+            dose.translation = [
+                PQR(
+                    value=source_dose.value,
+                    code=source_dose.code,
+                    codeSystem="2.16.840.1.113883.6.96",
+                    originalText=source_dose.unit,
+                )
+            ]
+        substance_administration.doseQuantity = dose
 
-        # if there is a code add a translation
-        if entry.dosage[0].doseQuantity.code:
-            substance_administration.doseQuantity["translation"] = {
-                "@value": entry.dosage[0].doseQuantity.value,
-                "@code": entry.dosage[0].doseQuantity.code,
-                "@codeSystem": "2.16.840.1.113883.6.96",
-                "originalText": entry.dosage[0].doseQuantity.unit,
-            }
-    # mapping from https://build.fhir.org/ig/HL7/ccda-on-fhir/CF-medications.html
-    # check if dosage has as needed boolean of true
+    reason = dosages[0].asNeededCodeableConcept
+    if dosages[0].asNeededBoolean or reason:
+        value = code_with_translations(reason.coding) if reason else None
+        if value is None:
+            value = CD(nullFlavor="NI")
+        if reason and reason.text:
+            value.originalText = reason.text
+        criterion = Criterion(
+            templateId=templateId("2.16.840.1.113883.10.20.22.4.25", "2014-06-09"),
+            code=CD(code="ASSERTION", codeSystem="2.16.840.1.113883.5.4"),
+            value=value,
+        )
+        substance_administration.precondition = [Precondition(criterion=criterion)]
 
-    if entry.dosage[0].asNeededBoolean:
-        # populate precondition
-        # TODO: Build a list of Precondition models rather than a single dict;
-        # structured-dosage/PRN tests warn that precondition expects list[Precondition].
-        substance_administration.precondition = {
-            "@typeCode": "PRCN",
-            "criterion": {
-                "templateId": templateId(root="2.16.840.1.113883.10.20.22.4.25", extension="2014-06-09"),
-                "code": {
-                    "@code": "ASSERTION",
-                    "@codeSystem": "2.16.840.1.113883.5.4",
-                },
-            },
-        }
-        # if there is a asNeededCodeableConcept, use it
-        if entry.dosage[0].asNeededCodeableConcept:
-            substance_administration.precondition["criterion"]["value"] = {
-                "@xsi:type": "CD",
-                "@code": entry.dosage[0].asNeededCodeableConcept.coding[0].code,
-                "@displayName": entry.dosage[0].asNeededCodeableConcept.coding[0].display,
-                "@codeSystemName": entry.dosage[0].asNeededCodeableConcept.coding[0].value,
-            }
-        else:
-            # if no asNeededCodeableConcept, use NI
-            substance_administration.precondition["criterion"]["value"] = {
-                "@xsi:type": "CD",
-                "@nullFlavor": "NI",
-            }
-
-    if entry.dosage[0].timing:
-        repeat = entry.dosage[0].timing.repeat
+    if dosages[0].timing:
+        repeat = dosages[0].timing.repeat
         frequency = getattr(repeat, "frequency", None)
         frequency_max = getattr(repeat, "frequencyMax", None)
         pivl = PIVL_TS(
@@ -253,36 +248,23 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
         substance_administration.effectiveTime.append(pivl)
 
-    if entry.dosage[0].maxDosePerPeriod:
-        numerator = entry.dosage[0].maxDosePerPeriod.numerator
-        denominator = entry.dosage[0].maxDosePerPeriod.denominator
+    if dosages[0].maxDosePerPeriod:
+        numerator = dosages[0].maxDosePerPeriod.numerator
+        denominator = dosages[0].maxDosePerPeriod.denominator
         if numerator and denominator:
-            try:
-                # TODO: Build an RTO_PQ_PQ model with PQ numerator/denominator;
-                # test_prn_meds emits a serializer warning for this dict assignment.
-                substance_administration.maxDoseQuantity = {
-                    "@xsi:type": "RTO_PQ_PQ",
-                    "numerator": {
-                        "@value": numerator.value,
-                        "@unit": numerator.unit,
-                    },
-                    "denominator": {
-                        "@value": denominator.value,
-                        "@unit": denominator.unit,
-                    },
-                }
-            except Exception as e:
-                logging.error(f"Error processing maxDosePerPeriod: {e}")
-                pass
+            substance_administration.maxDoseQuantity = RTO_PQ_PQ(
+                numerator=PQ(value=numerator.value, unit=numerator.unit),
+                denominator=PQ(value=denominator.value, unit=denominator.unit),
+            )
 
     #   check if route is in dosage
-    if entry.dosage[0].method:
-        substance_administration.routeCode = code_with_translations(entry.dosage[0].method.coding)
+    if dosages[0].method:
+        substance_administration.routeCode = code_with_translations(dosages[0].method.coding)
 
     patient_instr_list = []
     text_instr_list = []
 
-    for i, dosage in enumerate(entry.dosage):
+    for i, dosage in enumerate(dosages):
         prefix = f"{i + 1}. " if multiple_dosages else ""
 
         if dosage.patientInstruction:
@@ -340,39 +322,30 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
     # check if snomed code is in cache and if so add to med name
     snomed_code = substance_administration.consumable.manufacturedProduct.manufacturedMaterial.code.code
-    # print(substance_administration.doseQuantity)
     gp_units = ["tablet", "capsule"]
-    unit = (
-        substance_administration.doseQuantity.get("@unit", "").lower() if substance_administration.doseQuantity else ""
-    )
+    dmd_dose_warning = None
+    dmd_route_warning = None
 
-    if substance_administration.doseQuantity:
-        blank_unit = not substance_administration.doseQuantity.get("@unit")
-        if unit in gp_units or blank_unit:
+    if dose:
+        unit = (dose.unit or "").lower()
+        if unit in gp_units or not unit:
             # we only process doses for tablets or capsules.
 
             try:
                 dmd_data = await dmd_lookup(int(snomed_code))
                 # only process dose if a single dosage instruction
-                if len(entry.dosage) == 1:
-                    if dmd_data.vpi and substance_administration.doseQuantity:
-                        processed_dose = dmd_data.vpi.value * substance_administration.doseQuantity["@value"]
+                if len(dosages) == 1:
+                    if dmd_data.vpi and dose.value is not None:
+                        processed_dose = dmd_data.vpi.value * dose.value
 
                         # clean number to remove trailing .0 if whole number
                         processed_dose = clean_number(processed_dose)
 
-                        substance_administration.doseQuantity["@value"] = processed_dose
-                        substance_administration.doseQuantity["@unit"] = dmd_data.vpi.unit
-                        warning_text = (
+                        dose.value = processed_dose
+                        dose.unit = dmd_data.vpi.unit
+                        dmd_dose_warning = (
                             f"Xhuma: Dose of {processed_dose} {dmd_data.vpi.unit} automatically mapped via dm+d lookup"
                         )
-                        # print(warning_text)
-                        misc_notes.append(warning_text)
-
-                elif len(entry.dosage) > 1:
-                    # multiple dosage instrutions so add warning to medication name instead of processing dose
-                    warning_text = "Xhuma: Multiple dosage instructions found. Use caution when converting dose**"
-                    misc_notes.append(warning_text)
 
                 if substance_administration.routeCode:
                     if substance_administration.routeCode.displayName == "Take":
@@ -381,49 +354,50 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                             substance_administration.routeCode.displayName = dmd_data.route.displayName
                             substance_administration.routeCode.code = dmd_data.route.code
                             substance_administration.routeCode.codeSystem = "2.16.840.1.113883.6.96"
-                            # substance_administration.routeCode.codeSystem = (
-                            #     "2.16.840.1.113883.3.26.1.1"
-                            # )
                             substance_administration.routeCode.codeSystemName = dmd_data.route.codeSystemName
-                            # route_translation = CD()
-                            # route_translation["@code"] = dmd_data.route.code
-                            # route_translation.codeSystem = "2.16.840.1.113883.3.26.1.1"
-                            # substance_administration.routeCode.translation = (
-                            #     route_translation
-                            # )
                             # add a warning note about the route being automatically mapped
-                            warning_text = (
+                            dmd_route_warning = (
                                 f'Xhuma: Route inferred as {dmd_data.route.displayName} from dm+d because the GP source value was "Take"; '
                                 "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
                             )
-                            misc_notes.append(warning_text)
 
             except Exception as e:
                 logging.error(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
-                print(f"Error looking up DMD data for SNOMED code {snomed_code}: {e}")
-                pass
 
         if "- unit of product usage" in unit:
             # strip overly verbose snomed unit description to just unit
-            substance_administration.doseQuantity["@unit"] = (
-                substance_administration.doseQuantity["@unit"].replace("- unit of product usage", "").strip()
-            )
+            dose.unit = dose.unit.replace("- unit of product usage", "").strip()
+
+    # 1. dm+d mapping/inference warnings
+    if dmd_dose_warning:
+        append_xhuma_warning(dmd_dose_warning)
+    if dmd_route_warning:
+        append_xhuma_warning(dmd_route_warning)
+
+    # 2. additional dosage/clinical warnings
+    if multiple_dosages:
+        append_xhuma_warning("Xhuma: Multiple dosage instructions found. Use caution when converting dose**")
+
+    for index, dosage in enumerate(dosages, start=1):
+        repeat = getattr(getattr(dosage, "timing", None), "repeat", None)
+        warning = _event_timing_warning(repeat, dosage_number=index if multiple_dosages else None)
+        if warning:
+            append_xhuma_warning(warning, marker="Xhuma")
 
     # check for prescribing agency and last issued date extensions
     remaining_repeats = None
     prescription_information = []
     if entry.extension:
         for ext in entry.extension:
-            # print(ext.url)
             if ext.url == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-PrescribingAgency-1":
                 prescribing_agency = ext.valueCodeableConcept.coding[0].display
-                prescription_information.append(prescribing_agency)
+                prescription_information.append({"content": {"#text": prescribing_agency}})
             if (
                 ext.url
                 == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationStatementLastIssueDate-1"
             ):
                 last_issued_date = readable_date(fhir_to_cda_timestamp(ext.valueDateTime))
-                prescription_information.append(f"Last issued date: {last_issued_date}")
+                prescription_information.append(_labelled_narrative("Last issued date:", last_issued_date))
 
     # look for prescription type in medication request
     if based_on_request.extension:
@@ -434,7 +408,6 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 ext.url
                 == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationRepeatInformation-1"
             ):
-                # print("Medication repeat information extension found")
                 repeats_allowed = None
                 repeats_issued = None
                 for i in ext.extension:
@@ -446,14 +419,12 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
 
                     if i.url == "numberOfRepeatPrescriptionsAllowed":
                         repeats_allowed = val
-                        # print(repeats_allowed)
                     elif i.url == "numberOfRepeatPrescriptionsIssued":
                         repeats_issued = val
-                        # print(f"Repeats Issued:{repeats_issued}")
                 if repeats_allowed is not None and repeats_issued is not None:
                     remaining_repeats = repeats_allowed - repeats_issued
                     prescription_information.append(
-                        f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."
+                        {"content": {"#text": f"Prescription {repeats_issued} of {repeats_allowed} allowed repeats."}}
                     )
             if (
                 ext.url
@@ -462,7 +433,11 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                 for i in ext.extension:
                     if i.url == "statusReason":
                         status_reason = i.valueCodeableConcept.text
-                        misc_notes.append(f"Medication status reason: {status_reason}")
+                        status_note = f"Medication status reason: {status_reason}"
+                        misc_notes.append(status_note)
+                        narrative_notes.setdefault(
+                            status_note, {**_labelled_narrative("Medication status reason:", status_reason), "br": None}
+                        )
 
     # process issued quantity from based_on_request
     if based_on_request.dispenseRequest and based_on_request.dispenseRequest.quantity:
@@ -478,22 +453,24 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                     == "https://fhir.nhs.uk/STU3/StructureDefinition/Extension-CareConnect-GPC-MedicationQuantityText-1"
                 ):
                     unit = ext.valueString
-        issued_quantity = f"Issued quantity: {quantity.value} {unit}"
-        prescription_information.append(issued_quantity)
+        prescription_information.append(_labelled_narrative("Issued quantity:", f"{quantity.value} {unit}"))
 
-    # add br tags to prescription information with a join
-    prescription_information = "<br />".join(prescription_information) if prescription_information else ""
-    # prescription_information = [f"{info} <br />" for info in prescription_information]
-
-    patient_instructions = "Patient Instructions: " + "<br />".join(patient_instr_list) if patient_instr_list else ""
-    text_instructions = " Instructions: " + "<br />".join(text_instr_list) if text_instr_list else ""
+    instructions = []
+    if text_instr_list:
+        instructions.append(_labelled_narrative("Instructions:", text_instr_list))
+    if patient_instr_list:
+        instructions.append(_labelled_narrative("Patient Instructions:", patient_instr_list))
+    # Breaks follow child content, never #text (which xmltodict emits last).
+    for lines in (instructions, prescription_information):
+        for line in lines[:-1]:
+            line["br"] = None
     # use dict.fromkeys to avoid duplicates while preserving chronological insertion order
     misc_notes = list(dict.fromkeys(misc_notes))
 
     # CRITICAL: Epic's C-CDA parser swallows text preceding a <br/> tag in structured `xmlText` nodes.
     # We must use standard newlines (\n) for the machine-readable `xmlText`, while preserving the
     # HTML <br /> tags exclusively for the narrative `entry_row` table view.
-    misc_notes_text = [f"{note} <br />" for note in misc_notes if note]
+    misc_notes_text = [narrative_notes.get(note, {"#text": f"{note} <br />"}) for note in misc_notes if note]
     structured_notes_text = "\n".join(misc_notes) if misc_notes else ""
 
     comment_activity = EntryRelationship()
@@ -521,26 +498,15 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
             supply_order.substanceAdministration.repeatNumber = IVL_INT(value=remaining_repeats)
         substance_administration.entryRelationship.append(supply_order)
 
-    # entry_row = [
-    #     readable_date(low_time[0]) if low_time else "",
-    #     readable_date(high_time[0]) if high_time else "",
-    #     entry.status if entry.status else "unknown",
-    #     prescription_type if "prescription_type" in locals() else "",
-    #     med_name,
-    #     f"{text_instructions}<br />{patient_instructions}",
-    #     {"BR": misc_notes_text},
-    #     prescribing_agency if "prescribing_agency" in locals() else "",
-    #     last_issued_date if "last_issued_date" in locals() else "",
-    # ]
     entry_row = [
         readable_date(low_time[0]) if low_time else "",
         readable_date(high_time[0]) if high_time else "",
         entry.status if entry.status else "unknown",
         prescription_type if "prescription_type" in locals() else "",
-        med_name,
-        f"{text_instructions}<br />{patient_instructions}",
-        {"BR": misc_notes_text},
-        prescription_information,
+        {"content": {"@styleCode": "Bold", "#text": med_name}},
+        {"content": instructions},
+        {"content": misc_notes_text},
+        {"content": prescription_information},
     ]
 
     return EntryWithRow(

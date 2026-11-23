@@ -201,6 +201,7 @@ class PQR(CV):
         description="A representation of a physical quantity in a unit from any code "
         "system. Used to show alternative representation for a physical "
         "quantity.",
+        alias="@xsi:type",
     )
     value: Optional[float] = Field(default=None, alias="@value")
 

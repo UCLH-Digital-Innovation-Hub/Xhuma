@@ -81,7 +81,7 @@ services:
   driver:
     build:
       context: .
-      dockerfile: scripts/container_smoke/Dockerfile
+      target: smoke-driver
     profiles: ["driver"]
     environment:
       # Reuse Locust's payloads/validators with the synchronous HTTP driver.

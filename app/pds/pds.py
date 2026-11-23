@@ -4,7 +4,6 @@ import hmac
 import json
 import logging
 import os
-import pprint
 import uuid
 from urllib.parse import urlsplit
 
@@ -13,7 +12,7 @@ import httpx
 from fhirclient.models.fhirabstractbase import FHIRValidationError
 from fhirclient.models.operationoutcome import OperationOutcome
 
-from app.audit.audit import AuditFailureException, attempt_audit, process_saml_attributes
+from app.audit.audit import AuditFailureException, attempt_audit
 from app.audit.models import AuditOutcome, SAMLAttributes
 from app.logging import log_request, log_response
 from app.redis_connect import redis_client
@@ -108,8 +107,6 @@ def _operation_outcome_display(payload: object) -> str:
     return _sanitize_diagnostic(text, max_length=None)
 
 
-# router = fastapi.APIRouter(prefix="/pds")
-
 # use environment to set path
 environment = os.getenv("ENV", "dev").lower()
 if environment == "dev":
@@ -148,7 +145,6 @@ def sds_cache_key(
     return key
 
 
-# @router.get("/lookup_patient/{nhsno}")
 async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAMLAttributes = None):
     if not saml:
         raise ValueError("Missing SAML attributes: Clinical lookup cannot continue unaudited.")
@@ -187,7 +183,6 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         if not nhs_api_key:
             raise ValueError("NHS_API_KEY is not configured")
         jwt_token = await asyncio.to_thread(pds_jwt, nhs_api_key, nhs_api_key, full_path)
-        # print(f"jwt_token: {jwt_token}")
 
         oauth_params = {
             "grant_type": "client_credentials",
@@ -274,7 +269,6 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
         )
         raise fastapi.HTTPException(status_code=502, detail="Failed to obtain PDS token due to upstream error")
 
-    # print(f"nhs_token: {nhs_token}")
     # set headers for pds request
     headers = {
         "X-Request-ID": str(uuid.uuid4()),
@@ -361,7 +355,6 @@ async def lookup_patient(nhsno: int, request: fastapi.Request = None, saml: SAML
     return patient_dict
 
 
-# @router.get("/sds/{ods}")
 async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
     """
     Function to get the SDS trace for an ODS code
@@ -421,7 +414,6 @@ async def sds_trace(ods: str, endpoint: bool = False, **kwargs):
         parameters["manufacturing-organization"] = (
             f"https://fhir.nhs.uk/Id/ods-organization-code|{manufacturer_ods.strip().upper()}"
         )
-    # print(parameters)
     headers = {
         "accept": "application/fhir+json",
         "apikey": nhs_api_key,
@@ -603,65 +595,3 @@ async def lookup_self_issuer() -> str:
     if len(addresses) != 1:
         raise ValueError("SDS self lookup must return exactly one consumer Spine Endpoint address")
     return addresses.pop()
-
-
-if __name__ == "__main__":
-    import xmltodict
-
-    from app.db import make_engine, make_sessionmaker
-
-    xml38 = '<AttributeStatement><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:subject-id"><AttributeValue>CONE, Stephen</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization"><AttributeValue>UCLH - University College London Hospitals - TST</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:organization-id"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:nhin:names:saml:homeCommunityId"><AttributeValue>urn:oid:1.2.840.114350.1.13.525.3.7.3.688884.100</AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:subject:role"><AttributeValue><Role xsi:type="CE" code="224608005" codeSystem="2.16.840.1.113883.6.96" codeSystemName="SNOMED_CT" displayName="Administrative healthcare staff" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"><AttributeValue><PurposeForUse xsi:type="CE" code="TREATMENT" codeSystem="2.16.840.1.113883.3.18.7.1" codeSystemName="nhin-purpose" displayName="Treatment" xmlns="urn:hl7-org:v3" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"/></AttributeValue></Attribute><Attribute Name="urn:oasis:names:tc:xacml:2.0:resource:resource-id"><AttributeValue>9692136744^^^&amp;2.16.840.1.113883.2.1.4.1&amp;ISO</AttributeValue></Attribute></AttributeStatement>'
-    saml = process_saml_attributes(xmltodict.parse(xml38)["AttributeStatement"])
-
-    async def main():
-        engine = make_engine()
-        try:
-            app = fastapi.FastAPI()
-            app.state.SessionLocal = make_sessionmaker(engine)
-
-            request = fastapi.Request(
-                {
-                    "type": "http",
-                    "app": app,
-                    "headers": [],
-                }
-            )
-
-            issuer = await lookup_self_issuer()
-            print(f"GP Connect issuer: {issuer}")
-
-            return await lookup_patient(
-                9658218873,
-                request=request,
-                saml=saml,
-            )
-        finally:
-            await engine.dispose()
-            await redis_client.close()
-
-    pprint.pprint(asyncio.run(main()))
-
-    # print(patient.gender)
-    # print(patient.name[0].family)
-    # print(patient.generalPractitioner[0].identifier.value)
-
-    # ods = asyncio.run(sds_trace("A82038"))
-    # pprint.pprint(ods)
-    # for i in ods["entry"]:
-    #     pprint.pprint(i)
-
-    # try self lookup
-    prefix = "https://fhir.nhs.uk/Id/"
-    "https://fhir.nhs.uk/Id/objectClass|nhsAs"
-    parameters = {
-        "nhsIDCode": "RVV00",
-        "objectClass": "nhsAs",
-        "nhsAsSvcIAD": "urn:nhs:names:services:gpconnect:fhir:operation:gpc.getstructuredrecord-1",
-        "nhsMhsManufacturerOrg": "RRV00",
-    }
-    indentifiers = [
-        f"{prefix}nhsIDCode|RVV00",
-        f"{prefix}objectClass|nhsAs",
-    ]
-    # url = f"{INT_BASE_PATH}spine-directory/FHIR/R4/{suffix}"
-    # r = httpx.get(url, headers=headers, params=parameters)

@@ -1161,7 +1161,7 @@ async def _expand_and_cache_lookups(
             )
             k = raw_key(expected_release, code)
             batch_bytes += len(k.encode("utf-8")) + len(raw_payload.encode("utf-8"))
-            pipe.setex(k, DMD_RESOLVED_TTL, raw_payload)
+            pipe.set(k, raw_payload, ex=DMD_RESOLVED_TTL)
             total_processed += 1
 
         # Per-batch guard: inspect CURRENT Redis state before writing
@@ -1263,7 +1263,7 @@ async def _expand_vmp_concepts(
             payload = resolved_concept.model_dump_json()
             k = resolved_key(expected_release, code)
             batch_bytes += len(k.encode("utf-8")) + len(payload.encode("utf-8"))
-            pipe.setex(k, DMD_RESOLVED_TTL, payload)
+            pipe.set(k, payload, ex=DMD_RESOLVED_TTL)
             total_processed += 1
 
         current_mem = await get_redis_memory_state()
@@ -1362,7 +1362,7 @@ async def _expand_amp_concepts(
             payload = resolved_concept.model_dump_json()
             k = resolved_key(expected_release, code)
             batch_bytes += len(k.encode("utf-8")) + len(payload.encode("utf-8"))
-            pipe.setex(k, DMD_RESOLVED_TTL, payload)
+            pipe.set(k, payload, ex=DMD_RESOLVED_TTL)
             total_processed += 1
 
         current_mem = await get_redis_memory_state()

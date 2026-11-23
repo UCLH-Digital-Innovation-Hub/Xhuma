@@ -14,23 +14,23 @@ pytestmark = pytest.mark.usefixtures("mock_self_issuer")
 def isolate_startup_io():
     # These tests exercise configuration/lifecycle, not live Redis or OTLP exporters.
     with (
-        patch("app.main.redis_client", autospec=True),
-        patch("app.main.snomed_client", autospec=True),
-        patch("app.main.OTLPMetricExporter"),
-        patch("app.main.PeriodicExportingMetricReader"),
-        patch("app.main.MeterProvider"),
-        patch("app.main.metrics.set_meter_provider"),
+        patch("app.bootstrap.lifespan.redis_client", autospec=True),
+        patch("app.bootstrap.lifespan.snomed_client", autospec=True),
+        patch("opentelemetry.exporter.otlp.proto.grpc.metric_exporter.OTLPMetricExporter"),
+        patch("opentelemetry.sdk.metrics.export.PeriodicExportingMetricReader"),
+        patch("opentelemetry.sdk.metrics.MeterProvider"),
+        patch("opentelemetry.metrics.set_meter_provider"),
     ):
         yield
 
 
 @pytest.mark.asyncio
-@patch("app.gpconnect.lookup_patient", new_callable=AsyncMock)
-@patch("app.gpconnect.sds_trace", new_callable=AsyncMock)
-@patch("app.gpconnect.redis_client.pipeline")
-@patch("app.gpconnect.create_nhs_ssl_context")
-@patch("app.gpconnect.httpx.AsyncClient")
-@patch("app.gpconnect.attempt_audit", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.patient.lookup_patient", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.routing.sds_trace", new_callable=AsyncMock)
+@patch("app.gpconnect_stages.document.redis_client.pipeline")
+@patch("app.gpconnect_stages.transport.create_nhs_ssl_context")
+@patch("app.gpconnect_stages.transport.httpx.AsyncClient")
+@patch("app.audit.audit.attempt_audit", new_callable=AsyncMock)
 async def test_ccda_expiry_configuration_parsing(
     mock_audit, mock_client, mock_ssl, mock_pipeline, mock_sds, mock_lookup
 ):
@@ -91,7 +91,7 @@ async def test_ccda_expiry_configuration_parsing(
     request = MagicMock()
     del request.app
 
-    with patch("app.gpconnect.convert_bundle") as mock_convert:
+    with patch("app.gpconnect_stages.document.convert_bundle") as mock_convert:
 
         async def dummy_convert(*args, **kwargs):
             return {"ClinicalDocument": "test"}
@@ -104,10 +104,8 @@ async def test_ccda_expiry_configuration_parsing(
             await _fetch_gpconnect_record(9690937278, saml, request=request)
 
             # Verify pipeline was called with timedelta(hours=1.5)
-            mock_pipeline.return_value.setex.assert_called()
-            # We can inspect the arguments for the first setex call
-            args, kwargs = mock_pipeline.return_value.setex.call_args_list[0]
-            assert args[1].total_seconds() == 1.5 * 3600
+            mock_pipeline.return_value.set.assert_called_once()
+            assert mock_pipeline.return_value.set.call_args.kwargs["ex"].total_seconds() == 1.5 * 3600
 
 
 @pytest.mark.asyncio

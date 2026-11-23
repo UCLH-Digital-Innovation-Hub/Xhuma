@@ -108,7 +108,8 @@ async def test_iti38_preserves_pds_patient_not_found(mock_request, mock_saml, pd
     with (
         patch("app.soap.responses.iti_38.redis_client.get", return_value=None),
         patch(
-            "app.gpconnect.lookup_patient", side_effect=HTTPException(pds_status, "PDS Entitlement or Token Failure")
+            "app.gpconnect_stages.patient.lookup_patient",
+            side_effect=HTTPException(pds_status, "PDS Entitlement or Token Failure"),
         ),
         patch("app.soap.responses.iti_38.attempt_audit") as audit,
     ):
