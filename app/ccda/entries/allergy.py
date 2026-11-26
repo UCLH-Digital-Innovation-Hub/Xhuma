@@ -19,7 +19,7 @@ from ..models.allergy import (
     SeverityObservation,
 )
 from ..models.datatypes import CD, ED, II, IVL_TS, IVXB_TS
-from .allergy_metadata import source_author, source_informant
+from .allergy_metadata import source_author, source_informant, source_recorder
 from .types import EntryWithRow
 
 # SNOMED concepts from the HL7 C-CDA Allergy and Intolerance Type mappings.
@@ -184,13 +184,11 @@ def allergy(entry: allergyintolerance.AllergyIntolerance, index: dict | None = N
     # A no-known-allergy finding is not an allergen. Keep its source wording in
     # the narrative, but mark the required CDA substance participant not applicable.
     participant_code = AllergySubstanceCode(nullFlavor="NA") if absence_type is not None else substance_ce
-    notes = [note.text for note in entry.note or [] if note.text]
     degraded_text = None
     if entry.code.text and any(
         coding.code == "196461000000101" and coding.system == "http://snomed.info/sct" for coding in entry.code.coding
     ):
         degraded_text = f"Transfer degraded allergy text: {entry.code.text}"
-        notes.append(degraded_text)
     asserted_low = _date_low(entry.assertedDate)
     onset = entry.onsetDateTime
     if onset is None and entry.onsetPeriod is not None:
@@ -254,9 +252,15 @@ def allergy(entry: allergyintolerance.AllergyIntolerance, index: dict | None = N
         )
     informant, asserter_name = source_informant(entry.asserter, index, entry)
     # assertedDate is the assertion date, not necessarily the recorder's authoring time.
-    recorder = source_author(entry.recorder, None, index, entry)
+    recorder, recorder_name = source_recorder(entry.recorder, index, entry)
+    notes = []
     if asserter_name:
         notes.append(f"Asserter: {asserter_name}")
+    if recorder_name:
+        notes.append(f"Recorded by: {recorder_name}")
+    notes.extend(note.text for note in entry.note or [] if note.text)
+    if degraded_text:
+        notes.append(degraded_text)
     observation = AllergyIntoleranceObservation(
         **source_id,
         effectiveTime=clinical_time,

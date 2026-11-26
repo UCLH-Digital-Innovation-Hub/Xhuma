@@ -120,13 +120,64 @@ def provider_organization(value) -> ProviderOrganization:
     )
 
 
-def patient_record_target(patient, index: dict) -> RecordTarget:
+ODS_ORGANIZATION_SYSTEM = "https://fhir.nhs.uk/Id/ods-organization-code"
+
+
+def resolve_managing_organization(patient, index: dict):
+    """Resolve Patient.managingOrganization from index using relative or absolute reference."""
     source = source_dict(patient)
     reference = source.get("managingOrganization") or {}
     ref = reference.get("reference")
     organization = index.get(ref)
     if organization is None and ref:
         organization = index.get("/".join(ref.rstrip("/").split("/")[-2:]))
+    return organization, reference
+
+
+def managing_organization_label(patient, index: dict) -> str | None:
+    """Return human-readable managing organisation text for narrative display, or None.
+
+    Resolves Patient.managingOrganization against index. Displays name and/or ODS code.
+    Never returns raw references or fallbacks.
+    """
+    organization, reference = resolve_managing_organization(patient, index)
+    org_source = source_dict(organization) if organization is not None else {}
+
+    raw_name = org_source.get("name")
+    name = raw_name.strip() if isinstance(raw_name, str) and raw_name.strip() else None
+
+    # ODS identifier: only from https://fhir.nhs.uk/Id/ods-organization-code
+    ods_code = None
+    for identifier in org_source.get("identifier") or []:
+        ident = source_dict(identifier)
+        if ident.get("system") == ODS_ORGANIZATION_SYSTEM and ident.get("value"):
+            val = str(ident["value"]).strip()
+            if val:
+                ods_code = val
+                break
+
+    # If no org name, check reference display as fallback
+    if not name:
+        display = reference.get("display")
+        if isinstance(display, str) and display.strip():
+            candidate = display.strip()
+            ref = reference.get("reference")
+            ref_prefixes = ("Organization/", "Practitioner/", "Patient/")
+            if candidate != ref and not any(candidate.startswith(p) for p in ref_prefixes):
+                name = candidate
+
+    if name and ods_code:
+        return f"{name} (ODS: {ods_code})"
+    if name:
+        return name
+    if ods_code:
+        return f"ODS {ods_code}"
+    return None
+
+
+def patient_record_target(patient, index: dict) -> RecordTarget:
+    source = source_dict(patient)
+    organization, reference = resolve_managing_organization(patient, index)
     provider = provider_organization(organization) if organization is not None else None
     if provider is None and reference.get("display"):
         provider = ProviderOrganization(name=[reference["display"]])

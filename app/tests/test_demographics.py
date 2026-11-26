@@ -8,7 +8,7 @@ from fhirclient.models.bundle import Bundle
 from pydantic import ValidationError
 
 from app.ccda.convert_mime import base64_xml
-from app.ccda.demographics import patient_record_target
+from app.ccda.demographics import managing_organization_label, patient_record_target
 from app.ccda.fhir2ccda import convert_bundle
 from app.ccda.models.demographics import PatientRole, RecordTarget
 from app.soap.responses.iti_55 import iti_55_response
@@ -200,3 +200,95 @@ async def test_ambiguous_or_absent_patient_fails_explicitly(count):
 def test_header_models_reject_empty_required_collections():
     with pytest.raises(ValidationError):
         PatientRole(id=[], addr=[], patient={"name": [], "birthTime": {"@nullFlavor": "UNK"}})
+
+
+def test_managing_organization_label_name_and_ods():
+    patient = {"managingOrganization": {"reference": "Organization/1"}}
+    index = {
+        "Organization/1": {
+            "name": "Example Medical Practice",
+            "identifier": [{"system": "https://fhir.nhs.uk/Id/ods-organization-code", "value": "A82038"}],
+        }
+    }
+    assert managing_organization_label(patient, index) == "Example Medical Practice (ODS: A82038)"
+
+
+def test_managing_organization_label_name_only():
+    patient = {"managingOrganization": {"reference": "Organization/1"}}
+    index = {
+        "Organization/1": {
+            "name": "Example Medical Practice",
+            "identifier": [{"system": "urn:oid:local", "value": "LOCAL1"}],
+        }
+    }
+    assert managing_organization_label(patient, index) == "Example Medical Practice"
+
+
+def test_managing_organization_label_ods_only():
+    patient = {"managingOrganization": {"reference": "Organization/1"}}
+    index = {
+        "Organization/1": {
+            "identifier": [{"system": "https://fhir.nhs.uk/Id/ods-organization-code", "value": "A82038"}],
+        }
+    }
+    assert managing_organization_label(patient, index) == "ODS A82038"
+
+
+def test_managing_organization_label_display_only():
+    patient = {"managingOrganization": {"display": "Example Medical Practice"}}
+    assert managing_organization_label(patient, {}) == "Example Medical Practice"
+
+
+def test_managing_organization_label_unresolved_reference_omitted():
+    patient = {"managingOrganization": {"reference": "Organization/missing"}}
+    assert managing_organization_label(patient, {}) is None
+
+
+def test_managing_organization_label_missing_organization_omitted():
+    assert managing_organization_label({}, {}) is None
+
+
+def test_managing_organization_label_ignores_general_practitioner():
+    patient = {
+        "generalPractitioner": [{"reference": "Practitioner/1"}],
+    }
+    index = {"Practitioner/1": {"name": [{"text": "Dr Someone"}]}}
+    assert managing_organization_label(patient, index) is None
+
+
+def test_managing_organization_multiple_organizations_selects_exact_reference():
+    patient = {"managingOrganization": {"reference": "Organization/2"}}
+    index = {
+        "Organization/1": {
+            "name": "First Practice",
+            "identifier": [{"system": "https://fhir.nhs.uk/Id/ods-organization-code", "value": "ODS1"}],
+        },
+        "Organization/2": {
+            "name": "Target Practice",
+            "identifier": [{"system": "https://fhir.nhs.uk/Id/ods-organization-code", "value": "ODS2"}],
+        },
+    }
+    assert managing_organization_label(patient, index) == "Target Practice (ODS: ODS2)"
+
+
+def test_managing_organization_preserves_structured_provider_organization():
+    patient = {
+        "managingOrganization": {"reference": "Organization/1"},
+        "identifier": [{"value": "123"}],
+        "address": [{"line": ["Street"]}],
+    }
+    index = {
+        "Organization/1": {
+            "name": "Example Medical Practice",
+            "identifier": [{"system": "https://fhir.nhs.uk/Id/ods-organization-code", "value": "A82038"}],
+            "address": [{"city": "Leeds", "postalCode": "LS1 1AA"}],
+        }
+    }
+    record_target = patient_record_target(patient, index)
+    provider = record_target.patientRole.providerOrganization
+    assert provider is not None
+    assert provider.name == ["Example Medical Practice"]
+    assert provider.id[0].root == "2.16.840.1.113883.2.1.4.3"
+    assert provider.id[0].extension == "A82038"
+    assert provider.addr[0].city == "Leeds"
+    assert provider.addr[0].postalCode == "LS1 1AA"
