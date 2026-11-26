@@ -261,6 +261,9 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
     #   check if route is in dosage
     if dosages[0].method:
         substance_administration.routeCode = code_with_translations(dosages[0].method.coding)
+    # check route is in .route if not in dosage.method
+    elif dosages[0].route:
+        substance_administration.routeCode = code_with_translations(dosages[0].route.coding)
 
     patient_instr_list = []
     text_instr_list = []
@@ -349,8 +352,11 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                         )
 
                 if substance_administration.routeCode:
-                    if substance_administration.routeCode.displayName == "Take":
-                        # take often used with capsules. replace with dmd route.
+                    #  if route is "take" or none then replace with dm+d route if available
+                    if (
+                        substance_administration.routeCode.displayName == "Take"
+                        or not substance_administration.routeCode.displayName
+                    ):
                         if dmd_data.route:
                             substance_administration.routeCode.displayName = dmd_data.route.displayName
                             substance_administration.routeCode.code = dmd_data.route.code
@@ -358,7 +364,7 @@ async def medication(entry: medicationstatement.MedicationStatement, index: dict
                             substance_administration.routeCode.codeSystemName = dmd_data.route.codeSystemName
                             # add a warning note about the route being automatically mapped
                             dmd_route_warning = (
-                                f'Xhuma: Route inferred as {dmd_data.route.displayName} from dm+d because the GP source value was "Take"; '
+                                f'Xhuma: Route inferred as {dmd_data.route.displayName} from dm+d because the GP source value was "Take" or not specified; '
                                 "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
                             )
 
