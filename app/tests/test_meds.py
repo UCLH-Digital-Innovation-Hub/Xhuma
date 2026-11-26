@@ -521,7 +521,7 @@ async def test_new_structured_detail(mock_dmd_lookup):
     }
     substance_administration = await medication_entry(new_structured_statement, index_dict)
     warning = (
-        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
+        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take" or not specified; '
         "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
     )
     notes = _serialized_medication_notes(substance_administration)
@@ -802,7 +802,7 @@ def _serialized_medication_notes(result):
 async def test_medication_narrative_bolds_only_authored_provenance_markers(scenario):
     dose_warning = "Xhuma: Dose of 100 mg automatically mapped via dm+d lookup"
     route_warning = (
-        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
+        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take" or not specified; '
         "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
     )
     free_warning = "Xhuma: Free-text dosage instructions automatically mapped"
