@@ -174,3 +174,6 @@ RIGG_Presentation.html
 /manifest.json
 /plan-manifest-*/
 /plan_logs.txt
+
+# Synthetic NIR conformance wire evidence
+/nir_evidence/

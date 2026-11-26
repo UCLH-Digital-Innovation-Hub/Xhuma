@@ -63,6 +63,9 @@ dev = [
     "schemathesis>=4.33.1",
     "hypothesis>=6.170.15",
     "pytest-sugar>=1.1.1",
+    "pydicom>=3.0,<4",
+    "numpy>=2,<3",
+    "signxml>=4,<5",
 ]
 
 [tool.uv]

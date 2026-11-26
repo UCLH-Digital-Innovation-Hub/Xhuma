@@ -136,6 +136,110 @@ including certificate trust and IP allow listing.
 Compose loads the settings from `.env`. Local Python commands use exported
 environment variables; the NIR client does not load `.env` itself.
 
+## Incoming ITI-38 to signed NIR request
+
+Xhuma's intended signing workflow uses the authenticated user context from an
+incoming ITI-38 to issue a new SAML assertion for its outgoing NIR ITI-38.
+Xhuma becomes the assertion issuer and signs with its own signing key. The
+upstream identity remains the subject of the assertion.
+
+This flow currently exists in the synthetic test harness
+[`saml_evidence.py`](../app/tests/nir/saml_evidence.py), exercised by the Q23
+scenario. It is not connected to the production inbound FastAPI route.
+`NIRClient` can send the resulting prepared envelope but does not itself issue
+assertions or validate signatures.
+
+```mermaid
+sequenceDiagram
+    participant U as Upstream clinical system
+    participant X as Xhuma
+    participant S as Xhuma assertion signer
+    participant N as NIR
+    U->>X: ITI-38 with SAML user context
+    X->>X: Validate upstream trust, assertion and patient access
+    X->>S: Verified user context and NIR destination
+    S->>S: Create fresh assertion and sign with Xhuma key
+    S-->>X: Signed assertion
+    X->>N: New ITI-38 envelope containing signed assertion
+    N-->>X: Query response
+    Note over U,N: Intended integration; current evidence uses a synthetic upstream harness
+```
+
+### Establish trust in the incoming context
+
+Before reissuing claims, the production integration must authenticate the
+upstream caller, verify the assertion against configured upstream trust, check
+its audience and validity, and authorize access to the patient. Claims must
+come from the verified assertion. An allowed issuer name alone is insufficient;
+our existing inbound SAML helper does not yet perform these cryptographic checks.
+
+The test harness verifies a single header assertion against a pinned upstream
+test certificate, rejects duplicate XML IDs, and checks issuer, audience,
+validity and required identity/authentication claims. It assumes authenticated
+upstream transport and patient authorization. Its assertion signature does not
+cover the SOAP body. Production integration still needs the agreed protection
+binding the patient query to its caller, plus replay handling and audit recording.
+
+### Create the outgoing assertion
+
+The harness maps verified context into a newly issued assertion:
+
+| Field | Outgoing treatment |
+| --- | --- |
+| Subject `NameID` | Preserve the verified upstream user identity. |
+| Authentication statement | Preserve the authentication time and method; issuing a new assertion is not a new login. |
+| Role, purpose, organisation and originating community | Copy the allowlisted verified claims. The originating community is distinct from a target image repository's community. |
+| Issuer | Set to Xhuma's assertion-issuer identity, rather than retaining the upstream issuer. |
+| Assertion ID | Generate a fresh unique ID. |
+| Issue time and validity | Set fresh UTC issue time and `NotBefore`. The harness caps expiry at five minutes and at the incoming assertion's expiry. |
+| Audience | Set to the NIR gateway base URL for the destination environment. |
+| Signature | Sign the newly created assertion with Xhuma's key using RSA-SHA256, SHA256 and exclusive canonicalization. |
+
+The harness reads the patient identifier and NHS assigning authority from the
+incoming query and builds a fresh FindDocuments request using the existing
+ITI-38 builder. This supports the specific synthetic scenario; it does not
+implement forwarding arbitrary incoming query types or filters. The new SOAP
+envelope has its own destination and message ID. The signed assertion is placed
+inside `soap:Header/wsse:Security` and passed to
+`NIRClient.query_documents(patient, soap_envelope=outgoing)` without rewriting
+its signed XML. The harness verifies the outgoing signature and checks that the
+mapped user context was preserved before sending it.
+
+For the full journey, the harness selects a KOS reference from the ITI-38
+results, retrieves it via ITI-39, and derives an image request for RAD-75 from
+the manifest. It reuses the same signed NIR assertion unchanged in all three
+envelopes, verifying its signature and validity before each send. Each
+transaction has its own addressing and MessageID. The harness fails if the
+assertion expires; production renewal requires fresh authorized context.
+
+### Signing credentials and deployment
+
+The evidence harness generates separate ephemeral upstream and Xhuma test keys.
+It exports only their public certificates; private keys remain in memory.
+These credentials prove local signing and verification, not NIR certificate
+trust. The actual Xhuma signing certificate and issuer identity are being agreed
+with NIR. Production acceptance requires the appropriate NIR trust arrangement
+and INT verification before claiming security conformance.
+
+SOAP signing and mTLS serve separate purposes. `NIR_TLS_CERT_PATH` and
+`NIR_TLS_KEY_PATH` currently configure transport authentication; they are not
+wired into a production assertion signer. Signing key storage, certificate
+rotation and the production signer interface remain to be implemented.
+
+The Q23 harness signs the assertion only. It does not add the separate SOAP
+message signature covering the body, timestamp and assertion, and therefore
+includes complete ITI-38, ITI-39 and RAD-75 envelopes in the combined Q23
+evidence for Q23/Q25 review. It does not claim a separate message signature
+or NIR certificate trust. Refer to the
+[NIR XUA and WS-Security requirements](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api/xca-saml-requirements-guide/xca-saml-and-ws-security-requirements)
+when implementing the production security envelope.
+
+The public sandbox returned a successful query response to this signed test
+request. That response does not establish that NIR validated the test signature
+or trusts its certificate. Commands, artifacts, applicability and remaining
+evidence requirements are maintained with the
+[NIR test evidence notes](../app/tests/nir/README.md#q23-synthetic-incoming-to-outgoing-assertion-evidence).
+
 ## Calling the client
 
 ```python
@@ -261,6 +365,9 @@ uv run --locked pytest app/tests/nir
 These tests use mocked HTTP responses and synthetic document data. The sandbox
 command above exercises the live NHS sandbox separately.
 
+For scenario instructions, questionnaire applicability, captured results and the
+consolidation review, see the [NIR test evidence notes](../app/tests/nir/README.md).
+
 ## Future development
 
 The client above is the standalone MVP. The following work is proposed to
@@ -294,7 +401,9 @@ patient and request context through discovery, retrieval and any worker job.
 An identity or access denial must stop the request, rather than becoming a
 partial result from the other source.
 
-Implement the NIR issuer-signed SAML assertion and WS-Security envelope using
+Promote the [signing workflow](#incoming-iti-38-to-signed-nir-request) from its
+synthetic harness into the production request path. Implement the NIR
+issuer-signed SAML assertion and WS-Security envelope using
 the authenticated user's context, with the required audience, role, purpose
 of use and originating home community. Rebuild addressing and security for
 each SOAP hop. Queued work needs a valid assertion at dispatch, rather than
@@ -440,4 +549,4 @@ cover NIR, and the required NHS and local approvals permit production use.
 
 - [NIR API specification](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api)
 - [NIR test data](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api/test-data)
-- [dm+d mapping workflow](dm+d_mapping.md)
+- [dm+d mapping workflow](clinical-mapping/dm+d_mapping.md)
