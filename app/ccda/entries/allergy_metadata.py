@@ -13,6 +13,36 @@ from ..models.allergy import (
 from ..models.demographics import PersonName
 
 
+def _resolve_reference_resource(reference, index, owner):
+    """Resolve reference locally against bundle index or inline contained resources."""
+    if reference is None:
+        return None, None
+    ref = reference.reference
+    resource = index.get(ref)
+    if resource is None and ref and ref.startswith("#"):
+        # "#123" points inside the owning allergy, not to a separate bundle entry.
+        resource = next((r for r in owner.contained or [] if r.id == ref[1:]), None)
+    if resource is None and ref:
+        # GP Connect may use absolute references while the bundle index uses Type/id.
+        resource = index.get("/".join(ref.rstrip("/").split("/")[-2:]))
+    return ref, resource
+
+
+def _extract_name(resource) -> str | None:
+    """Extract a human-readable name string from a FHIR resource, or None."""
+    names = getattr(resource, "name", None) or []
+    name = names if isinstance(names, str) else None
+    if names and not name:
+        selected = next((n for n in names if n.use == "usual"), names[0])
+        name = (
+            selected.text
+            or " ".join(
+                [*(selected.prefix or []), *(selected.given or []), selected.family or "", *(selected.suffix or [])]
+            ).strip()
+        )
+    return name.strip() if name and name.strip() else None
+
+
 def reference_details(reference, index, owner):
     """Return a display label and CDA identifiers for a FHIR person reference.
 
@@ -25,28 +55,8 @@ def reference_details(reference, index, owner):
     if reference is None:
         return None, []
 
-    # Usually the reference is a bundle key such as "Practitioner/123".
-    ref = reference.reference
-    resource = index.get(ref)
-    if resource is None and ref and ref.startswith("#"):
-        # "#123" points inside the owning allergy, not to a separate bundle entry.
-        resource = next((r for r in owner.contained or [] if r.id == ref[1:]), None)
-    if resource is None and ref:
-        # GP Connect may use absolute references while the bundle index uses Type/id.
-        resource = index.get("/".join(ref.rstrip("/").split("/")[-2:]))
-
-    # Accept a plain name or a list of FHIR HumanName values. Prefer the usual name,
-    # then the first supplied name; preserve its text before assembling name parts.
-    names = getattr(resource, "name", None) or []
-    name = names if isinstance(names, str) else None
-    if names and not name:
-        selected = next((n for n in names if n.use == "usual"), names[0])
-        name = (
-            selected.text
-            or " ".join(
-                [*(selected.prefix or []), *(selected.given or []), selected.family or "", *(selected.suffix or [])]
-            ).strip()
-        )
+    ref, resource = _resolve_reference_resource(reference, index, owner)
+    name = _extract_name(resource)
 
     # Map supplied identifiers directly: the system (including a URL) becomes the
     # CDA root and the value becomes the extension. Do not generate replacement IDs.
@@ -67,6 +77,33 @@ def reference_details(reference, index, owner):
     return name or reference.display or ref or (
         reference.identifier.value if reference.identifier else None
     ), identifiers
+
+
+def source_recorder(reference, index, owner):
+    """Return the allergy recorder's CDA author and narrative display label.
+
+    Resolve the reference locally using reference_details and source_author.
+    Narrative label is only returned when there is a genuinely useful
+    human-readable label (resolved name or supplied display), never a raw
+    reference or identifier fallback.
+    """
+    author = source_author(reference, None, index, owner)
+    if reference is None:
+        return author, None
+
+    ref, resource = _resolve_reference_resource(reference, index, owner)
+    name = _extract_name(resource)
+    if name:
+        return author, name
+
+    display = getattr(reference, "display", None)
+    if display and display.strip():
+        candidate = display.strip()
+        ref_prefixes = ("Practitioner/", "Patient/", "Organization/", "Device/", "RelatedPerson/")
+        if candidate != ref and not any(candidate.startswith(p) for p in ref_prefixes):
+            return author, candidate
+
+    return author, None
 
 
 def source_author(reference, date, index, owner, name=None):

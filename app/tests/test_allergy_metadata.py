@@ -47,8 +47,13 @@ def test_asserter_recorder_and_note_author_are_distinct_and_survive_xml():
     comment = parsed["entryRelationship"]["act"]
     assert comment["author"]["assignedAuthor"]["assignedPerson"]["name"] == "Dr Note Author"
     assert comment["author"]["time"]["@value"] == "20240203101112+0100"
-    assert result.row[5]["content"] == ["Clinical note <br />", "Asserter: Dr Asserter <br />"]
-    assert "Dr Recorder" not in str(result.row)
+    assert result.row[5]["content"] == [
+        "Asserter: Dr Asserter <br />",
+        "Recorded by: Dr Recorder <br />",
+        "Clinical note <br />",
+    ]
+    assert "Dr Recorder" in str(result.row)
+    assert "Dr Note Author" not in str(result.row)
     assert (
         list(parsed).index("author")
         < list(parsed).index("informant")
@@ -327,3 +332,113 @@ async def test_absence_and_positive_allergies_remain_separate_in_full_ccda():
     assert [r["td"][1] for r in section["text"]["table"]["tbody"]["tr"]] == [
         {"content": {"@styleCode": "Bold", "#text": name}} for name in ["No known allergy", "Test substance"]
     ]
+
+
+def test_recorder_only_renders_narrative_and_structured_author():
+    p = practitioner("1", "Dr Recorder")
+    entry = resource(recorder={"reference": "Practitioner/1"})
+    result = allergy(entry, {"Practitioner/1": p})
+    assert result.row[5]["content"] == ["Recorded by: Dr Recorder <br />"]
+    obs = get_observation(result)
+    assert obs["author"][0]["assignedAuthor"]["assignedPerson"]["name"] == [{"#text": "Dr Recorder"}]
+    assert "informant" not in obs
+
+
+def test_asserter_and_recorder_order_and_structured_separation():
+    index = {
+        "Practitioner/1": practitioner("1", "Dr Asserter"),
+        "Practitioner/2": practitioner("2", "Dr Recorder"),
+    }
+    entry = resource(
+        asserter={"reference": "Practitioner/1"},
+        recorder={"reference": "Practitioner/2"},
+        note=[{"text": "Patient reports severe reaction to penicillin"}],
+    )
+    result = allergy(entry, index)
+    assert result.row[5]["content"] == [
+        "Asserter: Dr Asserter <br />",
+        "Recorded by: Dr Recorder <br />",
+        "Patient reports severe reaction to penicillin <br />",
+    ]
+    obs = get_observation(result)
+    assert obs["informant"][0]["assignedEntity"]["assignedPerson"]["name"] == [{"#text": "Dr Asserter"}]
+    assert obs["author"][0]["assignedAuthor"]["assignedPerson"]["name"] == [{"#text": "Dr Recorder"}]
+
+
+def test_note_author_remains_on_note_and_not_conflated_with_recorder():
+    index = {
+        "Practitioner/recorder": practitioner("recorder", "Dr True Recorder"),
+        "Practitioner/note-author": practitioner("note-author", "Dr Note Writer"),
+    }
+    entry = resource(
+        recorder={"reference": "Practitioner/recorder"},
+        note=[
+            {
+                "text": "Annotation text",
+                "authorReference": {"reference": "Practitioner/note-author"},
+                "time": "2024-01-15T09:30:00Z",
+            }
+        ],
+    )
+    result = allergy(entry, index)
+    assert result.row[5]["content"] == [
+        "Recorded by: Dr True Recorder <br />",
+        "Annotation text <br />",
+    ]
+    assert "Dr Note Writer" not in str(result.row[5])
+    obs = get_observation(result)
+    assert obs["author"][0]["assignedAuthor"]["assignedPerson"]["name"] == [{"#text": "Dr True Recorder"}]
+    comment = obs["entryRelationship"][0]["act"]
+    assert comment["author"][0]["assignedAuthor"]["assignedPerson"]["name"] == [{"#text": "Dr Note Writer"}]
+
+
+def test_display_only_recorder_renders_narrative_and_author():
+    entry = resource(recorder={"display": "Dr Display Only"})
+    result = allergy(entry)
+    assert result.row[5]["content"] == ["Recorded by: Dr Display Only <br />"]
+    obs = get_observation(result)
+    assert obs["author"][0]["assignedAuthor"]["assignedPerson"]["name"] == [{"#text": "Dr Display Only"}]
+    assert obs["author"][0]["assignedAuthor"]["id"][0]["@nullFlavor"] == "UNK"
+
+
+def test_unresolved_recorder_preserves_structured_id_without_narrative():
+    entry = resource(recorder={"reference": "Practitioner/unresolved-123"})
+    result = allergy(entry, {})
+    assert result.row[5] == ""
+    obs = get_observation(result)
+    assert obs["author"][0]["assignedAuthor"]["id"][0]["@root"] == "Practitioner/unresolved-123"
+    assert "assignedPerson" not in obs["author"][0]["assignedAuthor"]
+
+
+def test_missing_recorder_omits_narrative_line_and_author():
+    entry = resource(recorder=None)
+    result = allergy(entry)
+    assert result.row[5] == ""
+    obs = get_observation(result)
+    assert "author" not in obs
+
+
+def test_allergy_source_immutability_preserved():
+    p1 = practitioner("1", "Dr Asserter")
+    p2 = practitioner("2", "Dr Recorder")
+    entry = resource(
+        asserter={"reference": "Practitioner/1"},
+        recorder={"reference": "Practitioner/2"},
+        note=[{"text": "Source note"}],
+    )
+    original_dict = entry.as_json()
+    result = allergy(entry, {"Practitioner/1": p1, "Practitioner/2": p2})
+    assert entry.as_json() == original_dict
+    assert result.row[5]["content"] == [
+        "Asserter: Dr Asserter <br />",
+        "Recorded by: Dr Recorder <br />",
+        "Source note <br />",
+    ]
+
+
+@pytest.mark.parametrize("reference", ["Practitioner/1", "https://provider.test/fhir/Practitioner/1", "#1"])
+def test_recorder_reference_resolution_variants(reference):
+    p = practitioner("1", "Dr Recorder")
+    entry = resource(recorder={"reference": reference}, contained=[p.as_json()] if reference.startswith("#") else None)
+    result = allergy(entry, {"Practitioner/1": p})
+    assert result.row[5]["content"] == ["Recorded by: Dr Recorder <br />"]
