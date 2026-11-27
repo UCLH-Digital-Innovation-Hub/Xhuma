@@ -9,8 +9,10 @@ Xhuma uses those references for the next request.
 
 The MVP provides an async Python client in `app/nir`. Its IHE models, SOAP
 builders and response parsers live in `app/soap/nir_*`. It can run independently
-of the existing GP Connect routes, PDS lookups, Redis and relay. There is no new
-inbound FastAPI route or automatic C-CDA conversion in this workflow.
+of the existing GP Connect routes, PDS lookups, Redis and relay. An opt-in
+integration also connects the existing inbound ITI-38 and ITI-39 routes to NIR;
+see [application integration](#application-integration). NIR documents retain
+their original format; they are not converted to C-CDA.
 
 ## Basic flow
 
@@ -138,16 +140,16 @@ environment variables; the NIR client does not load `.env` itself.
 
 ## Incoming ITI-38 to signed NIR request
 
-Xhuma's intended signing workflow uses the authenticated user context from an
+Xhuma's signing workflow uses the authenticated user context from an
 incoming ITI-38 to issue a new SAML assertion for its outgoing NIR ITI-38.
 Xhuma becomes the assertion issuer and signs with its own signing key. The
 upstream identity remains the subject of the assertion.
 
-This flow currently exists in the synthetic test harness
-[`saml_evidence.py`](../app/tests/nir/saml_evidence.py), exercised by the Q23
-scenario. It is not connected to the production inbound FastAPI route.
-`NIRClient` can send the resulting prepared envelope but does not itself issue
-assertions or validate signatures.
+The application implements this in [`app/nir/security.py`](../app/nir/security.py)
+when NIR discovery is enabled. The separate synthetic test harness
+[`saml_evidence.py`](../app/tests/nir/saml_evidence.py) supplies Q23 evidence.
+`NIRClient` transports prepared envelopes; verification and issuance belong
+to the caller.
 
 ```mermaid
 sequenceDiagram
@@ -162,27 +164,27 @@ sequenceDiagram
     S-->>X: Signed assertion
     X->>N: New ITI-38 envelope containing signed assertion
     N-->>X: Query response
-    Note over U,N: Intended integration; current evidence uses a synthetic upstream harness
+    Note over U,N: Enabled application flow; existing Q23 evidence uses a synthetic upstream harness
 ```
 
 ### Establish trust in the incoming context
 
-Before reissuing claims, the production integration must authenticate the
-upstream caller, verify the assertion against configured upstream trust, check
-its audience and validity, and authorize access to the patient. Claims must
-come from the verified assertion. An allowed issuer name alone is insufficient;
-our existing inbound SAML helper does not yet perform these cryptographic checks.
+The enabled route verifies a single header assertion against a configured pinned
+upstream certificate. It checks issuer, audience, lifetime, authentication event,
+required claims and duplicate IDs. It requires a signed NHS `resource-id` that
+matches the ITI-38 query, records MessageIDs in Redis to reject replay, and runs
+PDS patient restrictions before either source or the GP cache. ITI-39 requires
+its own valid context and repeats the access checks. Existing mTLS middleware
+still authenticates the transport; the assertion signature covers the assertion,
+not the SOAP body. The legacy GP-only path retains its existing validation.
 
-The test harness verifies a single header assertion against a pinned upstream
-test certificate, rejects duplicate XML IDs, and checks issuer, audience,
-validity and required identity/authentication claims. It assumes authenticated
-upstream transport and patient authorization. Its assertion signature does not
-cover the SOAP body. Production integration still needs the agreed protection
-binding the patient query to its caller, plus replay handling and audit recording.
+The Q23 harness verifies synthetic assertions but does not exercise the complete
+application access, replay or audit boundary. Its captured evidence remains
+separate from the mocked application-route tests.
 
 ### Create the outgoing assertion
 
-The harness maps verified context into a newly issued assertion:
+Both the application and harness map verified context into a newly issued assertion:
 
 | Field | Outgoing treatment |
 | --- | --- |
@@ -222,9 +224,11 @@ with NIR. Production acceptance requires the appropriate NIR trust arrangement
 and INT verification before claiming security conformance.
 
 SOAP signing and mTLS serve separate purposes. `NIR_TLS_CERT_PATH` and
-`NIR_TLS_KEY_PATH` currently configure transport authentication; they are not
-wired into a production assertion signer. Signing key storage, certificate
-rotation and the production signer interface remain to be implemented.
+`NIR_TLS_KEY_PATH` configure transport authentication. Separate
+`NIR_SIGNING_KEY_PATH` and `NIR_SIGNING_CERT_PATH` configure application assertion
+signing. Keys are loaded at startup; certificate rotation requires restarting
+the application. Deployment secret storage and NIR trust must be configured
+by the operator.
 
 The Q23 harness signs the assertion only. It does not add the separate SOAP
 message signature covering the body, timestamp and assertion, and therefore
@@ -232,7 +236,7 @@ includes complete ITI-38, ITI-39 and RAD-75 envelopes in the combined Q23
 evidence for Q23/Q25 review. It does not claim a separate message signature
 or NIR certificate trust. Refer to the
 [NIR XUA and WS-Security requirements](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api/xca-saml-requirements-guide/xca-saml-and-ws-security-requirements)
-when implementing the production security envelope.
+when validating the deployment security envelope.
 
 The public sandbox returned a successful query response to this signed test
 request. That response does not establish that NIR validated the test signature
@@ -368,78 +372,134 @@ command above exercises the live NHS sandbox separately.
 For scenario instructions, questionnaire applicability, captured results and the
 consolidation review, see the [NIR test evidence notes](../app/tests/nir/README.md).
 
-## Future development
+## Application integration
 
-The client above is the standalone MVP. The following work is proposed to
-complete its integration into Xhuma; these routes, security controls and image
-delivery workers are not implemented yet. Development and NHS onboarding can
-progress together, but INT testing and production access have separate gates.
+The existing ITI-38 and ITI-39 routes use the integration only when
+`NIR_DISCOVERY_ENABLED=true` at startup. The default is `false`: no NIR
+credentials are loaded and GP-only routes keep their existing behaviour.
+Invalid enabled configuration stops startup instead of silently omitting NIR.
 
-### 1. Agree the receiving-system contract
+```dotenv
+NIR_DISCOVERY_ENABLED=true
+NIR_ENV=sandbox
+NIR_TIMEOUT=30
+NIR_RETRIEVAL_TTL=900
+NIR_ISSUER=https://your-xhuma-issuer.example
+NIR_SIGNING_KEY_PATH=/run/secrets/nir-signing-key.pem
+NIR_SIGNING_CERT_PATH=/run/secrets/nir-signing-cert.pem
+NIR_INBOUND_ISSUER=https://your-trusted-upstream-issuer.example
+NIR_INBOUND_AUDIENCE=https://your-xhuma-gateway.example
+NIR_INBOUND_CERT_PATH=/run/secrets/trusted-upstream-cert.pem
+```
 
-Keep ITI-55 and the existing patient discovery workflow. For an incoming ITI-38,
-validate the patient and caller, then run the GP Connect lookup and an outgoing
-NIR ITI-38 in parallel. Return the GP document metadata and the NIR document
-metadata in one ITI-38 response. Retrieval remains a separate request.
+These issuer/audience URLs are placeholders: use the values agreed with the
+upstream organisation and NIR. Signing uses a matching RSA key/certificate
+(at least 2048 bits); the inbound certificate pins the trusted upstream signer.
+The initial configuration supports one trusted upstream issuer. It requires
+finite assertion validity, a signed NHS patient resource ID, coded role/purpose,
+organisation and originating community. Incoming transport authentication uses
+the existing mTLS middleware. INT/production require `REQUIRE_MTLS=true` plus
+`NIR_TLS_CERT_PATH` and `NIR_TLS_KEY_PATH` for outbound mTLS. Optional
+`NIR_CA_BUNDLE_PATH` controls NIR server trust. Credentials and environment are
+independent of GP Connect. Do not use the test fixtures as deployment identities.
 
-Agree with the requesting organisation how it will retrieve documents belonging
-to external home communities through Xhuma. Preserve the original home
-community, repository and document unique IDs. If the receiver requires local
-identifiers, agree and persist a reversible mapping before implementing it.
+```mermaid
+flowchart TD
+    A[Incoming ITI-38] --> B[Verify SAML and supported query]
+    B --> C[Replay and PDS access checks]
+    C --> D[GP cache or existing GP stages]
+    C --> E[Fresh Xhuma assertion and NIR ITI-38]
+    D --> F[Combine complete metadata and source errors]
+    E --> F
+    F --> G[Cache retrieval associations and audit]
+    G --> H[Correlated discovery response]
+    H --> I[Consumer sends ITI-39 to Xhuma]
+    I --> J[Verify fresh context and patient access]
+    J --> K[Local GP cache or NIR ITI-39 by home community]
+    K --> L[Audit and return binary MTOM response]
+```
 
-Confirm which reports and DICOM objects the receiver can import and display.
-For image retrieval, agree Xhuma's IHE actor role and whether the receiving
-interface uses RAD-69 or RAD-75. The existing ITI-39 document interface alone
-does not provide an imaging viewer; images need a compatible viewer or PACS.
+| Code | Responsibility |
+| --- | --- |
+| `app/bootstrap/lifespan.py`, `app/nir/config.py` | Load the deployment switch and validate credentials once at startup. |
+| `app/soap/soap.py` | Dispatch enabled requests to the coordinator; keep legacy handling when disabled. |
+| `app/nir/security.py` | Construct `DiscoveryContext` from verified incoming XML and issue fresh signed assertions. |
+| `app/nir/saml_models.py` | Model generated SAML fields while copying verified identity, authentication and coded-claim XML intact before signing. |
+| `app/soap/nir_request_models.py` | Model outgoing ITI-38, ITI-39 and RAD-75 bodies and addressing using the existing `XmlModel` convention. |
+| `app/soap/discovery.py` | Validate queries, check access, query both sources concurrently, preserve full registry metadata and route retrieval. |
+| `app/gpconnect_stages/patient.py` | Share patient restriction checks while keeping GP registration resolution in the GP source. |
+| `app/soap/responses/iti_38.py` | Expose GP metadata separately from the legacy outer SOAP response. |
+| `app/soap/responses/iti_39.py` | Reuse audited direct/callback delivery, preserving binary MTOM bytes. |
 
-### 2. Connect identity, access checks and NIR security
+Generated XML follows the existing Pydantic `XmlModel` → `to_xml_dict()` →
+`xmltodict.unparse()` pattern. Shared SOAP response models support repeated
+documents/errors and XOP references. Binary attachments remain bytes outside
+the XML models. Complete external registry entries and errors remain XML so
+unknown metadata, namespaces and element order survive combination.
 
-Apply shared patient and access validation before either downstream request,
-including when the GP document is already cached. Validate the identifier's
-assigning authority as well as its digits, and carry trusted user, organisation,
-patient and request context through discovery, retrieval and any worker job.
-An identity or access denial must stop the request, rather than becoming a
-partial result from the other source.
+Inbound signatures are verified against the original XML. The SAML models
+build the new assertion structure and insert copies of verified NameID,
+authentication and attribute elements. Signing happens after that assertion is
+attached to the final envelope; signed XML is never serialized through Pydantic
+again. Model validation does not replace signature verification.
 
-Promote the [signing workflow](#incoming-iti-38-to-signed-nir-request) from its
-synthetic harness into the production request path. Implement the NIR
-issuer-signed SAML assertion and WS-Security envelope using
-the authenticated user's context, with the required audience, role, purpose
-of use and originating home community. Rebuild addressing and security for
-each SOAP hop. Queued work needs a valid assertion at dispatch, rather than
-reusing an expired incoming envelope. Keep NIR credentials, certificates and
-environment settings independent of GP Connect.
-Follow the [NIR XUA and WS-Security requirements](https://digital.nhs.uk/developer/api-catalogue/national-imaging-registry-api/xca-saml-requirements-guide/xca-saml-and-ws-security-requirements).
+The context is created per request by `verify_incoming`; it contains verified
+identity, patient, authentication and validity data. It does not come from an
+environment variable. The feature flag is deployment configuration held in
+`app.state.nir_discovery`; there is no `context.sources.nir_enabled` property.
 
-### 3. Merge discovery responses without losing metadata
+The initial enabled query contract is **untargeted FindDocuments, LeafClass,
+one NHS patient and Approved status**. Other query types, filters, return types
+and targeted communities are explicitly rejected. Supported query XML is copied
+to NIR unchanged, with new addressing and security. NIR slots, classifications,
+associations and original retrieval addresses are preserved. Colliding metadata
+XML IDs and their references are renamed together; document unique IDs are not.
 
-Extend the current single-document GP response and the reduced NIR reference
-parser to support complete registry entries. Preserve slots, classifications,
-external identifiers, associations and source provenance, including the
-retrieval address. Returning document IDs alone is insufficient for the
-receiving system to select and retrieve the correct content.
+Both sources run after shared access checks, even on a GP cache hit. Each source
+has the configured timeout. Missing GP registration or a source outage can
+produce partial results; missing shared patient access cannot. Security denials
+and audit failures stop the whole request, cancelling outstanding discovery work.
 
-Support the incoming query type, return type, filters and target communities
-that the agreed interface allows. Use bounded downstream deadlines and define
-how source failures produce registry errors and partial results. Distinguish
-an empty successful query from an unavailable source, and retain usable
-documents when an availability failure permits partial success. Validate the
-merged response against the [ITI-38 transaction requirements](https://profiles.ihe.net/ITI/TF/Volume2/ITI-38.html).
+| Source outcome | Combined response |
+| --- | --- |
+| Both complete, including empty matches | Success. |
+| One available and one unavailable, or a reported partial result | PartialSuccess with usable entries and source errors. |
+| Both fail | Failure with source errors. |
+| Identity/access/security or audit failure | No document response is released. |
 
-### 4. Route ITI-39 to the correct source
+Consumers send ITI-39 to **Xhuma**, retaining the original home community,
+repository and document unique IDs. Xhuma reads local GP documents from Redis
+and forwards external requests to NIR, grouped by home community. Discovery
+records the full external address against the verified caller, organisation and
+patient for `NIR_RETRIEVAL_TTL` seconds (default 900, maximum 86400). Expired or
+unknown addresses require rediscovery. Every retrieval repeats patient access
+checks; routing state does not replace authorization. No assertion is cached.
 
-Handle every document request in an incoming ITI-39, rather than only the first.
-Route local GP documents to the existing cache and NIR documents to outgoing
-ITI-39 requests, grouped by home community where necessary. Persist an
-authorised patient association for the full home/repository/document address
-so that retrieval and audit do not depend on the document UID alone.
+ITI-39 accepts 1–100 distinct complete addresses, checks returned addresses,
+and preserves binary payloads in MIME/XOP parts. Mixed requests retain usable
+documents when a source is unavailable. Existing asynchronous ReplyTo allowlists
+and audit-before-delivery apply. Retrieval is buffered in memory; this does not
+provide streaming, durable callback retries, manifest decoding or inbound RAD-75.
+A retrieved KOS manifest is a document, not automatic retrieval of its images.
 
-Return PDF, text and DICOM payloads with their correct MIME types and MTOM
-attachment references. Build a response addressed and correlated to the
-original requester; NIR's response headers relate to Xhuma's outbound request
-and cannot simply be forwarded. Check requested and returned identifiers,
-attachment completeness and available size or hash metadata before recording
-successful retrieval and delivery.
+Application tests run in default collection:
+
+```bash
+NIR_RUN_CONFORMANCE=0 uv run --locked pytest app/tests/test_nir_integration.py app/tests/nir
+```
+
+They use shared SAML fixture attributes, temporary test certificates, mocked PDS,
+Redis and HTTP, with real signing and parsing. Existing Q23 sandbox artefacts do
+not demonstrate this integrated route, trusted INT signing or receiver import.
+Extend evidence through the real receiver and INT before making those claims.
+The receiving system must be configured to route external communities through
+Xhuma and support the returned document formats.
+
+## Remaining development and onboarding
+
+The report/KOS discovery and retrieval slice above is implemented behind the
+flag. Broader query support, image delivery and live deployment acceptance remain.
+The following items describe that remaining work.
 
 ### 5. Decode manifests and build image delivery
 

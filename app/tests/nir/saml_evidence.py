@@ -12,6 +12,7 @@ from lxml import etree as ET
 from signxml import DigestAlgorithm, SignatureConfiguration, SignatureMethod, XMLSigner, XMLVerifier
 
 from app.soap.nir_queries import RIM_NS, SOAP_NS, WSA_NS, build_iti38_request
+from app.tests.fixtures.saml_attributes import xml38
 
 SAML = "urn:oasis:names:tc:SAML:2.0:assertion"
 WSSE = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
@@ -23,7 +24,11 @@ XHUMA_AUDIENCE = "https://xhuma.example.test"
 ROLE = "urn:oasis:names:tc:xacml:2.0:subject:role"
 PURPOSE = "urn:oasis:names:tc:xspa:1.0:subject:purposeofuse"
 HOME = "urn:ihe:iti:xca:2010:homeCommunityId"
+SUBJECT = "urn:oasis:names:tc:xspa:1.0:subject:subject-id"
+RESOURCE = "urn:oasis:names:tc:xacml:2.0:resource:resource-id"
 ATTRIBUTES = (
+    SUBJECT,
+    RESOURCE,
     ROLE,
     PURPOSE,
     HOME,
@@ -61,7 +66,22 @@ def element(parent, name, text=None, **attrs):
     return child
 
 
-def assertion(issuer, audience, now, context=None):
+def fixture_attributes(patient):
+    """Adapt the shared fixture to SAML XML and the scenario's patient."""
+    attrs = parse_xml(xml38.encode())
+    for node in attrs.iter():
+        if node.tag in ("AttributeStatement", "Attribute", "AttributeValue"):
+            node.tag = f"{{{SAML}}}{node.tag}"
+    for attr in attrs:
+        attr.set("NameFormat", "urn:oasis:names:tc:SAML:2.0:attrname-format:uri")
+        if attr.get("Name") == "urn:nhin:names:saml:homeCommunityId":
+            attr.set("Name", HOME)
+        elif attr.get("Name") == RESOURCE:
+            attr.find("saml:AttributeValue", NS).text = f"{patient}^^^&2.16.840.1.113883.2.1.4.1&ISO"
+    return attrs
+
+
+def assertion(issuer, audience, now, context=None, *, patient="9694116422"):
     root = ET.Element(
         f"{{{SAML}}}Assertion",
         nsmap={"saml": SAML, "ds": DS},
@@ -73,11 +93,12 @@ def assertion(issuer, audience, now, context=None):
     ET.SubElement(root, f"{{{DS}}}Signature", Id="placeholder")
     subject = element(root, "Subject")
     if context is None:
+        attrs = fixture_attributes(patient)
         element(
             subject,
             "NameID",
-            "test.clinician@example.test",
-            Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+            attrs.find(f"saml:Attribute[@Name='{SUBJECT}']/saml:AttributeValue", NS).text,
+            Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
         )
     else:
         subject.append(deepcopy(context.find("saml:Subject/saml:NameID", NS)))
@@ -95,19 +116,7 @@ def assertion(issuer, audience, now, context=None):
             "AuthnContextClassRef",
             "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
         )
-        attrs = element(root, "AttributeStatement")
-        for name, value in zip(
-            ATTRIBUTES,
-            (
-                "DOCTOR",
-                "TREATMENT",
-                "urn:oid:1.2.826.0.1.3680043.10.999",
-                "Synthetic Test Organisation",
-                "urn:oid:1.2.826.0.1.3680043.10.999",
-            ),
-        ):
-            attr = element(attrs, "Attribute", Name=name, NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri")
-            element(attr, "AttributeValue", value)
+        root.append(attrs)
     else:
         root.append(deepcopy(context.find("saml:AuthnStatement", NS)))
         attrs = element(root, "AttributeStatement")
@@ -189,14 +198,23 @@ def verify_context(envelope, cert, issuer, audience, now):
         raise ValueError("Authentication is in the future")
     for name in (ROLE, PURPOSE, HOME):
         attrs = verified.xpath("saml:AttributeStatement/saml:Attribute[@Name=$name]", namespaces=NS, name=name)
-        if len(attrs) != 1 or not "".join(attrs[0].itertext()).strip():
+        if len(attrs) != 1:
+            raise ValueError("Missing or duplicated required claim")
+        value = attrs[0].find("saml:AttributeValue", NS)
+        coded_tag = {ROLE: "Role", PURPOSE: "PurposeForUse"}.get(name)
+        coded = value.find(f"{{urn:hl7-org:v3}}{coded_tag}") if value is not None and coded_tag else None
+        if coded is not None:
+            populated = bool((coded.get("code") or "").strip())
+        else:
+            populated = value is not None and bool((value.text or "").strip())
+        if not populated:
             raise ValueError("Missing or duplicated required claim")
     return verified
 
 
 def synthetic_incoming(key, cert, now, patient="9694116422"):
     root = parse_xml(build_iti38_request(patient, XHUMA_AUDIENCE + "/SOAP/iti38"))
-    return attach_signed(root, assertion(UPSTREAM_ISSUER, XHUMA_AUDIENCE, now), key, cert)
+    return attach_signed(root, assertion(UPSTREAM_ISSUER, XHUMA_AUDIENCE, now, patient=patient), key, cert)
 
 
 def reissue_for_nir(incoming, upstream_cert, key, cert, endpoint, audience, now):

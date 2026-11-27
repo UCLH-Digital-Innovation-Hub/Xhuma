@@ -9,8 +9,9 @@ from app.telemetry import measure, record_cache
 
 from ...audit.audit import AuditFailureException, attempt_audit
 from ...audit.models import AuditOutcome, SAMLAttributes
-from ...gpconnect import gpconnect
+from ...gpconnect import _fetch_gpconnect_record, gpconnect
 from ...redis_connect import redis_client
+from ..faults import SoapFault
 from ..models import (
     XDS_DEFERRED_CREATION_STATUS,
     XDS_ERROR_SEVERITY,
@@ -61,6 +62,30 @@ async def iti_38_error(queryid: str, error_text: str, error_code: str = "XDSRegi
 async def iti_38_response(
     request: Request, nhsno: int, ceid, queryid: str, saml_attrs: SAMLAttributes, message_id: str | None = None
 ):
+    """Legacy GP-only SOAP boundary, also used when NIR is disabled."""
+    response = await query_gp_documents(request, nhsno, ceid, saml_attrs, message_id)
+    soap_response = SoapEnvelope.create(
+        ResponseHeader.create("urn:ihe:iti:2007:CrossGatewayQueryResponse", message_id or queryid),
+        ITI38ResponseBody(response=response),
+    )
+    return xmltodict.unparse(soap_response.to_xml_dict(), pretty=True)
+
+
+async def query_gp_documents(
+    request: Request,
+    nhsno: int,
+    ceid,
+    saml_attrs: SAMLAttributes,
+    message_id: str | None = None,
+    *,
+    patient: dict | None = None,
+) -> AdhocQueryResponse:
+    """Return GP registry metadata without building the outer SOAP response.
+
+    This small extraction keeps the established cache, pipeline and audit code
+    in one place. The integrated coordinator can combine this typed result with
+    NIR entries before creating one response to the original caller.
+    """
     response = AdhocQueryResponse()
 
     # check the redis cache if there's an existing ccda
@@ -74,13 +99,22 @@ async def iti_38_response(
     if docid is None:
         # no cached ccda
         try:
-            r = await gpconnect(nhsno, saml_attrs, request=request)
+            if patient is None:
+                r = await gpconnect(nhsno, saml_attrs, request=request)
+            else:
+                r = await _fetch_gpconnect_record(nhsno, saml_attrs, request=request, patient=patient)
+                # A security denial must stop both sources, not become a
+                # partial success containing documents from the other source.
+                if r.status_code in (401, 403):
+                    raise SoapFault(
+                        "GP source denied access", subcode="wsse:FailedAuthentication", message_id=message_id
+                    )
 
             logging.info("no cached ccda, used internal call for patient")
             r = json.loads(r.body)
             if not r.get("success"):
                 audit_error_code = "GP_CONNECT_FAILURE"
-        except AuditFailureException:
+        except (AuditFailureException, SoapFault):
             raise
         except Exception as e:
             logging.error(f"Error: {e}")
@@ -108,7 +142,7 @@ async def iti_38_response(
         request=request,
         nhs_number=str(nhsno),
         saml=saml_attrs,
-        action="iti38_document_query",
+        action="iti38_gp_document_query" if patient is not None else "iti38_document_query",
         outcome=AuditOutcome.ok if docid else AuditOutcome.fail,
         error_code=audit_error_code,
         message_id=message_id,
@@ -205,8 +239,4 @@ async def iti_38_response(
     else:
         response.registry_object_list = {}
 
-    soap_response = SoapEnvelope.create(
-        ResponseHeader.create("urn:ihe:iti:2007:CrossGatewayQueryResponse", message_id or queryid),
-        ITI38ResponseBody(response=response),
-    )
-    return xmltodict.unparse(soap_response.to_xml_dict(), pretty=True)
+    return response

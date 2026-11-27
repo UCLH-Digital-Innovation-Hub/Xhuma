@@ -5,9 +5,15 @@ from lxml import etree
 from signxml import InvalidSignature
 
 from app.soap.nir_queries import build_iti38_request
+from app.tests.fixtures.saml_attributes import saml
 
 from .saml_evidence import (
+    HOME,
     NS,
+    PURPOSE,
+    RESOURCE,
+    ROLE,
+    SUBJECT,
     UPSTREAM_ISSUER,
     XHUMA_AUDIENCE,
     XHUMA_ISSUER,
@@ -38,18 +44,52 @@ def test_reissues_with_new_identity_audience_and_signature(signed_request):
     )
     verified = verify_context(outgoing, outgoing_cert, XHUMA_ISSUER, "https://sandbox.example", now)
     assert patient == "9694116422"
-    assert verified.findtext("saml:Subject/saml:NameID", namespaces=NS) == "test.clinician@example.test"
+    assert verified.findtext("saml:Subject/saml:NameID", namespaces=NS) == saml.subject_id
     assert verified.find("saml:AuthnStatement", NS).get("AuthnInstant") == verify_context(
         incoming, cert, UPSTREAM_ISSUER, XHUMA_AUDIENCE, now
     ).find("saml:AuthnStatement", NS).get("AuthnInstant")
 
 
-@pytest.mark.parametrize("failure", ["tampered", "unknown_certificate", "expired", "audience", "duplicate"])
+@pytest.mark.parametrize("patient", ["9694116422", "9932549118", "9690937278"])
+def test_shared_fixture_claims_survive_signed_reissue(signed_request, patient):
+    now, upstream_key, upstream_cert, _ = signed_request
+    incoming = synthetic_incoming(upstream_key, upstream_cert, now, patient=patient)
+    key, cert = make_certificate("outgoing synthetic", now)
+    actual_patient, outgoing = reissue_for_nir(
+        incoming, upstream_cert, key, cert, "https://sandbox.example/xca/iti-38", "https://sandbox.example", now
+    )
+    verified = verify_context(outgoing, cert, XHUMA_ISSUER, "https://sandbox.example", now)
+    assert actual_patient == patient
+    assert verified.find("saml:Subject/saml:NameID", NS).get("Format").endswith(":unspecified")
+    values = {
+        attr.get("Name"): attr.find("saml:AttributeValue", NS)
+        for attr in verified.findall("saml:AttributeStatement/saml:Attribute", NS)
+    }
+    assert {name: value.text for name, value in values.items() if name not in (ROLE, PURPOSE)} == {
+        SUBJECT: saml.subject_id,
+        HOME: saml.home_community_id,
+        "urn:oasis:names:tc:xspa:1.0:subject:organization": saml.organization,
+        "urn:oasis:names:tc:xspa:1.0:subject:organization-id": saml.organization_id,
+        RESOURCE: f"{patient}^^^&2.16.840.1.113883.2.1.4.1&ISO",
+    }
+    for name, tag, expected in ((ROLE, "Role", saml.role), (PURPOSE, "PurposeForUse", saml.purpose_of_use)):
+        coded = values[name].find(f"{{urn:hl7-org:v3}}{tag}")
+        for attribute in ("code", "codeSystem", "codeSystemName", "displayName"):
+            assert coded.get(attribute) == getattr(expected, attribute)
+        assert coded.get("{http://www.w3.org/2001/XMLSchema-instance}type") == "CE"
+
+
+@pytest.mark.parametrize(
+    "failure", ["tampered", "tampered_role", "unknown_certificate", "expired", "audience", "duplicate"]
+)
 def test_rejects_invalid_incoming_assertion(signed_request, failure):
     now, _, cert, incoming = signed_request
     root = parse_xml(incoming)
     if failure == "tampered":
         root.find(".//saml:NameID", NS).text = "forged@example.test"
+        incoming = etree.tostring(root)
+    elif failure == "tampered_role":
+        root.find(".//{urn:hl7-org:v3}Role").set("code", "forged")
         incoming = etree.tostring(root)
     elif failure == "unknown_certificate":
         _, cert = make_certificate("untrusted", now)
@@ -70,6 +110,21 @@ def test_signed_missing_required_claim_rejected(signed_request):
     now, key, cert, _ = signed_request
     claim = assertion(UPSTREAM_ISSUER, XHUMA_AUDIENCE, now)
     claim.remove(claim.find("saml:AttributeStatement", NS))
+    incoming = attach_signed(parse_xml(build_iti38_request("9694116422", XHUMA_AUDIENCE)), claim, key, cert)
+    with pytest.raises(ValueError, match="required claim"):
+        verify_context(incoming, cert, UPSTREAM_ISSUER, XHUMA_AUDIENCE, now)
+
+
+@pytest.mark.parametrize("tag", ["Role", "PurposeForUse"])
+@pytest.mark.parametrize("code", [None, "", " "])
+def test_signed_empty_coded_claim_rejected(signed_request, tag, code):
+    now, key, cert, _ = signed_request
+    claim = assertion(UPSTREAM_ISSUER, XHUMA_AUDIENCE, now)
+    coded = claim.find(f".//{{urn:hl7-org:v3}}{tag}")
+    if code is None:
+        del coded.attrib["code"]
+    else:
+        coded.set("code", code)
     incoming = attach_signed(parse_xml(build_iti38_request("9694116422", XHUMA_AUDIENCE)), claim, key, cert)
     with pytest.raises(ValueError, match="required claim"):
         verify_context(incoming, cert, UPSTREAM_ISSUER, XHUMA_AUDIENCE, now)

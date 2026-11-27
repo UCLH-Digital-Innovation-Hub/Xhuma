@@ -34,6 +34,8 @@ dependencies = [
     "defusedxml>=0.7.1",
     "tzdata>=2026.6",
     "xmltodict>=1.0.4",
+    "signxml>=4,<5",
+    "lxml>=6,<7",
 ]
 
 [tool.ruff]
@@ -65,7 +67,6 @@ dev = [
     "pytest-sugar>=1.1.1",
     "pydicom>=3.0,<4",
     "numpy>=2,<3",
-    "signxml>=4,<5",
 ]
 
 [tool.uv]

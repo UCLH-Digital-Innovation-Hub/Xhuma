@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from .. import logging as application_logging
@@ -17,7 +17,7 @@ from ..telemetry import measure
 from .types import DiagnosticStep
 
 
-async def resolve_patient(
+async def validate_patient(
     nhsno: int,
     saml_attrs: SAMLAttributes,
     *,
@@ -25,9 +25,10 @@ async def resolve_patient(
     log_dir: str | None,
     step: DiagnosticStep,
 ) -> Any:
-    """Return the unvalidated JSON ODS value, or the existing early JSONResponse.
+    """Return the unrestricted PDS patient, or the existing early JSONResponse.
 
-    PDS owns patient caching. Only the first security/GP entries are read here.
+    Discovery uses this before either source/cache. GP-only callers still reach
+    it through resolve_patient below. PDS continues to own its patient cache.
     """
     # 1) Validate NHS number
     if validateNHSnumber(nhsno) is False:
@@ -115,6 +116,30 @@ async def resolve_patient(
             with open(os.path.join(log_dir, "error.log"), "a") as f:
                 f.write(diagnostic + "\n")
         return JSONResponse(status_code=403, content={"success": False, "error": msg})
+
+    return pds_search
+
+
+async def resolve_patient(
+    nhsno: int,
+    saml_attrs: SAMLAttributes,
+    *,
+    request: Request | None,
+    log_dir: str | None,
+    step: DiagnosticStep,
+    patient: dict | None = None,
+) -> Any:
+    """Resolve GP registration after shared patient validation.
+
+    The coordinator supplies the already-validated PDS patient. Ordinary GP
+    callers leave patient unset and retain the original validation order.
+    Missing GP registration therefore affects GP Connect, not NIR discovery.
+    """
+    pds_search = patient
+    if pds_search is None:
+        pds_search = await validate_patient(nhsno, saml_attrs, request=request, log_dir=log_dir, step=step)
+        if isinstance(pds_search, Response):
+            return pds_search
 
     # 4) Resolve GP ODS
     step.value = "resolve_gp_ods.ods_extraction"

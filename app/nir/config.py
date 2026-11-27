@@ -8,6 +8,7 @@ import math
 import os
 import ssl
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit
 
 # Each NIR environment has its own host. The client adds transaction paths to
@@ -104,3 +105,84 @@ class NIRConfig:
         if self.tls_cert_path:
             context.load_cert_chain(self.tls_cert_path, self.tls_key_path)
         return context
+
+
+@dataclass(frozen=True, repr=False)
+class NIRDiscoveryConfig:
+    """Opt-in SOAP integration settings, loaded once by application startup.
+
+    Transport credentials and assertion-signing credentials are deliberately
+    separate. One configured upstream issuer/certificate is supported initially;
+    the certificate in an incoming assertion is never used as a trust anchor.
+    repr=False avoids accidentally logging key material through this object.
+    """
+
+    client: NIRConfig
+    signing_key: object
+    signing_certificate: object
+    inbound_certificate: object
+    issuer: str
+    inbound_issuer: str
+    inbound_audience: str
+    retrieval_ttl: int = 900
+
+    @classmethod
+    def from_env(cls) -> "NIRDiscoveryConfig | None":
+        enabled = os.getenv("NIR_DISCOVERY_ENABLED", "false").strip().lower()
+        if enabled not in {"true", "false"}:
+            raise ValueError("NIR_DISCOVERY_ENABLED must be true or false")
+        if enabled == "false":
+            # A GP-only deployment must not need NIR files, TLS credentials or
+            # even valid NIR_ENV settings. Do not construct NIRConfig here.
+            return None
+
+        from datetime import UTC, datetime
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+
+        names = (
+            "NIR_SIGNING_KEY_PATH",
+            "NIR_SIGNING_CERT_PATH",
+            "NIR_INBOUND_CERT_PATH",
+            "NIR_ISSUER",
+            "NIR_INBOUND_ISSUER",
+            "NIR_INBOUND_AUDIENCE",
+        )
+        values = {name: os.getenv(name, "").strip() for name in names}
+        missing = [name for name, value in values.items() if not value]
+        if missing:
+            raise ValueError("Missing NIR configuration: " + ", ".join(missing))
+        key = serialization.load_pem_private_key(Path(values["NIR_SIGNING_KEY_PATH"]).read_bytes(), password=None)
+        signing = x509.load_pem_x509_certificate(Path(values["NIR_SIGNING_CERT_PATH"]).read_bytes())
+        inbound = x509.load_pem_x509_certificate(Path(values["NIR_INBOUND_CERT_PATH"]).read_bytes())
+        if not isinstance(key, rsa.RSAPrivateKey) or key.key_size < 2048:
+            raise ValueError("NIR signing requires an RSA key of at least 2048 bits")
+        if key.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        ) != signing.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        ):
+            raise ValueError("NIR signing key does not match its certificate")
+        now = datetime.now(UTC)
+        for cert in (signing, inbound):
+            if not cert.not_valid_before_utc <= now < cert.not_valid_after_utc:
+                raise ValueError("NIR signing and inbound certificates must be currently valid")
+        ttl = int(os.getenv("NIR_RETRIEVAL_TTL", "900"))
+        if not 1 <= ttl <= 86400:
+            raise ValueError("NIR_RETRIEVAL_TTL must be between 1 and 86400 seconds")
+        client = NIRConfig.from_env()
+        if client.environment != "sandbox" and os.getenv("REQUIRE_MTLS", "true").lower() != "true":
+            raise ValueError("NIR INT/production integration requires inbound mTLS")
+        client.ssl_context()  # Fail startup, rather than the first request, for broken TLS files.
+        return cls(
+            client,
+            key,
+            signing,
+            inbound,
+            values["NIR_ISSUER"],
+            values["NIR_INBOUND_ISSUER"],
+            values["NIR_INBOUND_AUDIENCE"],
+            ttl,
+        )

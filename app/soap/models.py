@@ -425,7 +425,7 @@ class RegistryError(XmlModel):
 class RegistryErrorList(XmlModel):
     xmlns_rs: str = Field(default="urn:oasis:names:tc:ebxml-regrep:xsd:rs:3.0", alias="@xmlns:rs")
     highest_severity: str = Field(alias="@highestSeverity")
-    error: RegistryError = Field(alias="rs:RegistryError")
+    error: RegistryError | list[RegistryError] = Field(alias="rs:RegistryError")
 
 
 class SlotValueList(XmlModel):
@@ -480,7 +480,7 @@ class ExtrinsicObject(XmlModel):
 
 class RegistryObjectList(XmlModel):
     xmlns: str = Field(default="urn:oasis:names:tc:ebxml-regrep:xsd:rim:3.0", alias="@xmlns")
-    extrinsic_object: ExtrinsicObject = Field(alias="ExtrinsicObject")
+    extrinsic_object: ExtrinsicObject | list[ExtrinsicObject] | None = Field(default=None, alias="ExtrinsicObject")
 
 
 class AdhocQueryResponse(XmlModel):
@@ -500,7 +500,7 @@ class ITI38ResponseBody(XmlModel):
 
 class ITI39RegistryErrorList(XmlModel):
     highest_severity: str = Field(alias="@highestSeverity")
-    error: RegistryError = Field(alias="rs:RegistryError")
+    error: RegistryError | list[RegistryError] = Field(alias="rs:RegistryError")
 
 
 class ITI39RegistryResponse(XmlModel):
@@ -509,17 +509,30 @@ class ITI39RegistryResponse(XmlModel):
     registry_error_list: ITI39RegistryErrorList | None = Field(default=None, alias="rs:RegistryErrorList")
 
 
+class XOPInclude(XmlModel):
+    href: str = Field(alias="@href")
+
+
+class XOPDocument(XmlModel):
+    """Reference a binary MIME part without turning its bytes into XML text."""
+
+    xmlns_xop: str = Field(default="http://www.w3.org/2004/08/xop/include", alias="@xmlns:xop")
+    include: XOPInclude = Field(alias="xop:Include")
+
+
 class ITI39DocumentResponse(XmlModel):
     home_community_id: TextElement = Field(alias="ns4:HomeCommunityId")
     repository_unique_id: TextElement = Field(alias="ns4:RepositoryUniqueId")
     document_unique_id: TextElement = Field(alias="ns4:DocumentUniqueId")
     mime_type: TextElement = Field(default_factory=lambda: TextElement(text="text/xml"), alias="ns4:mimeType")
-    document: bytes | str = Field(alias="ns4:Document")
+    document: bytes | str | XOPDocument = Field(alias="ns4:Document")
 
     @field_serializer("document")
-    def serialize_document(self, value: bytes | str) -> str:
+    def serialize_document(self, value: bytes | str | XOPDocument) -> str | dict[str, Any]:
         # Redis stores the generated C-CDA as bytes; the established SOAP payload
         # embeds that XML text directly inside the Document element.
+        if isinstance(value, XOPDocument):
+            return value.to_xml_dict()
         return value.decode("utf-8") if isinstance(value, bytes) else value
 
 
@@ -531,7 +544,9 @@ class RetrieveDocumentSetResponse(XmlModel):
     )
     xmlns_rs: str | None = Field(default=None, alias="@xmlns:rs")
     registry_response: ITI39RegistryResponse = Field(alias="ns8:RegistryResponse")
-    document_response: ITI39DocumentResponse | None = Field(default=None, alias="ns4:DocumentResponse")
+    document_response: ITI39DocumentResponse | list[ITI39DocumentResponse] | None = Field(
+        default=None, alias="ns4:DocumentResponse"
+    )
 
 
 class ITI39ResponseBody(XmlModel):

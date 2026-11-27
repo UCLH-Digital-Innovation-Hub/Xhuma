@@ -276,6 +276,15 @@ async def iti38(request: Request):
     content_type = request.headers.get("Content-Type", "")
     if _accepts_soap(content_type):
         body = await request.body()
+        # The application lifespan owns this deployment switch. With NIR off,
+        # the existing GP-only path below is unchanged and needs no NIR keys.
+        # The integrated path verifies the original XML before extracting claims;
+        # the legacy dictionary parser must not become its signature boundary.
+        nir_config = getattr(getattr(request.scope.get("app"), "state", None), "nir_discovery", None)
+        if nir_config is not None:
+            from .discovery import discover_documents
+
+            return await discover_documents(request, body, nir_config)
         envelope = _parse_envelope(body)
         saml_attrs = extract_saml_attributes(envelope)
 
@@ -359,6 +368,13 @@ async def iti39(request: Request):
     content_type = request.headers.get("Content-Type", "")
     if _accepts_soap(content_type, multipart=True):
         body = await request.body()
+        # NIR-enabled deployments route all requested addresses through the
+        # same audited delivery boundary, including mixed GP/NIR retrievals.
+        nir_config = getattr(getattr(request.scope.get("app"), "state", None), "nir_discovery", None)
+        if nir_config is not None:
+            from .discovery import retrieve_documents
+
+            return await retrieve_documents(request, body, nir_config)
         envelope = _parse_envelope(body, mime_wrapped=True)
         saml_attrs = extract_saml_attributes(envelope)
 

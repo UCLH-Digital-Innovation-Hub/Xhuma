@@ -46,17 +46,26 @@ async def gpconnect(nhsno: int, saml_attrs: SAMLAttributes, request: Request = N
 
 
 async def _fetch_gpconnect_record(
-    nhsno: int, saml_attrs: SAMLAttributes, log_dir: str = None, request: Request = None
+    nhsno: int,
+    saml_attrs: SAMLAttributes,
+    log_dir: str = None,
+    request: Request = None,
+    *,
+    patient: dict | None = None,
 ) -> JSONResponse:
     """Run the stages sequentially, retaining the original outer failure boundary."""
     step = DiagnosticStep("validate_nhs_number.validate")
     try:
+        # An integrated ITI-38 has already checked PDS access before reading
+        # either source's cache. Reuse that result instead of a second lookup.
+        patient_options = {"patient": patient} if patient is not None else {}
         gp_ods = await resolve_patient(
             nhsno,
             saml_attrs,
             request=request,
             log_dir=log_dir,
             step=step,
+            **patient_options,
         )
         if isinstance(gp_ods, Response):
             return gp_ods

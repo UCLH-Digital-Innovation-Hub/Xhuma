@@ -9,6 +9,14 @@ responses to another consumer do not demonstrate receiving requests from NIR.
 
 ## Scenario evidence
 
+The opt-in application integration now handles incoming ITI-38 and ITI-39;
+its mocked route tests are in `app/tests/test_nir_integration.py` and run in
+default collection. Configuration and current query/retrieval limits are in
+the [workflow guide](../../../docs/nir_workflow.md#application-integration).
+The Q23 artefacts below remain standalone synthetic sandbox evidence. They
+have not been regenerated through the integrated route or a real receiver,
+and do not establish trusted INT/production operation.
+
 Run the opt-in scenario suite, patterned after the SCAL tests:
 
 ```bash
@@ -42,11 +50,19 @@ overwritten.
 | Q17/Q18 | Invalid repository 1.1.4567332.1.3; require parsed retrieval failure and no documents. |
 | Q19/Q20 | POST to `/does-not-exist`; require HTTPStatusError carrying 404. This is client handling evidence, not a new inbound Xhuma HTTP response. |
 | Q21/Q22 | ITI-38 envelope sent to ITI-39; require an actual SOAP Fault, including when HTTP status is non-2xx. This captures the NIR fault, not proof Xhuma generated an inbound fault. |
-| Q23 | Synthetic incoming ITI-38 → verified SAML context → newly issued, locally signed assertion → outbound sandbox ITI-38, ITI-39 and RAD-75 using the same signed assertion. Test certificates only; NIR trust, INT acceptance and production inbound integration remain outstanding. |
+| Q23 | Synthetic incoming ITI-38 → verified SAML context → newly issued, locally signed assertion → outbound sandbox ITI-38, ITI-39 and RAD-75 using the same signed assertion. Test certificates only; NIR trust, INT acceptance and live integrated-route evidence remain outstanding. |
 | Q25 | Complete ITI-38/ITI-39/RAD-75 envelopes are included in Q23 evidence, with signed SAML inside WS-Security. No separate body/timestamp signature; certificate trust and INT acceptance remain pending. |
 | Q24 | Out of scope: Xhuma is not a NIR responding gateway. |
 | Q26/Q28 | Explicitly skipped pending agreement on NIR responder scope. |
 | Q27 | Explicitly skipped: configured client certificate support is not proof of successful INT mTLS authentication. |
+
+Q23 takes its user and organisation attributes from
+`app/tests/fixtures/saml_attributes.py`, preserving the HL7-coded role and purpose
+of use. The harness maps the fixture's `urn:nhin:names:saml:homeCommunityId` to
+its NIR attribute name, `urn:ihe:iti:xca:2010:homeCommunityId`, and sets the
+resource ID to the scenario's patient before signing. The fixture's subject ID
+also supplies the assertion NameID, with an unspecified format. Signing certificates
+and authentication context remain synthetic.
 
 Paired question IDs share the same raw exchange. For questions asking for a
 response **from Xhuma**, assess whether the outbound client result is accepted;
@@ -64,8 +80,8 @@ The [current NHS security requirements](https://digital.nhs.uk/developer/api-cat
 require an issuer-signed assertion, and describe the separate message signature
 as optional (with exact signing requirements when supplied). Q25 explicitly asks
 for signed-request evidence. Confirm the applicable questionnaire version before
-changing the existing stricter client guard; this work does not claim security
-conformance or implement signing.
+changing the existing stricter client guard. Assertion signing is implemented;
+these tests do not claim security conformance or implement a separate body signature.
 
 ## Overlapping functions: recommended boundaries
 
@@ -77,7 +93,7 @@ refactoring is bundled with this evidence work.
 | `nir_queries.build_iti38_request` NHS checksum and `ccda.helpers.validateNHSnumber` | Strongest shared-helper candidate. Extract a dependency-light NHS identifier validator used by both. Preserve NIR's strict ASCII/string validation and useful exceptions; retain the legacy bool/int interface as a wrapper. Importing all CCDA helpers into NIR would create unnecessary coupling. Add cross-interface edge cases before switching callers. |
 | `NIRClient.retrieve_documents` and `retrieve_imaging_documents` | Extract a private send-and-parse retrieval helper: three call sites repeat `send_soap` plus Content-Type-aware `parse_retrieve_response`. Keep community grouping and supplied signed-envelope handling in their current methods. |
 | `NIRQueryResponse.success` and `NIRRetrieveResponse.success` | Identical status/error predicate; a small shared result base is possible, but low benefit until more response types exist. Keep typed document lists distinct. |
-| `nir_queries._envelope` and `soap.responses.helpers.create_header/create_envelope` | Share namespace/action constants first. Outgoing request addressing and correlated incoming responses have different responsibilities and serializers; do not replace them with one generic envelope function yet. |
+| NIR request/response serialization | Generated messages now use the shared `SoapEnvelope` and `XmlModel` conventions, with dedicated outgoing request models. Incoming signature verification and external registry metadata preservation remain namespace-aware XML operations. |
 | `nir_queries.wrap_mtom_request` and `soap.responses.iti_39.deliver_iti39_response` | Potential shared binary-safe MIME encoder once response attachment support is designed. Keep auditing, callbacks and ReplyTo validation outside encoding. Signed request bytes must remain unchanged. |
 | `nir_responses` and inbound SOAP parsing | Keep strict outbound metadata/attachment parsing distinct from inbound authentication, validation and fault generation. Similar XML does not imply interchangeable trust boundaries. |
 | SCAL `capture_test_logs` and NIR `EvidenceTransport` | Share directory/manifest conventions if useful; logger output alone cannot preserve SOAP/MTOM bodies. Capture at the HTTP transport boundary for NIR. |

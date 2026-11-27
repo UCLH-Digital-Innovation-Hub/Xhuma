@@ -99,6 +99,7 @@ async def deliver_iti39_response(
     outcome,
     error_code,
     detail,
+    content_type: str | None = None,
 ):
     """Audit before releasing either a direct response or an asynchronous acknowledgement."""
     message_id = soap_request.header.message_id
@@ -152,21 +153,27 @@ async def deliver_iti39_response(
         detail=delivery_detail,
     )
     if not asynchronous:
-        return Response(content=data, media_type="application/soap+xml")
+        return Response(content=data, media_type=content_type or "application/soap+xml")
 
-    boundary = f"uuid:{uuid.uuid4()}"
-    mime_message = MIMEMultipart("related", boundary=boundary, type="application/xop+xml")
-    encoding = charset.Charset("utf-8")
-    encoding.body_encoding = "8bit"
-    soap_mime = MIMEText("")
-    soap_mime.set_charset(encoding)
-    soap_mime.set_payload(data)
-    soap_mime.replace_header("Content-Transfer-Encoding", "8bit")
-    soap_mime.add_header("Content-Id", "<http://tempuri.org/0>")
-    soap_mime.add_header("Content-Type", 'application/xop+xml; charset="utf-8"; type="application/soap+xml"')
-    mime_message.attach(soap_mime)
-    payload = mime_message.as_string().encode("utf-8")
-    headers = {"Content-Type": f'multipart/related; boundary="{boundary}"'}
+    if content_type is not None:
+        # The combined retrieval handler already assembled binary-safe MTOM.
+        # Re-wrapping it with MIMEText would corrupt DICOM/PDF attachments.
+        payload = data
+        headers = {"Content-Type": content_type}
+    else:
+        boundary = f"uuid:{uuid.uuid4()}"
+        mime_message = MIMEMultipart("related", boundary=boundary, type="application/xop+xml")
+        encoding = charset.Charset("utf-8")
+        encoding.body_encoding = "8bit"
+        soap_mime = MIMEText("")
+        soap_mime.set_charset(encoding)
+        soap_mime.set_payload(data)
+        soap_mime.replace_header("Content-Transfer-Encoding", "8bit")
+        soap_mime.add_header("Content-Id", "<http://tempuri.org/0>")
+        soap_mime.add_header("Content-Type", 'application/xop+xml; charset="utf-8"; type="application/soap+xml"')
+        mime_message.attach(soap_mime)
+        payload = mime_message.as_string().encode("utf-8")
+        headers = {"Content-Type": f'multipart/related; boundary="{boundary}"'}
 
     def send_post():
         try:

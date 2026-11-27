@@ -12,6 +12,7 @@ from uuid import uuid4
 from fastapi import FastAPI
 
 from app.db import make_engine, make_sessionmaker
+from app.nir.config import NIRDiscoveryConfig
 from app.redis_connect import redis_client, snomed_client
 from app.security import fix_pem_formatting, get_jwk_keyset
 
@@ -28,6 +29,11 @@ async def lifespan(app: FastAPI):
     Lifespan context for FastAPI. Runs startup logic before app starts serving.
     """
     # --- Startup logic ---
+    # The flag is deployment configuration, not part of a patient's request.
+    # Disabled NIR performs no certificate loading; enabled misconfiguration
+    # fails startup instead of silently serving incomplete GP-only results.
+    app.state.nir_discovery = NIRDiscoveryConfig.from_env()
+    app.state.nir_discovery_enabled = app.state.nir_discovery is not None
     # Validate required configuration
     for var in ["API_KEY", "NHS_API_KEY", "ORG_ASID", "ORG_CODE"]:
         val = os.getenv(var)

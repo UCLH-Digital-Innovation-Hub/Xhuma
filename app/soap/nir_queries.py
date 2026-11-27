@@ -9,9 +9,27 @@ from __future__ import annotations
 
 import re
 from uuid import uuid4
-from xml.etree import ElementTree as ET
 
+import xmltodict
+
+from app.soap.models import SoapEnvelope, TextElement, XmlModel
 from app.soap.nir_models import NIRDocumentReference, NIRImagingStudyRequest
+from app.soap.nir_request_models import (
+    AdhocQueryRequest,
+    DocumentRequest,
+    FindDocumentsQuery,
+    ImagingBody,
+    OutgoingHeader,
+    QueryBody,
+    QuerySlot,
+    QueryValues,
+    RetrievalBody,
+    RetrieveDocumentSetRequest,
+    RetrieveImagingDocumentSetRequest,
+    SeriesRequest,
+    StudyRequest,
+    TransferSyntaxUIDList,
+)
 
 # SOAP carries the message and WS-Addressing identifies the transaction and its
 # destination. The registry query/RIM namespaces describe discovery metadata;
@@ -27,58 +45,15 @@ ITI38_ACTION = "urn:ihe:iti:2007:CrossGatewayQuery"
 ITI39_ACTION = "urn:ihe:iti:2007:CrossGatewayRetrieve"
 RAD75_ACTION = "urn:ihe:rad:2011:CrossGatewayRetrieveImagingDocumentSet"
 
-# Prefixes make generated XML easy to compare with the NHS examples. The
-# namespace URI, rather than the chosen prefix, determines each element's meaning.
-for prefix, namespace in (
-    ("s", SOAP_NS),
-    ("a", WSA_NS),
-    ("query", QUERY_NS),
-    ("rim", RIM_NS),
-    ("xds", XDS_NS),
-    ("xdsi", XDSI_NS),
-):
-    ET.register_namespace(prefix, namespace)
 
-
-def _element(parent: ET.Element, namespace: str, local_name: str, text: str | None = None, **attributes) -> ET.Element:
-    """Add a namespaced element; ElementTree escapes its text and attributes."""
-
-    element = ET.SubElement(parent, f"{{{namespace}}}{local_name}", attributes)
-    element.text = text
-    return element
-
-
-def _envelope(action: str, endpoint: str) -> tuple[ET.Element, ET.Element]:
-    """Create the common SOAP header and return the body ready for its payload."""
-
-    envelope = ET.Element(f"{{{SOAP_NS}}}Envelope")
-    header = _element(envelope, SOAP_NS, "Header")
-    # Action selects ITI-38, ITI-39 or RAD-75; To names the actual NIR endpoint.
-    # Each HTTP request gets a fresh MessageID for response correlation. This is
-    # separate from the fixed stored-query ID used to select FindDocuments below.
-    _element(header, WSA_NS, "Action", action, **{f"{{{SOAP_NS}}}mustUnderstand": "true"})
-    _element(header, WSA_NS, "MessageID", f"urn:uuid:{uuid4()}")
-    # The anonymous ReplyTo requests a response on this connection, rather than
-    # asking NIR to call an application callback URL.
-    reply_to = _element(header, WSA_NS, "ReplyTo")
-    _element(reply_to, WSA_NS, "Address", f"{WSA_NS}/anonymous")
-    _element(header, WSA_NS, "To", endpoint, **{f"{{{SOAP_NS}}}mustUnderstand": "true"})
-    return envelope, _element(envelope, SOAP_NS, "Body")
-
-
-def _serialize(envelope: ET.Element) -> bytes:
-    """Serialize generated XML as UTF-8 bytes with a matching XML declaration."""
-
-    return ET.tostring(envelope, encoding="utf-8", xml_declaration=True)
-
-
-def _document_request(parent: ET.Element, document: NIRDocumentReference) -> None:
-    """Write the common routing identifiers used by ITI-39 and RAD-75."""
-
-    request = _element(parent, XDS_NS, "DocumentRequest")
-    _element(request, XDS_NS, "HomeCommunityId", document.home_community_id)
-    _element(request, XDS_NS, "RepositoryUniqueId", document.repository_unique_id)
-    _element(request, XDS_NS, "DocumentUniqueId", document.document_unique_id)
+def _serialize_request(action: str, endpoint: str, body: XmlModel) -> bytes:
+    """Build fresh addressing and serialize once, before any signature is added."""
+    header = OutgoingHeader(
+        action=TextElement(must_understand=1, text=action),
+        destination=TextElement(must_understand=1, text=endpoint),
+    )
+    envelope = SoapEnvelope.create(header, body)
+    return xmltodict.unparse(envelope.to_xml_dict(), pretty=False).encode("utf-8")
 
 
 def build_iti38_request(nhs_number: str, endpoint: str) -> bytes:
@@ -95,26 +70,26 @@ def build_iti38_request(nhs_number: str, endpoint: str) -> bytes:
         check_digit = 0
     if check_digit != int(nhs_number[-1]):
         raise ValueError("NHS number has an invalid check digit")
-    envelope, body = _envelope(ITI38_ACTION, endpoint)
-    request = _element(body, QUERY_NS, "AdhocQueryRequest")
-    # LeafClass returns the full metadata needed for retrieval. ObjectRef would
-    # only return registry references. Approved excludes deprecated entries.
-    _element(request, QUERY_NS, "ResponseOption", returnType="LeafClass", returnComposedObjects="true")
-    # This UUID selects the standard FindDocuments stored query and stays fixed
-    # between requests. Omit its home attribute for discovery across communities,
-    # matching the NHS sandbox example rather than restricting to one gateway.
-    query = _element(request, RIM_NS, "AdhocQuery", id="urn:uuid:14d4debf-8f97-4251-9a74-a90016b0af0d")
-    # The patient slot uses the HL7 CX form: identifier plus assigning-authority
-    # OID and ISO type. Quotes belong to the stored-query value; ElementTree
-    # handles the ampersand escaping when it serializes this text into XML.
-    for name, value in (
-        ("$XDSDocumentEntryStatus", "('urn:oasis:names:tc:ebxml-regrep:StatusType:Approved')"),
-        ("$XDSDocumentEntryPatientId", f"'{nhs_number}^^^&{NHS_NUMBER_ROOT}&ISO'"),
-    ):
-        slot = _element(query, RIM_NS, "Slot", name=name)
-        values = _element(slot, RIM_NS, "ValueList")
-        _element(values, RIM_NS, "Value", value)
-    return _serialize(envelope)
+    # LeafClass includes full metadata; Approved excludes deprecated entries.
+    # An untargeted FindDocuments query leaves the home community unset.
+    # xmltodict escapes the ampersands in the NHS assigning-authority CX value.
+    body = QueryBody(
+        request=AdhocQueryRequest(
+            query=FindDocumentsQuery(
+                slots=[
+                    QuerySlot(
+                        name="$XDSDocumentEntryStatus",
+                        values=QueryValues(values=["('urn:oasis:names:tc:ebxml-regrep:StatusType:Approved')"]),
+                    ),
+                    QuerySlot(
+                        name="$XDSDocumentEntryPatientId",
+                        values=QueryValues(values=[f"'{nhs_number}^^^&{NHS_NUMBER_ROOT}&ISO'"]),
+                    ),
+                ]
+            )
+        )
+    )
+    return _serialize_request(ITI38_ACTION, endpoint, body)
 
 
 def build_iti39_request(documents: list[NIRDocumentReference], endpoint: str) -> bytes:
@@ -122,11 +97,14 @@ def build_iti39_request(documents: list[NIRDocumentReference], endpoint: str) ->
 
     if not documents:
         raise ValueError("At least one document is required")
-    envelope, body = _envelope(ITI39_ACTION, endpoint)
-    request = _element(body, XDS_NS, "RetrieveDocumentSetRequest")
-    for document in documents:
-        _document_request(request, document)
-    return _serialize(envelope)
+    # Read just the model's three address fields. A reference may be a retrieved
+    # document subclass; its MIME type and binary content do not belong here.
+    body = RetrievalBody(
+        request=RetrieveDocumentSetRequest(
+            documents=[DocumentRequest.model_validate(document, from_attributes=True) for document in documents]
+        )
+    )
+    return _serialize_request(ITI39_ACTION, endpoint, body)
 
 
 def build_rad75_request(
@@ -145,22 +123,29 @@ def build_rad75_request(
     syntax_uids = ["1.2.840.10008.1.2.1"] if transfer_syntax_uids is None else transfer_syntax_uids
     if not syntax_uids or any(not uid for uid in syntax_uids):
         raise ValueError("At least one transfer syntax UID is required")
-    envelope, body = _envelope(RAD75_ACTION, endpoint)
-    request = _element(body, XDSI_NS, "RetrieveImagingDocumentSetRequest")
-    # Preserve the study -> series -> object hierarchy. Each DocumentUniqueId
-    # names one DICOM SOP instance, with its gateway and repository identifiers.
-    for study in studies:
-        study_request = _element(request, XDSI_NS, "StudyRequest", studyInstanceUID=study.study_instance_uid)
-        for series in study.series:
-            series_request = _element(
-                study_request, XDSI_NS, "SeriesRequest", seriesInstanceUID=series.series_instance_uid
-            )
-            for document in series.documents:
-                _document_request(series_request, document)
-    syntax_list = _element(request, XDSI_NS, "TransferSyntaxUIDList")
-    for uid in syntax_uids:
-        _element(syntax_list, XDSI_NS, "TransferSyntaxUID", uid)
-    return _serialize(envelope)
+    # Preserve study -> series -> object hierarchy and each complete address.
+    body = ImagingBody(
+        request=RetrieveImagingDocumentSetRequest(
+            studies=[
+                StudyRequest(
+                    study_instance_uid=study.study_instance_uid,
+                    series=[
+                        SeriesRequest(
+                            series_instance_uid=series.series_instance_uid,
+                            documents=[
+                                DocumentRequest.model_validate(document, from_attributes=True)
+                                for document in series.documents
+                            ],
+                        )
+                        for series in study.series
+                    ],
+                )
+                for study in studies
+            ],
+            transfer_syntaxes=TransferSyntaxUIDList(uids=syntax_uids),
+        )
+    )
+    return _serialize_request(RAD75_ACTION, endpoint, body)
 
 
 def wrap_mtom_request(envelope: bytes, action: str) -> tuple[bytes, str]:

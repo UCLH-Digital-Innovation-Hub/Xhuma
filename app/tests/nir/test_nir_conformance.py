@@ -138,6 +138,12 @@ async def test_nir_conformance(question, patient, count):
                 (directory / "upstream-test-certificate.pem").write_bytes(upstream_cert)
                 (directory / "xhuma-test-certificate.pem").write_bytes(signing_cert)
                 result.update(
+                    attributes_source="app/tests/fixtures/saml_attributes.py",
+                    attribute_adaptations=[
+                        "Map homeCommunityId from the NHIN name to the NIR harness name",
+                        "Set resource-id to the scenario patient 9932549118",
+                        "Use subject-id as NameID with unspecified format",
+                    ],
                     incoming_signature_verified=True,
                     outgoing_signature_verified=True,
                     claims_preserved=True,
@@ -202,6 +208,9 @@ async def test_nir_conformance(question, patient, count):
                 (directory / "outgoing-assertion.xml").write_bytes(etree.tostring(sent_assertion))
                 (directory / "Q23-evidence.txt").write_text(
                     "Q23 DEVELOPMENT EVIDENCE - synthetic test identities only\n"
+                    "User and organisation attributes come from app/tests/fixtures/saml_attributes.py.\n"
+                    "HL7-coded role and purpose are preserved; homeCommunityId is mapped to the NIR harness name.\n"
+                    "Resource-id matches scenario patient 9932549118; NameID uses the fixture subject-id.\n"
                     "Incoming ITI-38 is generated and processed by a test harness, not the production inbound route.\n"
                     "Incoming and outgoing assertions use separate ephemeral test signing keys.\n"
                     "Both assertion signatures verified locally against pinned test certificates.\n"
