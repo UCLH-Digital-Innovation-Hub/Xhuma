@@ -144,7 +144,7 @@ async def test_medication_warnings_cumulative_aggregation(mock_dmd_lookup):
     br_notes, xml_text = _extract_notes_and_xml(result)
 
     dmd_warning = (
-        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take"; '
+        'Xhuma: Route inferred as Oral from dm+d because the GP source value was "Take" or not specified; '
         "this may not represent the patient's actual route of administration. Verify during medicines reconciliation."
     )
     freesig_warning = "Xhuma: Free-text dosage instructions automatically mapped"
